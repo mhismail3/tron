@@ -3325,6 +3325,10 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         DerivedData.
     12. The harness finds its products with a BSD-only tool, so its build fails
         silently on the Linux CI runner that runs these cases (#113).
+    13. The first focused XCTest case fails before creating an `.xcresult`, but a
+        later case passes and overwrites the status to green. Failure-report
+        extraction is optional evidence and must never decide whether the case
+        sequence stops.
     """
 
     def setUp(self) -> None:
@@ -3466,6 +3470,71 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         stamp = json.loads((self.root / "e2e-derived/build-identity.json").read_text())
         self.assertEqual(stamp, self.source_identity())
+
+    def test_first_failed_case_without_result_bundle_stops_e2e_sequence(self) -> None:
+        """Failure mode 13: absent `.xcresult` cannot let the next case mask failure.
+
+        Run the exact sequence helper used by the E2E runner with a fake xcodebuild:
+        case one exits 37 without creating a result bundle; case two would pass and
+        create a valid bundle if the runner incorrectly continued.
+        """
+        helper = ROOT / "scripts/ios-gateway-e2e-case-sequence.sh"
+        calls = self.root / "fake-xcodebuild-calls.txt"
+        binary = self.root / "fake-bin"
+        binary.mkdir()
+        fake_xcodebuild = binary / "xcodebuild"
+        fake_xcodebuild.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+filter="$1"; shift
+result_bundle=""
+while (($#)); do
+  if [[ "$1" == "-resultBundlePath" ]]; then result_bundle="$2"; shift 2; else shift; fi
+done
+printf '%s\\n' "$filter" >>"$FAKE_XCODEBUILD_CALLS"
+if [[ "$filter" == FirstFailsWithoutBundle ]]; then exit 37; fi
+mkdir -p "$result_bundle"
+exit 0
+""")
+        fake_xcodebuild.chmod(0o755)
+        fake_xcrun = binary / "xcrun"
+        fake_xcrun.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == xcresulttool && "${2:-}" == get && "${3:-}" == test-results && "${4:-}" == summary ]]; then
+  printf '%s\\n' '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'
+  exit 0
+fi
+exit 0
+""")
+        fake_xcrun.chmod(0o755)
+        environment = dict(self.environment)
+        environment["PATH"] = f"{binary}:{environment['PATH']}"
+        environment["FAKE_XCODEBUILD_CALLS"] = str(calls)
+        driver = self.root / "run-e2e-case-sequence.sh"
+        driver.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+source "$1"
+shift
+result_root="$1"
+shift
+run_one_case() {
+  local filter="$1" result_bundle="$result_root/$1.xcresult" status
+  if xcodebuild "$filter" -resultBundlePath "$result_bundle"; then status=0; else status=$?; fi
+  if ((status == 0)); then
+    if ! xcrun xcresulttool get test-results summary --path "$result_bundle" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r.get("passedTests")==1 and r.get("failedTests")==0 and r.get("skippedTests")==0 and r.get("totalTestCount")==1'; then status=65; fi
+  elif [[ -d "$result_bundle" ]]; then
+    xcrun xcresulttool get test-results tests --path "$result_bundle" >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+run_e2e_case_sequence run_one_case "$@"
+""")
+        driver.chmod(0o755)
+        result = subprocess.run(
+            [str(driver), str(helper), str(self.root / "results"), "FirstFailsWithoutBundle", "SecondWouldPass"],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
+        )
+        self.assertEqual(result.returncode, 37, result.stderr)
+        self.assertEqual(calls.read_text().splitlines(), ["FirstFailsWithoutBundle"])
 
     def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
         """Failure mode 10: every unproven product set is refused before the

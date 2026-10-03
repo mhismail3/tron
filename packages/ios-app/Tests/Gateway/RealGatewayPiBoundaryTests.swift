@@ -539,13 +539,13 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let originalConnectionID = try XCTUnwrap(connectedID)
         let payload = Data(repeating: 0x78, count: 298_013)
 
-        // One FIFO shaper owns the actual HTTP and WebSocket proxy paths. It
-        // includes HTTP body/header and WS data/control-frame overhead; it has
-        // no transport priority. The observation spans two existing 10 s ping
-        // ticks without changing the GatewayClient's 8 s pong deadline.
+        // One FIFO shaper owns the actual HTTP and WebSocket proxy paths. This
+        // test-only aggregate rate keeps the body in flight long enough to
+        // observe its actual overlap with liveness traffic. No traffic receives
+        // priority, and the production 8 s pong deadline is unchanged.
         try await control(
             "shape", port: port, token: proxyToken,
-            rateBytesPerSecond: 65_536, latencyMilliseconds: 30, maximumQueuedBytes: 1_048_576
+            rateBytesPerSecond: 12_288, latencyMilliseconds: 30, maximumQueuedBytes: 1_048_576
         )
         let clock = ContinuousClock()
         let uploadStarted = clock.now
@@ -553,7 +553,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             let id = try await client.upload(name: "synthetic.bin", mimeType: "application/octet-stream", data: payload)
             return (id, uploadStarted.duration(to: clock.now))
         }
-        let observationDeadline = clock.now + .seconds(24)
+        let observationDeadline = clock.now + .seconds(35)
         var rpcCount = 0
         while clock.now < observationDeadline {
             _ = try await client.requestValue("system.info", EmptyParams(), timeout: .seconds(8))
@@ -566,16 +566,49 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let uploadDuration = completedUploadDuration.components
         let uploadDurationMilliseconds = Int(uploadDuration.seconds * 1_000 + uploadDuration.attoseconds / 1_000_000_000_000_000)
         XCTAssertGreaterThanOrEqual(uploadDurationMilliseconds, 4_000, "The transfer should experience the declared aggregate 64 KiB/s capacity")
-        XCTAssertLessThan(uploadDurationMilliseconds, 12_000, "The bounded healthy transfer must complete without exceeding its phase deadline")
+        XCTAssertLessThan(uploadDurationMilliseconds, 32_000, "The bounded healthy transfer must complete within its test-only phase deadline")
         let afterShapedUploadID = await client.activeConnectionID()
         XCTAssertEqual(afterShapedUploadID, originalConnectionID)
 
         let shaped = try await controlValue("link-stats", port: port, token: proxyToken)
+        let heartbeatTimeline = shaped.objectValue?["clientHeartbeatTimeline"]?.arrayValue ?? []
+        let completedHeartbeats = heartbeatTimeline.compactMap { item -> (enqueuedMs: Int, pongForwardedMs: Int)? in
+            guard let event = item.objectValue,
+                  let enqueuedMs = event["enqueuedMs"]?.intValue,
+                  event["forwardedMs"]?.intValue != nil,
+                  event["gatewayPongMs"]?.intValue != nil,
+                  let pongForwardedMs = event["appPongForwardedMs"]?.intValue else { return nil }
+            return (enqueuedMs, pongForwardedMs)
+        }
+        guard completedHeartbeats.count >= 2 else {
+            throw BoundaryFailure.timedOut("The upload did not overlap two complete heartbeat cycles")
+        }
+        let observedHeartbeatIntervalMs = completedHeartbeats[completedHeartbeats.count - 1].enqueuedMs
+            - completedHeartbeats[completedHeartbeats.count - 2].enqueuedMs
+        XCTAssertGreaterThan(observedHeartbeatIntervalMs, 0)
         XCTAssertGreaterThanOrEqual(shaped.objectValue?["forwardedWebSocketPings"]?.intValue ?? 0, 2)
         XCTAssertGreaterThanOrEqual(shaped.objectValue?["forwardedWebSocketPongs"]?.intValue ?? 0, 2)
         let heartbeatRTTs = shaped.objectValue?["heartbeatRoundTripMilliseconds"]?.arrayValue?.compactMap(\.intValue) ?? []
         XCTAssertGreaterThanOrEqual(heartbeatRTTs.count, 2)
-        XCTAssertTrue(heartbeatRTTs.allSatisfy { $0 < 8_000 }, "Observed real Gateway pong round trips must meet the unchanged 8 s client bound")
+        XCTAssertTrue(heartbeatRTTs.allSatisfy { $0 < 8_000 }, "Enqueue-to-Gateway-pong delay, including FIFO wait, must meet the unchanged 8 s client bound")
+        let bodyInterval = try XCTUnwrap(shaped.objectValue?["uploadBodyTransfers"]?.arrayValue?.first?.objectValue)
+        let bodyStartMs = try XCTUnwrap(bodyInterval["startMs"]?.intValue)
+        let bodyEndMs = try XCTUnwrap(bodyInterval["endMs"]?.intValue)
+        XCTAssertEqual(bodyInterval["bytes"]?.intValue, payload.count)
+        XCTAssertGreaterThan(bodyEndMs, bodyStartMs)
+        XCTAssertGreaterThan(bodyEndMs - bodyStartMs, 2 * observedHeartbeatIntervalMs,
+                             "The observed body transfer should span more than two measured heartbeat intervals")
+        let overlappingHeartbeatCount = heartbeatTimeline.filter { item in
+            guard let event = item.objectValue,
+                  let pingForwardedMs = event["forwardedMs"]?.intValue,
+                  let pongForwardedMs = event["appPongForwardedMs"]?.intValue,
+                  let gatewayPongMs = event["gatewayPongMs"]?.intValue else { return false }
+            return pingForwardedMs >= bodyStartMs && pingForwardedMs <= bodyEndMs
+                && gatewayPongMs >= bodyStartMs && gatewayPongMs <= bodyEndMs
+                && pongForwardedMs >= bodyStartMs && pongForwardedMs <= bodyEndMs
+        }.count
+        XCTAssertGreaterThanOrEqual(overlappingHeartbeatCount, 1,
+                                    "Require an actually forwarded client ping and Gateway pong both observed/forwarded during the upload-body interval")
         XCTAssertEqual(shaped.objectValue?["uploadBodyBytes"]?.intValue, payload.count)
         XCTAssertGreaterThanOrEqual(shaped.objectValue?["dispatchedRPCs"]?.intValue ?? 0, rpcCount)
         XCTAssertGreaterThanOrEqual(shaped.objectValue?["settledRPCs"]?.intValue ?? 0, rpcCount)
@@ -643,6 +676,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let attachment = XCTAttachment(string: [
             "authority=paired fixture Gateway through owned shared proxy",
             "uploadBytes=\(payload.count) uploadDurationMs=\(uploadDurationMilliseconds) periodicRPCs=\(rpcCount)",
+            "observedHeartbeatIntervalMs=\(observedHeartbeatIntervalMs) uploadBodyIntervalMs=\(bodyStartMs)-\(bodyEndMs) uploadHeartbeatOverlaps=\(overlappingHeartbeatCount)",
             "originalConnectionID=\(originalConnectionID)",
             "heldHTTPResponse=held; stagedUploads=\(heldStagedCount); RPC=healthy; connectionPreserved=\(stillHeldConnectionID == heldConnectionID)",
             "commonLinkOutage=expectedPossiblySentTimeout; restoredRPC=success; connectionPreserved=\(afterRecoveryConnectionID == originalConnectionID)",

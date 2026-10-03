@@ -2092,13 +2092,17 @@ once, and the Agent Instructions projection decodes with the fixture workspace
 session is active, then verifies lifecycle auto-reconnect, one canonical copy of
 the accepted prompt, the session snapshot, and exactly one settled catalog row.
 The shared-link case sends synthetic 298,013-byte HTTP upload traffic and actual
-RPC/ping/pong frames through the same bounded FIFO proxy schedule (64 KiB/s
-application-payload capacity, 30 ms per scheduled item, 1 MiB queue bound).
-It records the original loopback authority, scheduled HTTP/WebSocket bytes,
-forwarded ping/pong counts and observed RTTs, actual upload/RPC dispatch and
-settlement, and staging cleanup in the retained test attachment. The 24-second
-observation covers two unchanged 10-second GatewayClient ping ticks and keeps
-its existing 8-second pong deadline. HTTP header lengths come from Node's parsed
+RPC/ping/pong frames through the same bounded FIFO proxy schedule (12 KiB/s
+test-only application-payload capacity, 30 ms per scheduled item, 1 MiB queue
+bound). With that schedule active, it measures complete client ping/pong cycles
+and their actual enqueue interval while the body is being transferred; the body
+must span over two observed intervals. The retained attachment records upload-body
+start/end, ping enqueue and FIFO-forward times, Gateway-pong observation and
+forward time, and asserts that a forwarded ping and its returned pong overlap
+the body-active interval. Proxy heartbeat delay starts at ping enqueue, so it
+includes outbound FIFO wait; the value ends when the Gateway pong reaches the
+proxy and does not claim phone receipt. The unchanged 8-second GatewayClient
+pong deadline remains. HTTP header lengths come from Node's parsed
 request/response headers; WebSocket message sizes are decoded payload lengths
 plus estimated uncompressed frame overhead because `ws` hides compressed wire
 lengths. Thus this synthetic schedule is a reproducible shared application

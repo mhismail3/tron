@@ -46,8 +46,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   // claim about OS/TCP or compressed WebSocket wire-byte accounting.
   let shaper;
   let scheduleTail = Promise.resolve();
+  const proxyStartedAt = process.hrtime.bigint();
+  const elapsedMilliseconds = () => Math.round(Number(process.hrtime.bigint() - proxyStartedAt) / 1_000_000);
   const linkStats = {
     forwardedWebSocketPings: 0, forwardedWebSocketPongs: 0, uploadBodyBytes: 0,
+    uploadBodyTransfers: [], clientHeartbeatTimeline: [],
     scheduledBytes: 0, scheduledHTTPBytes: 0, scheduledWebSocketBytes: 0,
     queuedPayloadBytes: 0, queueHighWaterBytes: 0,
     scheduleOverflows: 0, dispatchedRPCs: 0, settledRPCs: 0,
@@ -56,6 +59,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   };
   const logsExportRequestIDs = new Set();
   const outstandingClientPings = [];
+  let clientPingSequence = 0;
   let heldHTTP = false;
   let releaseHTTP;
   let httpHoldTimer;
@@ -113,7 +117,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           return;
         }
         if (next.mode === "shape") {
-          if (![65_536].includes(next.rateBytesPerSecond) || next.latencyMilliseconds !== 30
+          if (![12_288, 65_536].includes(next.rateBytesPerSecond) || next.latencyMilliseconds !== 30
               || next.maximumQueuedBytes !== 1_048_576 || shaper || policy.mode !== "pass") throw new Error("invalid shared-link schedule");
           shaper = { rateBytesPerSecond: next.rateBytesPerSecond, latencyMilliseconds: next.latencyMilliseconds, maximumQueuedBytes: next.maximumQueuedBytes };
           answer(response, 200, { mode: "shape", schedule: "shared-fifo" });
@@ -241,13 +245,24 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
       request.once("aborted", () => upstream.destroy());
       response.once("close", () => upstream.destroy());
       void (async () => {
+        const isUploadBody = request.url?.startsWith("/v1/uploads?") ?? false;
+        const uploadTransfer = isUploadBody ? { startMs: null, endMs: null, bytes: 0 } : undefined;
         for await (const chunk of request) {
           const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-          if (request.url?.startsWith("/v1/uploads?")) linkStats.uploadBodyBytes += bytes.length;
+          if (isUploadBody) {
+            uploadTransfer.startMs ??= elapsedMilliseconds();
+            uploadTransfer.bytes += bytes.length;
+            linkStats.uploadBodyBytes += bytes.length;
+          }
           for (let offset = 0; offset < bytes.length; offset += 16_384) {
             const part = bytes.subarray(offset, Math.min(offset + 16_384, bytes.length));
             await schedule("http-request-body", part.length, () => upstream.write(part));
           }
+        }
+        if (uploadTransfer?.startMs !== null && uploadTransfer?.startMs !== undefined) {
+          uploadTransfer.endMs = elapsedMilliseconds();
+          linkStats.uploadBodyTransfers.push(uploadTransfer);
+          if (linkStats.uploadBodyTransfers.length > 8) linkStats.uploadBodyTransfers.shift();
         }
         upstream.end();
       })().catch(() => { upstream.destroy(); response.destroy(); });
@@ -378,22 +393,48 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
       for (const [source, destination, direction] of [[front, back, "client"], [back, front, "gateway"]]) {
         source.on("ping", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
+          const heartbeat = direction === "client" ? {
+            payload: data.toString("hex"),
+            timeline: {
+              sequence: ++clientPingSequence,
+              enqueuedMs: elapsedMilliseconds(),
+              forwardedMs: null,
+              gatewayPongMs: null,
+              appPongForwardedMs: null,
+            },
+          } : undefined;
+          if (heartbeat) {
+            outstandingClientPings.push(heartbeat);
+            linkStats.clientHeartbeatTimeline.push(heartbeat.timeline);
+            if (linkStats.clientHeartbeatTimeline.length > 16) linkStats.clientHeartbeatTimeline.shift();
+            if (outstandingClientPings.length > 16) outstandingClientPings.shift();
+          }
           void schedule("websocket-ping", data.length + (direction === "client" ? 6 : 2), () => {
             if (destination.readyState === WebSocket.OPEN) {
-              if (direction === "client") outstandingClientPings.push(Date.now());
+              if (heartbeat) heartbeat.timeline.forwardedMs = elapsedMilliseconds();
+              if (direction === "client") linkStats.forwardedWebSocketPings++;
               destination.ping(data);
             }
           }).catch(terminate);
         });
         source.on("pong", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
+          const heartbeat = direction === "gateway"
+            ? outstandingClientPings.find(ping => ping.payload === data.toString("hex") && ping.timeline.gatewayPongMs === null)
+            : undefined;
+          if (heartbeat) {
+            heartbeat.timeline.gatewayPongMs = elapsedMilliseconds();
+            linkStats.heartbeatRoundTripMilliseconds.push(heartbeat.timeline.gatewayPongMs - heartbeat.timeline.enqueuedMs);
+            if (linkStats.heartbeatRoundTripMilliseconds.length > 32) linkStats.heartbeatRoundTripMilliseconds.shift();
+          }
           void schedule("websocket-pong", data.length + (direction === "gateway" ? 6 : 2), () => {
             if (destination.readyState === WebSocket.OPEN) {
+              if (heartbeat) heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
               destination.pong(data);
-              if (direction === "gateway" && outstandingClientPings.length) {
-                const started = outstandingClientPings.shift();
-                linkStats.heartbeatRoundTripMilliseconds.push(Date.now() - started);
-                if (linkStats.heartbeatRoundTripMilliseconds.length > 32) linkStats.heartbeatRoundTripMilliseconds.shift();
+              if (direction === "gateway") linkStats.forwardedWebSocketPongs++;
+              if (heartbeat) {
+                const index = outstandingClientPings.indexOf(heartbeat);
+                if (index >= 0) outstandingClientPings.splice(index, 1);
               }
             }
           }).catch(terminate);
