@@ -374,6 +374,7 @@ private struct IntegrationInstanceView: View {
 private struct IntegrationSetupView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(\.tronPresentationActivity) private var activity
     #if HOSTED_TEST
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
@@ -419,9 +420,15 @@ private struct IntegrationSetupView: View {
                     .tronSettingsCaption("Create a public OAuth 2.0 app in the X developer console, enable tweet.read, users.read, bookmark.read, and offline.access, and register this exact HTTPS callback. Tron does not ask for an app secret.")
                     if let xAuthorizationURL {
                         TronSettingsGroup("Authorize your X account", accent: .tronPurple) {
-                            Link(destination: xAuthorizationURL) {
-                                Label("Open X consent", systemImage: "arrow.up.right.square")
+                            Button { openURL(xAuthorizationURL) } label: {
+                                TronSettingsRow(icon: "arrow.up.right.square", title: "Open X consent", accent: .tronPurple) {
+                                    Image(systemName: "arrow.up.right")
+                                        .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .semibold))
+                                        .foregroundStyle(Color.tronTextMuted)
+                                        .accessibilityHidden(true)
+                                }
                             }
+                            .buttonStyle(.plain)
                             TronSettingsDivider(accent: .tronPurple)
                             TronTextSettingRow(icon: "doc.on.clipboard", title: "Paste redirected URL", detail: "or enter the code below", value: $xCallbackURL)
                             TronSettingsDivider(accent: .tronPurple)
@@ -610,7 +617,8 @@ private struct IntegrationSetupView: View {
                 guard !xCallbackURL.isEmpty || (!xAuthorizationCode.isEmpty && xOAuthState != nil) else { error = "Paste the redirected URL or its authorization code after consent."; return }
                 let requestIdentity = model.knowledgeDestinationIdentity
                 let operationID = operationID, callbackURL = xCallbackURL.isEmpty ? nil : xCallbackURL
-                let code = xAuthorizationCode.isEmpty ? nil : xAuthorizationCode, state = xOAuthState
+                let code = callbackURL == nil && !xAuthorizationCode.isEmpty ? xAuthorizationCode : nil
+                let state = callbackURL == nil ? xOAuthState : nil
                 mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                     guard model.knowledgeDestinationIdentity == requestIdentity,
                           model.knowledgePresentationIdentity.lifecycleGeneration != nil,

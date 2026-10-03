@@ -87,7 +87,14 @@ struct HostedIntegrationsFixtureView: View {
             if let recoveryScenario {
                 HostedConnectionRetryFixture(scenario: recoveryScenario)
             } else if ready {
-                if parentOAuthScenario != nil {
+                if parentOAuthScenario == "parent-oauth-chat-reconnect" {
+                    NavigationStack { ChatView(sessionID: "integration-fixture-chat") }
+                        .environment(model)
+                        .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
+                        .tronPresentation()
+                        .tronSettingsLayout()
+                        .overlay { fixtureDiagnostics }
+                } else if parentOAuthScenario != nil {
                     SessionShellView()
                         .environment(model)
                         .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
@@ -207,6 +214,7 @@ actor HostedIntegrationsGateway {
     private var receiptReturns = 0
     private var oauthReplyReleases = 0
     private var oauthCompletes = 0
+    private var oauthCompleteMode = "none"
     private var receiptQueries = 0
     private var queryMismatches = 0
     private var commands: [String: String] = [:]
@@ -244,7 +252,7 @@ actor HostedIntegrationsGateway {
     private var oauthReply: CheckedContinuation<Void, Never>?
     private var oauthReplyReleaseScheduled = false
     private func publishCounters() {
-        let value = "begins:\(oauthBegins) uniqueBeginCommands:\(oauthBeginCommandIDs.count) completes:\(oauthCompletes) queries:\(receiptQueries) receiptReturns:\(receiptReturns) replyReleases:\(oauthReplyReleases) mismatches:\(queryMismatches) catalog:lists=\(connectionsListCount) revision=\(lastCatalogRevision) pending=\(lastPendingSetupCount) instances=\(lastCatalogInstanceCount) client=\(oauthClientIDProvided) redirect=\(oauthRedirectURIProvided) policy:enabled=\(oauthPolicyEnabled) paid=\(oauthPaidAccessApproved) budget=\(oauthPaidBudgetCents) recurring=\(oauthRecurringApproved) policyUpdates:\(policyUpdates) policyBudget=\(lastPolicyBudget) policyEnabled=\(lastPolicyEnabled) setupBegins:\(setupBegins) setupCompletes:\(setupCompletes) setupBudget=\(lastSetupBudget)"
+        let value = "begins:\(oauthBegins) uniqueBeginCommands:\(oauthBeginCommandIDs.count) completes:\(oauthCompletes) completeMode=\(oauthCompleteMode) queries:\(receiptQueries) receiptReturns:\(receiptReturns) replyReleases:\(oauthReplyReleases) mismatches:\(queryMismatches) catalog:lists=\(connectionsListCount) revision=\(lastCatalogRevision) pending=\(lastPendingSetupCount) instances=\(lastCatalogInstanceCount) client=\(oauthClientIDProvided) redirect=\(oauthRedirectURIProvided) policy:enabled=\(oauthPolicyEnabled) paid=\(oauthPaidAccessApproved) budget=\(oauthPaidBudgetCents) recurring=\(oauthRecurringApproved) policyUpdates:\(policyUpdates) policyBudget=\(lastPolicyBudget) policyEnabled=\(lastPolicyEnabled) setupBegins:\(setupBegins) setupCompletes:\(setupCompletes) setupBudget=\(lastSetupBudget)"
         counterContinuations.forEach { $0.yield(value) }
     }
     func releaseOAuthReply() {
@@ -258,6 +266,27 @@ actor HostedIntegrationsGateway {
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
+        if method == "session.open" {
+            let sessionID = params["sessionId"]?.stringValue ?? "integration-fixture-chat"
+            let snapshot = SessionSnapshot(
+                sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
+                phase: .idle, name: "Integration fixture chat", cwd: "/fixture", parentSessionId: nil, model: nil,
+                thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
+                stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
+                    tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
+                queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: nil,
+                transcriptTotal: nil, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
+                extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "fixture-host", revision: 1,
+                    capabilities: [], diagnostics: [], semanticState: .init(statuses: [:], working: .init(message: nil, visible: false),
+                    hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
+                    surfaces: [], pendingInteractions: []), diagnostics: [])
+            return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
+                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
+        }
+        if method == "session.sync" { return (.object(["synchronized": .bool(true)]), nil) }
+        if method == "session.close" { return (.object(["closed": .bool(true)]), nil) }
+        if method == "session.commands" { return (.object(["commands": .array([])]), nil) }
+        if method == "session.attention.read" { return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil) }
         if method == "mcp.list" {
             let servers: [JSONValue] = scenario.hasPrefix("mcp-auth-") ? [.object([
                 "name": .string("fixture-auth-server"), "scope": .string("global"), "enabled": .bool(true),
@@ -400,7 +429,15 @@ actor HostedIntegrationsGateway {
             return (result, nil)
         }
         if method == "knowledge.x.oauth.complete", let command = params["commandId"]?.stringValue {
-            oauthCompletes += 1; commands[command] = method; publishCounters()
+            oauthCompletes += 1; commands[command] = method
+            let callbackURL = params["callbackUrl"]?.stringValue
+            let code = params["code"]?.stringValue
+            let state = params["state"]?.stringValue
+            oauthCompleteMode = callbackURL != nil ? ((code == nil && state == nil) ? "callback" : "mixed") : ((code != nil && state != nil) ? "code" : "invalid")
+            publishCounters()
+            if oauthCompleteMode == "mixed" || oauthCompleteMode == "invalid" {
+                return (nil, .object(["code": .string("invalid_request"), "message": .string("Provide either the full X OAuth redirect URL or its code and state"), "retryable": .bool(false)]))
+            }
             if scenario == "oauth-expired" {
                 let error: JSONValue = .object(["code": .string("conflict"), "message": .string("X OAuth setup expired; start authorization again"), "retryable": .bool(false)])
                 receiptErrors[command] = error
