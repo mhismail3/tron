@@ -275,7 +275,9 @@
         "name": "work-tooling",
         "paths": [
           "tools/work/**",
-          ".github/work.json"
+          ".github/work.json",
+          "scripts/ci_macos_scope.py",
+          ".github/workflows/ci.yml"
         ],
         "command": "python3 -m unittest discover -s tools/work"
       },
@@ -619,6 +621,13 @@
     "visibilityPrefix": "visibility:",
     "areaPrefix": "area:",
     "ideaLabel": "kind:idea",
-    "recentDays": 14
+    "recentDays": 14,
+    "ciWorkflow": "ci.yml",
+    "advisoryJobs": [
+      "gateway",
+      "ios",
+      "pi-sdk-e2e",
+      "mac"
+    ]
   }
 }

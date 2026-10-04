@@ -256,6 +256,17 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   remains in CI's heavy run and explicit checkpoints. The simulator admission
   and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
   the check with exit 73; verify again once memory is free.
+- **Advisory hosted macOS CI** uses `scripts/ci_macos_scope.py` over the
+  available event-base and checkout trees (no merge-base required). Recognized
+  docs, work-tooling and push-relay-only changes skip macOS. Gateway inputs run
+  Gateway, the hosted iOS/Gateway boundary and Mac packaging; iOS inputs run iOS
+  and the boundary; Mac inputs run Mac. Shared workflow, protocol and toolchain
+  inputs, unknown paths, empty diffs and unavailable Git inputs run all four.
+  Deleted/renamed paths retain both owners. Manual dispatch runs all four, and
+  a failed classifier or missing output never skips coverage. `test_ci_scope.py`
+  exercises the CLI with real Git histories. Jobs keep real failure conclusions;
+  only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
+  unapplied by maintainer decision; no schedule or deployment is added.
 - **CI policy's iOS infrastructure test** uses
   `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
   The workflow compares the available base and head trees directly (two-dot
@@ -382,6 +393,12 @@ It reads, in a bounded number of calls:
 - open pull requests whose head branch is in this repository, with the
   combined check state of the head commit and the `dashboard.verifyContext`
   commit status;
+- when `dashboard.ciWorkflow` and `dashboard.advisoryJobs` are configured, the
+  latest workflow run for a push to the base branch, plus the latest run for each
+  exact open same-repository PR head (fork PRs excluded). Actions run queries
+  select one run; job lists use pages of 100 with a 1,000-job ceiling. Repeated
+  run/job requests share the current fetch only. API errors, malformed responses
+  and a job list beyond the ceiling report unavailable evidence, never success;
 - the state of any issue named by a remote claim branch or a local worktree's
   claim-style branch that the reads above did not return (one aliased query);
 - remote branches (`git ls-remote`), the claim owner from each claim branch's
@@ -417,6 +434,14 @@ Sections, in order:
    remote branch is gone says that `work cleanup --all` removes it once its
    pull request merged at its head.
 10. **Regressions:** open issues labeled `regressionLabel`.
+11. **Advisory CI:** current run state, branch, SHA, run link and each configured
+    job's state/link. Failed, cancelled, pending, missing and unavailable evidence
+    is also visible under Health, outside collapsed rows. Skipped jobs remain
+    distinguishable from successful jobs. Base-branch push evidence survives a
+    PR's merge; PR evidence from an older head or a foreign repository is rejected.
+    This is latest-run evidence, not an exhaustive unresolved-failure history:
+    a newer base push supersedes the prior run, and a dispatch is not a base push.
+    No local failure registry or regression issue is created.
 
 The names it reads (statuses, labels, fields, the verify context) come from the
 `dashboard` and `claim` sections of `.github/work.json`.
@@ -473,6 +498,13 @@ The names it reads (statuses, labels, fields, the verify context) come from the
 45. **The work list drops, repeats or mislabels an issue.** Each open non-epic
     issue appears once; an issue closed within `dashboard.recentDays` appears
     and an older one does not; epics stay in their own section.
+67. **Advisory CI failure or unavailable evidence disappears.**
+    `test_ci_dashboard.py` drives the dashboard with real Git and a CLI-shaped
+    GitHub fixture through fetch, JSON, text and HTML. It covers a failed main
+    run with no open PR, a failure on a later jobs page, exact PR head and
+    repository fencing, pending/cancelled/missing/unavailable evidence, and
+    escaped branch text. `test_ci_scope.py` covers real Git path selection,
+    shared consumers, empty/unknown/unresolved input, and deletion/rename.
 46. **GitHub text reaches a filter or a style.** Undeclared or hostile labels
     never become filter tokens or class names, and a label color is used only
     when it is six hex digits.
