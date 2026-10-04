@@ -820,3 +820,6 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     globs. Neither an existing symlink nor a directory swapped for a symlink
     during permission opening changes anything outside it. A kept, dry-run,
     failed-release or failed-recheck worktree keeps its read-only tree as it was.
+    After assertions, fixture teardown walks the surviving payload without
+    following symlinks, including directories renamed by the controlled race;
+    captured pre-race names would leave read-only children behind on Python 3.9.
