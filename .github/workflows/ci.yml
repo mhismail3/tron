@@ -192,7 +192,7 @@ jobs:
   # gate work land; the dashboard reads these jobs directly from Actions.
   gateway:
     needs: policy
-    if: needs.policy.outputs.gateway != 'false'
+    if: ${{ !cancelled() && needs.policy.outputs.gateway != 'false' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -245,7 +245,7 @@ jobs:
 
   ios:
     needs: policy
-    if: needs.policy.outputs.ios != 'false'
+    if: ${{ !cancelled() && needs.policy.outputs.ios != 'false' }}
     runs-on: macos-26
     # The memory reserve protects a shared development Mac's Gateway. A hosted
     # runner is a dedicated VM whose whole memory (7 GB) is below the 8 GB
@@ -292,7 +292,7 @@ jobs:
 
   pi-sdk-e2e:
     needs: policy
-    if: needs.policy.outputs.pi-sdk-e2e != 'false'
+    if: ${{ !cancelled() && needs.policy.outputs['pi-sdk-e2e'] != 'false' }}
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
     runs-on: macos-26
@@ -357,7 +357,7 @@ jobs:
 
   mac:
     needs: policy
-    if: needs.policy.outputs.mac != 'false'
+    if: ${{ !cancelled() && needs.policy.outputs.mac != 'false' }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

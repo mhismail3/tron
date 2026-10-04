@@ -263,8 +263,12 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   and the boundary; Mac inputs run Mac. Shared workflow, protocol and toolchain
   inputs, unknown paths, empty diffs and unavailable Git inputs run all four.
   Deleted/renamed paths retain both owners. Manual dispatch runs all four, and
-  a failed classifier or missing output never skips coverage. `test_ci_scope.py`
-  exercises the CLI with real Git histories. Jobs keep real failure conclusions;
+  a failed classifier or missing output never skips coverage. An explicit
+  `!cancelled()` status check lets selected or missing-output jobs run even if
+  `policy` fails; an explicit `false` scope still skips, and workflow cancellation
+  stops advisory work. `test_ci_scope.py` exercises the CLI with real Git histories
+  and the workflow's selector shell, not GitHub's job dependency scheduler.
+  Jobs keep real failure conclusions;
   only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
   unapplied by maintainer decision; no schedule or deployment is added.
 - **CI policy's iOS infrastructure test** uses
