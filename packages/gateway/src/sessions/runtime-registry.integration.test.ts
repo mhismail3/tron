@@ -9681,8 +9681,10 @@ export default function (pi) {
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
+    // Recursive extension setup owns its parent too; a simultaneous plain
+    // mkdir(cwd) races that creation and can fail before the journey begins.
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
     ]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -9779,7 +9781,7 @@ export default function (pi) {
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd)]);
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true })]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await Promise.all([
@@ -9853,7 +9855,7 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
     ]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -10038,6 +10040,14 @@ export default function (pi) {
       const slot = await registry.create(cwd);
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
+      // The faux model names tools unconditionally, unlike a real model whose
+      // catalog is supplied at dispatch. Join actual asynchronous registration
+      // before issuing those calls; runtime creation alone is not MCP readiness.
+      await waitUntil(() => {
+        const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
+        return ["mcp__stdio__echo", "mcp__http__echo"].every(name =>
+          tools.some(tool => tool.name === name && tool.exposure === "direct"));
+      });
       await slot.prompt("call MCP fixtures and resource tools");
       await waitUntil(() => !slot.isBusy);
       const transcript = slot.snapshot().transcript;

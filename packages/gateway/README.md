@@ -2792,7 +2792,11 @@ npx vitest run src/sessions/runtime-registry.integration.test.ts
 
 The integration tests use the SDK's faux provider to verify concurrent real
 session runtimes, detached completion, and fork rekeying without network
-credentials. Additional deterministic tests exercise interactive API-key and
+credentials. A scripted MCP call joins the actual direct-tool registration
+boundary first: creating a runtime does not mean its asynchronous HTTP discovery
+has completed. Codemode fixture directory setup gives recursive extension-directory
+creation sole ownership of its parent, avoiding a competing plain parent mkdir.
+The live/cold transcript and MCP execution assertions remain the behavioral oracles. Additional deterministic tests exercise interactive API-key and
 OAuth brokering, project trust, and native local-package persistence,
 and credential separation.
 
