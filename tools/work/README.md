@@ -163,8 +163,8 @@ the GitHub side.
 
 ## `verify`
 
-`scripts/tron work verify [--post]` validates the committed head of the current
-branch and writes a receipt for that exact commit.
+`scripts/tron work verify [--post] [--evidence-manifest <json>]` validates the
+committed head of the current branch and writes a receipt for that exact commit.
 
 1. **Clean head.** A worktree with modified, staged or untracked files is
    refused, because the receipt describes a commit and not a working tree.
@@ -228,6 +228,52 @@ name is written into public text.
 Exit status is 0 only when the receipt passes (and, with `--post`, the evidence
 was posted).
 
+### UI evidence
+
+Capture screenshots or short recordings with the owning test/device tooling first,
+then review their contents for secrets and personal data. Verify does not capture
+screens, inspect image contents, redact media, or prove an interaction happened.
+Do not submit credentials or unreviewed captures. The manifest is explicit opt-in;
+no files are discovered automatically and callers without media need no new input.
+
+Keep captures outside source control. In their directory, create a JSON manifest:
+
+```json
+{
+  "head": "<full git rev-parse HEAD output>",
+  "artifacts": [{"path": "screen.png"}, {"path": "interaction.mp4"}]
+}
+```
+
+Run `scripts/tron work verify --evidence-manifest <manifest.json>` (add `--post`
+after pushing the exact head), or pass the same flag to `scripts/tron work land`.
+Paths are relative to the manifest's directory. Absolute paths, traversal,
+symlinks in any path component, missing files, special files and duplicates are
+refused. Use physical paths, not symlink aliases such as `/tmp` on macOS.
+Only PNG, JPEG, MP4 and MOV extension/signature pairs are accepted: signatures
+identify containers, not valid playback or safe contents. Limits are 10 files,
+10 MiB per file, 25 MiB total, and 64 KiB for the manifest. Recording duration is
+not decoded; keep clips short enough to inspect and within the byte bounds.
+
+Before checks, verify snapshots the bounded bytes into
+`<git-dir>/work/media/<head>/<sha256>.<extension>`. The receipt binds each opaque
+name, byte count and SHA-256 to that head. Same-head re-verification without the
+flag reuses these snapshots, even if the original capture has gone. Supplying a
+manifest replaces that head's media selection. A different head never inherits
+media: verify refuses when the nearest ancestor receipt contains media, requiring
+a new capture and manifest. This also stops `land` after it merges a new base;
+recapture against the resulting head and rerun. Check carry-over is unchanged.
+
+Posting rechecks every snapshot before uploading anything. Missing, changed or
+unsafe snapshots refuse publication instead of silently omitting evidence.
+All media uses the existing private-repository gate and uploader, under
+`<issue>/<head>/media/`; nothing is attached to the public repository. Public
+comments and the PR's Verification section link opaque filenames in the private
+repository, including when `land` opens the PR after posting its receipt to the
+issue. Source filenames and local paths never appear in those links. As with
+logs, a partial remote upload may remain if a later upload fails, but no success
+status or evidence comment is published on that failure.
+
 ### Tron's check set
 
 Tron's `verify` section in `.github/work.json` follows the validation commands
@@ -256,6 +302,21 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   remains in CI's heavy run and explicit checkpoints. The simulator admission
   and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
   the check with exit 73; verify again once memory is free.
+- **Advisory hosted macOS CI** uses `scripts/ci_macos_scope.py` over the
+  available event-base and checkout trees (no merge-base required). Recognized
+  docs, work-tooling and push-relay-only changes skip macOS. Gateway inputs run
+  Gateway, the hosted iOS/Gateway boundary and Mac packaging; iOS inputs run iOS
+  and the boundary; Mac inputs run Mac. Shared workflow, protocol and toolchain
+  inputs, unknown paths, empty diffs and unavailable Git inputs run all four.
+  Deleted/renamed paths retain both owners. Manual dispatch runs all four, and
+  a failed classifier or missing output never skips coverage. An explicit
+  `!cancelled()` status check lets selected or missing-output jobs run even if
+  `policy` fails; an explicit `false` scope still skips, and workflow cancellation
+  stops advisory work. `test_ci_scope.py` exercises the CLI with real Git histories
+  and the workflow's selector shell, not GitHub's job dependency scheduler.
+  Jobs keep real failure conclusions;
+  only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
+  unapplied by maintainer decision; no schedule or deployment is added.
 - **CI policy's iOS infrastructure test** uses
   `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
   The workflow compares the available base and head trees directly (two-dot
@@ -331,6 +392,21 @@ covers the GitHub side.
     name. `--post` comments on the branch's own pull request, or on the issue
     when only a fork's exists.
 
+68. **Explicit UI evidence is lost or relabeled.** `MediaEvidenceTests` in
+    `test_verify.py` runs the real CLI with files and Git, deletes the source
+    capture, then reverifies and checks the exact uploaded snapshot bytes at the
+    fake-gh boundary. Media survives only same-head reverify. `MediaLandingTests`
+    in `test_land.py` proves the first PR links private media and a base merge
+    stops for recapture before publication.
+69. **Media escapes its input, storage or privacy bounds.** The same tests reject
+    traversal, symlink files/directories/manifests, special/missing files,
+    non-media, duplicates, count/byte overruns, malformed/stale manifests and
+    changed/missing/symlink snapshots. Public evidence repositories and upload
+    errors leave no media comment or success status. The fake-gh boundary is not
+    live GitHub upload proof. Repeat with
+    `python3 -m unittest discover -s tools/work`; retain its output alongside the
+    verify receipt/logs for the tested commit.
+
 ## `dashboard`
 
 `scripts/tron work dashboard [--html <path>] [--json <path>]` shows the state of
@@ -382,6 +458,12 @@ It reads, in a bounded number of calls:
 - open pull requests whose head branch is in this repository, with the
   combined check state of the head commit and the `dashboard.verifyContext`
   commit status;
+- when `dashboard.ciWorkflow` and `dashboard.advisoryJobs` are configured, the
+  latest workflow run for a push to the base branch, plus the latest run for each
+  exact open same-repository PR head (fork PRs excluded). Actions run queries
+  select one run; job lists use pages of 100 with a 1,000-job ceiling. Repeated
+  run/job requests share the current fetch only. API errors, malformed responses
+  and a job list beyond the ceiling report unavailable evidence, never success;
 - the state of any issue named by a remote claim branch or a local worktree's
   claim-style branch that the reads above did not return (one aliased query);
 - remote branches (`git ls-remote`), the claim owner from each claim branch's
@@ -417,6 +499,14 @@ Sections, in order:
    remote branch is gone says that `work cleanup --all` removes it once its
    pull request merged at its head.
 10. **Regressions:** open issues labeled `regressionLabel`.
+11. **Advisory CI:** current run state, branch, SHA, run link and each configured
+    job's state/link. Failed, cancelled, pending, missing and unavailable evidence
+    is also visible under Health, outside collapsed rows. Skipped jobs remain
+    distinguishable from successful jobs. Base-branch push evidence survives a
+    PR's merge; PR evidence from an older head or a foreign repository is rejected.
+    This is latest-run evidence, not an exhaustive unresolved-failure history:
+    a newer base push supersedes the prior run, and a dispatch is not a base push.
+    No local failure registry or regression issue is created.
 
 The names it reads (statuses, labels, fields, the verify context) come from the
 `dashboard` and `claim` sections of `.github/work.json`.
@@ -473,6 +563,13 @@ The names it reads (statuses, labels, fields, the verify context) come from the
 45. **The work list drops, repeats or mislabels an issue.** Each open non-epic
     issue appears once; an issue closed within `dashboard.recentDays` appears
     and an older one does not; epics stay in their own section.
+67. **Advisory CI failure or unavailable evidence disappears.**
+    `test_ci_dashboard.py` drives the dashboard with real Git and a CLI-shaped
+    GitHub fixture through fetch, JSON, text and HTML. It covers a failed main
+    run with no open PR, a failure on a later jobs page, exact PR head and
+    repository fencing, pending/cancelled/missing/unavailable evidence, and
+    escaped branch text. `test_ci_scope.py` covers real Git path selection,
+    shared consumers, empty/unknown/unresolved input, and deletion/rename.
 46. **GitHub text reaches a filter or a style.** Undeclared or hostile labels
     never become filter tokens or class names, and a label color is used only
     when it is six hex digits.
@@ -820,3 +917,6 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     globs. Neither an existing symlink nor a directory swapped for a symlink
     during permission opening changes anything outside it. A kept, dry-run,
     failed-release or failed-recheck worktree keeps its read-only tree as it was.
+    After assertions, fixture teardown walks the surviving payload without
+    following symlinks, including directories renamed by the controlled race;
+    captured pre-race names would leave read-only children behind on Python 3.9.

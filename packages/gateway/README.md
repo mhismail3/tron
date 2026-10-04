@@ -2759,6 +2759,14 @@ npm test
 npm audit --omit=dev
 ```
 
+Vitest admits at most four workers (or the host's available parallelism when
+smaller). The suite runs real durable filesystem/SQLite fixtures and SDK child
+processes; CPU-count fanout can saturate shared host resources and consume a
+test's deadline before its owned work can finish. This is a test-runner resource
+bound, not a change to test selection, per-test concurrency assertions, or the
+15-second default timeout. Production scheduling is unchanged. Keep focused
+owners narrow while iterating and use the full configured suite for checkpoints.
+
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 
 ```bash

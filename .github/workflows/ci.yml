@@ -14,11 +14,35 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pi-sdk-graph-changed: ${{ steps.pi-graph.outputs.changed }}
+      gateway: ${{ steps.macos-scope.outputs.gateway }}
+      ios: ${{ steps.macos-scope.outputs.ios }}
+      pi-sdk-e2e: ${{ steps.macos-scope.outputs.pi-sdk-e2e }}
+      mac: ${{ steps.macos-scope.outputs.mac }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
+      - name: Select advisory macOS coverage
+        id: macos-scope
+        shell: bash
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$CI_EVENT" == workflow_dispatch ]]; then
+            args=(--all)
+          else
+            if [[ -n "$CI_BASE" && ! "$CI_BASE" =~ ^0+$ ]]; then
+              git cat-file -e "$CI_BASE^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$CI_BASE" || true
+            fi
+            args=(--base "$CI_BASE" --head HEAD)
+          fi
+          if ! python3 scripts/ci_macos_scope.py "${args[@]}" --github-output "$GITHUB_OUTPUT"; then
+            echo "macOS classifier failed; running every advisory job"
+            for job in gateway ios pi-sdk-e2e mac; do echo "$job=true" >> "$GITHUB_OUTPUT"; done
+          fi
       - name: Detect Pi SDK graph change
         id: pi-graph
         shell: bash
@@ -164,8 +188,11 @@ jobs:
             scripts/tron-ios-test
       - run: scripts/ios-release-toolchain-doctor.sh --self-test
 
+  # Advisory jobs retain real failure conclusions. Only policy and tron/verify
+  # gate work land; the dashboard reads these jobs directly from Actions.
   gateway:
     needs: policy
+    if: ${{ !cancelled() && needs.policy.outputs.gateway != 'false' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -217,6 +244,8 @@ jobs:
         working-directory: packages/push-relay
 
   ios:
+    needs: policy
+    if: ${{ !cancelled() && needs.policy.outputs.ios != 'false' }}
     runs-on: macos-26
     # The memory reserve protects a shared development Mac's Gateway. A hosted
     # runner is a dedicated VM whose whole memory (7 GB) is below the 8 GB
@@ -263,6 +292,7 @@ jobs:
 
   pi-sdk-e2e:
     needs: policy
+    if: ${{ !cancelled() && needs.policy.outputs['pi-sdk-e2e'] != 'false' }}
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
     runs-on: macos-26
@@ -326,6 +356,8 @@ jobs:
         run: scripts/ios-gateway-e2e-test clean
 
   mac:
+    needs: policy
+    if: ${{ !cancelled() && needs.policy.outputs.mac != 'false' }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
