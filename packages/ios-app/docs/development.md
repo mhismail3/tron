@@ -2736,3 +2736,26 @@ with attachments/chips/catalog; also tap **Jump to latest** while reading older
 messages and confirm the newest message is shown (the prior edge target landed at
 the oldest end). Upright-at-rest device inversion remains open: hosted pixels do
 not reproduce the user's intermittent image/badge flip.
+
+### Post-Stop configuration qualification
+
+`SessionSettingPresentationTests` and the configuration cases in
+`SessionPresentationStoreTests` cover held terminal eligibility, sequenced
+release, preserved canonical revision and stale-snapshot refusal.
+`SessionMutationServiceTests` exercises original-intent send refusal after a
+transport wait and completed-versus-missing receipt ownership.
+`TronSmokeUITests/testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening`
+mounts the production Manage Session sheet through
+`HostedSessionConfigurationFixture` (`HOSTED_TEST` only). Its synthetic Stop RPC
+publishes an idle foreground with held terminal settlement, then an explicit
+fixture action releases the Gateway-owned eligibility event. The actual Thinking
+control stays disabled with a reason, then opens its slider without reopening
+the sheet. `TronSmokeUITests/testSupersededThinkingReceiptReleasesMountedConfiguration`
+uses the same production sheet to commit a different Thinking value, hold its
+success reply, and publish a newer superseding value before delivering the
+original receipt. It verifies the canonical value wins and another edit opens
+without reopening the sheet. Removing revision-based retirement makes that
+journey fail with permanently disabled controls. Retained xcresult screenshots
+label these synthetic states. This is not physical-device or real-provider evidence. Run with the owned UIValidation
+runner and that exact selector; matching protocol 7 builds require manual
+Mac-first installation before the real-device post-Stop check.

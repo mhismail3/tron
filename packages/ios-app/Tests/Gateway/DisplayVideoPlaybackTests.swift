@@ -25,7 +25,7 @@ struct DisplayVideoPlaybackTests {
             )
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"video-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","display-artifacts.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":\#(TronGatewayProtocolContract.protocolVersion),"minProtocolVersion":\#(TronGatewayProtocolContract.minimumProtocolVersion),"machineId":"video-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","display-artifacts.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "test-token")
             let staged: URL
             do {

@@ -85,7 +85,7 @@ struct GatewayProtocolContractTests {
     func snapshotDecodes() throws {
         let data = Data(#"""
         {
-          "sessionId":"session-1","runtimeGeneration":"generation-1","revision":8,"eventSequence":21,"phase":"running","cwd":"/workspace",
+          "sessionId":"session-1","runtimeGeneration":"generation-1","revision":8,"eventSequence":21,"phase":"running","configurationBlocker":"running","cwd":"/workspace",
           "model":{"provider":"anthropic","id":"model"},"thinkingLevel":"high",
           "availableThinkingLevels":["off","high"],
           "contextUsage":{"tokens":120,"contextWindow":1000,"percent":12},

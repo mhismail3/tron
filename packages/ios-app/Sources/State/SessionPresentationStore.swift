@@ -2969,6 +2969,11 @@ final class SessionPresentationStore {
             case .resynchronize(let sessionID):
                 if !synchronization.markRetryRequired(sessionID: sessionID) { return sessionID }
             }
+        case "session.configuration":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .configuration(let blocker)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.configurationBlocker = blocker
+            advance(&snapshot, envelope)
         case "session.progress":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .progress(let item)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }

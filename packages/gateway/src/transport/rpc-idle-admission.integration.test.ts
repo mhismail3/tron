@@ -53,6 +53,7 @@ interface Client {
 
 interface Fixture {
   root: string;
+  registry: RuntimeRegistry;
   faux: ReturnType<typeof fauxProvider>;
   logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
   connect(): Promise<Client>;
@@ -70,7 +71,9 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
-  const faux = fauxProvider({ provider: "rpc-idle-fixture", tokensPerSecond: options.tokensPerSecond ?? 10_000 });
+  const faux = fauxProvider({ provider: "rpc-idle-fixture", tokensPerSecond: options.tokensPerSecond ?? 10_000,
+    models: [{ id: "model-a", reasoning: true }, { id: "model-b", reasoning: true }],
+  });
   faux.setResponses([fauxAssistantMessage("idle admission fixture response")]);
   const runtimeFactory = vi.fn(async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -149,7 +152,7 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await until(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     await until(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,
@@ -182,6 +185,8 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
   const snapshot = async (client: Client, sessionId: string) => {
     const opened = await client.request(`snapshot-${Math.random().toString(36).slice(2, 8)}`, "session.open", { sessionId });
     expect(opened.ok, JSON.stringify(opened)).toBe(true);
+    const synced = await client.request(`sync-${Math.random()}`, "session.sync", { sessionId, syncToken: opened.result.syncToken });
+    expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
   const openSession = async (client: Client, sessionId: string) => {
@@ -191,7 +196,7 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
-  return { root, faux, logRecords, connect, coldSession, snapshot, openSession };
+  return { root, registry, faux, logRecords, connect, coldSession, snapshot, openSession };
 }
 
 describe("diagnostic export RPC boundary", () => {
@@ -227,6 +232,134 @@ const list = async (client: Client) => {
 };
 
 describe("receipt-backed mutations against their own session work entry", () => {
+  it("publishes ready after real assistant completion without reopening the session", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("completion-readiness");
+    await f.openSession(client, session.id);
+    const start = client.frames.length;
+    const prompted = await client.request("normal-completion", "session.prompt", {
+      sessionId: session.id, commandId: "normal-completion", text: "Complete normally",
+    });
+    expect(prompted.ok).toBe(true);
+    await until(() => client.frames.slice(start).some(frame => frame.topic === "session.snapshot"
+      && frame.payload.phase === "idle" && frame.payload.transcript.some((item: any) => item.role === "assistant")), "completed assistant snapshot");
+    const settledIndex = client.frames.findLastIndex(frame => frame.topic === "session.snapshot" && frame.payload.phase === "idle");
+    await until(() => client.frames.slice(settledIndex + 1).some(frame => frame.topic === "session.configuration"
+      && frame.payload.data.configurationBlocker === null), "normal completion ready event");
+    record("normal assistant retirement publishes readiness", { readyWithoutReopen: true });
+  });
+  it("changes all parent configuration immediately after Stop while independent child work remains", async () => {
+    const f = await fixture({ tokensPerSecond: 4 });
+    const client = await f.connect();
+    const session = await f.coldSession("post-stop-configuration");
+    await f.openSession(client, session.id);
+    f.faux.setResponses([fauxAssistantMessage("slow response ".repeat(60))]);
+    const prompt = await client.request("configuration-prompt", "session.prompt", {
+      commandId: "configuration-prompt", sessionId: session.id, text: "Start a slow run",
+    });
+    expect(prompt.ok).toBe(true);
+    await until(async () => (await f.snapshot(client, session.id)).phase === "running");
+    const stopped = await client.request("configuration-stop", "session.abort", {
+      commandId: "configuration-stop", sessionId: session.id,
+    });
+    expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
+    const slot = await f.registry.acquire(session.id);
+    // Installed extension lifecycle is independent authority. Inject only its
+    // admitted artifact, not the configuration admission or RPC under test.
+    const activities = (slot as any).extensionActivities as Map<string, unknown>;
+    const now = new Date().toISOString();
+    activities.set("independent-child", {
+      id: "independent-child", activityId: "independent-child", runId: "independent-child", toolCallId: "independent-child",
+      source: { source: "pi-subagents" }, title: "Subagent", mode: "asynchronous", status: "running",
+      startedAt: now, updatedAt: now, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: now },
+    });
+    const accepted: string[] = [];
+    try {
+      expect(slot.isDrainBusy).toBe(true);
+      for (const method of ["session.setModel", "session.setThinking", "session.setContextWindow"]) {
+        const before = await f.snapshot(client, session.id);
+        const nextModel = method === "session.setModel" ? f.faux.models.find(model => model.id !== before.model.id)! : before.model;
+        const nextThinking = before.availableThinkingLevels.find((level: string) => level !== before.thinkingLevel)!;
+        const response = await client.request(method, method, {
+          sessionId: session.id, commandId: method,
+          expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
+          provider: nextModel.provider, modelId: nextModel.id,
+          level: nextThinking, contextWindow: 64_000, expectedRevision: before.revision,
+        });
+        expect(response.ok, `${method}: ${JSON.stringify(response)}`).toBe(true);
+        accepted.push(method);
+        const after = await f.snapshot(client, session.id);
+        expect(response.result.revision).toBe(after.revision);
+        expect(after.model).toEqual({ provider: nextModel.provider, id: nextModel.id });
+        if (method === "session.setModel") expect(after.model).not.toEqual(before.model);
+        if (method === "session.setThinking") {
+          expect(after.thinkingLevel).toBe(nextThinking);
+          expect(after.thinkingLevel).not.toBe(before.thinkingLevel);
+        }
+        if (method === "session.setContextWindow") expect(after.contextWindowPolicy).toMatchObject({ effective: 64_000, override: 64_000, source: "session" });
+      }
+      expect((await f.snapshot(client, session.id)).configurationBlocker).toBeNull();
+      expect(slot.isDrainBusy).toBe(true);
+      const deleted = await client.request("delete-with-child", "session.delete", {sessionId: session.id, commandId: "delete-with-child"});
+      expect(deleted).toMatchObject({ok: false, error: {code: "busy"}});
+      record("post-Stop configuration with independent child", { accepted, deletionRejected: true });
+    } finally { activities.delete("independent-child"); }
+  });
+
+  it("publishes configuration settlement without changing context revision and fences stale model intent", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("configuration-settlement");
+    const before = await f.openSession(client, session.id);
+    const work = f.registry.administrativeWorkRegistry.begin({kind: "terminal-receipt-persistence", sessionId: session.id, hostEpoch: "fixture"});
+    let settlementFrameCut = 0;
+    try {
+      await until(() => client.frames.some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === "settling"), "settling publication");
+      const busy = await f.snapshot(client, session.id);
+      expect(busy.configurationBlocker).toBe("settling");
+      const rejected = await client.request("settling-thinking", "session.setThinking", {
+        sessionId: session.id, commandId: "settling-thinking", level: "off",
+        expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
+      });
+      expect(rejected).toMatchObject({ok: false, error: {code: "busy", details: {configurationBlocker: "settling"}}});
+      expect(f.logRecords.some(record => record.metadata.event === "rpc.error" && record.metadata.reason === "session_configuration_settling")).toBe(true);
+      settlementFrameCut = client.frames.length;
+    } finally { work.settle(); }
+    // No session.open/snapshot RPC may rescue a missing retirement event.
+    await until(() => client.frames.slice(settlementFrameCut).some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === null), "ready publication after terminal retirement");
+    const ready = await f.snapshot(client, session.id);
+    expect(ready.revision).toBe(before.revision);
+    const stale = await client.request("stale-thinking", "session.setThinking", {
+      sessionId: session.id, commandId: "stale-thinking", level: "off",
+      expectedRuntimeGeneration: "retired-runtime", expectedModel: before.model ?? null,
+    });
+    expect(stale).toMatchObject({ok: false, error: {code: "conflict"}});
+    const wrongModel = await client.request("wrong-model-thinking", "session.setThinking", {
+      sessionId: session.id, commandId: "wrong-model-thinking", level: "off",
+      expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: {provider: "retired-provider", id: "retired-model"},
+    });
+    expect(wrongModel).toMatchObject({ok: false, error: {code: "conflict"}});
+    const competing = f.registry.administrativeWorkRegistry.begin({kind: "rpc-mutation", sessionId: session.id, hostEpoch: "fixture"});
+    try {
+      for (const method of ["session.setModel", "session.setThinking", "session.setContextWindow"]) {
+        const response = await client.request(`competing-${method}`, method, {
+          sessionId: session.id, commandId: `competing-${method}`, level: "off",
+          provider: before.model.provider, modelId: before.model.id, contextWindow: null, expectedRevision: before.revision,
+          expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
+        });
+        expect(response).toMatchObject({ok: false, error: {code: "busy", details: {configurationBlocker: "mutation"}}});
+      }
+    } finally { competing.settle(); }
+    const context = await client.request("ready-context", "session.setContextWindow", {
+      sessionId: session.id, commandId: "ready-context", provider: before.model.provider, modelId: before.model.id,
+      expectedRuntimeGeneration: before.runtimeGeneration, expectedRevision: before.revision, contextWindow: null,
+    });
+    expect(context.ok, JSON.stringify(context)).toBe(true);
+    record("configuration settlement and original intent", { revisionPreserved: true, staleIntentRejected: true, contextAccepted: true });
+  });
+
   it("admits every idle-checked mutation on an idle session", async () => {
     const f = await fixture();
     const client = await f.connect();
@@ -242,7 +375,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       return response.result;
     };
 
-    await step("session.setThinking", { level: (opened.availableThinkingLevels as string[])[0] });
+    await step("session.setThinking", { level: (opened.availableThinkingLevels as string[])[0], expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null });
     await step("session.setTools", { tools: [] });
     await step("session.label", { entryId: session.entryId, label: "idle admission" });
     const bash = await step("session.bash", { command: "echo rpc-idle-admission" });
@@ -286,7 +419,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const f = await fixture({ tokensPerSecond: 4 });
     const client = await f.connect();
     const session = await f.coldSession("busy-session");
-    await f.openSession(client, session.id);
+    const opened = await f.openSession(client, session.id);
 
     // A running prompt is not the caller's own entry, so idle admission must
     // still reject every idle-checked mutation.
@@ -299,7 +432,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const rejectedByRun: string[] = [];
     for (const [method, params] of [
       ["session.setTools", { tools: [] }],
-      ["session.setThinking", { level: "off" }],
+      ["session.setThinking", { level: "off", expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null }],
       ["session.label", { entryId: session.entryId, label: "blocked" }],
       ["session.reloadResources", {}],
     ] as Array<[string, Record<string, unknown>]>) {

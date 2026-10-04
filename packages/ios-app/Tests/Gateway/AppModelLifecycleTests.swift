@@ -576,7 +576,7 @@ struct AppModelLifecycleTests {
     ) -> Data {
         var frame: [String: Any] = [
             "type": "hello", "gatewayVersion": "1.0.0", "piVersion": "1.0.0",
-            "protocolVersion": 6, "minProtocolVersion": 6, "machineId": "machine",
+            "protocolVersion": 7, "minProtocolVersion": 7, "machineId": "machine",
             "machineName": "Mac", "gatewayChannel": "stable", "capabilities": ["sessions.v1"],
             "lanEndpoints": endpoints.map { ["host": $0.host, "port": $0.port] },
         ]

@@ -205,7 +205,7 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
     private var closed = false
     init(gateway: ProjectTrustFixtureGateway, machineID: String) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":6,\"minProtocolVersion\":6,\"machineId\":\"\(machineID)\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":7,\"minProtocolVersion\":7,\"machineId\":\"\(machineID)\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
         Task { await gateway.attach(self) }
     }
     func send(_ data: Data) async throws {

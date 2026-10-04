@@ -68,6 +68,7 @@ export interface GatewayWorkHandle {
  */
 export class GatewayWorkRegistry {
   private readonly entries = new Map<string, GatewayWorkEntry>();
+  private readonly sessionObservers = new Set<(sessionId: string) => void>();
   private admissionsOpen = true;
   private derivedAdmissionsOpen = true;
   private cancellationRequested = false;
@@ -99,6 +100,21 @@ export class GatewayWorkRegistry {
    * administrative drain and eviction use the unfiltered query. */
   hasSessionWork(sessionId: string, exceptToken?: string): boolean {
     return [...this.entries.values()].some((entry) => entry.sessionId === sessionId && entry.token !== exceptToken);
+  }
+
+  observeSessions(observer: (sessionId: string) => void): () => void {
+    this.sessionObservers.add(observer);
+    return () => { this.sessionObservers.delete(observer); };
+  }
+
+  private publishSessionChange(sessionId: string | undefined): void {
+    if (!sessionId) return;
+    for (const observer of this.sessionObservers) {
+      // Disposable publication cannot strand a token before its caller receives
+      // the handle, or prevent drain waiters from observing exact settlement.
+      // Transport owns publication failures; reconnect obtains a fresh snapshot.
+      try { observer(sessionId); } catch { /* advisory projection */ }
+    }
   }
 
   begin(admission: GatewayWorkAdmission): GatewayWorkHandle {
@@ -160,6 +176,7 @@ export class GatewayWorkRegistry {
         if (!gatewayWorkKinds.includes(kind)) throw new Error("Gateway work kind is invalid");
         current.kind = kind;
         this.markProgress(current);
+        this.publishSessionChange(current.sessionId);
       },
       progress: () => {
         const current = owned();
@@ -171,6 +188,7 @@ export class GatewayWorkRegistry {
       },
       settle: () => this.settle(token, entry),
     };
+    this.publishSessionChange(entry.sessionId);
     if (this.cancellationRequested && entry.cancellation) void this.cancelEntry(entry);
     return handle;
   }
@@ -186,6 +204,7 @@ export class GatewayWorkRegistry {
     if (entry.pool === "derived") this.derivedEntryCount -= 1;
     else this.normalEntryCount -= 1;
     entry.settle();
+    this.publishSessionChange(entry.sessionId);
     if (this.entries.size === 0) {
       const waiters = this.idleWaiters.splice(0);
       for (const waiter of waiters) waiter();

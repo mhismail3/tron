@@ -164,7 +164,11 @@
       "progressSequence": 3,
       "extensionOrigin": {
         "source": "fixture-extension",
-        "owner": { "id": "fixture-owner", "title": "Fixture Extension", "source": "fixture-extension" }
+        "owner": {
+          "id": "fixture-owner",
+          "title": "Fixture Extension",
+          "source": "fixture-extension"
+        }
       }
     },
     {
@@ -396,8 +400,16 @@
               "question": "Choose one",
               "context": "Fixture context",
               "options": [
-                { "id": "one", "label": "One", "description": "First" },
-                { "id": "two", "label": "Two", "description": "Second" }
+                {
+                  "id": "one",
+                  "label": "One",
+                  "description": "First"
+                },
+                {
+                  "id": "two",
+                  "label": "Two",
+                  "description": "Second"
+                }
               ],
               "multiSelect": false,
               "allowOther": true
@@ -484,5 +496,6 @@
       "type": "warning",
       "message": "fixture diagnostic"
     }
-  ]
+  ],
+  "configurationBlocker": null
 }

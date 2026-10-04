@@ -58,7 +58,7 @@ final class IntegrationModelsTests: XCTestCase {
             clock: .continuous, reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
             pairingCommit: { _, _ in }, profileTokenLookup: { _ in nil })
         let executor = ConfirmedMutationExecutor(client: gateway, lifecycle: lifecycle, clock: .continuous, performanceSignposts: RecordingPerformanceSignposts())
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         do {
             try await lifecycle.connectHosted(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "fixture-token")
             let policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)

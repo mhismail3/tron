@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 
 describe("GatewayWorkRegistry", () => {
+  // Failure mode: projection callbacks must not orphan an admitted handle or
+  // prevent settlement waiters from resolving when transport publication throws.
+  it("keeps work authority usable when a disposable session observer throws", async () => {
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const unsubscribe = registry.observeSessions(() => { throw new Error("observer retired"); });
+    const owner = registry.begin({kind: "rpc-mutation", sessionId: "session", hostEpoch: "epoch"});
+    const settled = registry.waitUntilSettled();
+    owner.transition("terminal-receipt-persistence");
+    owner.settle();
+    await settled;
+    expect(registry.size).toBe(0);
+    unsubscribe();
+  });
+
   it("transfers one exact token without a release/reacquire gap", async () => {
     let now = 1_000;
     const registry = new GatewayWorkRegistry("epoch", 8, () => now, () => now);

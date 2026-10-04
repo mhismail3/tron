@@ -18,7 +18,7 @@ struct SessionThinkingEditScope: Hashable {
     }
 
     func admits(_ level: String, in current: SessionContextPresentation) -> Bool {
-        self == Self(current) && !current.phase.isActive && levels.contains(level)
+        self == Self(current) && current.configurationLockedReason == nil && levels.contains(level)
     }
 }
 
@@ -27,7 +27,7 @@ struct SessionPendingModelSelection: Equatable {
     let value: ModelRef
     let sessionID: String
     let runtimeGeneration: String
-    private var confirmed = false
+    private var confirmedRevision: Int?
 
     init(_ value: ModelRef, snapshot: SessionContextPresentation) {
         self.value = value
@@ -41,10 +41,10 @@ struct SessionPendingModelSelection: Equatable {
         return self
     }
 
-    func confirming(_ requestID: UUID) -> Self {
+    func confirming(_ requestID: UUID, revision: Int) -> Self {
         guard id == requestID else { return self }
         var copy = self
-        copy.confirmed = true
+        copy.confirmedRevision = revision
         return copy
     }
 
@@ -52,9 +52,12 @@ struct SessionPendingModelSelection: Equatable {
         id == requestID ? nil : self
     }
 
-    func reconciled(authoritative: ModelRef?, runtimeGeneration: String?) -> Self? {
+    func reconciled(authoritative: ModelRef?, runtimeGeneration: String?, revision: Int? = nil) -> Self? {
         guard runtimeGeneration == self.runtimeGeneration else { return nil }
-        return confirmed && value == authoritative ? nil : self
+        guard let confirmedRevision else { return self }
+        // A later client may have superseded the successful command. Its exact
+        // receipt revision, not perpetual value equality, retires our intent.
+        return value == authoritative || (revision.map { $0 >= confirmedRevision } ?? false) ? nil : self
     }
 }
 
@@ -67,7 +70,7 @@ struct SessionPendingSetting<Value: Equatable>: Equatable {
     private let model: ModelRef?
     private let sessionID: String
     private let runtimeGeneration: String
-    private var confirmed = false
+    private var confirmedRevision: Int?
 
     init(_ value: Value, snapshot: SessionContextPresentation) {
         self.value = value
@@ -81,10 +84,10 @@ struct SessionPendingSetting<Value: Equatable>: Equatable {
             && runtimeGeneration == snapshot.runtimeGeneration ? self : nil
     }
 
-    func confirming(_ requestID: UUID) -> Self {
+    func confirming(_ requestID: UUID, revision: Int) -> Self {
         guard id == requestID else { return self }
         var result = self
-        result.confirmed = true
+        result.confirmedRevision = revision
         return result
     }
 
@@ -92,10 +95,11 @@ struct SessionPendingSetting<Value: Equatable>: Equatable {
         id == requestID ? nil : self
     }
 
-    func reconciled(authoritative: Value, snapshot: SessionContextPresentation?) -> Self? {
+    func reconciled(authoritative: Value, snapshot: SessionContextPresentation?, revision: Int? = nil) -> Self? {
         guard let snapshot, let pending = admitted(in: snapshot) else { return nil }
-        // A rapid A → B → A selection can match the old snapshot before its
-        // command runs. Only the exact command's completion can retire it.
-        return confirmed && value == authoritative ? nil : pending
+        guard let confirmedRevision else { return pending }
+        // Receipt and projection may arrive in either order. Wait for our value
+        // or authority at/after the applied revision, including supersession.
+        return value == authoritative || (revision.map { $0 >= confirmedRevision } ?? false) ? nil : pending
     }
 }

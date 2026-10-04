@@ -1155,13 +1155,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     faux.setResponses([fauxAssistantMessage("streamed reply ".repeat(12))]);
     runtime.registerNativeProvider(faux.provider);
     const snapshots: any[] = [];
+    const configurationEvents: any[] = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime,
       trust: new TrustService(agentDir),
-      broadcast: (_id, topic, payload) => { if (topic === "session.snapshot") snapshots.push(payload); },
+      broadcast: (_id, topic, payload) => {
+        if (topic === "session.snapshot") snapshots.push(payload);
+        if (topic === "session.configuration") configurationEvents.push(payload);
+      },
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
@@ -1193,10 +1197,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(final.transcript.find((item: any) => item.role === "user")?.presentationId).toBe(receipt.operationId);
     // Both an early subscriber and the mid-admission subscriber converge on
     // the owner's settled state.
-    expect(state(published.at(-1))).toBe(state(final));
+    const projected = (snapshot: any) => configurationEvents
+      .filter(event => event.runtimeGeneration === snapshot.runtimeGeneration && event.eventSequence > snapshot.eventSequence)
+      .reduce((current, event) => ({ ...current, configurationBlocker: event.data.configurationBlocker }), snapshot);
+    expect(state(projected(published.at(-1)))).toBe(state(final));
     const lateSubscriberFrames = published.filter((snapshot) => snapshot.eventSequence > midAdmission.eventSequence);
     expect(lateSubscriberFrames.length).toBeGreaterThan(0);
-    expect(state(lateSubscriberFrames.at(-1))).toBe(state(final));
+    expect(state(projected(lateSubscriberFrames.at(-1)))).toBe(state(final));
   });
 
   it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
@@ -9674,8 +9681,10 @@ export default function (pi) {
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
+    // Recursive extension setup owns its parent too; a simultaneous plain
+    // mkdir(cwd) races that creation and can fail before the journey begins.
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
     ]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -9772,7 +9781,7 @@ export default function (pi) {
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
-    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd)]);
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true })]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await Promise.all([
@@ -9846,7 +9855,7 @@ export default function (pi) {
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
     await Promise.all([
-      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
     ]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
@@ -10031,6 +10040,14 @@ export default function (pi) {
       const slot = await registry.create(cwd);
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
+      // The faux model names tools unconditionally, unlike a real model whose
+      // catalog is supplied at dispatch. Join actual asynchronous registration
+      // before issuing those calls; runtime creation alone is not MCP readiness.
+      await waitUntil(() => {
+        const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
+        return ["mcp__stdio__echo", "mcp__http__echo"].every(name =>
+          tools.some(tool => tool.name === name && tool.exposure === "direct"));
+      });
       await slot.prompt("call MCP fixtures and resource tools");
       await waitUntil(() => !slot.isBusy);
       const transcript = slot.snapshot().transcript;

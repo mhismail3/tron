@@ -171,14 +171,14 @@ struct DashboardStateOwnerTests {
         ) == Set([secondRemote.id]))
 
         let matchingInfo = GatewayInfo(
-            gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 7, minProtocolVersion: 7,
             machineId: other.machineId, machineGroupID: other.machineGroupID,
             machineName: "Other", capabilities: []
         )
         #expect(DashboardGatewayConnectionPool.admitsIdentity(matchingInfo, for: other))
         #expect(!DashboardGatewayConnectionPool.admitsIdentity(
             GatewayInfo(
-                gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
+                gatewayVersion: "1", piVersion: "1", protocolVersion: 7, minProtocolVersion: 7,
                 machineId: "wrong", machineGroupID: other.machineGroupID,
                 machineName: "Other", capabilities: []
             ),
@@ -203,7 +203,7 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: socketFactory.factory)
             })
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
 
             pool.reconcile(
                 profiles: [selected, remote],
@@ -311,7 +311,7 @@ struct DashboardStateOwnerTests {
     }
 
     private static func remoteHelloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
     }
 
     @MainActor
@@ -335,7 +335,7 @@ struct DashboardStateOwnerTests {
                 clock: clock.clock
             )
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -399,7 +399,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -480,7 +480,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -557,7 +557,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: socketFactory.factory) }
             )
             pool.delegate = recorder
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await oldSocket.enqueue(hello)
             pool.reconcile(
                 profiles: [selected, remote], selectedProfileID: selected.id,
@@ -614,7 +614,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: socketFactory.factory) }
             )
             pool.delegate = recorder
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await oldSocket.enqueue(hello)
             pool.reconcile(
                 profiles: [selected, remote], selectedProfileID: selected.id,
@@ -682,7 +682,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
                 clock: clock.clock
             )
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await sockets[11].enqueue(hello)
             for socket in sockets[0...10] {
                 await socket.failNextSend(GatewayFailure(
@@ -735,7 +735,7 @@ struct DashboardStateOwnerTests {
                 clock: clock.clock
             )
             pool.delegate = recorder
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await sockets[0].failNextSend(GatewayFailure(
                 code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
             ))
@@ -1101,7 +1101,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
                 clock: clock.clock
             )
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await sockets[0].enqueue(hello)
             for socket in sockets[1...] {
                 await socket.failNextSend(GatewayFailure(
@@ -1256,7 +1256,7 @@ struct DashboardStateOwnerTests {
             await failing.failNextSend(GatewayFailure(
                 code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
             ))
-            await connecting.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","connectionId":"5bf6a9a2-0000-4000-8000-0000000000c5","capabilities":[]}"#.utf8))
+            await connecting.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","connectionId":"5bf6a9a2-0000-4000-8000-0000000000c5","capabilities":[]}"#.utf8))
             pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
 
             let failed = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
@@ -1509,8 +1509,8 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: factory.factory)
             })
-            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
-            let helloB = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-b","machineGroupID":"group-b","machineName":"B","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloB = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine-b","machineGroupID":"group-b","machineName":"B","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await aOld.enqueue(helloA)
             pool.reconcile(profiles: [profileA], selectedProfileID: nil, token: { _ in "token-a" })
             try await aOld.waitUntilSent(count: 2)
@@ -1551,7 +1551,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
             }
             let ownedClients = clients
-            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             // Give the second injected client unsettled physical close work so
             // the two retirement boundaries can be released independently.
             await second.enqueue(helloA)
@@ -2355,7 +2355,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,

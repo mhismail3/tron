@@ -38,7 +38,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const PROTOCOL_VERSION = 6;
+const PROTOCOL_VERSION = 7;
 // The phone's reconnect backoff (ReconnectDelayPolicy.standard): a failed
 // attempt is followed by 2 s x 1.7, capped at 15 s, with ±20% jitter.
 const PHONE_RETRY_INITIAL_SECONDS = 2;
@@ -1803,7 +1803,7 @@ async function multi() {
     };
     for (const { sessionId } of config.running) {
       const opened = await retrying(driver, "session.open", { sessionId });
-      await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+      await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model", expectedRuntimeGeneration: opened.session.runtimeGeneration, expectedModel: opened.session.model ?? null });
       started = now();
       await mutation(driver, "session.prompt", { sessionId, text: config.runPrompt });
       result.setupPromptMs.push(now() - started);
@@ -1894,7 +1894,7 @@ async function multi() {
         // other lane has stopped (biased low) and censored with an elapsed time
         // under the tail, not the tail's own length.
         if (now() < deadline) {
-          await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+          await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model", expectedRuntimeGeneration: opened.session.runtimeGeneration, expectedModel: opened.session.model ?? null });
           if (now() < deadline) {
             await timed("promptAdmission", () => mutation(driver, "session.prompt", { sessionId, text: config.coldPrompt }));
           }
@@ -2035,6 +2035,7 @@ async function main() {
       // iteration, before the window, so each measured workload is identical.
       await actor.request("session.setModel", {
         sessionId, provider: "tron-profile", modelId: "profile-model", commandId: randomUUID(),
+        expectedRuntimeGeneration: opened.session.runtimeGeneration, expectedModel: openedModel,
       });
       await sleep(config.settleBeforeMs);
 

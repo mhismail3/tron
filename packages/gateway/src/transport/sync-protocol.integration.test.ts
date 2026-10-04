@@ -28,7 +28,7 @@ describe("two-phase session synchronization protocol", () => {
     const failNext = { value: false };
     const oversizedNext = { value: false };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -99,7 +99,7 @@ describe("two-phase session synchronization protocol", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const request = (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
@@ -197,7 +197,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
     const mobileFrames: any[] = [];
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
-    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile" }));
+    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
     while (!mobileFrames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
     const mobileOpenSync = async (prefix: string, sessionId: string) => {
       const expectedCount = (startedCounts.get(sessionId) ?? 0) + 1;
@@ -286,7 +286,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const openCounts = new Map<string, number>();
     const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       recoverySnapshot: async (sessionId: string) => {
@@ -361,7 +361,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const openAndSync = async (idPrefix: string, sessionId: string) => {
@@ -488,7 +488,7 @@ describe("connection-wide synchronization ownership", () => {
     let pendingOpenStartedResolve: (() => void) | undefined;
     const pendingOpenStarted = new Promise<void>((resolve) => { pendingOpenStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -538,7 +538,7 @@ describe("connection-wide synchronization ownership", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     const waitFor = async (predicate: () => boolean) => {
       const deadline = Date.now() + 5_000;
       while (!predicate()) {
@@ -678,7 +678,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     let releaseOpen!: () => void;
     const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: async (context: ClientContext, method: string, params: ClientRequest) => {
@@ -718,7 +718,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     const frames: Array<{ type?: string }> = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const connection = [...(gateway as unknown as {
@@ -810,7 +810,7 @@ describe("disposable read cancellation", () => {
     let releaseGatedSync: (() => void) | undefined;
     const records: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -873,7 +873,7 @@ describe("disposable read cancellation", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const connection = [...(gateway as unknown as {
@@ -1037,7 +1037,7 @@ describe("mobile presentation slot", () => {
     const openStarts: string[] = [];
     const openGates = new Map<string, () => void>();
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -1087,7 +1087,7 @@ describe("mobile presentation slot", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile" }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };

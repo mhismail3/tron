@@ -81,7 +81,7 @@ struct AppModelComposerAdmissionTests {
         do {
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
-                "protocolVersion": .number(6), "minProtocolVersion": .number(6), "machineId": .string("machine"),
+                "protocolVersion": .number(7), "minProtocolVersion": .number(7), "machineId": .string("machine"),
                 "machineName": .string("Mac"), "gatewayChannel": .string("stable"), "capabilities": .array(capabilities),
             ])))
             try await model.connectHostedGateway(profile: profile, token: "token")

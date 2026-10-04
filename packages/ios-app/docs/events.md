@@ -1,6 +1,26 @@
 # Gateway events
 
-## Protocol v6 chat semantics
+## Protocol v7 chat semantics
+
+Session configuration uses the Gateway's required `configurationBlocker` field
+and sequenced `session.configuration` updates, not foreground phase alone.
+`null` means ready; `running`, `queued`, `settling`, `mutation`, `interaction`
+and `unavailable` keep model, thinking and context controls locked with an
+explanation. Readiness changes do not increment canonical revision, preserving
+context-window optimistic concurrency. The existing exact event cursor and
+snapshot/rebaseline admission reject stale readiness. An acknowledged Stop can
+still be settling, while independently running children do not block safe
+parent configuration. The originating model/runtime and installed subscription
+are rechecked in each actual send closure after transport waits; accepted
+outcomes remain receipt-owned. Model/thinking commands carry the original
+runtime and nullable model expectation to the Gateway mutation lane. Configuration
+success receipts carry the exact applied revision. While a choice is pending,
+Manage Session observes authoritative revision as well as its narrow semantic
+projection: confirmed intents retire at that revision even when a newer client
+has selected a different value. Before that point the pending display remains
+request-owned; unrelated or earlier acknowledgements cannot unlock it. Controls
+also require the existing synchronized-session command admission during reconnect.
+
 
 Session events are live invalidation hints; the authoritative snapshot and
 canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
@@ -130,7 +150,7 @@ admits and reduces mounted-session topics:
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
   bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
   and queue revision; queue updates therefore replace the visible
-  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v6 requires
+  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v7 requires
   both rich fields; iOS admits Edit/Remove only for that authoritative pair. A mutation response
   never rewrites queue projection locally: clear,
   edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
@@ -373,7 +393,7 @@ Session subscription ownership is token-scoped end to end. The open response rem
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v6
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v7
 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
 and advances all three public reload revisions before publishing the replacement. Secondary read successes

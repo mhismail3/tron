@@ -21,7 +21,7 @@ struct Pi099VisualEvidenceTests {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
         let model = AppModel(client: client, cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.99.1","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-machine","machineName":"Fixture Mac","gatewayChannel":"stable","capabilities":["sessions.v1","modules.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.99.1","protocolVersion":7,"minProtocolVersion":7,"machineId":"fixture-machine","machineName":"Fixture Mac","gatewayChannel":"stable","capabilities":["sessions.v1","modules.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "fixture-machine", deviceId: "fixture-device"), token: "fixture-token")
         let responder = Task { await respondToHostedFixtures(socket) }
         defer { responder.cancel(); Task { await model.teardown(); await client.close() } }

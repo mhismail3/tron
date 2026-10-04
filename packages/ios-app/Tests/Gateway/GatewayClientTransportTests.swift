@@ -130,10 +130,10 @@ struct GatewayClientTransportTests {
             machineId: "machine", deviceId: "device"
         )
         let fixtures: [(GatewayProfile, String)] = [
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","capabilities":[]}"#),
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"dev","capabilities":[]}"#),
-            (debug, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#),
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"dev","capabilities":[]}"#),
+            (debug, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#),
         ]
         for (target, frame) in fixtures {
             let socket = ScriptedGatewaySocket()
@@ -151,7 +151,7 @@ struct GatewayClientTransportTests {
         let pin = Data(repeating: 7, count: 32).base64EncodedString()
         let advertised = ScriptedGatewaySocket()
         let advertisedClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: advertised).factory)
-        await advertised.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[],"lanEndpoints":[{"host":"192.168.1.24","port":9847},{"host":"bad/entry","port":9847}],"lanPin":"\#(pin)"}"#.utf8))
+        await advertised.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[],"lanEndpoints":[{"host":"192.168.1.24","port":9847},{"host":"bad/entry","port":9847}],"lanPin":"\#(pin)"}"#.utf8))
 
         let identity = try await advertisedClient.connectForLifecycle(profile: profile, token: "token")
         // One entry this phone cannot dial is dropped; the leg stays usable.
@@ -163,7 +163,7 @@ struct GatewayClientTransportTests {
         // rather than a stale one.
         let silent = ScriptedGatewaySocket()
         let silentClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: silent).factory)
-        await silent.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+        await silent.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
 
         let silentIdentity = try await silentClient.connectForLifecycle(profile: profile, token: "token")
         #expect(silentIdentity.info.lanEndpoints.isEmpty)
@@ -224,7 +224,7 @@ struct GatewayClientTransportTests {
 
         let normal = Task { try await client.requestValue("system.info", EmptyParams()) }
         try await socket.waitUntilSent(count: 2)
-        await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000012", result: .object(["protocolVersion": .number(6)])))
+        await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000012", result: .object(["protocolVersion": .number(7)])))
         _ = try await valueOfOwnedTask(normal)
 
         let privatePayload = String(repeating: "synthetic-export-private", count: 8_192)
@@ -2339,7 +2339,7 @@ struct GatewayClientTransportTests {
 
     private func helloFrame(connectionID: String? = nil) -> Data {
         let connection = connectionID.map { #","connectionId":"\#($0)""# } ?? ""
-        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
     }
 
     /// The Gateway's own `busy` answer for a shed read (`G-12`), with the retry
@@ -2447,7 +2447,7 @@ private actor RecordedHTTPCalls {
 
 @Suite("Gateway client LAN lane race (E-3c)")
 struct GatewayClientLanLaneTests {
-    private static let helloFrame = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+    private static let helloFrame = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
     private static let lanHost = "192.168.1.24"
     private static let savedHost = "gateway.test"
 

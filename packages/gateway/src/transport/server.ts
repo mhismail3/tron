@@ -446,6 +446,7 @@ const SNAPSHOT_STATED_TOPICS: ReadonlySet<string> = new Set([
   "session.snapshot",
   "session.rebaseline",
   "session.progress",
+  "session.configuration",
   "session.toolProgress",
   "session.processActivity",
   "session.extensionActivity",

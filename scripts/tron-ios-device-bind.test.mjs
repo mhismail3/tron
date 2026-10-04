@@ -34,7 +34,7 @@ test("CLI authenticates locally, lists paired IDs, and sends one explicit bindin
     ws.on("message", (raw) => {
       const frame = JSON.parse(raw.toString());
       if (frame.type === "hello") {
-        ws.send(JSON.stringify({ type: "hello", protocolVersion: 6, minProtocolVersion: 6 }));
+        ws.send(JSON.stringify({ type: "hello", protocolVersion: 7, minProtocolVersion: 7 }));
       } else {
         calls.push(frame);
         ws.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result:

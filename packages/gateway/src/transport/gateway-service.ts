@@ -1532,12 +1532,12 @@ export class GatewayService {
         ));
       case "session.setModel":
         return this.mutation(client, method, params, async (workToken) => {
-          await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }), workToken);
-          return { updated: true };
+          const revision = await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }), workToken, this.configurationExpectation(params));
+          return { updated: true, revision };
         });
       case "session.setContextWindow":
         return this.mutation(client, method, params, async (workToken) => {
-          await (await this.openedSlot(client, params)).setContextWindow(
+          const revision = await (await this.openedSlot(client, params)).setContextWindow(
             string(params.provider, "provider", { max: 120 }),
             string(params.modelId, "modelId", { max: 300 }),
             params.contextWindow,
@@ -1545,12 +1545,12 @@ export class GatewayService {
             string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 200 }),
             workToken,
           );
-          return { updated: true };
+          return { updated: true, revision };
         });
       case "session.setThinking":
         return this.mutation(client, method, params, async (workToken) => {
-          await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels), workToken);
-          return { updated: true };
+          const revision = await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels), workToken, this.configurationExpectation(params));
+          return { updated: true, revision };
         });
       case "session.setTools":
         return this.mutation(client, method, params, async (workToken) => {
@@ -2092,6 +2092,16 @@ export class GatewayService {
       throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
     }
     if (!release) throw new GatewayError("busy", "Session runtime is no longer available", true);
+  }
+
+  private configurationExpectation(params: Record<string, unknown>) {
+    const runtimeGeneration = string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 200 });
+    const value = params.expectedModel === null ? null : object(params.expectedModel, "expectedModel");
+    const model = value === null ? null : {
+      provider: string(value.provider, "expectedModel.provider", { max: 120 }),
+      id: string(value.id, "expectedModel.id", { max: 300 }),
+    };
+    return { runtimeGeneration, model };
   }
 
   private async openedSlot(client: ClientContext, params: Record<string, unknown>) {

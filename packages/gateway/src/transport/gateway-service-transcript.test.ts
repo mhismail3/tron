@@ -68,7 +68,7 @@ describe("session transcript paging", () => {
     } as unknown as GatewayServiceDependencies);
     try {
       await expect(service.invoke(client, "session.setModel", {
-        commandId: "fresh-session-model-change", sessionId: "fresh-session",
+        commandId: "fresh-session-model-change", sessionId: "fresh-session", expectedRuntimeGeneration: "runtime", expectedModel: null,
         provider: "anthropic", modelId: "claude-opus-4-5-20251101",
       })).resolves.toEqual({ updated: true });
       expect(mutateModel).toHaveBeenCalledOnce();
