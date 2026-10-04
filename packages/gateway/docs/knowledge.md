@@ -945,7 +945,11 @@ tracking installed until the owned work drains. A late hook cannot restore the
 next fixture's mocks or remove its root. Each whole cleanup/report has one
 5-second join budget, below the unchanged 10-second framework hook budget;
 failed joins retain their exact root even if their work later settles. The existing
-15-second test timeout is unchanged. Run `npx vitest run
+15-second test timeout is unchanged. Publication-observer failures release the
+suspended test body before awaiting its expected rejection; an observation
+deadline cannot strand the body until framework teardown. The Gateway suite's
+bounded worker concurrency applies without reducing the ten-item workload.
+Run `npx vitest run
 src/knowledge/knowledge-intake-enrichment.test.ts` from `packages/gateway` to
 regenerate `test-results/knowledge-intake-outcome.json` (ten durable outcomes)
 and `test-results/knowledge-intake-lifecycle{,-model,-publication}.json` (phase
