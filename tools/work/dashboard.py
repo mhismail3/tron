@@ -13,10 +13,11 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlencode, quote
 
 import claim as claims
 import start
-from gh import Gh
+from gh import Gh, GhError
 
 # Workflow rule: a claim with no push or comment for this long is flagged.
 STALE_AFTER = timedelta(hours=48)
@@ -127,6 +128,78 @@ def _issue_states(gh: Gh, owner: str, name: str, numbers: List[int]) -> Dict[int
     return states
 
 
+def _ci_evidence(gh: Gh, repository: str, config: dict, pulls: List[dict]) -> List[dict]:
+    """Read current Actions evidence, never persist a second failure registry.
+
+    Main push evidence survives a PR's merge. PR evidence is pinned to the exact
+    open head, not merely its reusable branch name. API failures are not green.
+    """
+    board = config["dashboard"]
+    workflow = board.get("ciWorkflow")
+    names = board.get("advisoryJobs", [])
+    if not workflow or not names:
+        return []
+    targets = [(config["claim"]["baseBranch"], "push", None, "main")]
+    for pull in pulls:
+        if pull.get("isCrossRepository"):
+            continue
+        commits = pull["commits"]["nodes"]
+        sha = commits[-1]["commit"]["oid"] if commits else None
+        targets.append((pull["headRefName"], "pull_request", sha, f"PR #{pull['number']}"))
+    rows = []
+    runs_cache: dict = {}
+    jobs_cache: dict = {}
+    for branch, event, sha, scope in targets:
+        row = {"scope": scope, "branch": branch, "sha": sha, "url": None,
+               "state": "missing", "jobs": {}}
+        try:
+            # A PR without a known head must not fall back to branch evidence.
+            if event == "pull_request" and not sha:
+                rows.append(row)
+                continue
+            query = {"branch": branch, "event": event, "per_page": 1}
+            if sha:
+                query["head_sha"] = sha
+            path = f"repos/{repository}/actions/workflows/{quote(workflow, safe='')}/runs?{urlencode(query)}"
+            if path not in runs_cache:
+                runs_cache[path] = gh.rest("GET", path)["workflow_runs"]
+            candidates = runs_cache[path]
+            candidate = candidates[0] if candidates else None
+            if candidate and (candidate["head_branch"] != branch or candidate["event"] != event
+                              or candidate["head_repository"]["full_name"] != repository
+                              or (sha and candidate["head_sha"] != sha)):
+                candidate = None
+            if candidate:
+                row.update(sha=candidate["head_sha"], url=candidate["html_url"],
+                           state=candidate["conclusion"] if candidate["status"] == "completed" else "pending")
+                run_id = int(candidate["id"])
+                if run_id not in jobs_cache:
+                    jobs = []
+                    # Job lists are paginated, bounded to 1,000. Incomplete
+                    # evidence is unavailable, never a silently healthy subset.
+                    for page in range(1, 11):
+                        response = gh.rest("GET", f"repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100&page={page}")
+                        jobs.extend(response["jobs"])
+                        if len(jobs) >= response["total_count"]:
+                            break
+                    else:
+                        raise DashboardError("Actions job list exceeds 1,000 jobs")
+                    jobs_cache[run_id] = jobs
+                by_name = {job["name"]: job for job in jobs_cache[run_id]}
+                for name in names:
+                    job = by_name.get(name)
+                    state = (job["conclusion"] or "unknown") if job and job["status"] == "completed" else "pending"
+                    if not job:
+                        state = "pending" if row["state"] == "pending" else "missing"
+                    row["jobs"][name] = {"state": state, "url": job["html_url"] if job else None}
+        except (GhError, DashboardError, KeyError, TypeError, ValueError):
+            # Do not expose raw CLI diagnostics (which may hold local paths).
+            row["state"] = "unavailable"
+            row["jobs"] = {}
+        rows.append(row)
+    return rows
+
+
 def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Iterable[int]) -> dict:
     """GitHub's side of the snapshot; claim_numbers are the issues named by every claim-style branch."""
     board, rules = config["dashboard"], config["claim"]
@@ -161,6 +234,7 @@ def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Ite
         "project_items": items,
         "labeled_issues": labeled,
         "pull_requests": pulls,
+        "ci": _ci_evidence(gh, repository, config, pulls),
         "issue_states": _issue_states(gh, owner, name, unknown) if unknown else {},
     }
 
@@ -403,6 +477,7 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "orphans": {"worktrees": orphan_worktrees, "branches": orphan_branches},
         "regressions": [_ref(i) for i in open_issues if board["regressionLabel"] in i["labels"]],
         "classification": classification,
+        "ci": snapshot.get("ci", []),
         "work": work,
         "priority_order": priority_order,
         "recent_days": board["recentDays"],
@@ -525,6 +600,17 @@ def _absence(number: int, state: str) -> str:
 # ---------------------------------------------------------------- rendering
 
 
+def _ci_alert(row: dict) -> bool:
+    return row["state"] not in {"success", "skipped"} or any(
+        job["state"] not in {"success", "skipped"} for job in row["jobs"].values())
+
+
+def _ci_text(row: dict) -> str:
+    jobs = ", ".join(f"{name}={job['state']}" for name, job in row["jobs"].items())
+    return (f"{row['scope']} {row['branch']} {(row['sha'] or 'unknown')[:12]}: {row['state']}"
+            + (f" ({jobs})" if jobs else "") + (f" {row['url']}" if row["url"] else ""))
+
+
 def render_text(model: dict) -> str:
     cap = model["soft_cap"]
     lines = [f"{model['repository']} - Project {model['project']!r} - {model['generated_at']}"]
@@ -551,6 +637,7 @@ def render_text(model: dict) -> str:
     section("Orphans", [f"worktree {o['path']}: {o['reason']}" for o in orphans["worktrees"]]
             + [f"branch {o['branch']}: {o['reason']}" for o in orphans["branches"]])
     section("Regressions", [f"#{e['number']} {e['title']}" for e in model["regressions"]])
+    section("Advisory CI (latest main push and exact open PR heads)", [_ci_text(row) for row in model["ci"]])
     section("Classification", [f"#{p['number']} {p['problem']}" for p in model["classification"]])
     if model["ignored_items"]:
         lines.append(f"Ignored {model['ignored_items']} Project item(s) without an issue of this repository")
@@ -738,6 +825,8 @@ def _health(model: dict) -> str:
          + [f'<li class="flag">{_line(None, _tag(o["reason"]), head="<code>" + _e(o["branch"]) + "</code>")}</li>'
             for o in orphans["branches"]]),
         ("Regressions", [f'<li class="alert">{_line(e)}</li>' for e in model["regressions"]]),
+        ("Advisory CI", [f'<li class="alert">{_e(_ci_text(row))}</li>'
+                         for row in model["ci"] if _ci_alert(row)]),
         ("Classification", [f'<li class="flag">{_line(p, _tag(p["problem"], "warn"))}</li>'
                             for p in model["classification"]]),
         ("Soft cap", [f'<li class="alert">{_line(None, head=_e(over))}</li>'] if cap["over"] else []),
@@ -895,12 +984,29 @@ def _epics(model: dict) -> str:
     return _section("epics", "Epics", _rows(items, "No epics"), str(len(items)))
 
 
+def _ci_section(model: dict) -> str:
+    if not model["ci"]:
+        return ""
+    rows = []
+    for row in model["ci"]:
+        url = row["url"] or ""
+        link = f'<a href="{_e(url)}">run</a>' if url.startswith("https://") else ""
+        jobs = " ".join(
+            f'<a href="{_e(job["url"])}">{_e(name)}={_e(job["state"])}</a>'
+            if (job["url"] or "").startswith("https://") else f'{_e(name)}={_e(job["state"])}'
+            for name, job in row["jobs"].items())
+        rows.append(f'<li>{_e(row["scope"])} {_e(row["branch"])} <code>{_e(row["sha"] or "unknown")}</code>'
+                    f' {_e(row["state"])} {link}<div>{jobs}</div></li>')
+    return _section("ci", "Advisory CI", '<div class="panel rows">' + "".join(rows) + '</div>',
+                    "Latest main push and exact open PR heads; not failure history")
+
+
 def render_html(model: dict) -> str:
     order = model.get("priority_order", [])
     cap = model["soft_cap"]
     alerts = (len(model["stale"]) + len(model["disagreements"]) + len(model["orphans"]["worktrees"])
               + len(model["orphans"]["branches"]) + len(model["regressions"]) + len(model["classification"])
-              + int(cap["over"]))
+              + int(cap["over"]) + sum(_ci_alert(row) for row in model["ci"]))
     open_work = sum(1 for r in model["work"] if r["state"] == "OPEN")
     closed = len(model["work"]) - open_work
 
@@ -927,7 +1033,7 @@ def render_html(model: dict) -> str:
         f'<header><div class="brand">{_e(model["project"])} · work</div><h1>{_e(model["repository"])}</h1>'
         f'<div class="sub">Snapshot {_e(stamp)} · live from GitHub and Git when generated</div>'
         '<div class="stripe"></div></header>'
-        + tiles + _needs_you(model) + _health(model) + _in_progress(model, order) + work + _epics(model)
+        + tiles + _needs_you(model) + _health(model) + _ci_section(model) + _in_progress(model, order) + work + _epics(model)
         + ignored + "</body></html>\n"
     )
 
