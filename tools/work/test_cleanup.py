@@ -555,8 +555,14 @@ class ReadOnlyOutputTests(CleanupFixture):
                 Path(directory, name).chmod(0o444)
         for directory in reversed(trees):
             os.chmod(directory, 0o555)
-        # The fixture removes its temporary root afterwards; a kept tree must not block that.
-        self.addCleanup(lambda: [os.chmod(d, 0o755) for d in trees if os.path.isdir(d) and not os.path.islink(d)])
+        def restore_fixture_permissions():
+            # Race tests rename directories after publication. Walk the surviving
+            # fixture, not captured names, without following replacement symlinks.
+            for directory, _, _ in os.walk(payload, followlinks=False):
+                if not os.path.islink(directory):
+                    os.chmod(directory, 0o755)
+
+        self.addCleanup(restore_fixture_permissions)
         return trees
 
     def test_a_merged_worktree_with_a_read_only_generated_tree_is_removed(self):
