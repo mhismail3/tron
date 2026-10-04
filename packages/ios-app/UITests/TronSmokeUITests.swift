@@ -5,6 +5,33 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testSupersededThinkingReceiptReleasesMountedConfiguration() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        thinking.tap()
+        let slider = app.descendants(matching: .any)["thinking-level-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.buttons["Done"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        app.buttons["Complete superseded thinking"].tap()
+        XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(thinking.value as? String == "Off")
+        thinking.tap()
+        XCTAssertTrue(slider.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
+        keepScreenshot(named: "superseded-thinking-receipt-ready")
+    }
+
+    @MainActor
     func testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening() {
         continueAfterFailure = false
         let app = XCUIApplication()

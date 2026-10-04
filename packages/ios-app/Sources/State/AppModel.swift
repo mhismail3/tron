@@ -3826,23 +3826,26 @@ final class AppModel {
         )
     }
 
-    func setModel(_ model: ModelRef, sessionID: String) async throws {
+    @discardableResult
+    func setModel(_ model: ModelRef, sessionID: String) async throws -> Int {
         let snapshot = try configurationSnapshot(sessionID)
-        try await sessionMutations.setModel(model, sessionID: sessionID,
+        return try await sessionMutations.setModel(model, sessionID: sessionID,
             expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
                 self?.admitsConfigurationSend(snapshot) == true
             }
     }
 
-    func setThinking(_ level: String, sessionID: String) async throws {
+    @discardableResult
+    func setThinking(_ level: String, sessionID: String) async throws -> Int {
         let snapshot = try configurationSnapshot(sessionID)
-        try await sessionMutations.setThinking(level, sessionID: sessionID,
+        return try await sessionMutations.setThinking(level, sessionID: sessionID,
             expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
                 self?.admitsConfigurationSend(snapshot) == true
             }
     }
 
-    func setContextWindow(_ contextWindow: Int?, for model: ModelRef, sessionID: String, expectedRevision: Int, expectedRuntimeGeneration: String) async throws {
+    @discardableResult
+    func setContextWindow(_ contextWindow: Int?, for model: ModelRef, sessionID: String, expectedRevision: Int, expectedRuntimeGeneration: String) async throws -> Int {
         guard gatewayInfo?.capabilities.contains("context-window.v1") == true else {
             throw GatewayFailure(code: "unsupported", message: "This Gateway does not support context window controls.", retryable: false, details: nil)
         }
@@ -3850,7 +3853,7 @@ final class AppModel {
         guard snapshot.runtimeGeneration == expectedRuntimeGeneration, snapshot.model == model else {
             throw GatewayFailure(code: "conflict", message: "Session model changed. Refresh configuration.", retryable: true, details: nil)
         }
-        try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration) { [weak self] in
+        return try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration) { [weak self] in
             self?.admitsConfigurationSend(snapshot) == true
         }
     }

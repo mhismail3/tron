@@ -349,7 +349,7 @@ struct AppModelPerformanceSignpostTests {
                     id: status.id,
                     result: .object([
                         "status": .string("completed"),
-                        "result": .object(["updated": .bool(true)]),
+                        "result": .object(["updated": .bool(true), "revision": .number(11)]),
                     ])
                 ))
             }

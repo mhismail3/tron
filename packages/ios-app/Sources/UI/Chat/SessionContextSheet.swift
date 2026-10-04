@@ -86,9 +86,10 @@ enum SessionModelSelectionPresentation {
     static func reconciledPending(
         pending: SessionPendingModelSelection?,
         authoritative: ModelRef?,
-        runtimeGeneration: String?
+        runtimeGeneration: String?,
+        revision: Int?
     ) -> SessionPendingModelSelection? {
-        pending?.reconciled(authoritative: authoritative, runtimeGeneration: runtimeGeneration)
+        pending?.reconciled(authoritative: authoritative, runtimeGeneration: runtimeGeneration, revision: revision)
     }
 
     static func modelName(_ selection: ModelRef?, catalog: [ModelSummary]) -> String {
@@ -198,6 +199,20 @@ struct SessionContextSheet: View {
         self.sessionID = sessionID
         self.initialHistoryEntryID = initialHistoryEntryID
         self.onForkCreated = onForkCreated
+    }
+
+    // Observe revision only while a choice awaits projection, never for ordinary
+    // streaming. A completed receipt may be superseded without changing a value.
+    private var pendingConfigurationRevision: Int? {
+        guard pendingModelSelection != nil || pendingThinking != nil || pendingContextWindow != nil else { return nil }
+        return model.authoritativeSnapshot(for: sessionID)?.revision
+    }
+
+    private var configurationConnectionReason: String? {
+        guard let target = model.presentationTarget(for: sessionID), model.admitsLiveSessionCommands(target) else {
+            return "Waiting for the conversation to synchronize."
+        }
+        return nil
     }
 
     private var presentationSource: SessionContextPresentation? {
@@ -311,6 +326,9 @@ struct SessionContextSheet: View {
                     Color.clear
                         .onChange(of: presentationSource, initial: true) { _, value in
                             reconcilePresentation(value)
+                        }
+                        .onChange(of: pendingConfigurationRevision) { _, _ in
+                            reconcilePresentation(presentationSource)
                         }
                 }
             }
@@ -493,8 +511,8 @@ struct SessionContextSheet: View {
                             pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                             return
                         }
-                        try await model.setModel(selection, sessionID: sessionID)
-                        pendingModelSelection = pendingModelSelection?.confirming(pending.id)
+                        let revision = try await model.setModel(selection, sessionID: sessionID)
+                        pendingModelSelection = pendingModelSelection?.confirming(pending.id, revision: revision)
                         if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                     } catch is CancellationError {
                         // Refused receipt replay is terminal for this intent;
@@ -511,6 +529,7 @@ struct SessionContextSheet: View {
 
     private func modelSummaryCard(_ snapshot: SessionContextPresentation) -> some View {
         let thinkingScope = SessionThinkingEditScope(snapshot)
+        let lockedReason = configurationConnectionReason ?? snapshot.configurationLockedReason
         let displayedThinking = pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel
         let selection = modelSelection(snapshot)
         let catalog = model.providerCatalog(for: .session(id: sessionID))?.models ?? []
@@ -518,7 +537,7 @@ struct SessionContextSheet: View {
             selection: selection,
             catalog: catalog,
             // The Gateway rejects model changes during session work.
-            selectionLockedReason: snapshot.configurationLockedReason ?? ((pendingThinking != nil || settingContextWindow || pendingModelSelection != nil) ? "Applying configuration…" : nil),
+            selectionLockedReason: lockedReason ?? ((pendingThinking != nil || settingContextWindow || pendingModelSelection != nil) ? "Applying configuration…" : nil),
             automaticCompactionEnabled: snapshot.automaticCompactionEnabled
         ) {
             if let reason = snapshot.configurationLockedReason {
@@ -546,8 +565,8 @@ struct SessionContextSheet: View {
                                     pendingThinking = pendingThinking?.rejecting(pending.id)
                                     return
                                 }
-                                try await model.setThinking(level, sessionID: sessionID)
-                                pendingThinking = pendingThinking?.confirming(pending.id)
+                                let revision = try await model.setThinking(level, sessionID: sessionID)
+                                pendingThinking = pendingThinking?.confirming(pending.id, revision: revision)
                                 if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                             } catch {
                                 pendingThinking = pendingThinking?.rejecting(pending.id)
@@ -560,7 +579,7 @@ struct SessionContextSheet: View {
                 accent: configurationRowAccent
             )
             .id(thinkingScope)
-            .disabled(snapshot.configurationLockedReason != nil || pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
+            .disabled(lockedReason != nil || pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
             if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                let policy = snapshot.contextWindowPolicy {
                 let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
@@ -586,8 +605,8 @@ struct SessionContextSheet: View {
                                     guard let admission = model.authoritativeSnapshot(for: sessionID),
                                           admission.runtimeGeneration == snapshot.runtimeGeneration,
                                           admission.contextWindowPolicy?.model == policy.model else { return }
-                                    try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: admission.revision, expectedRuntimeGeneration: admission.runtimeGeneration)
-                                    pendingContextWindow = pendingContextWindow?.confirming(pending.id)
+                                    let revision = try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: admission.revision, expectedRuntimeGeneration: admission.runtimeGeneration)
+                                    pendingContextWindow = pendingContextWindow?.confirming(pending.id, revision: revision)
                                     if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                                 } catch {
                                     pendingContextWindow = pendingContextWindow?.rejecting(pending.id)
@@ -610,7 +629,7 @@ struct SessionContextSheet: View {
                     accent: configurationRowAccent
                 )
                 .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey)")
-                .disabled(snapshot.configurationLockedReason != nil || settingContextWindow || pendingModelSelection != nil || pendingThinking != nil)
+                .disabled(lockedReason != nil || settingContextWindow || pendingModelSelection != nil || pendingThinking != nil)
             }
         } compactAction: {
             compactButton(snapshot)
@@ -622,13 +641,14 @@ struct SessionContextSheet: View {
         pendingModelSelection = SessionModelSelectionPresentation.reconciledPending(
             pending: pendingModelSelection,
             authoritative: value?.model,
-            runtimeGeneration: value?.runtimeGeneration
+            runtimeGeneration: value?.runtimeGeneration,
+            revision: pendingConfigurationRevision
         )
         pendingContextWindow = pendingContextWindow?.reconciled(
-            authoritative: value?.contextWindowPolicy?.override, snapshot: value
+            authoritative: value?.contextWindowPolicy?.override, snapshot: value, revision: pendingConfigurationRevision
         )
         pendingThinking = pendingThinking?.reconciled(
-            authoritative: value?.thinkingLevel ?? "", snapshot: value
+            authoritative: value?.thinkingLevel ?? "", snapshot: value, revision: pendingConfigurationRevision
         )
     }
 

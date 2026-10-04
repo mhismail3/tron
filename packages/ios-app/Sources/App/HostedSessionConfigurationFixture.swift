@@ -9,6 +9,7 @@ struct HostedSessionConfigurationFixture: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var presented = false
+    @State private var deliveredSupersededReceipt = false
     @State private var error: String?
     private let socket: HostedSessionConfigurationSocket
     private let profile: GatewayProfile
@@ -53,8 +54,13 @@ struct HostedSessionConfigurationFixture: View {
         .tronManagedSheet(isPresented: $presented, identity: "session-configuration") {
             SessionContextSheet(sessionID: snapshot.sessionId, onForkCreated: { _ in })
                 .safeAreaInset(edge: .bottom) {
-                    Button("Release terminal settlement") { Task { try? await socket.releaseSettlement() } }
-                        .padding()
+                    VStack {
+                        Button("Release terminal settlement") { Task { try? await socket.releaseSettlement() } }
+                        Button("Complete superseded thinking") {
+                            Task { deliveredSupersededReceipt = (try? await socket.completeSupersededThinking()) == true }
+                        }
+                        if deliveredSupersededReceipt { Text("Superseded receipt delivered") }
+                    }.padding()
                 }
         }
         .environment(model)
@@ -76,6 +82,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
     private var closed = false
+    private var pendingThinking: (id: String, revision: Int)?
     init(snapshot: SessionSnapshot) { self.snapshot = snapshot }
     func resume() async { }
     func ping() async throws { }
@@ -92,6 +99,13 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
                 "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
             result = .object(["aborted": .bool(true)])
+        case "session.setThinking":
+            guard frame.objectValue?["params"]?.objectValue?["level"]?.stringValue == "high" else {
+                throw GatewayFailure(code: "invalid_request", message: "Expected a real changed Thinking selection", retryable: false, details: nil)
+            }
+            snapshot.revision += 1
+            pendingThinking = (id, snapshot.revision)
+            return // Hold the original success while a second client supersedes it.
         case "model.list": result = .object(["models": .array([])])
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
@@ -106,6 +120,18 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             "sessionId": .string(snapshot.sessionId), "payload": .object([
                 "runtimeGeneration": .string(snapshot.runtimeGeneration), "revision": .number(Double(snapshot.revision)),
                 "eventSequence": .number(Double(snapshot.eventSequence)), "data": .object(["configurationBlocker": .null])])]))
+    }
+    func completeSupersededThinking() throws -> Bool {
+        guard let pendingThinking else { return false }
+        self.pendingThinking = nil
+        snapshot.revision += 1
+        snapshot.eventSequence += 1
+        snapshot.thinkingLevel = "off"
+        try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
+            "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
+        try enqueue(.object(["type": .string("response"), "id": .string(pendingThinking.id), "ok": .bool(true),
+            "result": .object(["updated": .bool(true), "revision": .number(Double(pendingThinking.revision))])]))
+        return true
     }
     private func enqueue(_ frame: JSONValue) throws {
         let data = try JSONEncoder.gateway.encode(frame)

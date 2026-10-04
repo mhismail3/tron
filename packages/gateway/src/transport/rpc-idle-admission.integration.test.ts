@@ -232,6 +232,23 @@ const list = async (client: Client) => {
 };
 
 describe("receipt-backed mutations against their own session work entry", () => {
+  it("publishes ready after real assistant completion without reopening the session", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("completion-readiness");
+    await f.openSession(client, session.id);
+    const start = client.frames.length;
+    const prompted = await client.request("normal-completion", "session.prompt", {
+      sessionId: session.id, commandId: "normal-completion", text: "Complete normally",
+    });
+    expect(prompted.ok).toBe(true);
+    await until(() => client.frames.slice(start).some(frame => frame.topic === "session.snapshot"
+      && frame.payload.phase === "idle" && frame.payload.transcript.some((item: any) => item.role === "assistant")), "completed assistant snapshot");
+    const settledIndex = client.frames.findLastIndex(frame => frame.topic === "session.snapshot" && frame.payload.phase === "idle");
+    await until(() => client.frames.slice(settledIndex + 1).some(frame => frame.topic === "session.configuration"
+      && frame.payload.data.configurationBlocker === null), "normal completion ready event");
+    record("normal assistant retirement publishes readiness", { readyWithoutReopen: true });
+  });
   it("changes all parent configuration immediately after Stop while independent child work remains", async () => {
     const f = await fixture({ tokensPerSecond: 4 });
     const client = await f.connect();
@@ -274,6 +291,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
         expect(response.ok, `${method}: ${JSON.stringify(response)}`).toBe(true);
         accepted.push(method);
         const after = await f.snapshot(client, session.id);
+        expect(response.result.revision).toBe(after.revision);
         expect(after.model).toEqual({ provider: nextModel.provider, id: nextModel.id });
         if (method === "session.setModel") expect(after.model).not.toEqual(before.model);
         if (method === "session.setThinking") {

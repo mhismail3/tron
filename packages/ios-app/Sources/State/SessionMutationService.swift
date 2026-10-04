@@ -21,6 +21,10 @@ final class SessionMutationService {
     private struct MutationResponse: Codable {
         let updated: Bool
     }
+    private struct ConfigurationResponse: Codable {
+        let updated: Bool
+        let revision: Int
+    }
 
     private let client: GatewayClient
     private let executor: ConfirmedMutationExecutor
@@ -229,32 +233,36 @@ final class SessionMutationService {
         }
     }
 
+    @discardableResult
     func setModel(_ model: ModelRef, sessionID: String, expectedRuntimeGeneration: String,
-                  expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws {
+                  expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws -> Int {
         let commandID = uuidSource.next().uuidString
         let params: JSONValue = .object([
             "sessionId": .string(sessionID), "provider": .string(model.provider), "modelId": .string(model.id),
             "commandId": .string(commandID), "expectedRuntimeGeneration": .string(expectedRuntimeGeneration),
             "expectedModel": try expectedModel.map { try JSONValue.encode($0) } ?? .null,
         ])
-        let _: MutationResponse = try await executor.perform(method: "session.setModel", commandID: commandID, replayAdmission: sendAdmission) {
+        let response: ConfigurationResponse = try await executor.perform(method: "session.setModel", commandID: commandID, replayAdmission: sendAdmission) {
             try Self.requireConfigurationSend(sendAdmission)
             return try await client.request("session.setModel", params)
         }
+        return response.revision
     }
 
+    @discardableResult
     func setThinking(_ level: String, sessionID: String, expectedRuntimeGeneration: String,
-                     expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws {
+                     expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws -> Int {
         let commandID = uuidSource.next().uuidString
         let params: JSONValue = .object([
             "sessionId": .string(sessionID), "level": .string(level), "commandId": .string(commandID),
             "expectedRuntimeGeneration": .string(expectedRuntimeGeneration),
             "expectedModel": try expectedModel.map { try JSONValue.encode($0) } ?? .null,
         ])
-        let _: MutationResponse = try await executor.perform(method: "session.setThinking", commandID: commandID, replayAdmission: sendAdmission) {
+        let response: ConfigurationResponse = try await executor.perform(method: "session.setThinking", commandID: commandID, replayAdmission: sendAdmission) {
             try Self.requireConfigurationSend(sendAdmission)
             return try await client.request("session.setThinking", params)
         }
+        return response.revision
     }
 
     private static func requireConfigurationSend(_ admission: () -> Bool) throws {
@@ -263,6 +271,7 @@ final class SessionMutationService {
         }
     }
 
+    @discardableResult
     func setContextWindow(
         _ contextWindow: Int?,
         for model: ModelRef,
@@ -270,7 +279,7 @@ final class SessionMutationService {
         expectedRevision: Int,
         expectedRuntimeGeneration: String,
         sendAdmission: @escaping @MainActor () -> Bool
-    ) async throws {
+    ) async throws -> Int {
         struct Params: Encodable {
             let sessionId, provider, modelId: String
             let contextWindow: Int?
@@ -300,13 +309,14 @@ final class SessionMutationService {
             expectedRuntimeGeneration: expectedRuntimeGeneration,
             commandId: commandID
         )
-        let _: MutationResponse = try await executor.perform(
+        let response: ConfigurationResponse = try await executor.perform(
             method: "session.setContextWindow",
             commandID: commandID, replayAdmission: sendAdmission
         ) {
             try Self.requireConfigurationSend(sendAdmission)
             return try await client.request("session.setContextWindow", params)
         }
+        return response.revision
     }
 
     func rename(_ sessionID: String, name: String) async throws {

@@ -286,11 +286,11 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     const droppedToken = vi.spyOn(fresh, "setModel").mockImplementation((provider, modelId) => setModel(provider, modelId));
     await expect(switchModel("fixture")).rejects.toMatchObject({ code: "busy" });
     droppedToken.mockRestore();
-    await expect(switchModel("fixture")).resolves.toEqual({ updated: true });
+    await expect(switchModel("fixture")).resolves.toMatchObject({ updated: true, revision: expect.any(Number) });
     item.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "Synthetic provider authorization failure" })]);
     await fresh.prompt("A failed turn must not strand the new session");
     await waitUntil(() => !fresh.isBusy);
-    await expect(switchModel("alternate")).resolves.toEqual({ updated: true });
+    await expect(switchModel("alternate")).resolves.toMatchObject({ updated: true, revision: expect.any(Number) });
     expect(fresh.snapshot().model?.id).toBe("alternate");
     const activities = (fresh as unknown as { extensionActivities: Map<string, ExtensionRunActivity> }).extensionActivities;
     const now = new Date().toISOString();
@@ -303,7 +303,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     activities.set(child.toolCallId, child);
     try {
       expect(fresh.isDrainBusy).toBe(true);
-      await expect(switchModel("fixture")).resolves.toEqual({ updated: true });
+      await expect(switchModel("fixture")).resolves.toMatchObject({ updated: true, revision: expect.any(Number) });
       expect(fresh.snapshot().model?.id).toBe("fixture");
       expect(activities.get(child.toolCallId)).toBe(child);
       const otherRPC = registry.begin({ kind: "rpc-mutation", method: "session.setModel", sessionId: fresh.id, hostEpoch: registry.runtimeEpoch });
@@ -333,7 +333,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
       kind: "rpc-mutation", method: "session.setModel", sessionId: item.slot.id, hostEpoch: workRegistry.runtimeEpoch,
     });
     try {
-      await expect(item.slot.setModel(item.faux.getModel().provider, item.faux.getModel().id, work.token)).resolves.toBeUndefined();
+      await expect(item.slot.setModel(item.faux.getModel().provider, item.faux.getModel().id, work.token)).resolves.toEqual(expect.any(Number));
     } finally { work.settle(); }
     const terminal = (await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal");
     expect(terminal.at(-1)?.data).toMatchObject({ lifecycle: "failed", errorCode: "agent-error" });

@@ -57,7 +57,7 @@ struct SessionMutationServiceTests {
             #expect(status.method == "command.status")
             await MainActor.run { admitted.value = false }
             await harness.replacement.enqueue(successResponse(id: status.id, result: .object([
-                "status": .string(missing ? "missing" : "completed"), "result": .object(["updated": .bool(true)])
+                "status": .string(missing ? "missing" : "completed"), "result": .object(["updated": .bool(true), "revision": .number(11)])
             ])))
             if missing {
                 do { try await valueOfOwnedTask(command); Issue.record("retired intent replayed") }
@@ -402,7 +402,7 @@ struct SessionMutationServiceTests {
             }
             try await completeVoid(
                 model, socket: harness.socket, frameIndex: &frameIndex,
-                method: "session.setModel", result: .object(["updated": .bool(true)]),
+                method: "session.setModel", result: .object(["updated": .bool(true), "revision": .number(11)]),
                 expectedParams: [
                     "sessionId": .string("model-session"),
                     "provider": .string("provider"),
@@ -419,7 +419,7 @@ struct SessionMutationServiceTests {
             }
             try await completeVoid(
                 contextWindow, socket: harness.socket, frameIndex: &frameIndex,
-                method: "session.setContextWindow", result: .object(["updated": .bool(true)]),
+                method: "session.setContextWindow", result: .object(["updated": .bool(true), "revision": .number(11)]),
                 expectedParams: [
                     "sessionId": .string("context-session"),
                     "provider": .string("openai-codex"),
@@ -439,7 +439,7 @@ struct SessionMutationServiceTests {
             }
             try await completeVoid(
                 contextWindowReset, socket: harness.socket, frameIndex: &frameIndex,
-                method: "session.setContextWindow", result: .object(["updated": .bool(true)]),
+                method: "session.setContextWindow", result: .object(["updated": .bool(true), "revision": .number(11)]),
                 expectedParams: [
                     "sessionId": .string("context-session"),
                     "provider": .string("openai-codex"),
@@ -455,7 +455,7 @@ struct SessionMutationServiceTests {
             }
             try await completeVoid(
                 thinking, socket: harness.socket, frameIndex: &frameIndex,
-                method: "session.setThinking", result: .object(["updated": .bool(true)]),
+                method: "session.setThinking", result: .object(["updated": .bool(true), "revision": .number(11)]),
                 expectedParams: [
                     "sessionId": .string("thinking-session"),
                     "level": .string("high"),
@@ -672,7 +672,7 @@ struct SessionMutationServiceTests {
             #expect(fresh.method == "command.status")
             #expect(fresh.params?["commandId"] == stale.params?["commandId"])
             await harness.successor.enqueue(successResponse(id: fresh.id,
-                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(true)])])))
+                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(true), "revision": .number(11)])])))
             try await valueOfOwnedTask(mutation)
             #expect(await harness.successor.sentFrames().count == 2)
             await harness.client.close()
@@ -695,7 +695,7 @@ struct SessionMutationServiceTests {
             #expect(status.method == "command.status")
             #expect(status.params?["commandId"] == sent.params?["commandId"])
             await harness.replacement.enqueue(successResponse(id: status.id,
-                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(true)])])))
+                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(true), "revision": .number(11)])])))
             try await valueOfOwnedTask(mutation)
             #expect(await harness.socket.sentFrames().count == 2)
             #expect(await harness.replacement.sentFrames().count == 2)
@@ -793,7 +793,7 @@ struct SessionMutationServiceTests {
             #expect(replay.params?["commandId"] == .string(statusCommandID))
             await harness.replacement.enqueue(successResponse(
                 id: replay.id,
-                result: .object(["updated": .bool(true)])
+                result: .object(["updated": .bool(true), "revision": .number(11)])
             ))
             try await valueOfOwnedTask(mutation)
             #expect(receiptEvents(harness) == [
@@ -1099,8 +1099,8 @@ struct SessionMutationServiceTests {
         return try await valueOfOwnedTask(task)
     }
 
-    private func completeVoid(
-        _ task: Task<Void, Error>,
+    private func completeVoid<Value: Sendable>(
+        _ task: Task<Value, Error>,
         socket: ScriptedGatewaySocket,
         frameIndex: inout Int,
         method: String,

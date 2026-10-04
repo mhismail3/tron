@@ -3217,6 +3217,9 @@ export class RuntimeSlot {
         }
         this.completionOwnershipQueue.shift();
         item.fallbackWork?.settle();
+        // Normal completions already retired their operation token before the
+        // final snapshot. Queue retirement must also publish configuration ready.
+        this.publishConfiguration();
       }
       this.startPendingManualCompaction();
     })().finally(() => {
@@ -7767,8 +7770,8 @@ export class RuntimeSlot {
 
   /** Direct runtime owners may omit expectations; every remote RPC requires
    * the originating runtime/model cut before entering this serialized lane. */
-  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<void> {
-    await this.lane.run(async () => {
+  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
+    return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
@@ -7776,11 +7779,12 @@ export class RuntimeSlot {
       await this.runtime.session.setModel(model as Model<never>);
       this.revision += 1;
       this.publishSnapshot();
+      return this.revision;
     });
   }
 
-  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<void> {
-    await this.lane.run(() => {
+  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<number> {
+    return this.lane.run(() => {
       this.assertConfigurationIdle(initiatingWorkToken);
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
         throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
@@ -7796,16 +7800,18 @@ export class RuntimeSlot {
         this.emit("session.contextChanged", {});
         this.publishSnapshot();
       }
+      return this.revision;
     });
   }
 
-  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<void> {
-    await this.lane.run(() => {
+  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
+    return this.lane.run(() => {
       this.assertConfigurationIdle(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
       this.revision += 1;
       this.publishSnapshot();
+      return this.revision;
     });
   }
 

@@ -13,7 +13,13 @@ still be settling, while independently running children do not block safe
 parent configuration. The originating model/runtime and installed subscription
 are rechecked in each actual send closure after transport waits; accepted
 outcomes remain receipt-owned. Model/thinking commands carry the original
-runtime and nullable model expectation to the Gateway mutation lane.
+runtime and nullable model expectation to the Gateway mutation lane. Configuration
+success receipts carry the exact applied revision. While a choice is pending,
+Manage Session observes authoritative revision as well as its narrow semantic
+projection: confirmed intents retire at that revision even when a newer client
+has selected a different value. Before that point the pending display remains
+request-owned; unrelated or earlier acknowledgements cannot unlock it. Controls
+also require the existing synchronized-session command admission during reconnect.
 
 
 Session events are live invalidation hints; the authoritative snapshot and

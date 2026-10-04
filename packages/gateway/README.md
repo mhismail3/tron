@@ -1781,8 +1781,9 @@ change; it still blocks deletion, eviction and administrative drain.
 Protocol 7 snapshots require `configurationBlocker` (null when ready; otherwise
 `running`, `queued`, `settling`, `mutation`, `interaction` or `unavailable`).
 The sequenced `session.configuration` event republishes this derived fact when
-work admission or retirement changes eligibility, without changing canonical
-`revision`: otherwise the context-window request would invalidate its own CAS.
+work admission or retirement changes eligibility, including final assistant
+completion-queue retirement, without changing canonical `revision`: otherwise
+the context-window request would invalidate its own CAS.
 Snapshots re-state the event; stale events/snapshots cannot roll it back. Stop
 acknowledges foreground settlement, not detached children or every persistence
 owner. iOS shows the remaining settling reason and enables all three controls
@@ -1790,8 +1791,12 @@ only from this authority, with exact pending-choice ownership.
 
 Model and thinking RPCs require `expectedRuntimeGeneration` and `expectedModel`
 (provider/id, or explicit null for no model). The slot checks this original
-intent inside its mutation lane. Context changes retain their existing exact
-runtime/model/revision checks. iOS rechecks original synchronization/runtime/model
+intent inside its mutation lane. All three configuration replies include the
+exact applied `revision`, captured inside that same lane and retained in the
+command receipt. iOS retires a confirmed pending choice when its value is
+projected or authoritative state reaches that revision, even if another client
+has superseded the value. An earlier snapshot cannot retire a different pending
+command. Context changes retain their existing exact runtime/model/revision checks. iOS rechecks original synchronization/runtime/model
 admission at actual transmission, including a definitely-not-sent retry; accepted
 results remain with the confirmed mutation receipt owner and are not discarded
 when the view retires. No fixed delay or automatic new-command replay makes a

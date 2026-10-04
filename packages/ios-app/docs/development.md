@@ -2739,7 +2739,12 @@ mounts the production Manage Session sheet through
 publishes an idle foreground with held terminal settlement, then an explicit
 fixture action releases the Gateway-owned eligibility event. The actual Thinking
 control stays disabled with a reason, then opens its slider without reopening
-the sheet. Retained xcresult screenshots label settling and ready states. This
-is not physical-device or real-provider evidence. Run with the owned UIValidation
+the sheet. `TronSmokeUITests/testSupersededThinkingReceiptReleasesMountedConfiguration`
+uses the same production sheet to commit a different Thinking value, hold its
+success reply, and publish a newer superseding value before delivering the
+original receipt. It verifies the canonical value wins and another edit opens
+without reopening the sheet. Removing revision-based retirement makes that
+journey fail with permanently disabled controls. Retained xcresult screenshots
+label these synthetic states. This is not physical-device or real-provider evidence. Run with the owned UIValidation
 runner and that exact selector; matching protocol 7 builds require manual
 Mac-first installation before the real-device post-Stop check.

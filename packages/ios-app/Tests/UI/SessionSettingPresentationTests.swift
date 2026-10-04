@@ -94,6 +94,20 @@ struct SessionSettingPresentationTests {
         #expect(!scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
     }
 
+    @Test("completed choices retire when newer authority supersedes their value")
+    func supersededCompletedChoice() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_818).openingTail(targetEncodedBytes: 4_096)
+        snapshot.thinkingLevel = "off"
+        snapshot.revision = 10
+        let thinking = SessionPendingSetting("high", snapshot: SessionContextPresentation(snapshot))
+        let model = SessionPendingModelSelection(ModelRef(provider: "fixture", id: "desired"), snapshot: SessionContextPresentation(snapshot))
+        snapshot.revision = 12 // Our command committed at 11; another client superseded it.
+        let completedThinking = thinking.confirming(thinking.id, revision: 11)
+        #expect(completedThinking.reconciled(authoritative: "off", snapshot: SessionContextPresentation(snapshot), revision: 10) != nil)
+        #expect(completedThinking.reconciled(authoritative: "off", snapshot: SessionContextPresentation(snapshot), revision: snapshot.revision) == nil)
+        #expect(model.confirming(model.id, revision: 11).reconciled(authoritative: snapshot.model, runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision) == nil)
+    }
+
     @Test("a pending slider choice is visible before authority changes, then retires on confirmation")
     func immediateSelection() throws {
         var snapshot = try SessionScenarioBuilder(seed: 7_811).openingTail(targetEncodedBytes: 4_096)
@@ -107,9 +121,9 @@ struct SessionSettingPresentationTests {
         snapshot.thinkingLevel = "xhigh"
         let confirmed = SessionContextPresentation(snapshot)
         #expect(pending.reconciled(authoritative: confirmed.thinkingLevel, snapshot: confirmed) == pending)
-        #expect(pending.confirming(pending.id).reconciled(authoritative: confirmed.thinkingLevel, snapshot: confirmed) == nil)
+        #expect(pending.confirming(pending.id, revision: snapshot.revision).reconciled(authoritative: confirmed.thinkingLevel, snapshot: confirmed) == nil)
         // Receipt and authoritative event may arrive in either order.
-        let acknowledged = pending.confirming(pending.id)
+        let acknowledged = pending.confirming(pending.id, revision: snapshot.revision)
         #expect(acknowledged.reconciled(authoritative: before.thinkingLevel, snapshot: before) == acknowledged)
     }
 
@@ -120,7 +134,7 @@ struct SessionSettingPresentationTests {
         #expect(pending.admitted(in: snapshot) != nil)
         #expect(pending.value == nil)
         #expect(pending.reconciled(authoritative: 1_048_576, snapshot: snapshot) == pending)
-        #expect(pending.confirming(pending.id).reconciled(authoritative: nil, snapshot: snapshot) == nil)
+        #expect(pending.confirming(pending.id, revision: 1).reconciled(authoritative: nil, snapshot: snapshot) == nil)
     }
 
     @Test("pending choices cannot outlive their model, runtime, or session projection")
@@ -153,8 +167,8 @@ struct SessionSettingPresentationTests {
         let first = SessionPendingSetting("xhigh", snapshot: before)
         let newest = SessionPendingSetting("high", snapshot: before)
         #expect(newest.reconciled(authoritative: "high", snapshot: before) == newest)
-        #expect(newest.confirming(first.id).reconciled(authoritative: "high", snapshot: before) == newest)
-        #expect(newest.confirming(newest.id).reconciled(authoritative: "high", snapshot: before) == nil)
+        #expect(newest.confirming(first.id, revision: snapshot.revision).reconciled(authoritative: "high", snapshot: before) == newest)
+        #expect(newest.confirming(newest.id, revision: snapshot.revision).reconciled(authoritative: "high", snapshot: before) == nil)
     }
 
     @Test("failure rolls back only its exact request, including repeated values")

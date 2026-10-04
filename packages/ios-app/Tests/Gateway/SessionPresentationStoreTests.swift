@@ -438,15 +438,15 @@ struct SessionPresentationStoreTests {
         #expect(SessionModelSelectionPresentation.reconciledPending(
             pending: pending,
             authoritative: firstSelection,
-            runtimeGeneration: context.runtimeGeneration
+            runtimeGeneration: context.runtimeGeneration, revision: nil
         ) == pending)
         // Authority can arrive before the exact RPC completion; retain that
         // request until both pieces of evidence agree, including A → B → A.
         #expect(pending.reconciled(authoritative: latestSelection, runtimeGeneration: context.runtimeGeneration) == pending)
         #expect(SessionModelSelectionPresentation.reconciledPending(
-            pending: pending.confirming(pending.id),
+            pending: pending.confirming(pending.id, revision: 1),
             authoritative: latestSelection,
-            runtimeGeneration: context.runtimeGeneration
+            runtimeGeneration: context.runtimeGeneration, revision: nil
         ) == nil)
         #expect(pending.reconciled(authoritative: firstSelection, runtimeGeneration: "replacement") == nil)
     }

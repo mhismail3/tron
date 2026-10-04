@@ -1155,13 +1155,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     faux.setResponses([fauxAssistantMessage("streamed reply ".repeat(12))]);
     runtime.registerNativeProvider(faux.provider);
     const snapshots: any[] = [];
+    const configurationEvents: any[] = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime,
       trust: new TrustService(agentDir),
-      broadcast: (_id, topic, payload) => { if (topic === "session.snapshot") snapshots.push(payload); },
+      broadcast: (_id, topic, payload) => {
+        if (topic === "session.snapshot") snapshots.push(payload);
+        if (topic === "session.configuration") configurationEvents.push(payload);
+      },
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
@@ -1193,10 +1197,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(final.transcript.find((item: any) => item.role === "user")?.presentationId).toBe(receipt.operationId);
     // Both an early subscriber and the mid-admission subscriber converge on
     // the owner's settled state.
-    expect(state(published.at(-1))).toBe(state(final));
+    const projected = (snapshot: any) => configurationEvents
+      .filter(event => event.runtimeGeneration === snapshot.runtimeGeneration && event.eventSequence > snapshot.eventSequence)
+      .reduce((current, event) => ({ ...current, configurationBlocker: event.data.configurationBlocker }), snapshot);
+    expect(state(projected(published.at(-1)))).toBe(state(final));
     const lateSubscriberFrames = published.filter((snapshot) => snapshot.eventSequence > midAdmission.eventSequence);
     expect(lateSubscriberFrames.length).toBeGreaterThan(0);
-    expect(state(lateSubscriberFrames.at(-1))).toBe(state(final));
+    expect(state(projected(lateSubscriberFrames.at(-1)))).toBe(state(final));
   });
 
   it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
