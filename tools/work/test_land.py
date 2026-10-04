@@ -936,5 +936,38 @@ class ClaimedStatusTests(LandFixture):
         self.assertEqual(model["soft_cap"]["in_progress"], counted)
 
 
+class MediaLandingTests(LandFixture):
+    def manifest(self):
+        import base64
+        folder = self.tmp / 'capture'
+        folder.mkdir()
+        (folder / 'screen.png').write_bytes(base64.b64decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='))
+        path = folder / 'manifest.json'
+        path.write_text(json.dumps({'head': git(self.repo, 'rev-parse', 'HEAD'),
+                                    'artifacts': [{'path': 'screen.png'}]}))
+        return path
+
+    def test_initial_pull_body_links_private_media(self):
+        manifest = self.manifest()
+        self.assertEqual(land.land(Gh(self.repo), self.repo, self.config, SESSION, None,
+                                  self.summary, None, sleep=self.sleep, clock=self.clock,
+                                  evidence_manifest=manifest), 0)
+        body = self.state()['pulls'][0]['body']
+        self.assertIn('../../widget-evidence/', body)
+        self.assertIn('/media/', body)
+        self.assertNotIn('screen.png', body)
+
+    def test_base_merge_refuses_stale_media_even_without_repeating_flag(self):
+        import verify
+        manifest = self.manifest()
+        verify.verify(self.repo, self.config, manifest)
+        self.advance_base('lib/new.txt', 'base\n')
+        with self.assertRaisesRegex(verify.VerifyError, 'head|recapture'):
+            self.land()
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.merges(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

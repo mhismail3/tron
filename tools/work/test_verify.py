@@ -462,5 +462,176 @@ class CommittedContentTests(VerifyFixture):
         self.assertFalse((self.receipts() / f"{head}.json").exists())
 
 
+class MediaEvidenceTests(PostFixture):
+    """Media boundary failures recorded in README.md's verify evidence contract."""
+
+    def media(self):
+        import base64
+        # A real one-pixel PNG, not a renamed arbitrary file.
+        return base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
+
+    def manifest(self):
+        self.commit(self.repo, 'app/a.txt', 'media change\n')
+        directory = self.tmp / 'capture'
+        directory.mkdir()
+        (directory / 'private-screen-name.png').write_bytes(self.media())
+        manifest = directory / 'manifest.json'
+        manifest.write_text(json.dumps({'head': git(self.repo, 'rev-parse', 'HEAD'),
+                                        'artifacts': [{'path': 'private-screen-name.png'}]}))
+        return manifest
+
+    def test_cli_snapshot_reverify_and_private_upload(self):
+        manifest = self.manifest()
+        self.config['verify']['checks'][3]['paths'] = ['.github/**']
+        self.commit(self.repo, '.github/work.json', json.dumps(self.config))
+        value = json.loads(manifest.read_text())
+        value['head'] = git(self.repo, 'rev-parse', 'HEAD')
+        manifest.write_text(json.dumps(value))
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name('cli.py')),
+                                 'verify', '--evidence-manifest', str(manifest)],
+                                cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        first = json.loads((self.receipts() / f"{value['head']}.json").read_text())
+        (manifest.parent / 'private-screen-name.png').unlink()
+        second = self.verify()
+        self.assertEqual(first['artifacts'], second['artifacts'])
+        self.push()
+        self.post(second)
+        import base64
+        uploads = {path: base64.b64decode(body['content']) for method, path, body in self.api_calls()
+                   if method == 'PUT'}
+        media = {path: content for path, content in uploads.items() if '/media/' in path}
+        self.assertEqual(list(media.values()), [self.media()])
+        self.assertTrue(all(path.startswith('repos/acme/widget-evidence/') for path in media))
+        public = self.comment_bodies()[0]
+        self.assertIn('/media/', public)
+        self.assertNotIn('private-screen-name', public)
+        self.assertNotIn(str(manifest.parent), public)
+
+    def test_movie_container_bytes_reach_private_upload_unchanged(self):
+        manifest = self.manifest()
+        value = json.loads(manifest.read_text())
+        # Minimal ISO BMFF container. This proves transfer, not recording/playback.
+        movie = bytes.fromhex('0000001466747970717420200000000071742020')
+        (manifest.parent / 'capture.mov').write_bytes(movie)
+        value['artifacts'].append({'path': 'capture.mov'})
+        manifest.write_text(json.dumps(value))
+        receipt = verify.verify(self.repo, self.config, manifest)
+        self.push()
+        self.post(receipt)
+        import base64
+        uploaded = [base64.b64decode(body['content']) for method, path, body in self.api_calls()
+                    if method == 'PUT' and path.endswith('.mov')]
+        self.assertEqual(uploaded, [movie])
+        self.assertEqual(len(receipt['artifacts']), 2)
+
+    def test_manifest_rejects_unsafe_or_unbounded_inputs_before_checks(self):
+        manifest = self.manifest()
+        good = json.loads(manifest.read_text())
+        (manifest.parent / 'credentials.png').write_text('secret credential')
+        (manifest.parent / 'link.png').symlink_to('private-screen-name.png')
+        (manifest.parent / 'linked').symlink_to(manifest.parent, target_is_directory=True)
+        os.mkfifo(manifest.parent / 'pipe.png')
+        oversized = manifest.parent / 'large.png'
+        with oversized.open('wb') as output:
+            output.write(self.media())
+            output.truncate(10 * 1024 * 1024 + 1)
+        cases = [dict(good, head='0' * 40), dict(good, artifacts=[]),
+                 dict(good, artifacts=[{'path': 'private-screen-name.png'}] * 11),
+                 dict(good, artifacts=[{'path': 'private-screen-name.png'}] * 2)]
+        cases += [dict(good, artifacts=[{'path': p}]) for p in (
+            '../capture/private-screen-name.png', str(manifest.parent / 'private-screen-name.png'),
+            'link.png', 'linked/private-screen-name.png', 'missing.png', 'credentials.png', 'pipe.png', 'large.png',
+            'bad\x00.png')]
+        for value in cases:
+            with self.subTest(value=value):
+                manifest.write_text(json.dumps(value))
+                with self.assertRaises(verify.VerifyError):
+                    verify.verify(self.repo, self.config, manifest)
+                self.assertEqual(self.runs('policy'), 0)
+                self.assertEqual(self.calls(), [])
+        manifest.write_text('{')
+        with self.assertRaises(verify.VerifyError):
+            verify.verify(self.repo, self.config, manifest)
+
+    def test_total_limit_and_manifest_symlink_refuse_before_checks(self):
+        manifest = self.manifest()
+        value = json.loads(manifest.read_text())
+        linked = manifest.parent / 'alias.json'
+        linked.symlink_to(manifest)
+        with self.assertRaises(verify.VerifyError):
+            verify.verify(self.repo, self.config, linked)
+        value['artifacts'] = []
+        for index in range(3):
+            path = manifest.parent / f'large-{index}.png'
+            with path.open('wb') as output:
+                output.write(self.media() + bytes([index]))
+                output.truncate(9 * 1024 * 1024)
+            value['artifacts'].append({'path': path.name})
+        manifest.write_text(json.dumps(value))
+        with self.assertRaisesRegex(verify.VerifyError, 'total'):
+            verify.verify(self.repo, self.config, manifest)
+        self.assertEqual(self.runs('policy'), 0)
+
+    def test_snapshot_directory_symlink_cannot_write_outside_git_storage(self):
+        manifest = self.manifest()
+        work = self.receipts().parent
+        work.mkdir()
+        outside = self.tmp / 'outside'
+        outside.mkdir()
+        (work / 'media').symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(verify.VerifyError):
+            verify.verify(self.repo, self.config, manifest)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_media_never_carries_to_a_new_head(self):
+        manifest = self.manifest()
+        first = verify.verify(self.repo, self.config, manifest)
+        self.commit(self.repo, 'app/a.txt', 'later\n')
+        for source in (None, manifest):
+            with self.subTest(source=source), self.assertRaisesRegex(verify.VerifyError, 'head|recapture'):
+                verify.verify(self.repo, self.config, source)
+        self.assertFalse((self.receipts() / f"{git(self.repo, 'rev-parse', 'HEAD')}.json").exists())
+        self.assertTrue(first['artifacts'])
+
+    def test_missing_changed_or_symlink_snapshot_prevents_all_uploads(self):
+        manifest = self.manifest()
+        receipt = verify.verify(self.repo, self.config, manifest)
+        self.push()
+        artifact = receipt['artifacts'][0]
+        snapshot = self.receipts().parent / 'media' / receipt['head'] / artifact['name']
+        for mutation in ('changed', 'missing', 'symlink'):
+            with self.subTest(mutation=mutation):
+                self.gh_log.unlink(missing_ok=True)
+                snapshot.unlink(missing_ok=True)
+                if mutation == 'changed':
+                    snapshot.write_bytes(b'changed')
+                elif mutation == 'symlink':
+                    snapshot.symlink_to(manifest.parent / 'private-screen-name.png')
+                with self.assertRaises(verify.VerifyError):
+                    self.post(receipt)
+                self.assertFalse(any(method == 'PUT' for method, _, _ in self.api_calls()))
+                self.assertEqual(self.comment_bodies(), [])
+                self.assertNotIn('success', self.statuses())
+
+    def test_public_repository_and_media_upload_failure_do_not_publish(self):
+        manifest = self.manifest()
+        receipt = verify.verify(self.repo, self.config, manifest)
+        self.push()
+        for variable, value in [('FAKE_GH_EVIDENCE_PUBLIC', '1'), ('FAKE_GH_FAIL', '/media/')]:
+            with self.subTest(variable=variable):
+                self.gh_log.unlink(missing_ok=True)
+                os.environ[variable] = value
+                try:
+                    with self.assertRaises(Exception):
+                        self.post(receipt)
+                finally:
+                    os.environ.pop(variable)
+                self.assertEqual(self.statuses(), ['pending', 'failure'])
+                self.assertEqual(self.comment_bodies(), [])
+                if variable == 'FAKE_GH_EVIDENCE_PUBLIC':
+                    self.assertFalse(any(method == 'PUT' for method, _, _ in self.api_calls()))
+
+
 if __name__ == "__main__":
     unittest.main()

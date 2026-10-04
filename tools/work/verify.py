@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import signal
+import stat
 import subprocess
 import time
 from dataclasses import dataclass
@@ -156,7 +157,153 @@ def _run_check(root: Path, check: Check, prelude: str, command: str, log_path: P
     return code, round(time.monotonic() - started, 1)
 
 
-def verify(repo: Path, config: dict) -> dict:
+# Media is explicit opt-in: format checks cannot establish that screen contents
+# are safe. Operators review captures before supplying a head-bound manifest.
+_MEDIA_COUNT = 10
+_MEDIA_BYTES = 10 * 1024 * 1024
+_MEDIA_TOTAL = 25 * 1024 * 1024
+_MEDIA_NAME = re.compile(r"^[0-9a-f]{64}\.(png|jpg|mp4|mov)$")
+
+
+@contextlib.contextmanager
+def _parent_fd(path: Path, create: bool = False):
+    """No-follow directory walk, including parents, rather than a check/open race."""
+    path = path.absolute()
+    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:-1]:
+            if create:
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(part, 0o700, dir_fd=fd)
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _read_regular(path: Path, bound: int) -> bytes:
+    try:
+        with _parent_fd(path) as parent:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            with os.fdopen(fd, "rb") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= bound:
+                    raise VerifyError("evidence must be a nonempty bounded regular file")
+                content = source.read(bound + 1)
+                if not 0 < len(content) <= bound:
+                    raise VerifyError("evidence exceeds its byte bound")
+                return content
+    except OSError as error:
+        raise VerifyError(f"cannot read evidence file (missing, symlink or inaccessible): {path}") from error
+
+
+def _media_extension(content: bytes, suffix: str) -> str:
+    if suffix == ".png" and content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if suffix in (".jpg", ".jpeg") and content.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if suffix in (".mp4", ".mov") and len(content) >= 12 and content[4:8] == b"ftyp":
+        return suffix[1:]
+    raise VerifyError("evidence format must match PNG, JPEG, MP4 or MOV media; never supply credentials")
+
+
+def _snapshot_media(work: Path, head: str, manifest: Path) -> list:
+    try:
+        value = json.loads(_read_regular(manifest, 64 * 1024))
+    except (ValueError, UnicodeError) as error:
+        raise VerifyError("invalid evidence manifest JSON") from error
+    if not isinstance(value, dict) or set(value) != {"head", "artifacts"} or value["head"] != head:
+        raise VerifyError("evidence manifest must name the exact full head; recapture for this commit")
+    items = value["artifacts"]
+    if not isinstance(items, list) or not 1 <= len(items) <= _MEDIA_COUNT:
+        raise VerifyError("evidence manifest needs 1–10 artifacts")
+    captured, total = [], 0
+    for item in items:
+        relative = item.get("path") if isinstance(item, dict) and set(item) == {"path"} else None
+        if (not isinstance(relative, str) or not relative or "\\" in relative or "\x00" in relative
+                or Path(relative).is_absolute() or any(p in ("", ".", "..") for p in relative.split("/"))):
+            raise VerifyError("evidence paths must stay beneath the manifest directory")
+        source = manifest.parent / relative
+        content = _read_regular(source, _MEDIA_BYTES)
+        extension = _media_extension(content, source.suffix.lower())
+        total += len(content)
+        if total > _MEDIA_TOTAL:
+            raise VerifyError("evidence exceeds the 25 MiB total byte bound")
+        digest = hashlib.sha256(content).hexdigest()
+        entry = {"name": f"{digest}.{extension}", "sha256": digest, "bytes": len(content)}
+        if any(existing[0]["name"] == entry["name"] for existing in captured):
+            raise VerifyError("evidence manifest repeats the same media")
+        captured.append((entry, content))
+    directory = work / "media" / head
+    for entry, content in captured:
+        target = directory / entry["name"]
+        try:
+            with _parent_fd(target, create=True) as parent:
+                fd = os.open(target.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=parent)
+                with os.fdopen(fd, "wb") as output:
+                    output.write(content)
+        except FileExistsError:
+            if _read_regular(target, _MEDIA_BYTES) != content:
+                raise VerifyError("existing evidence snapshot is corrupt; remove it and recapture")
+        except OSError as error:
+            raise VerifyError("cannot write evidence snapshot") from error
+    return [entry for entry, _ in captured]
+
+
+def _media_content(work: Path, receipt: dict) -> list:
+    contents, total = [], 0
+    artifacts = receipt.get("artifacts", [])
+    if not isinstance(artifacts, list) or len(artifacts) > _MEDIA_COUNT:
+        raise VerifyError("invalid receipt media count")
+    for entry in artifacts:
+        if not isinstance(entry, dict) or not _MEDIA_NAME.fullmatch(entry.get("name", "")):
+            raise VerifyError("invalid receipt media name")
+        content = _read_regular(work / "media" / receipt["head"] / entry["name"], _MEDIA_BYTES)
+        digest = hashlib.sha256(content).hexdigest()
+        if (len(content) != entry.get("bytes") or digest != entry.get("sha256")
+                or not entry["name"].startswith(digest + ".")):
+            raise VerifyError("evidence snapshot changed since verification; recapture")
+        _media_extension(content, Path(entry["name"]).suffix)
+        total += len(content)
+        if total > _MEDIA_TOTAL:
+            raise VerifyError("receipt media exceeds total byte bound")
+        contents.append((entry, content))
+    return contents
+
+
+def _receipt_media(repo: Path, work: Path, head: str, manifest: Optional[Path]) -> list:
+    if manifest is not None:
+        return _snapshot_media(work, head, manifest)
+    # Unlike check carry-over, media is never evidence for a different commit.
+    # Use the nearest receipt regardless of check/config success to avoid silently
+    # losing explicitly supplied evidence during reverify or land's base merge.
+    candidates = []
+    for path in (work / "receipts").glob("*.json"):
+        try:
+            receipt = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if _is_ancestor(repo, receipt["head"], head):
+            distance = int(_git(repo, "rev-list", "--count", f"{receipt['head']}..{head}"))
+            candidates.append((distance, receipt))
+    if not candidates:
+        return []
+    receipt = min(candidates, key=lambda item: item[0])[1]
+    if receipt.get("artifacts") and receipt["head"] != head:
+        raise VerifyError("head changed since media capture; recapture and supply --evidence-manifest")
+    _media_content(work, receipt)
+    return receipt.get("artifacts", [])
+
+
+def media_links(receipt: dict, evidence_link: str) -> list:
+    return [f"- [UI evidence {index}]({evidence_link}/media/{entry['name']}) (private)"
+            for index, entry in enumerate(receipt.get("artifacts", []), 1)]
+
+
+def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None) -> dict:
     settings, claim = config["verify"], config["claim"]
     remote, base = claim["remote"], claim["baseBranch"]
     checks = load_checks(settings)
@@ -181,6 +328,7 @@ def verify(repo: Path, config: dict) -> dict:
     digest = config_hash(config)
     work = _work_dir(root)
     receipts = work / "receipts"
+    artifacts = _receipt_media(root, work, head, evidence_manifest)
     prior = _prior_receipt(root, receipts, head, digest)
     since_prior = _changed(root, prior["head"], head) if prior else []
 
@@ -212,6 +360,7 @@ def verify(repo: Path, config: dict) -> dict:
         "changedPaths": changed,
         "required": [c.name for c in required],
         "checks": results,
+        "artifacts": artifacts,
         "passed": all(results[c.name]["exitCode"] == 0 for c in required),
         "createdAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -275,6 +424,7 @@ def comment_body(receipt: dict, settings: dict, root: Path, evidence_link: str) 
         if entry["exitCode"] != 0:
             lines += ["", f"<details><summary>{name}: last {settings['excerptLines']} log lines</summary>", "",
                       "```", _excerpt(entry["log"], settings["excerptLines"], root), "```", "", "</details>"]
+    lines += ["", *media_links(receipt, evidence_link)] if receipt.get("artifacts") else []
     return "\n".join(lines) + "\n"
 
 
@@ -310,6 +460,8 @@ def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
     settings, claim = config["verify"], config["claim"]
     root = Path(_git(repo, "rev-parse", "--show-toplevel").strip())
     head = receipt["head"]
+    if head != _git(root, "rev-parse", "HEAD").strip():
+        raise VerifyError("receipt does not describe the current head")
     branch = subprocess.run(["git", "symbolic-ref", "-q", "--short", "HEAD"], cwd=root,
                             capture_output=True, text=True).stdout.strip()
     if not branch:
@@ -346,7 +498,10 @@ def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
         link = f"../../{evidence_repository.split('/', 1)[1]}/tree/HEAD/{evidence_dir}"
         body = comment_body(receipt, settings, root, link)
         scrub(root, settings["scrubCommand"], body)
+        media = _media_content(_work_dir(root), receipt)
         message = f"verify evidence for {head[:12]}"
+        for entry, content in media:
+            _upload(gh, evidence_repository, f"{evidence_dir}/media/{entry['name']}", content, message)
         for name in receipt["required"]:
             entry = receipt["checks"][name]
             try:

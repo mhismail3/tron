@@ -192,7 +192,7 @@ def default_title(branch: str, issue_title: str) -> str:
     return f"{branch.split('/', 1)[0]}: {_FORM_PREFIX.sub('', issue_title).strip()}"
 
 
-def verification(receipt: dict) -> str:
+def verification(receipt: dict, evidence_link: Optional[str] = None) -> str:
     checks = receipt["checks"]
     required = receipt["required"]
     passed = sum(1 for name in required if checks[name]["exitCode"] == 0)
@@ -210,11 +210,14 @@ def verification(receipt: dict) -> str:
         result = "pass" if entry["exitCode"] == 0 else f"FAIL ({entry['exitCode']})"
         carried_from = f"`{entry['carriedFrom'][:12]}`" if entry["carriedFrom"] else ""
         lines.append(f"| {name} | {result} | {entry['seconds']}s | {carried_from} |")
+    if evidence_link:
+        lines += ["", *verify.media_links(receipt, evidence_link)]
     return "\n".join(lines)
 
 
-def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Optional[str]) -> str:
-    body = f"{keyword} #{number}\n\n## Summary\n\n{summary.strip()}\n\n## Verification\n\n{verification(receipt)}\n"
+def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Optional[str],
+              evidence_link: Optional[str] = None) -> str:
+    body = f"{keyword} #{number}\n\n## Summary\n\n{summary.strip()}\n\n## Verification\n\n{verification(receipt, evidence_link)}\n"
     if action is not None:
         # On GitHub before the merge, so a stop after the merge cannot lose it.
         body += f"\n## Maintainer validation\n\n{action.strip()}\n"
@@ -381,7 +384,8 @@ def _wait(gh: Gh, config: dict, pull: int, head: str, sleep: Callable[[float], N
 
 def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg: Optional[str],
          summary_path: Optional[Path], action: Optional[str],
-         sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> int:
+         sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+         evidence_manifest: Optional[Path] = None) -> int:
     rules, settings = config["claim"], config["land"]
     remote, base = rules["remote"], rules["baseBranch"]
     root = Path(_out(repo, "rev-parse", "--show-toplevel"))
@@ -435,7 +439,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     for round_number in range(1, settings["maxRounds"] + 1):
         if update_from_base(root, remote, base):
             print(f"merged:   {remote}/{base} into {branch}")
-        receipt = verify.verify(root, config)
+        receipt = verify.verify(root, config, evidence_manifest)
         head = receipt["head"]
         if not receipt["passed"]:
             raise LandError(f"verify failed for {head[:12]}; nothing new was pushed or published")
@@ -446,7 +450,8 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
 
         # Every part of the body already passed the scrub: the title, summary and
         # validation text in the gates, the receipt fields in verify.post's comment.
-        body = pull_body(keyword, number, summary, receipt, action)
+        evidence_link = f"../../{name}{config['verify']['evidenceRepositorySuffix']}/tree/HEAD/{number}/{head}"
+        body = pull_body(keyword, number, summary, receipt, action, evidence_link)
         if pull is None:
             url = gh.run("pr", "create", "--base", base, "--head", branch, "--title", title, "--body-file", "-",
                          stdin=body).strip().splitlines()[-1]
