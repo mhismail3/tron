@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,13 +13,48 @@ import type { SourceAssessmentModel } from "./source-capture.js";
 import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 import * as durableJson from "../util/durable-json.js";
 
-const roots: string[] = [];
-const cleanups: Array<() => Promise<void>> = [];
+interface IntakeFixture { root: string; cleanup?: () => Promise<void>; retire?: () => void; retained?: boolean }
+const fixtures: IntakeFixture[] = [];
 const command = (value: string) => `k5-intake-${value}`;
 const headers = () => new Headers();
 function response(value: unknown): ConnectorHTTPResponse { return { status: 200, headers: headers(), body: JSON.stringify(value) }; }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
+function registerFixture(root: string, cleanup?: () => Promise<void>, retire?: () => void): IntakeFixture {
+  const fixture = { root, cleanup, retire };
+  fixtures.push(fixture);
+  return fixture;
+}
+function retireFixture(fixture: IntakeFixture): void {
+  const retire = fixture.retire;
+  fixture.retire = undefined;
+  retire?.();
+}
+async function joinFixture(fixture: IntakeFixture): Promise<void> {
+  // Global interception retires synchronously; already-dispatched writes keep
+  // their own closure. Instance admission tracking lives until the body drains.
+  retireFixture(fixture);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([fixture.cleanup?.(), new Promise<never>((_, reject) => {
+      // One budget for the entire cleanup/report, below Vitest's 10s hook.
+      timer = setTimeout(() => reject(new Error(`Fixture join deadline; retained ${fixture.root}`)), 5_000);
+    })]);
+  } catch (error) {
+    fixture.retained = true;
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+async function cleanupFixtures(): Promise<void> {
+  // A framework timeout does not cancel this hook. Detach every owned resource
+  // before yielding; a late continuation must never consume the next fixture.
+  const owned = fixtures.splice(0);
+  for (const fixture of owned) retireFixture(fixture);
+  await Promise.all(owned.map(async fixture => {
+    await joinFixture(fixture);
+    if (!fixture.retained) await rm(fixture.root, { recursive: true, force: true });
+  }));
+}
+afterEach(cleanupFixtures);
 
 /** Failure modes: a model or tagging failure blocks other items; unapproved
  * tagging drops the summary; intake waits on model latency; a rerun re-charges;
@@ -32,7 +67,7 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(
  * artifacts instead of overwriting one shared temp file. */
 describe("K5 Raindrop intake enrichment", () => {
   it("keeps a summary when Jev is unapproved, reports the skip, and lets another item survive model failure", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); roots.push(root);
+    const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); registerFixture(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
     await store.configure("k5-failure-model", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...initial.observation, model: "fixture/observer" } });
@@ -73,8 +108,68 @@ describe("K5 Raindrop intake enrichment", () => {
     expect(result.jobs.some(job => job.sourceId === personalWithoutText.record.id)).toBe(false);
   });
 
+  // Failure modes missed by the successful intake oracle: a rejected join
+  // leaks the publication spy into the next fixture; a late hook consumes the
+  // next fixture's root or restores its active publication interception.
+  it("isolates a failed join from the subsequent durable-write fixture", async () => {
+    const oldRoot = await mkdtemp(join(tmpdir(), "tron-k5-failed-join-"));
+    const nextRoot = await mkdtemp(join(tmpdir(), "tron-k5-next-"));
+    const originalWrite = durableJson.durableAtomicWriteJson;
+    const oldSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation(originalWrite);
+    const joinFailed = deferred<void>();
+    registerFixture(oldRoot, async () => { await joinFailed.promise; throw new Error("fixture join failed"); }, () => oldSpy.mockRestore());
+    let nextSpy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const finishing = cleanupFixtures();
+      joinFailed.resolve();
+      await expect(finishing).rejects.toThrow("fixture join failed");
+      // This is the next real fixture's forwarding pattern. A leaked Vitest
+      // spy becomes its own implementation and recurses rather than writing.
+      const nextWrite = durableJson.durableAtomicWriteJson;
+      nextSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation(nextWrite);
+      await durableJson.durableAtomicWriteJson(join(nextRoot, "proof.json"), { next: true });
+      expect(JSON.parse(await readFile(join(nextRoot, "proof.json"), "utf8"))).toEqual({ next: true });
+      await writeFile(join(oldRoot, "retained.txt"), "retained after failed join");
+      const artifact = join(process.cwd(), "test-results", "knowledge-intake-failed-join.json");
+      await mkdir(dirname(artifact), { recursive: true });
+      await writeFile(artifact, JSON.stringify({ failedJoin: "retained", subsequentDurableWrite: "read back" }));
+    } finally {
+      nextSpy?.mockRestore(); oldSpy.mockRestore();
+      await rm(oldRoot, { recursive: true, force: true });
+      await rm(nextRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("isolates delayed old cleanup from the next fixture's root and publication spy", async () => {
+    const oldRoot = await mkdtemp(join(tmpdir(), "tron-k5-old-cleanup-"));
+    const nextRoot = await mkdtemp(join(tmpdir(), "tron-k5-live-next-"));
+    const release = deferred<void>();
+    registerFixture(oldRoot, () => release.promise);
+    const finishing = cleanupFixtures();
+    const originalWrite = durableJson.durableAtomicWriteJson;
+    const nextSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation(originalWrite);
+    registerFixture(nextRoot, undefined, () => nextSpy.mockRestore());
+    try {
+      await writeFile(join(nextRoot, "live.txt"), "next fixture still owns this");
+      release.resolve();
+      await finishing;
+      expect(await readFile(join(nextRoot, "live.txt"), "utf8")).toBe("next fixture still owns this");
+      // The later fixture must still control its own publication boundary.
+      nextSpy.mockImplementation(async () => { throw new Error("next publication gate"); });
+      await expect(durableJson.durableAtomicWriteJson(join(nextRoot, "proof.json"), {})).rejects.toThrow("next publication gate");
+      const artifact = join(process.cwd(), "test-results", "knowledge-intake-delayed-cleanup.json");
+      await mkdir(dirname(artifact), { recursive: true });
+      await writeFile(artifact, JSON.stringify({ oldCleanup: "joined", nextRoot: "preserved", nextPublicationGate: "active" }));
+    } finally {
+      release.resolve(); await finishing.catch(() => {});
+      nextSpy.mockRestore();
+      await rm(oldRoot, { recursive: true, force: true });
+      await rm(nextRoot, { recursive: true, force: true });
+    }
+  });
+
   async function tenCaptures(failAt?: "model" | "publication") {
-    const root = await mkdtemp(join(tmpdir(), "tron-k5-intake-e2e-")); roots.push(root);
+    const root = await realpath(await mkdtemp(join(tmpdir(), "tron-k5-intake-e2e-"))); const fixture = registerFixture(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const sequence: string[] = [];
     const phases: Array<{ phase: string; ms: number }> = [];
@@ -122,11 +217,11 @@ describe("K5 Raindrop intake enrichment", () => {
     // can miss both the last summary and the summary-to-tag handoff.
     const admissions: Promise<unknown>[] = [];
     const summarize = service.summarize.bind(service);
-    vi.spyOn(service, "summarize").mockImplementation(request => {
+    const summarizeSpy = vi.spyOn(service, "summarize").mockImplementation(request => {
       const admitted = summarize(request); admissions.push(admitted.catch(() => {})); return admitted;
     });
     const autoRetag = service.autoRetag.bind(service);
-    vi.spyOn(service, "autoRetag").mockImplementation((...args) => {
+    const autoRetagSpy = vi.spyOn(service, "autoRetag").mockImplementation((...args) => {
       const admitted = autoRetag(...args); admissions.push(admitted.catch(() => {})); return admitted;
     });
     const drain = async () => {
@@ -145,13 +240,14 @@ describe("K5 Raindrop intake enrichment", () => {
     const writeSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation((path, value, mode) => originalWrite(path, value, mode, {
       mkdir, open, rm,
       rename: async (from, to) => {
-        if (!publicationBlocked && to.includes("/records/") && (value as { content?: { summary?: unknown } }).content?.summary) {
+        if (!publicationBlocked && to.startsWith(`${root}/`) && to.includes("/records/") && (value as { content?: { summary?: unknown } }).content?.summary) {
           publicationBlocked = true; phase("publication blocked"); publicationStarted.resolve();
           await releasePublication.promise;
         }
         await rename(from, to);
       },
     }));
+    fixture.retire = () => writeSpy.mockRestore();
     let userLookup = false;
     let assessmentCalls = 0;
     let failure: string | undefined;
@@ -233,31 +329,26 @@ describe("K5 Raindrop intake enrichment", () => {
       } finally {
         await bounded("fixture owner drain", drain());
         service.dispose();
+        summarizeSpy.mockRestore(); autoRetagSpy.mockRestore();
       }
     })();
-    const cleanup = async () => {
+    fixture.cleanup = async () => {
       // Vitest timeout does not cancel run. Release its gates and join the
       // whole body before afterEach can remove its filesystem or restore spies.
       modelGate.resolve(); releasePublication.resolve(); teardownStarted.resolve();
       let joined = false;
       try {
-        await bounded("timed-out test body", run.catch(() => {}));
-        await bounded("cleanup owner drain", drain());
+        await run.catch(() => {});
+        await drain();
         expect(jobs.running).toBe(0);
         joined = true;
-        writeSpy.mockRestore();
-      } catch (error) {
-        // A failed join is not permission to delete a live owner's files.
-        const index = roots.indexOf(root);
-        if (index !== -1) roots.splice(index, 1);
-        throw error;
       } finally {
         const artifact = join(process.cwd(), "test-results", `knowledge-intake-lifecycle${failAt ? `-${failAt}` : ""}.json`);
         await mkdir(dirname(artifact), { recursive: true });
-        await writeFile(artifact, `${JSON.stringify({ failAt, failure, phases, sequence, assessmentCalls, jobs: jobs.observe({ limit: 64 }), cleanup: joined ? "joined" : "retained", ...(!joined ? { root } : {}) }, null, 2)}\n`);
+        await writeFile(artifact, `${JSON.stringify({ failAt, failure, phases, sequence, assessmentCalls, jobs: jobs.observe({ limit: 64 }), cleanup: joined && !fixture.retained ? "joined" : "retained", ...(!joined || fixture.retained ? { root } : {}) }, null, 2)}\n`);
       }
     };
-    cleanups.push(cleanup);
+    const cleanup = () => joinFixture(fixture);
     if (failAt) {
       const rejected = expect(run).rejects.toThrow(`fixture failure at ${failAt}`);
       try {
@@ -278,7 +369,7 @@ describe("K5 Raindrop intake enrichment", () => {
   it.each(["model", "publication"] as const)("joins ten-capture writes after failure at %s", failAt => tenCaptures(failAt));
 
   it("summarizes a partial research capture once its intake settles", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); roots.push(root);
+    const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); const fixture = registerFixture(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
     await store.configure("k5-partial-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
@@ -310,6 +401,7 @@ describe("K5 Raindrop intake enrichment", () => {
         await rename(from, to);
       },
     }));
+    fixture.retire = () => writeSpy.mockRestore();
     const extension = new KnowledgeConnectorExtension(store, {
       credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]])),
       resolveHost: async () => ["93.184.216.34"],
@@ -344,7 +436,7 @@ describe("K5 Raindrop intake enrichment", () => {
       expect((await store.read(sourceId!, undefined, false, true, true))?.content.summary?.text).toBe("Partial summary");
     } finally {
       releaseWrite.resolve();
-      writeSpy.mockRestore();
+      retireFixture(fixture);
     }
   });
 });
