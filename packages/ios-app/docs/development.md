@@ -800,6 +800,17 @@ focused suites pass:
 scripts/tron-ios-test run
 ```
 
+`AppModelPerformanceSignpostTests.sessionOpenAndResync` holds the resync open
+reply until deliberate catalog reads reach the scripted socket, then correlates
+sync by method, session, token, and response ID rather than a global frame
+position. Its bounded sync observation and exact two-open/two-sync count reject
+missing or duplicate synchronization; the separate session-open and resync
+signpost arrays and authoritative-session assertion remain the behavioral oracle.
+Run the focused parameterized case with
+`--only-testing 'TronMobileTests/AppModelPerformanceSignpostTests/sessionOpenAndResync(interleavedMethods:)'`,
+then the owning suite. This is a native scripted-transport boundary, not live
+Gateway or device performance evidence.
+
 The default UnitTests plan owns transcript coverage. `ChatViewScrollHarnessTests`
 exercises origin-anchored layout with visible physical-row identity, mounted
 window geometry, detached-reader continuity, keyboard-sized contractions, and
