@@ -168,7 +168,7 @@ describe("K5 Raindrop intake enrichment", () => {
     }
   });
 
-  async function tenCaptures(failAt?: "model" | "publication") {
+  async function tenCaptures(failAt?: "model" | "publication", observationFails = false) {
     const root = await realpath(await mkdtemp(join(tmpdir(), "tron-k5-intake-e2e-"))); const fixture = registerFixture(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const sequence: string[] = [];
@@ -350,15 +350,24 @@ describe("K5 Raindrop intake enrichment", () => {
     };
     const cleanup = () => joinFixture(fixture);
     if (failAt) {
-      const rejected = expect(run).rejects.toThrow(`fixture failure at ${failAt}`);
+      // Observe rejection immediately; cleanup itself may fail before an
+      // asynchronous assertion can be awaited.
+      const outcome = run.then(() => ({ error: undefined }), error => ({ error }));
       try {
         if (failAt === "publication") {
           await bounded("publication before framework teardown", publicationStarted.promise);
-          // Framework teardown may run without unwinding the timed-out body.
-          await cleanup();
+          if (observationFails) throw new Error("fixture publication observer failed");
+        } else {
+          // The model fault is owned by the body, unlike external publication
+          // teardown. Do not release its gate before all models are admitted.
+          await outcome;
         }
-      } finally { await rejected; }
-      await cleanup();
+      } finally {
+        // Release the body waiting for teardown before joining its result,
+        // including when publication observation itself fails.
+        await cleanup();
+        expect((await outcome).error).toMatchObject({ message: expect.stringContaining(`fixture failure at ${failAt}`) });
+      }
       expect(jobs.running).toBe(0);
       // Exercise the real removal, not only the bookkeeping assertion.
       await rm(root, { recursive: true, force: true });
@@ -367,6 +376,9 @@ describe("K5 Raindrop intake enrichment", () => {
 
   it("runs ten captures through observable summary then tagging without waiting for the models", () => tenCaptures());
   it.each(["model", "publication"] as const)("joins ten-capture writes after failure at %s", failAt => tenCaptures(failAt));
+  it("releases suspended test body when the publication observer fails", async () => {
+    await expect(tenCaptures("publication", true)).rejects.toThrow("fixture publication observer failed");
+  });
 
   it("summarizes a partial research capture once its intake settles", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); const fixture = registerFixture(root);
