@@ -1269,16 +1269,14 @@ private struct DisplayVideoArtifactView: View {
     let display: DisplayProjection
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var player: AVPlayer?
-    @State private var localFileURL: URL?
-    @State private var failed = false
+    @State private var playback = DisplayVideoPlayback()
 
     var body: some View {
         Group {
-            if let player {
+            if let player = playback.player {
                 VideoPlayer(player: player)
                     .frame(minHeight: 220)
-            } else if failed {
+            } else if playback.failed || mediaIdentity == nil {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
                 TronLoadingState(label: "Preparing media…", accent: .tronBlue)
@@ -1289,57 +1287,37 @@ private struct DisplayVideoArtifactView: View {
             source: mediaIdentity,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            guard presentationActivity.allowsPresentationPublication else {
-                tearDown()
+            guard presentationActivity.allowsPresentationPublication,
+                  let artifact = display.artifact, let sessionID,
+                  let identity = mediaIdentity else {
+                playback.stop()
                 return
             }
-            await prepare()
+            await playback.prepare(mimeType: artifact.mimeType) {
+                let url = try await model.displayArtifactFile(
+                    id: artifact.id,
+                    sessionID: sessionID,
+                    profileID: identity.profileID,
+                    maximumBytes: artifact.size,
+                    expectedBytes: Int64(artifact.size)
+                )
+                guard presentationActivity.allowsPresentationPublication,
+                      mediaIdentity == identity else {
+                    BoundedHTTPFileStaging.shared.discard(url)
+                    throw CancellationError()
+                }
+                return url
+            }
         }
         .onChange(of: presentationActivity) { _, activity in
-            if !activity.allowsPresentationPublication { player?.pause() }
+            if !activity.allowsPresentationPublication { playback.stop() }
         }
-        .onDisappear { tearDown() }
+        .onDisappear { playback.stop() }
     }
 
     private var mediaIdentity: ChatMediaIdentity? {
         guard let artifact = display.artifact, let sessionID else { return nil }
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
-    }
-
-    private func prepare() async {
-        tearDown()
-        failed = false
-        guard let artifact = display.artifact, let sessionID,
-              let identity = mediaIdentity else {
-            failed = true
-            return
-        }
-        do {
-            let url = try await model.displayArtifactFile(
-                id: artifact.id,
-                sessionID: sessionID,
-                profileID: identity.profileID,
-                maximumBytes: artifact.size,
-                expectedBytes: Int64(artifact.size)
-            )
-            guard !Task.isCancelled else {
-                BoundedHTTPFileStaging.shared.discard(url)
-                return
-            }
-            localFileURL = url
-            player = AVPlayer(url: url)
-        } catch is CancellationError { return }
-        catch { failed = true }
-    }
-
-    private func tearDown() {
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
-        player = nil
-        if let localFileURL {
-            BoundedHTTPFileStaging.shared.discard(localFileURL)
-            self.localFileURL = nil
-        }
     }
 }
 
