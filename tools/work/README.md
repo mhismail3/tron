@@ -163,8 +163,8 @@ the GitHub side.
 
 ## `verify`
 
-`scripts/tron work verify [--post]` validates the committed head of the current
-branch and writes a receipt for that exact commit.
+`scripts/tron work verify [--post] [--evidence-manifest <json>]` validates the
+committed head of the current branch and writes a receipt for that exact commit.
 
 1. **Clean head.** A worktree with modified, staged or untracked files is
    refused, because the receipt describes a commit and not a working tree.
@@ -227,6 +227,52 @@ name is written into public text.
 
 Exit status is 0 only when the receipt passes (and, with `--post`, the evidence
 was posted).
+
+### UI evidence
+
+Capture screenshots or short recordings with the owning test/device tooling first,
+then review their contents for secrets and personal data. Verify does not capture
+screens, inspect image contents, redact media, or prove an interaction happened.
+Do not submit credentials or unreviewed captures. The manifest is explicit opt-in;
+no files are discovered automatically and callers without media need no new input.
+
+Keep captures outside source control. In their directory, create a JSON manifest:
+
+```json
+{
+  "head": "<full git rev-parse HEAD output>",
+  "artifacts": [{"path": "screen.png"}, {"path": "interaction.mp4"}]
+}
+```
+
+Run `scripts/tron work verify --evidence-manifest <manifest.json>` (add `--post`
+after pushing the exact head), or pass the same flag to `scripts/tron work land`.
+Paths are relative to the manifest's directory. Absolute paths, traversal,
+symlinks in any path component, missing files, special files and duplicates are
+refused. Use physical paths, not symlink aliases such as `/tmp` on macOS.
+Only PNG, JPEG, MP4 and MOV extension/signature pairs are accepted: signatures
+identify containers, not valid playback or safe contents. Limits are 10 files,
+10 MiB per file, 25 MiB total, and 64 KiB for the manifest. Recording duration is
+not decoded; keep clips short enough to inspect and within the byte bounds.
+
+Before checks, verify snapshots the bounded bytes into
+`<git-dir>/work/media/<head>/<sha256>.<extension>`. The receipt binds each opaque
+name, byte count and SHA-256 to that head. Same-head re-verification without the
+flag reuses these snapshots, even if the original capture has gone. Supplying a
+manifest replaces that head's media selection. A different head never inherits
+media: verify refuses when the nearest ancestor receipt contains media, requiring
+a new capture and manifest. This also stops `land` after it merges a new base;
+recapture against the resulting head and rerun. Check carry-over is unchanged.
+
+Posting rechecks every snapshot before uploading anything. Missing, changed or
+unsafe snapshots refuse publication instead of silently omitting evidence.
+All media uses the existing private-repository gate and uploader, under
+`<issue>/<head>/media/`; nothing is attached to the public repository. Public
+comments and the PR's Verification section link opaque filenames in the private
+repository, including when `land` opens the PR after posting its receipt to the
+issue. Source filenames and local paths never appear in those links. As with
+logs, a partial remote upload may remain if a later upload fails, but no success
+status or evidence comment is published on that failure.
 
 ### Tron's check set
 
@@ -345,6 +391,21 @@ covers the GitHub side.
     names are public, so a fork can open a pull request with the same head
     name. `--post` comments on the branch's own pull request, or on the issue
     when only a fork's exists.
+
+68. **Explicit UI evidence is lost or relabeled.** `MediaEvidenceTests` in
+    `test_verify.py` runs the real CLI with files and Git, deletes the source
+    capture, then reverifies and checks the exact uploaded snapshot bytes at the
+    fake-gh boundary. Media survives only same-head reverify. `MediaLandingTests`
+    in `test_land.py` proves the first PR links private media and a base merge
+    stops for recapture before publication.
+69. **Media escapes its input, storage or privacy bounds.** The same tests reject
+    traversal, symlink files/directories/manifests, special/missing files,
+    non-media, duplicates, count/byte overruns, malformed/stale manifests and
+    changed/missing/symlink snapshots. Public evidence repositories and upload
+    errors leave no media comment or success status. The fake-gh boundary is not
+    live GitHub upload proof. Repeat with
+    `python3 -m unittest discover -s tools/work`; retain its output alongside the
+    verify receipt/logs for the tested commit.
 
 ## `dashboard`
 

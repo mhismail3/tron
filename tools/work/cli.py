@@ -41,6 +41,8 @@ def main(argv: list) -> int:
     check = commands.add_parser("verify", help="run the checks the branch diff requires and write a receipt")
     check.add_argument("--post", action="store_true",
                        help="publish the receipt: evidence comment, private logs, commit status")
+    check.add_argument("--evidence-manifest", type=Path,
+                       help="head-bound JSON manifest of reviewed screenshots/short recordings (private only)")
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
@@ -54,6 +56,8 @@ def main(argv: list) -> int:
     landing.add_argument("--needs-user-validation", metavar="TEXT",
                         help="exact maintainer-only action and check; the issue stays open as Needs you")
     landing.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    landing.add_argument("--evidence-manifest", type=Path,
+                         help="head-bound media manifest; recapture if merging the base changes the head")
     stewardship = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
     stewardship.add_argument("--land", type=int, metavar="ISSUE",
                          help="merge this issue's pull request if its head is verified, green and up to date")
@@ -71,7 +75,7 @@ def main(argv: list) -> int:
         if args.command == "start":
             return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
         if args.command == "verify":
-            receipt = verify.verify(root, config)
+            receipt = verify.verify(root, config, args.evidence_manifest)
             print(f"receipt:  {verify.receipt_path(root, receipt['head'])}")
             print(f"result:   {'passed' if receipt['passed'] else 'FAILED'} for {receipt['head']}")
             if args.post:
@@ -83,7 +87,7 @@ def main(argv: list) -> int:
             return issues.run(Gh(root), config, args.closed_limit if args.closed else 0)
         if args.command == "land":
             return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
-                             args.needs_user_validation)
+                             args.needs_user_validation, evidence_manifest=args.evidence_manifest)
         if args.command == "steward":
             return land.steward(Gh(root), root, config, args.land)
         if args.command == "cleanup":
