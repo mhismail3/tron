@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeCurationJobs } from "./knowledge-curation.js";
@@ -15,16 +14,18 @@ import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 import * as durableJson from "../util/durable-json.js";
 
 const roots: string[] = [];
+const cleanups: Array<() => Promise<void>> = [];
 const command = (value: string) => `k5-intake-${value}`;
 const headers = () => new Headers();
 function response(value: unknown): ConnectorHTTPResponse { return { status: 200, headers: headers(), body: JSON.stringify(value) }; }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
+afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
 
 /** Failure modes: a model or tagging failure blocks other items; unapproved
  * tagging drops the summary; intake waits on model latency; a rerun re-charges;
  * summary and tagging race admission; partial captures (every X post) never
- * get a summary. This drives the actual connector and KnowledgeService owners
+ * get a summary; assertion/timeout teardown removes files while intake or
+ * enrichment still owns writes. This drives the actual connector and KnowledgeService owners
  * with local model/Jev fakes, never live credentials or paid providers. Its
  * outcome JSON is kept at packages/gateway/test-results/knowledge-intake-outcome.json
  * inside the worktree that ran it, so concurrent runs in two worktrees keep two
@@ -72,19 +73,43 @@ describe("K5 Raindrop intake enrichment", () => {
     expect(result.jobs.some(job => job.sourceId === personalWithoutText.record.id)).toBe(false);
   });
 
-  it("runs ten captures through observable summary then tagging without waiting for the models", async () => {
+  async function tenCaptures(failAt?: "model" | "publication") {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-intake-e2e-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
-    const initial = await store.config();
-    await store.configure("k5-intake-enrichment-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
-    const configured = await store.config();
-    await store.configureTags({ commandId: "k5-intake-vocabulary", expectedConfigRevision: configured.revision, edit: { kind: "add", tag: { id: "workflow", label: "Workflows", definition: "Reusable workflows.", category: "practice", decayClass: "stable", state: "active" } } });
     const sequence: string[] = [];
+    const phases: Array<{ phase: string; ms: number }> = [];
+    const started = performance.now();
+    const phase = (name: string) => phases.push({ phase: name, ms: Math.round(performance.now() - started) });
+    const dispatched = deferred<void>();
+    const publicationStarted = deferred<void>();
+    const teardownStarted = deferred<void>();
+    const releasePublication = deferred<void>();
+    const terminal = new Map<string, ReturnType<typeof deferred<void>>>();
+    const jobs = new KnowledgeCurationJobs(64, 120_000, job => {
+      phase(`${job.operation}:${job.status}`);
+      terminal.get(job.commandId)?.resolve();
+    });
+    const waitForTerminal = async () => {
+      await Promise.all(jobs.observe({ limit: 64 }).jobs.map(job => {
+        if (job.status !== "running") return;
+        let done = terminal.get(job.commandId);
+        if (!done) { done = deferred<void>(); terminal.set(job.commandId, done); }
+        return done.promise;
+      }));
+    };
+    const bounded = async <T,>(name: string, promise: Promise<T>): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([promise, new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${name}: ${JSON.stringify({ sequence, jobs: jobs.observe({ limit: 64 }), phases })}`)), 10_000);
+        })]);
+      } finally { clearTimeout(timer); }
+    };
     const modelGate = deferred<void>();
     let summariesSettled = 0;
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },
-      async summarizeSource(input) { sequence.push(`summary:${input.sessionId}`); await modelGate.promise; summariesSettled += 1; return { text: `Summary of ${input.sessionId}` }; },
+      async summarizeSource(input) { sequence.push(`summary:${input.sessionId}`); phase("summary dispatch"); if (sequence.length === 10) dispatched.resolve(); await modelGate.promise; summariesSettled += 1; return { text: `Summary of ${input.sessionId}` }; },
       async assess() { return { summary: "assessment", evidenceQuality: "high", freshness: "current" }; },
     };
     const tagging = {
@@ -92,11 +117,46 @@ describe("K5 Raindrop intake enrichment", () => {
       budget: { async gate() { return { ok: true }; } },
 
     };
-    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, undefined, tagging as never);
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, jobs, tagging as never);
+    // Admission is async before jobs.start; a snapshot of running jobs alone
+    // can miss both the last summary and the summary-to-tag handoff.
+    const admissions: Promise<unknown>[] = [];
+    const summarize = service.summarize.bind(service);
+    vi.spyOn(service, "summarize").mockImplementation(request => {
+      const admitted = summarize(request); admissions.push(admitted.catch(() => {})); return admitted;
+    });
+    const autoRetag = service.autoRetag.bind(service);
+    vi.spyOn(service, "autoRetag").mockImplementation((...args) => {
+      const admitted = autoRetag(...args); admissions.push(admitted.catch(() => {})); return admitted;
+    });
+    const drain = async () => {
+      modelGate.resolve(); releasePublication.resolve();
+      // Summary settlement can enqueue tags. Join admissions and terminals to
+      // a fixed point, not an empty running snapshot between those two owners.
+      let joined = 0;
+      do {
+        joined = admissions.length;
+        await Promise.all(admissions);
+        await waitForTerminal();
+      } while (joined !== admissions.length);
+    };
+    let publicationBlocked = false;
+    const originalWrite = durableJson.durableAtomicWriteJson;
+    const writeSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation((path, value, mode) => originalWrite(path, value, mode, {
+      mkdir, open, rm,
+      rename: async (from, to) => {
+        if (!publicationBlocked && to.includes("/records/") && (value as { content?: { summary?: unknown } }).content?.summary) {
+          publicationBlocked = true; phase("publication blocked"); publicationStarted.resolve();
+          await releasePublication.promise;
+        }
+        await rename(from, to);
+      },
+    }));
     let userLookup = false;
+    let assessmentCalls = 0;
+    let failure: string | undefined;
     const items = Array.from({ length: 10 }, (_, index) => ({ _id: index + 1, title: `Saved source ${index + 1}`, link: `https://example.test/item-${index + 1}`, created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }));
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); await context?.onDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
-    const owner = new ConnectionOwner(root);
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { assessmentCalls += 1; await context?.beforeDispatch?.(); await context?.onDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
     const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]]));
     const jevBudget = new KnowledgeTaggingBudget(store, () => true);
     const extension = new KnowledgeConnectorExtension(store, {
@@ -113,48 +173,109 @@ describe("K5 Raindrop intake enrichment", () => {
       queueSummary: source => service.queueIntakeSummary(source),
       sleep: async () => {}, now: () => "2026-09-29T00:00:00.000Z",
     });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("connector-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
-    const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("run"), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: "fixture-pilot", maxItems: 10, budgetCents: 10 } } }) as { captured: number; retained: number; outcomes: Array<{ sourceId?: string; itemId: string }> };
-    expect(userLookup).toBe(true);
-    expect(intake).toMatchObject({ captured: 10, retained: 10 }, JSON.stringify(intake));
-    for (let attempt = 0; attempt < 2_000; attempt += 1) { if (sequence.filter(value => value.startsWith("summary:")).length === 10) break; await new Promise(resolve => setTimeout(resolve, 5)); }
-    expect(sequence.filter(value => value.startsWith("summary:"))).toHaveLength(10);
-    expect(summariesSettled).toBe(0, "Intake must return without waiting for model latency");
-    modelGate.resolve();
-    for (let attempt = 0; attempt < 2_000; attempt += 1) {
-      const jobs = await service.invoke({ operation: "knowledge.curation.jobs", request: { limit: 64 } }) as { jobs: Array<{ operation: string; status: string }> };
-      const summaries = jobs.jobs.filter(job => job.operation === "summary");
-      const tags = jobs.jobs.filter(job => job.operation === "tags");
-      if (summaries.length === 10 && tags.length === 10 && [...summaries, ...tags].every(job => job.status !== "running")) break;
-      await new Promise(resolve => setTimeout(resolve, 5));
-    }
-    const finalJobs = await service.invoke({ operation: "knowledge.curation.jobs", request: { limit: 64 } }) as { jobs: Array<{ sourceId: string; operation: string; status: string; code?: string; reason?: string }> };
-    expect(finalJobs.jobs.filter(job => job.operation === "summary" && job.status === "done")).toHaveLength(10);
-    expect(finalJobs.jobs.filter(job => job.operation === "tags" && job.status === "done")).toHaveLength(10);
-    const providerCallsBeforeReplay = sequence.length;
-    const replay = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("replay"), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: "fixture-pilot", maxItems: 10, budgetCents: 10 } } }) as { captured: number };
-    expect(replay.captured).toBe(0);
-    await new Promise(resolve => setTimeout(resolve, 30));
-    expect(sequence).toHaveLength(providerCallsBeforeReplay);
-    for (const outcome of intake.outcomes) {
-      const summaryAt = sequence.indexOf(`summary:${outcome.sourceId}`);
-      const tagsAt = sequence.indexOf(`tags:${outcome.sourceId}`);
-      expect(summaryAt).toBeGreaterThanOrEqual(0);
-      expect(tagsAt).toBeGreaterThan(summaryAt);
-    }
-    const latestSources = await Promise.all(intake.outcomes.map(item => store.read(item.sourceId!)));
-    const report = {
-      commandId: command("run"), items: latestSources.map((record, index) => ({ itemId: intake.outcomes[index]!.itemId, sourceId: record?.id, revisionId: record?.revisionId, summary: record?.content.summary?.text, tagIds: record?.content.tags?.tagIds, jobs: finalJobs.jobs.filter(job => job.sourceId === record?.id).map(({ operation, status }) => ({ operation, status })) })),
-      sequence,
+    const run = (async () => {
+      try {
+        phase("configuration");
+        const initial = await store.config();
+        await store.configure("k5-intake-enrichment-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
+        const configured = await store.config();
+        await store.configureTags({ commandId: "k5-intake-vocabulary", expectedConfigRevision: configured.revision, edit: { kind: "add", tag: { id: "workflow", label: "Workflows", definition: "Reusable workflows.", category: "practice", decayClass: "stable", state: "active" } } });
+        phase("intake start");
+        await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("connector-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
+        const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("run"), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: "fixture-pilot", maxItems: 10, budgetCents: 10 } } }) as { captured: number; retained: number; outcomes: Array<{ sourceId?: string; itemId: string }> };
+        phase("intake returned");
+        expect(userLookup).toBe(true);
+        expect(intake).toMatchObject({ captured: 10, retained: 10 }, JSON.stringify(intake));
+        await bounded("ten summary dispatches", dispatched.promise);
+        expect(sequence.filter(value => value.startsWith("summary:"))).toHaveLength(10);
+        expect(summariesSettled).toBe(0, "Intake must return without waiting for model latency");
+        expect(failAt, "fixture failure at model").not.toBe("model");
+        modelGate.resolve();
+        await bounded("summary publication", publicationStarted.promise);
+        expect(jobs.running).toBeGreaterThan(0);
+        if (failAt === "publication") {
+          await teardownStarted.promise;
+          expect(failAt, "fixture failure at publication").not.toBe("publication");
+        }
+        releasePublication.resolve();
+        await bounded("summary and tagging terminal", drain());
+        const finalJobs = await service.invoke({ operation: "knowledge.curation.jobs", request: { limit: 64 } }) as { jobs: Array<{ sourceId: string; operation: string; status: string; code?: string; reason?: string }> };
+        expect(finalJobs.jobs.filter(job => job.operation === "summary" && job.status === "done")).toHaveLength(10);
+        expect(finalJobs.jobs.filter(job => job.operation === "tags" && job.status === "done")).toHaveLength(10);
+        const providerCallsBeforeReplay = sequence.length;
+        expect(assessmentCalls).toBe(10);
+        const replay = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("replay"), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: "fixture-pilot", maxItems: 10, budgetCents: 10 } } }) as { captured: number };
+        expect(replay.captured).toBe(0);
+        await bounded("replay admission and terminal", drain());
+        expect(sequence).toHaveLength(providerCallsBeforeReplay);
+        expect(assessmentCalls).toBe(10);
+        for (const outcome of intake.outcomes) {
+          const summaryAt = sequence.indexOf(`summary:${outcome.sourceId}`);
+          const tagsAt = sequence.indexOf(`tags:${outcome.sourceId}`);
+          expect(summaryAt).toBeGreaterThanOrEqual(0);
+          expect(tagsAt).toBeGreaterThan(summaryAt);
+        }
+        const latestSources = await Promise.all(intake.outcomes.map(item => store.read(item.sourceId!)));
+        const report = {
+          commandId: command("run"), items: latestSources.map((record, index) => ({ itemId: intake.outcomes[index]!.itemId, sourceId: record?.id, revisionId: record?.revisionId, summary: record?.content.summary?.text, tagIds: record?.content.tags?.tagIds, jobs: finalJobs.jobs.filter(job => job.sourceId === record?.id).map(({ operation, status }) => ({ operation, status })) })),
+          sequence, phases,
+        };
+        const artifact = join(process.cwd(), "test-results", "knowledge-intake-outcome.json");
+        await mkdir(dirname(artifact), { recursive: true });
+        await writeFile(artifact, `${JSON.stringify(report, null, 2)}\n`);
+        console.info(`K5 intake outcome artifact: ${artifact}`);
+        const persisted = JSON.parse(await readFile(artifact, "utf8")) as typeof report;
+        expect(persisted.items).toHaveLength(10);
+        expect(persisted.items.every(item => item.summary && item.tagIds?.includes("workflow"))).toBe(true);
+      } catch (error) {
+        failure = error instanceof Error ? error.message : String(error);
+        throw error;
+      } finally {
+        await bounded("fixture owner drain", drain());
+        service.dispose();
+      }
+    })();
+    const cleanup = async () => {
+      // Vitest timeout does not cancel run. Release its gates and join the
+      // whole body before afterEach can remove its filesystem or restore spies.
+      modelGate.resolve(); releasePublication.resolve(); teardownStarted.resolve();
+      let joined = false;
+      try {
+        await bounded("timed-out test body", run.catch(() => {}));
+        await bounded("cleanup owner drain", drain());
+        expect(jobs.running).toBe(0);
+        joined = true;
+        writeSpy.mockRestore();
+      } catch (error) {
+        // A failed join is not permission to delete a live owner's files.
+        const index = roots.indexOf(root);
+        if (index !== -1) roots.splice(index, 1);
+        throw error;
+      } finally {
+        const artifact = join(process.cwd(), "test-results", `knowledge-intake-lifecycle${failAt ? `-${failAt}` : ""}.json`);
+        await mkdir(dirname(artifact), { recursive: true });
+        await writeFile(artifact, `${JSON.stringify({ failAt, failure, phases, sequence, assessmentCalls, jobs: jobs.observe({ limit: 64 }), cleanup: joined ? "joined" : "retained", ...(!joined ? { root } : {}) }, null, 2)}\n`);
+      }
     };
-    const artifact = join(process.cwd(), "test-results", "knowledge-intake-outcome.json");
-    await mkdir(dirname(artifact), { recursive: true });
-    await writeFile(artifact, `${JSON.stringify(report, null, 2)}\n`);
-    console.info(`K5 intake outcome artifact: ${artifact}`);
-    const persisted = JSON.parse(await readFile(artifact, "utf8")) as typeof report;
-    expect(persisted.items).toHaveLength(10);
-    expect(persisted.items.every(item => item.summary && item.tagIds?.includes("workflow"))).toBe(true);
-  });
+    cleanups.push(cleanup);
+    if (failAt) {
+      const rejected = expect(run).rejects.toThrow(`fixture failure at ${failAt}`);
+      try {
+        if (failAt === "publication") {
+          await bounded("publication before framework teardown", publicationStarted.promise);
+          // Framework teardown may run without unwinding the timed-out body.
+          await cleanup();
+        }
+      } finally { await rejected; }
+      await cleanup();
+      expect(jobs.running).toBe(0);
+      // Exercise the real removal, not only the bookkeeping assertion.
+      await rm(root, { recursive: true, force: true });
+    } else await run;
+  }
+
+  it("runs ten captures through observable summary then tagging without waiting for the models", () => tenCaptures());
+  it.each(["model", "publication"] as const)("joins ten-capture writes after failure at %s", failAt => tenCaptures(failAt));
 
   it("summarizes a partial research capture once its intake settles", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); roots.push(root);

@@ -931,6 +931,21 @@ so tagging can use the shared budget. The order differs from the initial K5 draf
 admission does not consume summary/tags, and its receipt/budget/move authority
 remains independent of queued enrichment.
 
+`knowledge-intake-enrichment.test.ts` drives ten real connector captures and
+service-owned summaries/tags with local provider fakes. Its model gate proves
+intake returns before generation settles; exact curation terminal callbacks and
+tracked async admissions join the summary-to-tag handoff before fixture removal.
+Assertion failure at the model gate and teardown while atomic publication is
+held exercise cleanup with live writers. Framework timeout does not cancel a
+test body: teardown releases its gates, joins that body and its owned work, and
+retains the fixture instead of deleting it if a bounded join fails. The existing
+15-second test timeout is unchanged. Run `npx vitest run
+src/knowledge/knowledge-intake-enrichment.test.ts` from `packages/gateway` to
+regenerate `test-results/knowledge-intake-outcome.json` (ten durable outcomes)
+and `test-results/knowledge-intake-lifecycle{,-model,-publication}.json` (phase
+timings, dispatches, exact job states and cleanup result). These phase reports
+distinguish intake, model dispatch and publication stalls.
+
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source
 collection ID as provenance. X/Twitter post permalinks are read through the
