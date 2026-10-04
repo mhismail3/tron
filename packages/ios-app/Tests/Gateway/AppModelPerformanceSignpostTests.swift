@@ -6,8 +6,12 @@ import Testing
 @MainActor
 @Suite("AppModel performance boundaries")
 struct AppModelPerformanceSignpostTests {
-    @Test("presentation open and authoritative resync close distinct intervals")
-    func sessionOpenAndResync() async throws {
+    @Test("presentation open and authoritative resync close distinct intervals", arguments: [
+        [String](),
+        ["model.recent"],
+        ["provider.list", "model.list", "session.commands", "model.recent"],
+    ])
+    func sessionOpenAndResync(interleavedMethods: [String]) async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
             let snapshot = try SessionScenarioBuilder(seed: 41).openingTail(targetEncodedBytes: 8_192)
@@ -35,12 +39,29 @@ struct AppModelPerformanceSignpostTests {
             ])
 
             harness.signposts.reset()
-            let resyncResponder = Task {
-                try await respondToSessionSynchronization(
+            let resyncResponder = Task { @MainActor in
+                var catalogReads: [Task<JSONValue, Error>] = []
+                defer { catalogReads.forEach { $0.cancel() } }
+                let progress = try await respondToSessionSynchronization(
                     socket: harness.socket,
                     firstFrameIndex: nextFrameIndex,
-                    snapshot: snapshot
+                    snapshot: snapshot,
+                    beforeOpenResponse: {
+                        // Hold the open reply until real catalog requests are on
+                        // the wire: they must precede this transaction's sync.
+                        for method in interleavedMethods {
+                            let count = await harness.socket.sentFrames().count
+                            catalogReads.append(Task {
+                                try await harness.client.requestValue(method, JSONValue.object([:]))
+                            })
+                            try #require(await harness.socket.waitUntilSent(count: count + 1, within: .seconds(1)))
+                        }
+                    }
                 )
+                for (method, read) in zip(interleavedMethods, catalogReads) {
+                    #expect(try await valueOfOwnedTask(read) == presentationRefreshResult(for: method))
+                }
+                return progress
             }
             defer { resyncResponder.cancel() }
             await harness.model.handle(GatewayEvent(
@@ -54,6 +75,23 @@ struct AppModelPerformanceSignpostTests {
                 .begin(.sessionResync),
                 .end(.sessionResync, .success, .none),
             ])
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: snapshot.sessionId)?.sessionId
+            } == snapshot.sessionId)
+            let frames = await harness.socket.sentFrames()
+            let requests = try await MainActor.run {
+                try frames.dropFirst().map {
+                    try request(from: JSONDecoder.gateway.decode(JSONValue.self, from: $0))
+                }
+            }
+            #expect(requests.filter { $0.method == "session.open" }.count == 2)
+            #expect(requests.filter { $0.method == "session.sync" }.count == 2)
+            #expect(Set(requests.map(\.id)).count == requests.count)
+            let resyncOpenIndex = try #require(requests.lastIndex { $0.method == "session.open" })
+            let resyncSyncIndex = try #require(requests.lastIndex { $0.method == "session.sync" })
+            try #require(resyncOpenIndex < resyncSyncIndex)
+            let interleaved = requests[(resyncOpenIndex + 1)..<resyncSyncIndex].map(\.method)
+            for method in interleavedMethods { #expect(interleaved.contains(method)) }
             await harness.close()
         }
     }
@@ -1270,7 +1308,8 @@ struct AppModelPerformanceSignpostTests {
         socket: ScriptedGatewaySocket,
         firstFrameIndex: Int,
         snapshot: SessionSnapshot,
-        acknowledgesAttention: Bool = true
+        acknowledgesAttention: Bool = true,
+        beforeOpenResponse: (@MainActor () async throws -> Void)? = nil
     ) async throws -> SynchronizationResponseProgress {
         var index = firstFrameIndex
         var handledRefreshes = Set<String>()
@@ -1300,6 +1339,8 @@ struct AppModelPerformanceSignpostTests {
                 handledRefreshes: handledRefreshes
             )
         }
+        try #require(open.params?.objectValue?["sessionId"] == .string(snapshot.sessionId))
+        try await beforeOpenResponse?()
         await socket.enqueue(successResponse(
             id: open.id,
             result: .object([
@@ -1309,9 +1350,29 @@ struct AppModelPerformanceSignpostTests {
                 "completionRevision": .number(11),
             ])
         ))
-        let sync = try await request(in: socket, frameIndex: index)
-        index += 1
-        #expect(sync.method == "session.sync")
+        // Catalog reads share this socket, not this synchronization transaction.
+        // Only the exact session/token may advance it; a second open/sync or an
+        // unrelated mutation is never silently skipped as presentation work.
+        let deadline = ContinuousClock.now + .seconds(1)
+        let sync: Request
+        while true {
+            try #require(await socket.waitUntilSent(
+                count: index + 1, within: deadline - ContinuousClock.now
+            ), "missing session.sync for \(snapshot.sessionId)")
+            let next = try await request(in: socket, frameIndex: index)
+            index += 1
+            if let result = presentationRefreshResult(for: next.method) {
+                handledRefreshes.insert(next.method)
+                await socket.enqueue(successResponse(id: next.id, result: result))
+                continue
+            }
+            try #require(next.method == "session.sync")
+            try #require(next.params?.objectValue?["sessionId"] == .string(snapshot.sessionId))
+            try #require(next.params?.objectValue?["syncToken"] == .string("sync-token"))
+            try #require(next.id != open.id)
+            sync = next
+            break
+        }
         await socket.enqueue(successResponse(
             id: sync.id,
             result: .object(["synchronized": .bool(true)])
@@ -1325,7 +1386,8 @@ struct AppModelPerformanceSignpostTests {
         let attention = try await respondToAttentionRead(
             socket: socket,
             firstFrameIndex: index,
-            expectedRevision: 11
+            expectedRevision: 11,
+            expectedSessionID: snapshot.sessionId
         )
         return SynchronizationResponseProgress(
             nextFrameIndex: attention.nextFrameIndex,
@@ -1336,7 +1398,8 @@ struct AppModelPerformanceSignpostTests {
     private func respondToAttentionRead(
         socket: ScriptedGatewaySocket,
         firstFrameIndex: Int,
-        expectedRevision: Int
+        expectedRevision: Int,
+        expectedSessionID: String? = nil
     ) async throws -> SynchronizationResponseProgress {
         var index = firstFrameIndex
         var handledRefreshes = Set<String>()
@@ -1344,6 +1407,9 @@ struct AppModelPerformanceSignpostTests {
             let next = try await request(in: socket, frameIndex: index)
             index += 1
             if next.method == "session.attention.read" {
+                if let expectedSessionID {
+                    try #require(next.params?.objectValue?["sessionId"] == .string(expectedSessionID))
+                }
                 #expect(next.params?.objectValue?["throughCompletionRevision"] == .number(Double(expectedRevision)))
                 await socket.enqueue(successResponse(
                     id: next.id,

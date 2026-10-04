@@ -931,6 +931,31 @@ so tagging can use the shared budget. The order differs from the initial K5 draf
 admission does not consume summary/tags, and its receipt/budget/move authority
 remains independent of queued enrichment.
 
+`knowledge-intake-enrichment.test.ts` drives ten real connector captures and
+service-owned summaries/tags with local provider fakes. Its model gate proves
+intake returns before generation settles; exact curation terminal callbacks and
+tracked async admissions join the summary-to-tag handoff before fixture removal.
+Assertion failure at the model gate and teardown while atomic publication is
+held exercise cleanup with live writers. Framework timeout does not cancel a
+test body: teardown releases its gates, joins that body and its owned work, and
+retains the fixture instead of deleting it if a bounded join fails. Teardown
+captures and detaches its exact fixtures before yielding, retires each global
+publication spy synchronously and only once, and leaves instance-local admission
+tracking installed until the owned work drains. A late hook cannot restore the
+next fixture's mocks or remove its root. Each whole cleanup/report has one
+5-second join budget, below the unchanged 10-second framework hook budget;
+failed joins retain their exact root even if their work later settles. The existing
+15-second test timeout is unchanged. Run `npx vitest run
+src/knowledge/knowledge-intake-enrichment.test.ts` from `packages/gateway` to
+regenerate `test-results/knowledge-intake-outcome.json` (ten durable outcomes)
+and `test-results/knowledge-intake-lifecycle{,-model,-publication}.json` (phase
+timings, dispatches, exact job states and cleanup result). These phase reports
+distinguish intake, model dispatch and publication stalls. The same command
+regenerates `test-results/knowledge-intake-failed-join.json` and
+`test-results/knowledge-intake-delayed-cleanup.json`: failure-first regressions
+read back the subsequent fixture's durable bytes and prove that delayed old
+cleanup preserves the next root and its publication interception.
+
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source
 collection ID as provenance. X/Twitter post permalinks are read through the
