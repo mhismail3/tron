@@ -60,8 +60,8 @@ const MANIFEST_KEYS = [
 ];
 const PAYLOAD_PI_CLI = "app/node_modules/.bin/pi";
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
-const PROTOCOL_VERSION = 6;
-const MIN_PROTOCOL_VERSION = 6;
+const PROTOCOL_VERSION = 7;
+const MIN_PROTOCOL_VERSION = 7;
 export const PINNED_XCODEGEN_VERSION = "2.45.3";
 export const PINNED_NPM_VERSION = "10.9.4";
 export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";

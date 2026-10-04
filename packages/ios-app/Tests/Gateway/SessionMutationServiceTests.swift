@@ -7,6 +7,67 @@ import Synchronization
 @MainActor
 @Suite("Session mutation owner")
 struct SessionMutationServiceTests {
+    @Test("configuration send rechecks original intent after a transport wait without transmitting", arguments: ["model", "thinking", "context"])
+    func configurationSendAdmission(kind: String) async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let harness = try await makeHarness(lifecycleClock: clock.clock)
+            let connection = try #require(await harness.client.activeConnectionID())
+            await harness.lifecycle.noteDisconnected(connectionID: connection)
+            let admitted = await ConfigurationAdmissionProbe()
+            let command = Task {
+                switch kind {
+                case "model":
+                    try await harness.service.setModel(ModelRef(provider: "fixture", id: "next"), sessionID: "original",
+                        expectedRuntimeGeneration: "original-runtime", expectedModel: nil, sendAdmission: { admitted.value })
+                case "thinking":
+                    try await harness.service.setThinking("high", sessionID: "original",
+                        expectedRuntimeGeneration: "original-runtime", expectedModel: nil, sendAdmission: { admitted.value })
+                default:
+                    try await harness.service.setContextWindow(nil, for: ModelRef(provider: "fixture", id: "original"), sessionID: "original",
+                        expectedRevision: 1, expectedRuntimeGeneration: "original-runtime", sendAdmission: { admitted.value })
+                }
+            }
+            defer { command.cancel() }
+            // Exact lifecycle wait entry, not a yield/delay: moving the send
+            // check before executor.perform must let a stale frame escape.
+            try await clock.waitUntilSleeping(count: 1, duration: .milliseconds(100))
+            await MainActor.run { admitted.value = false }
+            await harness.replacement.enqueue(helloFrame())
+            try await harness.lifecycle.connectHosted(profile: harness.profile, token: "token")
+            clock.advance(by: .milliseconds(100))
+            do { try await valueOfOwnedTask(command); Issue.record("retired intent was sent") }
+            catch let failure as GatewayFailure { #expect(failure.code == "conflict") }
+            #expect(await harness.replacement.sentFrames().count == 1)
+            await harness.client.close()
+        }
+    }
+
+    @Test("accepted configuration outcome survives revoked presentation while missing receipt cannot replay", arguments: [false, true])
+    func configurationReceiptAdmission(missing: Bool) async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let admitted = await ConfigurationAdmissionProbe()
+            await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic uncertain send", retryable: true, details: nil))
+            let command = Task { try await harness.service.setThinking("high", sessionID: "original",
+                expectedRuntimeGeneration: "original-runtime", expectedModel: nil, sendAdmission: { admitted.value }) }
+            defer { command.cancel() }
+            try await reconnect(harness)
+            let status = try await request(in: harness.replacement, frameIndex: 1)
+            #expect(status.method == "command.status")
+            await MainActor.run { admitted.value = false }
+            await harness.replacement.enqueue(successResponse(id: status.id, result: .object([
+                "status": .string(missing ? "missing" : "completed"), "result": .object(["updated": .bool(true)])
+            ])))
+            if missing {
+                do { try await valueOfOwnedTask(command); Issue.record("retired intent replayed") }
+                catch is CancellationError { }
+            } else { try await valueOfOwnedTask(command) }
+            #expect(await harness.replacement.sentFrames().count == 2)
+            await harness.client.close()
+        }
+    }
+
     @Test("commands preserve explicit identity and typed outcomes")
     func explicitIdentityAndOutcomes() async throws {
         try await withTestWatchdog {
@@ -337,7 +398,7 @@ struct SessionMutationServiceTests {
                 try await harness.service.setModel(
                     ModelRef(provider: "provider", id: "model"),
                     sessionID: "model-session"
-                )
+                , expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             try await completeVoid(
                 model, socket: harness.socket, frameIndex: &frameIndex,
@@ -354,7 +415,7 @@ struct SessionMutationServiceTests {
                     1_050_000,
                     for: ModelRef(provider: "openai-codex", id: "gpt-6-astra"),
                     sessionID: "context-session", expectedRevision: 7, expectedRuntimeGeneration: "runtime-1"
-                )
+                , sendAdmission: { true })
             }
             try await completeVoid(
                 contextWindow, socket: harness.socket, frameIndex: &frameIndex,
@@ -374,7 +435,7 @@ struct SessionMutationServiceTests {
                     nil,
                     for: ModelRef(provider: "openai-codex", id: "gpt-6-astra"),
                     sessionID: "context-session", expectedRevision: 8, expectedRuntimeGeneration: "runtime-1"
-                )
+                , sendAdmission: { true })
             }
             try await completeVoid(
                 contextWindowReset, socket: harness.socket, frameIndex: &frameIndex,
@@ -390,7 +451,7 @@ struct SessionMutationServiceTests {
             )
 
             let thinking = Task {
-                try await harness.service.setThinking("high", sessionID: "thinking-session")
+                try await harness.service.setThinking("high", sessionID: "thinking-session", expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             try await completeVoid(
                 thinking, socket: harness.socket, frameIndex: &frameIndex,
@@ -479,7 +540,7 @@ struct SessionMutationServiceTests {
                 try await harness.service.setModel(
                     ModelRef(provider: "provider", id: "model"),
                     sessionID: "session"
-                )
+                , expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             defer { mutation.cancel() }
             let request = try await request(in: harness.socket, frameIndex: 1)
@@ -509,7 +570,7 @@ struct SessionMutationServiceTests {
                 try await harness.service.setModel(
                     ModelRef(provider: "provider", id: "model"),
                     sessionID: "session"
-                )
+                , expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             let request = try await request(in: harness.socket, frameIndex: 1)
             await harness.socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
@@ -544,7 +605,7 @@ struct SessionMutationServiceTests {
                 await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic loss", retryable: true, details: nil))
             }
             let mutation = Task {
-                try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session")
+                try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session", expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             defer { mutation.cancel() }
             if duringReceiptResolution { try await reconnect(harness) }
@@ -576,7 +637,7 @@ struct SessionMutationServiceTests {
             let probe = ReceiptRecoveryClockProbe()
             let harness = try await makeHarness(executorClock: probe.clock, selectProfile: true)
             await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Synthetic loss", retryable: true, details: nil))
-            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session") }
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session", expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true }) }
             defer { mutation.cancel() }
             try await harness.socket.waitUntilClosed()
             probe.startCounting()
@@ -597,7 +658,7 @@ struct SessionMutationServiceTests {
         try await withTestWatchdog {
             let harness = try await makeHarness()
             await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Synthetic loss", retryable: true, details: nil))
-            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session") }
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session", expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true }) }
             defer { mutation.cancel() }
             try await reconnect(harness)
             let stale = try await request(in: harness.replacement, frameIndex: 1)
@@ -622,7 +683,7 @@ struct SessionMutationServiceTests {
     func backgroundReceiptResolution() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
-            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session") }
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session", expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true }) }
             defer { mutation.cancel() }
             let sent = try await request(in: harness.socket, frameIndex: 1)
             await harness.lifecycle.enteredBackground()
@@ -681,7 +742,7 @@ struct SessionMutationServiceTests {
         try await withTestWatchdog {
             let harness = try await makeHarness()
             await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Fixture loss", retryable: true, details: nil))
-            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "fixture", id: "fixture"), sessionID: "original-session") }
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "fixture", id: "fixture"), sessionID: "original-session", expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true }) }
             defer { mutation.cancel() }
             try await reconnect(harness)
             let status = try await request(in: harness.replacement, frameIndex: 1)
@@ -715,7 +776,7 @@ struct SessionMutationServiceTests {
                 try await harness.service.setModel(
                     ModelRef(provider: "provider", id: "model"),
                     sessionID: "session"
-                )
+                , expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             defer { mutation.cancel() }
             try await reconnect(harness)
@@ -757,7 +818,7 @@ struct SessionMutationServiceTests {
                 try await harness.service.setModel(
                     ModelRef(provider: "provider", id: "model"),
                     sessionID: "cancelled-session"
-                )
+                , expectedRuntimeGeneration: "fixture-runtime", expectedModel: nil, sendAdmission: { true })
             }
             defer { mutation.cancel() }
 
@@ -952,7 +1013,7 @@ struct SessionMutationServiceTests {
         let params: JSONValue?
     }
 
-    private func makeHarness(executorClock: MonotonicClock = .continuous, selectProfile: Bool = false) async throws -> Harness {
+    private func makeHarness(executorClock: MonotonicClock = .continuous, lifecycleClock: MonotonicClock = .continuous, selectProfile: Bool = false) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let replacement = ScriptedGatewaySocket()
         let successor = ScriptedGatewaySocket()
@@ -967,7 +1028,7 @@ struct SessionMutationServiceTests {
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
-            clock: .continuous,
+            clock: lifecycleClock,
             reconnectDelayPolicy: .standard,
             uuidSource: .random,
             pairer: GatewayPairer(),
@@ -1075,7 +1136,7 @@ struct SessionMutationServiceTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {
@@ -1111,3 +1172,6 @@ private final class ReceiptRecoveryClockProbe: Sendable {
     func startCounting() { state.withLock { $0.counting = true } }
     var readCount: Int { state.withLock { $0.reads } }
 }
+
+@MainActor
+private final class ConfigurationAdmissionProbe { var value = true }

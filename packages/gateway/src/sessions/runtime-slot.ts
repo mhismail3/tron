@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
 import { catalogActivityTimestamp } from "./catalog-metadata-index.js";
 import { historyPage, historyEntry, type HistoryCursor } from "./history.js";
@@ -769,6 +770,8 @@ export class RuntimeSlot {
   private compactionOperation: SessionOperationState | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
+  private unregisterConfigurationWork: (() => void) | undefined;
+  private publishedConfigurationBlocker: SessionConfigurationBlocker | null | undefined;
   private shuttingDown = false;
   private shutdownPromise: Promise<void> | undefined;
   private suppressQueueEvents = false;
@@ -785,6 +788,9 @@ export class RuntimeSlot {
     interrupted: boolean,
   ) {
     this.phase = interrupted ? "interrupted" : "idle";
+    this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
+      if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
+    });
     this.ui = this.createSemanticBroker();
     this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
@@ -800,6 +806,7 @@ export class RuntimeSlot {
       // session even when no transcript entry changes. Publish that transition
       // immediately to shallow dashboard subscribers.
       this.publishSummary();
+      this.publishConfiguration();
     }, {
       capabilities: [
         "semantic.dialogs", "tron.form.v1", "semantic.notifications", "semantic.status", "semantic.working",
@@ -1355,6 +1362,7 @@ export class RuntimeSlot {
   }
 
   private publishStateChange(): void {
+    this.publishConfiguration();
     const waiters = [...this.stateChangeWaiters];
     this.stateChangeWaiters.clear();
     for (const resolve of waiters) resolve();
@@ -6214,6 +6222,7 @@ export class RuntimeSlot {
       // Phase is presentation state; Pi streaming is the exact authority for
       // whether a new prompt can request steer/follow-up delivery right now.
       acceptsQueuedPrompts,
+      configurationBlocker: this.configurationBlocker(),
       ...(session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
@@ -7756,9 +7765,12 @@ export class RuntimeSlot {
     });
   }
 
-  async setModel(provider: string, modelId: string, initiatingWorkToken?: string): Promise<void> {
+  /** Direct runtime owners may omit expectations; every remote RPC requires
+   * the originating runtime/model cut before entering this serialized lane. */
+  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<void> {
     await this.lane.run(async () => {
-      this.assertModelChangeIdle(initiatingWorkToken);
+      this.assertConfigurationIdle(initiatingWorkToken);
+      if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
       await this.runtime.session.setModel(model as Model<never>);
@@ -7769,7 +7781,7 @@ export class RuntimeSlot {
 
   async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
-      this.assertIdle(false, initiatingWorkToken);
+      this.assertConfigurationIdle(initiatingWorkToken);
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
         throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
       }
@@ -7787,9 +7799,10 @@ export class RuntimeSlot {
     });
   }
 
-  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string): Promise<void> {
+  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<void> {
     await this.lane.run(() => {
-      this.assertIdle(false, initiatingWorkToken);
+      this.assertConfigurationIdle(initiatingWorkToken);
+      if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
       this.revision += 1;
       this.publishSnapshot();
@@ -8615,6 +8628,7 @@ export class RuntimeSlot {
    * report a load or an eviction for. */
   markPublished(): void {
     this.published = true;
+    this.publishConfiguration();
   }
 
   async shutdown(): Promise<void> {
@@ -8755,6 +8769,8 @@ export class RuntimeSlot {
     for (const operationId of [...this.operationWork.keys()]) this.settleOperationWork(operationId);
     this.lifecycle.retire();
     this.ui.retire();
+    this.unregisterConfigurationWork?.();
+    this.unregisterConfigurationWork = undefined;
     this.disposed = true;
     // One live runtime is gone. This is the only place a slot stops existing, so
     // the resource sample counts the eviction where it happens and can see a
@@ -8828,17 +8844,45 @@ export class RuntimeSlot {
     }
   }
 
-  private assertModelChangeIdle(initiatingWorkToken?: string): void {
+  private configurationBlocker(exceptWorkToken?: string): SessionConfigurationBlocker | null {
+    if (this.disposed || this.shuttingDown || this.trustReloadPending) return "unavailable";
+    if (this.hasBlockedOwnershipWrite) return "settling";
+    if (this.runtime.session.isStreaming || this.runtime.session.isBashRunning
+      || this.phase === "running" || this.phase === "compacting" || this.phase === "retrying"
+      || this.activeOperationId !== undefined) return "running";
+    if (this.pendingPrompt || this.pendingQueueAdmission || this.queuedMessages.length > 0
+      || this.heldPrompts.length > 0 || this.pendingManualCompaction || this.queuedManualCompactionInFlight) return "queued";
+    if (this.pendingAssistantCompletion || this.completionOwnershipQueue.length > 0) return "settling";
+    if (this.pendingExtensionCommand || this.lifecycle.preventsNonRuntimeQuiescence) return "interaction";
+    const work = this.dependencies.workRegistry.facts().filter(fact => fact.sessionId === this.id && fact.token !== exceptWorkToken);
+    if (work.some(fact => fact.kind === "terminal-receipt-persistence" || fact.kind === "automation-terminal-persistence")) return "settling";
+    if (work.length > 0) return "mutation";
+    return null;
+  }
+
+  private publishConfiguration(): void {
+    if (!this.published || this.disposed) return;
+    const configurationBlocker = this.configurationBlocker();
+    if (configurationBlocker === this.publishedConfigurationBlocker) return;
+    // Work admission/retirement is sequenced projection, not a canonical
+    // configuration edit: changing revision here self-invalidates context CAS.
+    this.emit("session.configuration", { configurationBlocker });
+    this.publishedConfigurationBlocker = configurationBlocker;
+  }
+
+  private assertConfigurationIdle(initiatingWorkToken?: string): void {
     this.assertUsable();
-    // Detached child activities affect the aggregate dashboard/drain, not the
-    // parent's model. Keep every actual parent-owned work token fenced.
-    const activePhase = this.phase === "running" || this.phase === "compacting" || this.phase === "retrying";
-    if (this.runtime.session.isStreaming || activePhase || this.activeOperationId !== undefined
-      || this.pendingPrompt !== undefined || this.pendingQueueAdmission !== undefined
-      || this.pendingExtensionCommand !== undefined || this.pendingAssistantCompletion !== undefined
-      || this.queuedMessages.length > 0 || this.lifecycle.preventsNonRuntimeQuiescence
-      || this.dependencies.workRegistry.hasSessionWork(this.id, initiatingWorkToken)) {
-      throw new GatewayError("busy", "Session must be idle for this operation", false, undefined, "session_operation_busy");
+    const blocker = this.configurationBlocker(initiatingWorkToken);
+    if (blocker) throw new GatewayError("busy", "Session configuration is waiting for " + blocker, true,
+      { configurationBlocker: blocker, phase: this.effectivePhase }, `session_configuration_${blocker}`);
+  }
+
+  private assertConfigurationExpectation(expectation: { runtimeGeneration: string; model: { provider: string; id: string } | null }): void {
+    const model = this.runtime.session.model;
+    if (expectation.runtimeGeneration !== this.runtimeGeneration
+      || (expectation.model?.provider ?? null) !== (model?.provider ?? null)
+      || (expectation.model?.id ?? null) !== (model?.id ?? null)) {
+      throw new GatewayError("conflict", "Session model or runtime changed; refresh before changing configuration", true);
     }
   }
 

@@ -289,7 +289,7 @@ private final class HostedAskUserTokenStore: GatewayTokenStoring {
 
 private actor HostedAskUserSocket: GatewaySocketConnection {
     private let receipt: HostedAskUserFixtureReceipt
-    private var inbound: [Data] = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":6,"minProtocolVersion":6,"machineId":"hosted-ask-user-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)]
+    private var inbound: [Data] = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":7,"minProtocolVersion":7,"machineId":"hosted-ask-user-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
 

@@ -3827,18 +3827,46 @@ final class AppModel {
     }
 
     func setModel(_ model: ModelRef, sessionID: String) async throws {
-        try await sessionMutations.setModel(model, sessionID: sessionID)
+        let snapshot = try configurationSnapshot(sessionID)
+        try await sessionMutations.setModel(model, sessionID: sessionID,
+            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
+                self?.admitsConfigurationSend(snapshot) == true
+            }
     }
 
     func setThinking(_ level: String, sessionID: String) async throws {
-        try await sessionMutations.setThinking(level, sessionID: sessionID)
+        let snapshot = try configurationSnapshot(sessionID)
+        try await sessionMutations.setThinking(level, sessionID: sessionID,
+            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
+                self?.admitsConfigurationSend(snapshot) == true
+            }
     }
 
     func setContextWindow(_ contextWindow: Int?, for model: ModelRef, sessionID: String, expectedRevision: Int, expectedRuntimeGeneration: String) async throws {
         guard gatewayInfo?.capabilities.contains("context-window.v1") == true else {
             throw GatewayFailure(code: "unsupported", message: "This Gateway does not support context window controls.", retryable: false, details: nil)
         }
-        try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration)
+        let snapshot = try configurationSnapshot(sessionID)
+        guard snapshot.runtimeGeneration == expectedRuntimeGeneration, snapshot.model == model else {
+            throw GatewayFailure(code: "conflict", message: "Session model changed. Refresh configuration.", retryable: true, details: nil)
+        }
+        try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration) { [weak self] in
+            self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    private func configurationSnapshot(_ sessionID: String) throws -> SessionSnapshot {
+        guard let snapshot = authoritativeSnapshot(for: sessionID), admitsConfigurationSend(snapshot) else {
+            throw GatewayFailure(code: "busy", message: "Wait for the session to finish synchronizing or settling before changing configuration.", retryable: true, details: nil)
+        }
+        return snapshot
+    }
+
+    private func admitsConfigurationSend(_ original: SessionSnapshot) -> Bool {
+        guard sessionPresentation.hasInstalledSubscription(for: original.sessionId),
+              let current = authoritativeSnapshot(for: original.sessionId) else { return false }
+        return current.runtimeGeneration == original.runtimeGeneration && current.model == original.model
+            && current.configurationBlocker == .ready && !current.phase.isActive
     }
 
     func renameSession(_ sessionID: String, name: String) async throws {

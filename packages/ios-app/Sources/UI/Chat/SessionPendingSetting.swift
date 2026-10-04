@@ -18,7 +18,7 @@ struct SessionThinkingEditScope: Hashable {
     }
 
     func admits(_ level: String, in current: SessionContextPresentation) -> Bool {
-        self == Self(current) && !current.phase.isActive && levels.contains(level)
+        self == Self(current) && current.configurationLockedReason == nil && levels.contains(level)
     }
 }
 

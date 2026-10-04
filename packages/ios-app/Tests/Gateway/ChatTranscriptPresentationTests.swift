@@ -2568,7 +2568,7 @@ struct ChatTranscriptPresentationTests {
     private func fixture(transcript: String) throws -> SessionSnapshot {
         try decodeTranscriptFixture(SessionSnapshot.self, from: Data("""
         {
-          "sessionId":"session","runtimeGeneration":"generation","revision":1,"eventSequence":1,"phase":"idle","cwd":"/workspace",
+          "sessionId":"session","runtimeGeneration":"generation","revision":1,"eventSequence":1,"phase":"idle","configurationBlocker":null,"cwd":"/workspace",
           "model":{"provider":"openai-codex","id":"gpt-5.6-sol"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
           "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
           "queueRevision":0,"queuedItems":[],"automaticCompactionEnabled":true,"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":3,

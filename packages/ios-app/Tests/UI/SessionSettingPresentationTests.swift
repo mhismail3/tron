@@ -1,9 +1,25 @@
+import Foundation
 import Testing
 @testable import TronMobileCore
 @testable import TronMobile
 
 @Suite("Session setting presentation")
 struct SessionSettingPresentationTests {
+    @Test("settled foreground cannot admit thinking while Gateway configuration settlement remains")
+    func gatewayConfigurationSettlement() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7817).openingTail(targetEncodedBytes: 4096)
+        snapshot.phase = .idle
+        snapshot.availableThinkingLevels = ["off", "high"]
+        let scope = SessionThinkingEditScope(SessionContextPresentation(snapshot))
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        json["configurationBlocker"] = "settling"
+        let held = try JSONDecoder().decode(SessionSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(!scope.admits("high", in: SessionContextPresentation(held)))
+        json["configurationBlocker"] = NSNull()
+        let ready = try JSONDecoder().decode(SessionSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(scope.admits("high", in: SessionContextPresentation(ready)))
+    }
+
     @Test("extra-high variants share a readable label without changing canonical values", arguments: [
         "xhigh", "Xhigh", "XHigh", "XHIGH", "x-high", "extra_high", "extra-high", "Extra High", " extra high "
     ])

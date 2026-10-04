@@ -82,7 +82,7 @@ struct HostedAccessibilityFixtureView: View {
     }
 
     private static let info = GatewayInfo(
-        gatewayVersion: "1", piVersion: "2", protocolVersion: 6, minProtocolVersion: 6,
+        gatewayVersion: "1", piVersion: "2", protocolVersion: 7, minProtocolVersion: 7,
         machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1", "restart-supervised.v1"],
         sourceRevision: "source-revision", runtimeEpoch: "runtime-epoch"
     )

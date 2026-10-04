@@ -197,7 +197,7 @@ private actor ReadonlyAttachmentSocket: GatewaySocketConnection {
     private var closed = false
     init(gateway: ReadonlyAttachmentGateway, replacement: Bool) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":6,\"minProtocolVersion\":6,\"machineId\":\"\(replacement ? "readonly-replacement-machine" : "readonly-machine")\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":7,\"minProtocolVersion\":7,\"machineId\":\"\(replacement ? "readonly-replacement-machine" : "readonly-machine")\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
     }
     func send(_ data: Data) async throws {
         guard !closed else { throw CancellationError() }

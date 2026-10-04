@@ -66,7 +66,7 @@ async function fixture(maximumHttpRequests = 128) {
     host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumHttpRequests,
     devices, uploads: {} as any, sessions: { acquireBlob, unsubscribeClient: vi.fn() } as any,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
-    service: { info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn() } as any,
+    service: { info: () => ({ protocolVersion: 7 }), releaseClient: vi.fn() } as any,
     logger: logger as any,
     // Never the host's Tailscale CLI: only silence records read the path.
     peerPathReader: { lookup: async () => ({ peerPath: "unknown" as const, peerRelay: "" }) },

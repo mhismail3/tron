@@ -5,10 +5,10 @@ import Foundation
 
 private final class GatewayRealBurstFixtureBundleToken: NSObject {}
 
-// Lossless raw-deflate capture of the Gateway RuntimeSlot prompt burst:
-// source dcad5d679e3761ee903ed73056552f4f331f8b0f, source JSON SHA256
-// de54530be65d8593c299fab50c89f6d7e2bcf8d00064a70b8a65d93af63bef35.
-// The compressed resource is kept small while retaining exact decoded frames.
+// Raw-deflate Gateway burst capture, with snapshot configurationBlocker fields
+// adapted to protocol 7. Original event/transcript identities and ordering are
+// retained; this remains a transport-pressure fixture, not a readiness oracle.
+// Decoded JSON SHA256: c3f2d5813ea2689fdc54431994fd8d534347c67eaee12d319852aa5adae360eb.
 struct GatewayRealBurstFixture: Decodable {
     struct CapturedEvent: Decodable {
         let topic: String

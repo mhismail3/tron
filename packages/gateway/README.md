@@ -1,6 +1,6 @@
 # Tron Gateway
 
-## Protocol v6 chat semantics
+## Protocol v7 chat semantics
 
 The Gateway is the sole live owner of invocation, operation, and activity
 identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
@@ -26,20 +26,20 @@ command-driven replacement cases in
 `src/transport/session-archive.integration.test.ts` cover all three calls.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
-The v6 projection separates inbound context, agent output/invocations, ambient
+The v7 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
 is extension state. Producer attribution is only exact at a Gateway callback
 boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
 unknown. Every projection is bounded by count and byte limits and malformed
 recognized data fails closed for authoritative resynchronization.
 
-Protocol v6 deliberately has no v5 runtime path. The deployed v5 update helper
+Protocol v7 deliberately has no v6 runtime path. The deployed v6 update helper
 validates a candidate payload manifest against the protocol version it speaks
 and refuses a candidate whose advertised protocol range does not contain it, so
-it cannot promote a strictly v6 candidate. That one-time major transition must
+it cannot promote a strictly v7 candidate. That one-time major transition must
 use the Mac app's manual local Release reinstall runbook:
-install the Mac app containing the v6 Gateway payload while preserving
-`~/.tron`, verify the registered Gateway, and only then install a v6-only iOS
+install the Mac app containing the v7 Gateway payload while preserving
+`~/.tron`, verify the registered Gateway, and only then install a v7-only iOS
 client. The repository protocol manifest is projected into Gateway payload,
 Mac app, and iOS app metadata; launch/build/install validators require one exact
 range. A replacement launcher's bundled payload is the migration bootstrap when
@@ -47,7 +47,7 @@ a previously selected external payload advertises an older range. Same-major
 promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
-advertised minimum or allow a mixed v5/v6 pair merely to bypass that handoff.
+advertised minimum or allow a mixed v6/v7 pair merely to bypass that handoff.
 Ordinary same-major updates continue through the owned Gateway update flow. A
 Gateway built before the typed protocol-mismatch close (F-3) still refuses an
 unspeakable hello with `1008 "protocol version mismatch"` and no version range,
@@ -922,7 +922,7 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
-- `GET /v1/socket` — authenticated protocol version 6 WebSocket
+- `GET /v1/socket` — authenticated protocol version 7 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
@@ -1162,7 +1162,7 @@ Authorized device names are projected from one Gateway-owned record: a validated
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":6}
+{"type":"hello","protocolVersion":7}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -1771,19 +1771,39 @@ append stages an entry but disk persistence fails, the RPC reports an uncertain
 outcome and publishes the actual live projection rather than fabricating rollback
 or blindly replaying the command. An explicitly issued new command always records
 its desired value, even when it matches a previously staged in-memory value. Parent
-`session.setModel` is serialized against active foreground runs and pending prompts,
-but its own scoped RPC-accounting token is excluded from the idle check. Detached
-child/subagent work belongs to its own session and does not block a safe parent-model
-change; it still blocks parent deletion and remains visible to administrative drain
-and idle-eviction accounting. `session.delete` similarly excludes only its initiating
-RPC token and continues rejecting live child work. Every other idle-checked
-mutation follows the same rule: it excludes exactly its own `rpc-mutation` work
-entry, so `session.bash`, `session.setThinking`, `session.setTools`,
-`session.setContextWindow`, `session.label`, `session.fork`,
-`session.navigate` and `session.reloadResources` are admitted on an idle
-session, while another request's entry, detached extension work and
-administrative drain blockers still reject them. `session_operation_busy` on
-`rpc.error` identifies true foreground/delete blockers.
+`session.setModel`, `session.setThinking` and `session.setContextWindow` share
+one parent-configuration admission policy in RuntimeSlot. Streaming, pending
+parent operations/queues/interactions, terminal persistence and concurrent
+session mutations remain fenced. Only the initiating RPC token is excluded.
+Independent detached child activity alone does not block a parent configuration
+change; it still blocks deletion, eviction and administrative drain.
+
+Protocol 7 snapshots require `configurationBlocker` (null when ready; otherwise
+`running`, `queued`, `settling`, `mutation`, `interaction` or `unavailable`).
+The sequenced `session.configuration` event republishes this derived fact when
+work admission or retirement changes eligibility, without changing canonical
+`revision`: otherwise the context-window request would invalidate its own CAS.
+Snapshots re-state the event; stale events/snapshots cannot roll it back. Stop
+acknowledges foreground settlement, not detached children or every persistence
+owner. iOS shows the remaining settling reason and enables all three controls
+only from this authority, with exact pending-choice ownership.
+
+Model and thinking RPCs require `expectedRuntimeGeneration` and `expectedModel`
+(provider/id, or explicit null for no model). The slot checks this original
+intent inside its mutation lane. Context changes retain their existing exact
+runtime/model/revision checks. iOS rechecks original synchronization/runtime/model
+admission at actual transmission, including a definitely-not-sent retry; accepted
+results remain with the confirmed mutation receipt owner and are not discarded
+when the view retires. No fixed delay or automatic new-command replay makes a
+session ready. `rpc-idle-admission.integration.test.ts` retains a JSON report for
+post-Stop configuration with detached work, genuine terminal/concurrent work,
+original model/runtime intent and revision-preserving retirement.
+
+Other idle-checked mutations (`session.bash`, tools, labels, fork, navigation,
+resource reload) still use broader administrative admission and exclude only
+their initiating RPC token. Delete retains its independent child protection.
+`rpc.error` reasons `session_configuration_*` name the rejecting configuration
+category; `session_operation_busy` remains the archive/delete blocker signal.
 
 Forked transcript projections carry an optional, disposable `forkBoundary` annotation. At runtime bind/rebind and tree navigation, Gateway validates the selected child's contiguous inherited identity/ancestry against the catalog-admitted immediate parent's complete canonical tree. It retains only one inherited-entry anchor, not a transcript mirror; snapshots map that anchor onto the current branch without parent I/O, including after the first child append. Read-only subagent pages derive the anchor from their admitted parent runtime and include the projected annotation in their revision. Regenerated labels are normalized out of ancestry; sanitized/pruned payloads with preserved identities remain inherited. Missing, ambiguous, cyclic, replaced or oversized parents omit the annotation without blocking chat. A header-only relationship or a fork with no retained context cannot establish a marker. Parent reads are inode-fenced and capped at 64 MiB; derived graph scans are linear and capped at 100,000 entries. The annotation carries the stable inherited anchor ID plus its gap ordinal (0...total) in the canonical projected sequence, so inherited-only and hidden-only branches still have a boundary and later child appends cannot move it. It does not change canonical IDs, counts, or paging anchors. iOS owns the gap insertion before visibility folding, including the true canonical tail before streaming, and flushes tool grouping; page ownership is one-sided so adjacent pages cannot duplicate it. `fork-boundary.test.ts`, focused runtime-registry fork regressions, process-transcript lease tests, and `ChatTranscriptProjectionKernelTests` cover ancestry, the actual SDK fork behavior, reopen, wire propagation, paging, hidden tails, and rendering.
 
@@ -2077,7 +2097,7 @@ durable attention replacement, clears manual unread, and publishes no transient
 unread summary. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
-Protocol-v6 clients require the complete attention and presentation contract;
+Protocol-v7 clients require the complete attention and presentation contract;
 they do not attach to an earlier Gateway that lacks the method or revisioned
 response.
 Delete removes attention metadata, true identity replacement moves it without
@@ -2175,7 +2195,7 @@ large active runs therefore remain openable; no canonical Pi content is modified
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
-ordinary text part and never sends the Mac path to clients. Protocol-v6 clients therefore receive the safe filename instead of the
+ordinary text part and never sends the Mac path to clients. Protocol-v7 clients therefore receive the safe filename instead of the
 Mac path for a new content discriminant. A page carries and echoes the next projected entry as its branch anchor plus the current runtime
 generation and leaf identity. Raw canonical parent links may pass through filtered session-info,
 hidden custom, or extension-receipt entries and therefore never define projected-row adjacency.
@@ -2260,7 +2280,7 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. Protocol-v6 `session.prompt` accepts one typed
+never reads or copies every resource body. Protocol-v7 `session.prompt` accepts one typed
 `resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
 exact live `(source,name)` identity and extension-command precedence before constructing Pi's
 normalized leading invocation. Pending and queued projections retain the same typed resource;

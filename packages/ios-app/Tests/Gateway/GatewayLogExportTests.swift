@@ -257,7 +257,7 @@ struct GatewayLogExportTests {
             defaults.removePersistentDomain(forName: suite)
             Task { await model.teardown(); await client.close() }
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
         let responder = respondToConnectedExport(socket, failure: false)
         await model.start()
         await waitForDiagnosticsReadiness(model)
@@ -296,7 +296,7 @@ struct GatewayLogExportTests {
             defaults.removePersistentDomain(forName: suite)
             Task { await model.teardown(); await client.close() }
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
         let responder = respondToConnectedExport(socket, failure: true)
         await model.start()
         await waitForDiagnosticsReadiness(model)

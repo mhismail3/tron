@@ -900,6 +900,8 @@ export interface CompactionPolicyProjection {
   warning?: string;
 }
 
+export type SessionConfigurationBlocker = "running" | "queued" | "settling" | "mutation" | "interaction" | "unavailable";
+
 export interface SessionSnapshot {
   sessionId: string;
   runtimeGeneration: string;
@@ -908,6 +910,8 @@ export interface SessionSnapshot {
   phase: SessionPhase;
   /** Exact live Pi capability; unlike phase, distinguishes nested compaction and settlement gaps. */
   acceptsQueuedPrompts: boolean;
+  /** Parent configuration admission, independent of detached child activity. */
+  configurationBlocker: SessionConfigurationBlocker | null;
   /** Disposable Gateway projection of the inherited-to-child transition. */
   forkBoundary?: TranscriptForkBoundary;
   name?: string;

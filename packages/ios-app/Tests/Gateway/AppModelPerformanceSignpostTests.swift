@@ -330,6 +330,11 @@ struct AppModelPerformanceSignpostTests {
         try await withTestWatchdog {
             let clock = ManualClock()
             let harness = try await makeHarness(clock: clock.clock)
+            var configuration = try SessionScenarioBuilder(seed: 375).openingTail(targetEncodedBytes: 4096)
+            configuration.sessionId = "mounted-route"
+            configuration.phase = .idle
+            await MainActor.run { harness.model.installHostedSubscribedSnapshot(configuration, token: "configuration-token") }
+
             let responder = Task {
                 // An unanswered application request is uncertain without
                 // implying a broken socket. A genuine send failure now retires
@@ -367,6 +372,11 @@ struct AppModelPerformanceSignpostTests {
     func possiblySentCancellationDoesNotReplay() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
+            var configuration = try SessionScenarioBuilder(seed: 375).openingTail(targetEncodedBytes: 4096)
+            configuration.sessionId = "mounted-route"
+            configuration.phase = .idle
+            await MainActor.run { harness.model.installHostedSubscribedSnapshot(configuration, token: "configuration-token") }
+
             await harness.socket.suspendSends()
             let mutation = Task {
                 try await harness.model.setModel(
@@ -394,6 +404,10 @@ struct AppModelPerformanceSignpostTests {
     func wirePossiblySentCodeIsDefinitive() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
+            var configuration = try SessionScenarioBuilder(seed: 375).openingTail(targetEncodedBytes: 4096)
+            configuration.sessionId = "mounted-route"
+            configuration.phase = .idle
+            await MainActor.run { harness.model.installHostedSubscribedSnapshot(configuration, token: "configuration-token") }
             let mutation = Task {
                 try await harness.model.setModel(
                     ModelRef(provider: "test", id: "model"),
@@ -1459,7 +1473,7 @@ struct AppModelPerformanceSignpostTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {

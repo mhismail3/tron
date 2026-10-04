@@ -614,7 +614,7 @@ server.on("connection", (socket) => {
     try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
     if (frame.type === "hello") {
       clientId = frame.clientId ?? null;
-      return socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, gatewayVersion: "stub" }));
+      return socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, gatewayVersion: "stub" }));
     }
     if (frame.type !== "request") return;
     const reply = (result) => socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result }));

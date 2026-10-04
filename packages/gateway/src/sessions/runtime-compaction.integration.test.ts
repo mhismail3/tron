@@ -278,7 +278,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     };
     let command = 0;
     const switchModel = (modelId: string) => service.invoke(client, "session.setModel", {
-      sessionId: fresh.id, provider: item.faux.getModel().provider, modelId, commandId: `model-change-${++command}`,
+      sessionId: fresh.id, expectedRuntimeGeneration: fresh.snapshot().runtimeGeneration, expectedModel: fresh.snapshot().model ?? null, provider: item.faux.getModel().provider, modelId, commandId: `model-change-${++command}`,
     });
     // Negative control: losing the initiating token recreates the original
     // self-block through the real service and session admission boundary.
@@ -352,7 +352,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
       for (const kind of ["foreground-agent-operation", "compaction-export", "terminal-receipt-persistence"] as const) {
         const parentWork = registry.begin({ kind, sessionId: item.slot.id, hostEpoch: registry.runtimeEpoch });
         try {
-          await expect(item.slot.setModel(model.provider, model.id, selfMutation.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: "session_operation_busy" });
+          await expect(item.slot.setModel(model.provider, model.id, selfMutation.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: kind === "terminal-receipt-persistence" ? "session_configuration_settling" : "session_configuration_mutation" });
         } finally { parentWork.settle(); }
       }
     } finally { selfMutation.settle(); }

@@ -161,7 +161,7 @@ private actor NewSessionFixtureSocket: GatewaySocketConnection {
     init(gateway: NewSessionFixtureGateway, replacement: Bool) {
         self.gateway = gateway
         self.replacement = replacement
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":6,\"minProtocolVersion\":6,\"machineId\":\"\(replacement ? "new-session-replacement-machine" : "new-session-machine")\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":7,\"minProtocolVersion\":7,\"machineId\":\"\(replacement ? "new-session-replacement-machine" : "new-session-machine")\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
     }
     func send(_ data: Data) async throws {
         guard !closed else { throw CancellationError() }

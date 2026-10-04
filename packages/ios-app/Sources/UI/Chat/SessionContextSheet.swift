@@ -473,12 +473,13 @@ struct SessionContextSheet: View {
                 SessionModelSelectionPresentation.displayed(pending: pendingModelSelection, authoritative: snapshot.model)
             },
             set: { selection in
-                guard let selection,
+                guard let selection, pendingModelSelection == nil, pendingThinking == nil, !settingContextWindow,
                       selection != SessionModelSelectionPresentation.displayed(
                         pending: pendingModelSelection, authoritative: snapshot.model
                       ),
                       let current = model.sessionContextPresentation(for: sessionID),
                       current.runtimeGeneration == snapshot.runtimeGeneration,
+                      current.configurationLockedReason == nil,
                       current.model == snapshot.model else { return }
                 let pending = SessionPendingModelSelection(selection, snapshot: current)
                 pendingModelSelection = pending
@@ -487,7 +488,8 @@ struct SessionContextSheet: View {
                 Task {
                     do {
                         guard let admitted = model.sessionContextPresentation(for: sessionID),
-                              pending.admitted(in: admitted) != nil else {
+                              pending.admitted(in: admitted) != nil, admitted.model == current.model,
+                              admitted.configurationLockedReason == nil else {
                             pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                             return
                         }
@@ -495,7 +497,9 @@ struct SessionContextSheet: View {
                         pendingModelSelection = pendingModelSelection?.confirming(pending.id)
                         if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                     } catch is CancellationError {
-                        return
+                        // Refused receipt replay is terminal for this intent;
+                        // uncertain accepted outcomes use outcome_unknown instead.
+                        pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                     } catch {
                         pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                         surfaceActionError(error)
@@ -514,15 +518,20 @@ struct SessionContextSheet: View {
             selection: selection,
             catalog: catalog,
             // The Gateway rejects model changes during session work.
-            selectionLockedReason: snapshot.phase.isActive
-                ? "The model can change once this session is idle." : nil,
+            selectionLockedReason: snapshot.configurationLockedReason ?? ((pendingThinking != nil || settingContextWindow || pendingModelSelection != nil) ? "Applying configuration…" : nil),
             automaticCompactionEnabled: snapshot.automaticCompactionEnabled
         ) {
+            if let reason = snapshot.configurationLockedReason {
+                Label(reason, systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .padding(14)
+            }
             TronThinkingSelectionRow(
                 selection: Binding(
                     get: { displayedThinking },
                     set: { level in
-                        guard level != displayedThinking, pendingModelSelection == nil,
+                        guard level != displayedThinking, pendingModelSelection == nil, pendingThinking == nil, !settingContextWindow,
                               presentationActivity.allowsPresentationPublication,
                               let current = model.sessionContextPresentation(for: sessionID),
                               thinkingScope.admits(level, in: current),
@@ -551,7 +560,7 @@ struct SessionContextSheet: View {
                 accent: configurationRowAccent
             )
             .id(thinkingScope)
-            .disabled(snapshot.phase.isActive || pendingModelSelection != nil)
+            .disabled(snapshot.configurationLockedReason != nil || pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
             if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                let policy = snapshot.contextWindowPolicy {
                 let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
@@ -563,9 +572,9 @@ struct SessionContextSheet: View {
                             // Bind the request to the model shown when the
                             // control was rendered. A late tap after a model
                             // switch must never mutate the replacement model.
-                            guard !settingContextWindow, pendingModelSelection == nil,
+                            guard !settingContextWindow, pendingModelSelection == nil, pendingThinking == nil,
                                   let current = model.sessionContextPresentation(for: sessionID),
-                                  !current.phase.isActive,
+                                  current.configurationLockedReason == nil,
                                   current.runtimeGeneration == snapshot.runtimeGeneration,
                                   current.contextWindowPolicy?.model == policy.model else { return }
                             let pending = SessionPendingSetting(value, snapshot: snapshot)
@@ -601,7 +610,7 @@ struct SessionContextSheet: View {
                     accent: configurationRowAccent
                 )
                 .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey)")
-                .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
+                .disabled(snapshot.configurationLockedReason != nil || settingContextWindow || pendingModelSelection != nil || pendingThinking != nil)
             }
         } compactAction: {
             compactButton(snapshot)

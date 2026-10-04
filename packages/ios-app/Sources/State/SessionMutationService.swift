@@ -229,32 +229,37 @@ final class SessionMutationService {
         }
     }
 
-    func setModel(_ model: ModelRef, sessionID: String) async throws {
-        struct Params: Codable { let sessionId, provider, modelId, commandId: String }
+    func setModel(_ model: ModelRef, sessionID: String, expectedRuntimeGeneration: String,
+                  expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws {
         let commandID = uuidSource.next().uuidString
-        let params = Params(
-            sessionId: sessionID,
-            provider: model.provider,
-            modelId: model.id,
-            commandId: commandID
-        )
-        let _: MutationResponse = try await executor.perform(
-            method: "session.setModel",
-            commandID: commandID
-        ) {
-            try await client.request("session.setModel", params)
+        let params: JSONValue = .object([
+            "sessionId": .string(sessionID), "provider": .string(model.provider), "modelId": .string(model.id),
+            "commandId": .string(commandID), "expectedRuntimeGeneration": .string(expectedRuntimeGeneration),
+            "expectedModel": try expectedModel.map { try JSONValue.encode($0) } ?? .null,
+        ])
+        let _: MutationResponse = try await executor.perform(method: "session.setModel", commandID: commandID, replayAdmission: sendAdmission) {
+            try Self.requireConfigurationSend(sendAdmission)
+            return try await client.request("session.setModel", params)
         }
     }
 
-    func setThinking(_ level: String, sessionID: String) async throws {
-        struct Params: Codable { let sessionId, level, commandId: String }
+    func setThinking(_ level: String, sessionID: String, expectedRuntimeGeneration: String,
+                     expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws {
         let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, level: level, commandId: commandID)
-        let _: MutationResponse = try await executor.perform(
-            method: "session.setThinking",
-            commandID: commandID
-        ) {
-            try await client.request("session.setThinking", params)
+        let params: JSONValue = .object([
+            "sessionId": .string(sessionID), "level": .string(level), "commandId": .string(commandID),
+            "expectedRuntimeGeneration": .string(expectedRuntimeGeneration),
+            "expectedModel": try expectedModel.map { try JSONValue.encode($0) } ?? .null,
+        ])
+        let _: MutationResponse = try await executor.perform(method: "session.setThinking", commandID: commandID, replayAdmission: sendAdmission) {
+            try Self.requireConfigurationSend(sendAdmission)
+            return try await client.request("session.setThinking", params)
+        }
+    }
+
+    private static func requireConfigurationSend(_ admission: () -> Bool) throws {
+        guard admission() else {
+            throw GatewayFailure(code: "conflict", message: "Session changed or is still synchronizing. Your configuration change was not sent.", retryable: true, details: nil)
         }
     }
 
@@ -263,7 +268,8 @@ final class SessionMutationService {
         for model: ModelRef,
         sessionID: String,
         expectedRevision: Int,
-        expectedRuntimeGeneration: String
+        expectedRuntimeGeneration: String,
+        sendAdmission: @escaping @MainActor () -> Bool
     ) async throws {
         struct Params: Encodable {
             let sessionId, provider, modelId: String
@@ -296,9 +302,10 @@ final class SessionMutationService {
         )
         let _: MutationResponse = try await executor.perform(
             method: "session.setContextWindow",
-            commandID: commandID
+            commandID: commandID, replayAdmission: sendAdmission
         ) {
-            try await client.request("session.setContextWindow", params)
+            try Self.requireConfigurationSend(sendAdmission)
+            return try await client.request("session.setContextWindow", params)
         }
     }
 

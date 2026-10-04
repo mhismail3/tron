@@ -60,7 +60,7 @@ final class ProfileGatewayFixture {
     func connect(capabilities: [String] = ["sessions.v1"]) async throws {
         let hello: JSONValue = .object([
             "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(6), "minProtocolVersion": .number(6),
+            "protocolVersion": .number(7), "minProtocolVersion": .number(7),
             "machineId": .string(profile.machineId), "machineName": .string(profile.label),
             "gatewayChannel": .string("stable"), "capabilities": .array(capabilities.map(JSONValue.string)),
         ])

@@ -75,7 +75,7 @@ struct AppModelEventTests {
         )
         let connected = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
         try await socket.waitUntilSent(count: 1)
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         try await connected.value
 
         let snapshot = try SessionScenarioBuilder(seed: 9_301).openingTail(targetEncodedBytes: 4_096)
@@ -116,7 +116,7 @@ struct AppModelEventTests {
             let model = AppModel(client: client)
             do {
                 let profile = GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
-                await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+                await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
                 try await model.connectHostedGateway(profile: profile, token: "fixture")
                 let snapshot = try SessionScenarioBuilder(seed: 9302).openingTail(targetEncodedBytes: 4096)
                 model.installHostedSubscribedSnapshot(snapshot)

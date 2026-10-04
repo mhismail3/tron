@@ -556,7 +556,7 @@ actor HostedKnowledgeSocket: GatewaySocketConnection {
     init(gateway: HostedKnowledgeGateway, replacement: Bool = false) {
         self.gateway = gateway
         let machineID = replacement ? "fixture-knowledge-replacement" : "fixture-knowledge"
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":6,\"minProtocolVersion\":6,\"machineId\":\"\(machineID)\",\"machineName\":\"Studio server\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"knowledge.v1\",\"knowledge-library-rows.v1\",\"knowledge-curation.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":7,\"minProtocolVersion\":7,\"machineId\":\"\(machineID)\",\"machineName\":\"Studio server\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"knowledge.v1\",\"knowledge-library-rows.v1\",\"knowledge-curation.v1\"]}".utf8)]
         Task { await gateway.attach(self) }
     }
 

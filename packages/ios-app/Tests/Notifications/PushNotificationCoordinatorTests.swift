@@ -19,7 +19,7 @@ private func canonicalAppAttestKey(_ label: String) -> String {
 }
 
 private func pushHelloFrame() -> Data {
-    Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+    Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
 }
 
 @Suite("Push notification registration")
@@ -1237,7 +1237,7 @@ struct PushNotificationCoordinatorTests {
     ) async throws -> (GatewayClient, ScriptedGatewaySocket) {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"fixture-version","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-1","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"fixture-version","protocolVersion":7,"minProtocolVersion":7,"machineId":"machine-1","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
         _ = try await client.connect(profile: profile, token: "token")
         return (client, socket)
     }

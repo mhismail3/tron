@@ -540,6 +540,40 @@ package struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendabl
     }
 }
 
+/// Gateway-owned admission category. Null on the wire means ready; the key is
+/// required in protocol 7, so missing readiness cannot silently enable controls.
+package enum SessionConfigurationBlocker: String, Codable, Hashable, Sendable {
+    case ready, running, queued, settling, mutation, interaction, unavailable
+
+    package init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() { self = .ready; return }
+        let raw = try value.decode(String.self)
+        guard let decoded = Self(rawValue: raw), decoded != .ready else {
+            throw DecodingError.dataCorruptedError(in: value, debugDescription: "Invalid configuration blocker")
+        }
+        self = decoded
+    }
+
+    package func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        if self == .ready { try value.encodeNil() }
+        else { try value.encode(rawValue) }
+    }
+
+    package var message: String? {
+        switch self {
+        case .ready: nil
+        case .running: "Stop the session before changing its configuration."
+        case .queued: "Clear or finish queued work before changing configuration."
+        case .settling: "Finishing the session. Configuration will be available shortly."
+        case .mutation: "Another session change is finishing."
+        case .interaction: "Complete the session’s pending interaction first."
+        case .unavailable: "Session configuration is temporarily unavailable."
+        }
+    }
+}
+
 package struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Gateway's bounded authoritative queue capacity. Rich queue projections
     /// exceeding this limit are invalid and must not reach row rendering.
@@ -551,6 +585,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
     package var revision: Int
     package var eventSequence: Int
     package var phase: SessionPhase
+    package var configurationBlocker: SessionConfigurationBlocker
     /// Exact Gateway/Pi admission capability. Older compatible snapshots omit
     /// it and use the conservative running-phase fallback at presentation.
     package var acceptsQueuedPrompts: Bool? = nil
@@ -604,7 +639,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
 
     package init(
         sessionId: String, runtimeGeneration: String, revision: Int, eventSequence: Int, phase: SessionPhase,
-        acceptsQueuedPrompts: Bool? = nil, forkBoundary: TranscriptForkBoundary? = nil, name: String?,
+        configurationBlocker: SessionConfigurationBlocker = .ready, acceptsQueuedPrompts: Bool? = nil, forkBoundary: TranscriptForkBoundary? = nil, name: String?,
         cwd: String, parentSessionId: String?, model: ModelRef?, thinkingLevel: String,
         availableThinkingLevels: [String], contextUsage: ContextUsage?, stats: SessionStats,
         queueRevision: Int, queuedItems: [QueuedMessage], pendingPrompt: PendingPrompt? = nil,
@@ -624,6 +659,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         self.revision = revision
         self.eventSequence = eventSequence
         self.phase = phase
+        self.configurationBlocker = configurationBlocker
         self.acceptsQueuedPrompts = acceptsQueuedPrompts
         self.forkBoundary = forkBoundary
         self.name = name
@@ -856,6 +892,8 @@ package struct SessionContextPresentation: Hashable, Sendable {
     package let runtimeGeneration: String
     package let sessionID: String
     package let phase: SessionPhase
+    package let configurationBlocker: SessionConfigurationBlocker
+    package var configurationLockedReason: String? { configurationBlocker.message ?? (phase.isActive ? "Stop the session before changing its configuration." : nil) }
     package let operationKind: SessionOperationState.Kind?
     package let compactionQueued: Bool
     package let contextUsage: ContextUsage?
@@ -877,6 +915,7 @@ package struct SessionContextPresentation: Hashable, Sendable {
         runtimeGeneration = snapshot.runtimeGeneration
         sessionID = snapshot.sessionId
         phase = snapshot.phase
+        configurationBlocker = snapshot.configurationBlocker
         operationKind = snapshot.operation?.kind
         compactionQueued = snapshot.compactionQueued == true
         contextUsage = snapshot.contextUsage

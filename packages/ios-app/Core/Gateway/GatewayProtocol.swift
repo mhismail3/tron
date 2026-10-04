@@ -135,6 +135,7 @@ package struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedErro
 }
 
 package enum PreparedSessionEventData: Sendable, Equatable {
+    case configuration(SessionConfigurationBlocker)
     case progress(TranscriptItem)
     case compaction(TranscriptItem)
     case toolProgress(ToolExecutionState)
@@ -384,6 +385,10 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
             guard let envelope = try? adapter.decode(SessionEventEnvelope.self) else { return .none }
             let preparedData: PreparedSessionEventData
             switch topic {
+            case "session.configuration":
+                if let value = envelope.data.objectValue?["configurationBlocker"],
+                   let blocker = try? value.decode(SessionConfigurationBlocker.self) { preparedData = .configuration(blocker) }
+                else { preparedData = .invalid }
             case "session.progress":
                 if let message = envelope.data.objectValue?["message"], message != .null,
                    let item = try? message.decode(TranscriptItem.self),

@@ -5,6 +5,28 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
+        XCTAssertFalse(thinking.isEnabled, "Foreground Stop alone must not make settling configuration editable")
+        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].exists)
+        keepScreenshot(named: "post-stop-configuration-settling")
+        app.buttons["Release terminal settlement"].tap()
+        let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)
+        wait(for: [enabled], timeout: 5)
+        thinking.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
+        keepScreenshot(named: "post-stop-configuration-ready")
+    }
+
+    @MainActor
     func testIntegrationDestinationsHaveOneDoneButtonThroughSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -11,7 +11,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     private struct CloseResponse: Decodable { let closed: Bool }
     private struct ReceiptParams: Encodable { let commandId: String; let method: String }
     private struct ReceiptResponse: Decodable { let status: String; let result: JSONValue? }
-    private struct ModelParams: Encodable { let sessionId: String; let provider: String; let modelId: String; let commandId: String }
+    private struct ModelParams: Encodable { let sessionId: String; let provider: String; let modelId: String; let commandId: String; let expectedRuntimeGeneration: String; let expectedModel: JSONValue }
     private struct UpdatedResponse: Decodable { let updated: Bool }
 
     private final class MemoryProfileMetadataStore: GatewayProfileMetadataStoring {
@@ -131,7 +131,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             defer { rawSession.invalidateAndCancel() }
             let raw = rawSession.webSocketTask(with: probeRequest)
             raw.resume()
-            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(6)])
+            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(7)])
             try await raw.send(.data(hello))
             _ = try await raw.receive()
             try await control("close", port: port, token: proxyToken, closeCode: 1013)
@@ -145,7 +145,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             // bytes, so GatewayFramePolicy checks the inflated frame. A frame at
             // the ceiling must decode through the production socket.
             let socket = GatewaySocketFactory.urlSession.makeConnection(probeRequest, nil)
-            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(6)])
+            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(7)])
             try await socket.send(hello)
             _ = try await socket.receive()
             try await control("inject-frame", port: port, token: proxyToken, bytes: GatewayFramePolicy.maximumInboundBytes)
@@ -204,7 +204,8 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         // SDK phases. Explicitly choose the fixture provider before testing
         // admission; ambient/default credentials must never decide this case.
         let selected: UpdatedResponse = try await firstClient.request("session.setModel", ModelParams(
-            sessionId: created.sessionId, provider: "tron-e2e", modelId: "e2e-model", commandId: UUID().uuidString))
+            sessionId: created.sessionId, provider: "tron-e2e", modelId: "e2e-model", commandId: UUID().uuidString,
+            expectedRuntimeGeneration: opened.session.runtimeGeneration, expectedModel: try opened.session.model.map { try JSONValue.encode($0) } ?? .null))
         XCTAssertTrue(selected.updated)
         let configured = try await synchronizedOpen(client: firstClient, sessionID: created.sessionId)
         XCTAssertEqual(configured.session.model?.provider, "tron-e2e")
