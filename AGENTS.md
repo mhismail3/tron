@@ -175,6 +175,9 @@ process you start.
   running.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
+- Reproduce load-dependent failures inside the test process (constrained
+  workers, an in-process hog, an injected delay). Never load the whole Mac with
+  busy loops: other agents' checks and the Stable Gateway share it.
 - Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`, and
   never stop a process or release a simulator, lane or lease another session
   holds. Stop only processes you started, and ask before stopping anything you
