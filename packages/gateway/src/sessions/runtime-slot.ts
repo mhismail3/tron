@@ -35,6 +35,8 @@ import {
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
+import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import type { HomeMemoryPort } from "../home/home-owner.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -462,6 +464,12 @@ export interface RuntimeSlotDependencies {
    * to. `unnamed` is the only state in which the explicit creation profile
    * applies. */
   homeProfile?: (sessionId: string) => "home" | "ordinary" | "unnamed";
+  /** Tron Home's request seam for one session id. Asked once per runtime
+   * creation, never for a fork or an ordinary session. */
+  homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
+  /** Tron Home's memory. The slot only reports that canonical entries changed;
+   * the memory owns what it reads, how long it waits and how much it spends. */
+  homeMemory?: HomeMemoryPort;
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
   homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
@@ -535,6 +543,10 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
+  /** The open Home activation of the live runtime, undefined for every ordinary
+   * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
+   * with the runtime it applies to. */
+  private homeRequestPolicy: HomeRequestPolicy | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
@@ -1684,8 +1696,30 @@ export class RuntimeSlot {
       const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
       if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
+      this.homeRequestPolicy = home
+        ? this.dependencies.homeRequestPolicy?.(sessionManager.getSessionId())
+        : undefined;
+      const homeRequestPolicy = this.homeRequestPolicy;
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
-      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
+      const baseStream = created.session.agent.streamFunction;
+      // The guard is INNERMOST, so it validates the exact request the
+      // provider-facing base stream receives: after `abortAwareStream` and after
+      // the compaction policy's summary-focus rewrite. Installed outermost, it
+      // would run before both and never see them.
+      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(
+        homeRequestPolicy ? homeRequestPolicy.wrapStreamFunction(baseStream) : baseStream,
+      ));
+      if (homeRequestPolicy) {
+        // Outermost on both: the request is cut after the SDK's own projection,
+        // and the digest expectation is recorded after every SDK context stage.
+        created.session.agent.transformContext = homeRequestPolicy.wrapTransformContext(
+          created.session.agent.transformContext,
+        );
+        created.session.agent.prepareRequest = homeRequestPolicy.wrapPrepareRequest(
+          created.session,
+          created.session.agent.prepareRequest,
+        );
+      }
       this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
       this.contextPolicies.set(created.session, contextPolicy);
@@ -1731,7 +1765,10 @@ export class RuntimeSlot {
       navigateTree: async (targetId, options) => {
         this.assertAutomationMayNotReplaceSession();
         const result = await this.runtime.session.navigateTree(targetId, options);
-        if (!result.cancelled) this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
+        if (!result.cancelled) {
+          this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
+          this.noteCanonicalEntriesCommitted();
+        }
         return result;
       },
       switchSession: (sessionPath, options) => {
@@ -3649,6 +3686,7 @@ export class RuntimeSlot {
         // path below settles; before that point canonical durability is still
         // provisional and must not be projected as memory coverage.
         this.activeOperationId = undefined;
+        this.homeRequestPolicy?.settle(settledOperationId);
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;
         this.retry = undefined;
@@ -3930,6 +3968,7 @@ export class RuntimeSlot {
               reclassifiedAdmission.resolveDisposition("foreground");
               const displacedOwner = this.activeOperationId;
               this.activeOperationId = reclassifiedAdmission.id;
+              this.homeRequestPolicy?.transferOperation(displacedOwner, reclassifiedAdmission.id);
               const invocation = this.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
                 id: reclassifiedAdmission.id,
@@ -4229,6 +4268,9 @@ export class RuntimeSlot {
       }
       case "entry_appended":
         this.summaryContentDirty = true;
+        // Custom entries — context edits, extension callbacks — reach the log
+        // only here, and they change what the memory projects just as messages do.
+        this.noteCanonicalEntriesCommitted();
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
           // Keep this compatibility path for extension/custom persistence, but
           // ordinary Pi tool results arrive through message_end below.
@@ -4245,6 +4287,7 @@ export class RuntimeSlot {
         // new session's first prompt updates its title without a Gateway restart.
         this.summaryContentDirty = true;
         this.scheduleSnapshot();
+        this.noteCanonicalEntriesCommitted();
         if (event.message.role === "toolResult") {
           // Pi invokes listeners immediately before appending this exact
           // object. Verify canonical call-ID ownership in the next microtask;
@@ -5870,6 +5913,21 @@ export class RuntimeSlot {
     return canonicalToolResultCallIDs(this.runtime.session.sessionManager).has(toolCallId);
   }
 
+  /**
+   * Tron Home's memory follows the canonical log, not the slot's lane: the owner
+   * re-reads what a commit appended and drains its pump under its own bounds, so
+   * nothing here waits on it. Pi emits `message_end` immediately before the
+   * canonical append, so the report is deferred one microtask; the read is
+   * idempotent and the request path re-reads before it renders, so a report that
+   * lands early costs one incremental read and nothing else.
+   */
+  private noteCanonicalEntriesCommitted(): void {
+    if (this.liveProfile() !== "home") return;
+    const homeMemory = this.dependencies.homeMemory;
+    if (!homeMemory) return;
+    queueMicrotask(() => { homeMemory.entriesCommitted(this.id); });
+  }
+
   private observeCanonicalToolResultHandoff(
     message: Extract<AgentMessage, { role: "toolResult" }>,
   ): void {
@@ -6134,6 +6192,10 @@ export class RuntimeSlot {
           // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.activeOperationId;
           this.activeOperationId = item.id;
+          // The follow-up is part of the same activation: its boundary entry and
+          // its frozen memory view must not change, only the operation identity
+          // Tron now reports.
+          this.homeRequestPolicy?.transferOperation(syntheticOwner, item.id);
           this.operation = {
             id: item.id,
             kind: "prompt",
@@ -7082,6 +7144,11 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
+          // The canonical leaf immediately before Pi sees the input is the exact
+          // activation start: the input's own entry is appended inside
+          // `session.prompt` below, and steering later inserts entries after it,
+          // never before it.
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
           this.phase = "running";
@@ -7137,6 +7204,7 @@ export class RuntimeSlot {
         if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
         this.pendingQueueAdmission = undefined;
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
@@ -7217,6 +7285,7 @@ export class RuntimeSlot {
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         this.settleOperationWork(operationId);
         if (terminalLifecycle === "failed") {
@@ -7336,6 +7405,7 @@ export class RuntimeSlot {
         });
         this.invocations.delete(invocationId);
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
@@ -8253,6 +8323,9 @@ export class RuntimeSlot {
           ...(options.label ? { label: options.label } : {}),
         });
         if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
+        // Navigation rewrites the branch the memory projects: entries the branch
+        // no longer holds become omitted, and the view is folded again.
+        this.noteCanonicalEntriesCommitted();
         this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
         this.summaryContentDirty = true;
         completed = true;

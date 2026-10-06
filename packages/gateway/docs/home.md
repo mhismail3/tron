@@ -2,10 +2,10 @@
 
 Tron Home is an opt-in persistent conversation, one per Gateway installation:
 `~/.tron` and `~/.tron-dev` each own their own Home. This document owns what
-Home does today. It is deliberately narrow: Home is *designatable* and has a
-curated runtime, and until the memory, task and request-policy slices land it
-appears to clients as an ordinary session. Ordinary sessions are unaffected by
-every rule here.
+Home does today: its designation record, its curated runtime, its memory, and the
+request seam that sends each activation the memory's view instead of the
+canonical transcript. Tasks, the wake inbox and Home's own client surface are
+later slices. Ordinary sessions are unaffected by every rule here.
 
 ## The record
 
@@ -154,10 +154,64 @@ The Gateway log carries one record per designation lifecycle outcome:
 `home.unavailable`, `home.refused` (warning). `home.status` is the bounded
 runtime projection. See [observability.md](observability.md).
 
+## Activations
+
+An **activation** is one admitted input and everything it triggers: its tool loop,
+the SDK's retries and continuations, and any steering or follow-up that joins the
+same run. It opens at Tron's prompt admission, where the session's canonical leaf
+is captured immediately before the input reaches Pi (so the input's own entry, and
+every later steering entry, is inside the activation), it is renamed when Tron
+transfers the run's owning operation to a dequeued follow-up, and it closes when
+Tron settles the operation that owns it.
+
+Every provider request of an activation carries exactly three things:
+
+1. the session's system messages, as they stood before the activation's start,
+2. ONE memory view, frozen at the activation's first request (see below), and
+3. the activation's own messages, from its start entry onward.
+
+Prior activations are never re-sent, and the memory view is never persisted: a
+canonical transcript of the whole conversation stays the only durable history, and
+Home's continuity comes from the view. That view is a `custom` message the seam
+inserts; `newMessages`, `message_end` and the session JSONL never carry it.
+
+Three wrappers enforce it, all fail-closed (no activation, no provider request,
+and the refusal is a canonical assistant error entry the user can read):
+
+| wrapper | where | what it does |
+| --- | --- | --- |
+| `prepareRequest` | outermost | cuts the request into system messages + memory view + the activation's own messages |
+| `transformContext` | outermost | refuses unless the activation's non-system messages survived the SDK's context stages unchanged, then records the single-use digest expectation |
+| `streamFunction` | innermost | refuses unless the outgoing request carries the activation nonce exactly once with the recorded digest |
+
+Only a runtime whose profile is Home's gets them. A fork of the Home session is a
+different session id, hence an ordinary session with no seam and no activation.
+
+## Memory and readiness
+
+Home owns ONE `EpisodicMemory` ([episodic-memory.md](episodic-memory.md)) over the
+Home session's canonical entries, outside the session's runtime so an idle
+eviction, a reload or a profile change cannot lose it. The runtime only reports
+that canonical entries changed (persisted messages, custom entries, navigation);
+the memory re-reads the log after its cursor and builds its tree in the background
+under its own bounds.
+
+There are **no defaults** (decision D4). The record's optional `memory` field holds
+the model and the token budget, written by `HomeOwner.configureMemory`; the
+receipted `home.configureMemory` mutation over it is the client surface. A Home
+whose memory is unconfigured, blocked, or unable to place the activation's start
+entry refuses every activation with a readable reason and makes zero provider
+requests.
+
+An activation waits for the memory before it sends anything (the recipe's "wait,
+don't cut"): the wait covers the lines the view will carry, so an unbuilt line is
+never sent, and it is abortable, so the user's Stop cancels it and leaves their
+message in the log unanswered. Later steps of the same activation reuse the frozen
+text byte-for-byte.
+
 ## Not built yet
 
-Home has no memory projection, no request-local context seam, no task
-coordination, no wake inbox, no iOS surface of its own, and no scheduled or
-background work. It is one conversation with a curated runtime. Those are
-separately approved slices of the same epic, and none of them changes the rules
-above without updating this document.
+Home has no task coordination, no wake inbox, no iOS surface of its own, and no
+scheduled or background work. It is one conversation whose turns run on its
+memory. Those are separately approved slices of the same epic, and none of them
+changes the rules above without updating this document.

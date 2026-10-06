@@ -3,7 +3,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
   EpisodicMemoryError, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
-  EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
+  EPISODIC_PLACEHOLDER, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
   type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicSummarizer,
@@ -163,13 +163,26 @@ export class EpisodicMemory {
   /** Re-read the canonical session, ingest what the cursor has not seen, and
    * drain the pump. A source read failure blocks with `source-unavailable`. */
   async entriesCommitted(sessionId: string): Promise<void> {
+    await this.entriesIngested(sessionId);
+    await this.drain();
+  }
+
+  /**
+   * Re-read the canonical session and ingest what the cursor has not seen,
+   * WITHOUT waiting for the pump: the pump is started, not awaited. A turn loop
+   * waits only for the lines it will send (`whenReady`), never for summaries of
+   * messages that come after them, so a request's latency cannot depend on
+   * summarizing its own input and a slow compactor cannot stall a turn that does
+   * not need its output.
+   */
+  async entriesIngested(sessionId: string): Promise<void> {
     this.assertOpen();
     if (sessionId !== this.dependencies.sessionId) throw new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session");
     await this.mutex.run(async () => {
       if (this.blocked) return;
       await this.ingest();
     });
-    await this.drain();
+    void this.drain().catch(() => {});
   }
 
   /** Resolves when every part of the view covering messages before `cut` is a
@@ -192,6 +205,57 @@ export class EpisodicMemory {
       }
       this.waiters.push(waiter);
     });
+  }
+
+  /**
+   * How many of the messages this memory holds are at or before one canonical
+   * entry of the branch it last read: gist §6's cut, the number of view lines a
+   * request that starts at that entry covers. `null` is an empty history, so the
+   * cut is 0.
+   *
+   * Undefined when the entry is not on the branch this memory last read, or when
+   * it has not read the source at all: a cut cannot be guessed, because a wrong
+   * cut would render a view that does not stop where the activation starts.
+   */
+  cutAtEntry(entryId: string | null): number | undefined {
+    this.assertOpen();
+    if (entryId === null) return 0;
+    const position = this.sourceBranch.findIndex(entry => entry.id === entryId);
+    if (position < 0 || this.sourceCursor === null) return undefined;
+    let cut = 0;
+    for (let index = 0; index <= position; index += 1) {
+      const messageIndex = this.entryIndex.get(this.sourceBranch[index]!.id);
+      if (messageIndex !== undefined && messageIndex + 1 > cut) cut = messageIndex + 1;
+    }
+    return cut;
+  }
+
+  /**
+   * The agent-facing view up to `cut` (gist §5.1): one `id+n|text` line per
+   * part, oldest first, newlines flattened to single spaces. It covers the
+   * whole history before the cut, so a request that starts there never sends a
+   * message it does not own.
+   *
+   * A part that straddles the cut is expanded into the children under it: those
+   * are built whenever their parent is (a parent is composed from its children
+   * and revoked with them), so the expansion cannot render a placeholder. The
+   * placeholder is still the value for a part `whenReady` did not cover, which
+   * is display state, never a served request (the request layer waits first).
+   */
+  renderView(cut: number): { text: string; lines: number; bytes: number } {
+    this.assertOpen();
+    const parts: EpisodicViewPart[] = [];
+    const add = (part: EpisodicViewPart): void => {
+      if (part.start >= cut) return;
+      if (part.level === 0 || part.start + part.span <= cut) { parts.push(part); return; }
+      const half = part.span / 2;
+      add({ level: part.level - 1, index: part.index * 2, start: part.start, span: half });
+      add({ level: part.level - 1, index: part.index * 2 + 1, start: part.start + half, span: half });
+    };
+    for (const part of this.view) add(part);
+    const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${viewLine(this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
+    const text = lines.join("\n");
+    return { text, lines: lines.length, bytes: utf8Bytes(text) };
   }
 
   /** Clear the blocked state and restart the pump (departure 5). The cause must
@@ -800,4 +864,10 @@ export class EpisodicMemory {
   private assertOpen(): void {
     if (this.closed) throw new EpisodicMemoryError("closed", "Episodic memory was disposed");
   }
+}
+
+/** One view line's text: newlines flattened to single spaces (gist §5.1), and
+ * the placeholder for a part whose node is not built. */
+function viewLine(text: string | undefined): string {
+  return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/\n+/gu, " ");
 }

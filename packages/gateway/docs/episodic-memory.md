@@ -6,9 +6,10 @@ layer can read at a constant size. The algorithms are the public OptChat
 recipe's (its sections are cited as `gist §N` in the code); Tron's departures
 are listed below with their reasons.
 
-Nothing calls this module from a live session yet. Wiring it to Home's commits
-is a later task, so this document describes the module's own contract and not
-any chat behavior.
+This document owns the module's own contract. Home is its one live caller today:
+the Home owner holds one memory over the Home session's canonical entries, feeds
+it the commits the runtime reports, and sends each activation the view it renders
+([home.md](home.md)).
 
 ## The owner and its inputs
 
@@ -309,11 +310,22 @@ count, the blocked state and its reason, and reserved/used tokens.
   timings and worst synchronous slice, the context-encoding sizes, and the
   1,000-message invalidation (`npm run test:scale`).
 
-## Not wired yet
+## Home's use of this module
 
-- No live session calls `entriesCommitted`; Home's commits are a later task.
-- No Gateway startup path constructs an `EpisodicMemory`, so nothing supplies the
-  model, the budget or the diagnostic sink, and nothing persists this module's
-  records yet.
-- The compactor's product prompt is fixed here; per-project instructions and the
-  agent-facing view/`zoom` tools are the request layer's business.
+- `HomeOwner` holds one memory per Home session and reports canonical commits to
+  it (`HomeMemory.noteEntriesCommitted`) from the runtime's message, custom-entry
+  and navigation events. Nothing awaits that path, so a commit never blocks a
+  session's lane; the memory owns what it reads and how much it spends.
+- The request layer computes its cut with `cutAtEntry` (how many of the memory's
+  messages are at or before the activation's start entry), starts the pump with
+  `entriesIngested` — which does not wait for it — and then waits only for the
+  lines it will send with `whenReady(cut)`. A request's latency therefore never
+  depends on summarizing its own input.
+- `renderView(cut)` is the agent-facing view (`id+n|text`, oldest first); Home
+  wraps it in its attribution block. A line that `whenReady` did not cover still
+  renders the placeholder, which is display state: no served request can see it.
+- The model and the budget are the Home record's (`home.configureMemory`); what
+  this module persists about spend, blocking and its cursor is described above.
+
+Still the request layer's business: the `zoom`/`date` tools, and any per-project
+compactor instructions.

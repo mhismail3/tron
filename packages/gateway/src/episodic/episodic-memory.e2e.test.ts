@@ -831,6 +831,45 @@ describe("episodic memory end to end", () => {
     expect(tightMemory.status().blocked?.reason).toBe("permanent-failure");
     await tightMemory.dispose();
   }, 300_000);
+
+  it("cuts the view at a canonical entry and renders only what precedes it", async () => {
+    // The request layer's cut (gist §6): how many summarized messages a turn
+    // starting at one canonical entry covers. A turn sends the view up to that
+    // cut and nothing after it, so the render must stop there.
+    const fx = await fixture("cut", { viewBytes: 4_096, jobs: 2, retryMs: 1 });
+    const memory = await openMemory(fx);
+    await memory.entriesCommitted(fx.sessionId);
+    const first = fx.manager.getBranch()[0]!;
+    expect(memory.cutAtEntry(null)).toBe(0);
+    expect(memory.cutAtEntry(first.id)).toBe(1);
+    expect(memory.cutAtEntry("entry-that-no-branch-holds")).toBeUndefined();
+
+    // A non-message entry between two messages: the cut counts the messages at or
+    // before the named entry, whatever the entry's own type is.
+    fx.manager.appendMessage(fauxAssistantMessage(fauxText("first reply")));
+    fx.manager.appendCustomEntry("tron.bookkeeping", { private: "bookkeeping" });
+    const bookkeeping = fx.manager.getLeafId()!;
+    fx.manager.appendMessage(userMessage("third message"));
+    await memory.entriesCommitted(fx.sessionId);
+    expect(memory.cutAtEntry(bookkeeping)).toBe(2);
+    const leaf = fx.manager.getLeafId()!;
+    expect(memory.cutAtEntry(leaf)).toBe(3);
+
+    const view = memory.renderView(2);
+    const lines = view.text.split("\n");
+    expect(lines.length).toBeGreaterThan(0);
+    expect(view.bytes).toBe(Buffer.byteLength(view.text, "utf8"));
+    for (const line of lines) {
+      const [address, text] = line.split("|");
+      const [start, span] = address!.split("+").map(Number) as [number, number];
+      expect(text).toBeTruthy();
+      // Nothing covering the third message may be rendered.
+      expect(start + span).toBeLessThanOrEqual(2);
+    }
+    const full = memory.renderView(3);
+    expect(full.lines).toBeGreaterThan(view.lines);
+    await memory.dispose();
+  }, 300_000);
 });
 
 /** The live nodes as the oracle sees them, from the durable log. */

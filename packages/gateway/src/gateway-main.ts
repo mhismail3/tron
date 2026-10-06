@@ -49,6 +49,8 @@ import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
+import { createModelRuntimeSummarizer } from "./episodic/episodic-compactor.js";
+import { isVirtualModel } from "./providers/virtual-model.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
@@ -236,6 +238,21 @@ const sessions = new RuntimeRegistry({
     : logger.log("info", `Archived session returned to the dashboard on new work (${diagnostic.trigger})`, {
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
+  // Home's memory compactor runs on the Gateway's own ModelRuntime, exactly as
+  // Knowledge resolves the model for its calls; never on a session's runtime,
+  // whose lifetime is the session's. A virtual (routed) model cannot back it:
+  // routing is decided per request from the canonical projection (#412 Q4).
+  homeMemorySummarizer: (model) => {
+    const resolved = modelForConfig(modelRuntime, `${model.provider}/${model.id}`);
+    if (!resolved) return { refusal: "unavailable" as const };
+    if (isVirtualModel(resolved)) return { refusal: "virtual-model" as const };
+    return { summarizer: createModelRuntimeSummarizer(modelRuntime, resolved) };
+  },
+  homeMemoryDiagnostic: (record) => logger.log(record.level === "error" ? "warning" : record.level, "Tron Home memory diagnostic", {
+    event: record.event, source: "home",
+    ...(record.reason === undefined ? {} : { reason: record.reason }),
+    ...(record.counts === undefined ? {} : { counts: record.counts }),
+  }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to
