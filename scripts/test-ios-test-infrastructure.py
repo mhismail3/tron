@@ -3391,6 +3391,24 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
     16. Shared-link ping/pong counts increment both at FIFO admission and actual
         forwarding, so reported frames do not match the observed event timeline.
 
+    W-53 (issue #424): the real-UI lane reuses the same fixture, lane and lease.
+
+    17. `run-ui` patches the hosted unit target (or no target at all), so the UI
+        runner never receives the fixture environment, every journey skips for a
+        missing fixture, and the cross-layer receipt is green.
+    18. `run-ui` runs something other than the journeys it owns, or loses the
+        `--only-testing` selection when the lease holder starts it again.
+    19. A journey's evidence directory omits the result bundle, the Gateway's
+        runtime log, the proxy's link statistics or the XCTest summary, or names
+        a digest that does not match the bytes it claims to describe, or reports
+        a status that is not the run's final one.
+    20. The journey that backgrounds the app leaves no record of a retired
+        connection and a new one in the Gateway's own log, or a journey that
+        never connects is reported as having reconnected.
+    21. `run-ui` leaves the lane's simulator booted, leaves the Gateway fixture it
+        failed with running, or leaves the hosted app paired for the unit lane
+        that shares this worktree's app.
+
     #445: the fixture and its fault proxy are not the parent Gateway's children.
 
     22. A shell spawned by the Stable or Debug Gateway carries that Gateway's
