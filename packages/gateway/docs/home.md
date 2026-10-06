@@ -121,6 +121,18 @@ owner.
 - `home.disable` is a mutation. It sets `enabled: false` with `generation + 1`;
   the session stays an ordinary session afterwards. A record whose session is
   gone is only marked disabled.
+- `home.configureMemory` is a mutation with a command-id receipt:
+  `{ model, tokenBudget }` must name a registered physical model — a virtual or
+  unavailable one is refused — and a budget from 1 to 100000000. It is refused on
+  a disabled Home, and it resumes a block its change addresses (see
+  [Recovery](#recovery)). It returns the bounded memory projection.
+- `home.resumeMemory` is a mutation with a command-id receipt. It clears a
+  `retries-exhausted`, `permanent-failure` or `source-unavailable` block and
+  returns the bounded memory projection; a `budget-exhausted` block is refused
+  with the way out.
+- `home.context` is a read with no parameters: the bounded request context of
+  Home's current or last activation (see [Activations](#activations)), never a
+  message body.
 
 A profile change must take effect before the session's next prompt, so the live
 runtime is **replaced in place** inside the slot's own serialized lane: the idle
@@ -130,6 +142,27 @@ presentation and its (possibly never-persisted) in-memory session manager all
 survive. If the session is not idle the mutation is refused with a retryable
 `busy` error and nothing changes. A session with no live runtime needs no
 rebuild: the next runtime creation reads the record.
+
+## The terminal client
+
+`tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the session-based
+terminal client, and today it is the only surface that can designate Home,
+configure its memory and recover it. Its `/home` line is resolved without
+touching the Gateway, so a bad argument is answered before any RPC:
+
+| command | what it does |
+| --- | --- |
+| `/home`, `/home status` | `home.status`, printed as the bounded projection |
+| `/home designate [provider/id]` | `home.designate`; without a model the Gateway's default is used |
+| `/home disable` | `home.disable` |
+| `/home memory <provider/id> <tokenBudget>` | `home.configureMemory`, then the memory projection it returns |
+| `/home resume` | `home.resumeMemory`, then the memory projection it returns |
+| `/home context` | `home.context`: the activation's start, whether it is open, the request's sizes and its refusal |
+
+An unknown or incomplete command prints the usage line; a value that cannot be
+read — a model that is not spelled `provider/id`, a budget that is not a whole
+number of tokens — is reported with its own reason. A refused RPC is printed and
+the chat continues.
 
 ## Fork and disable both keep the transcript's tool loadout
 
