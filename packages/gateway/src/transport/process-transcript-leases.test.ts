@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -49,7 +50,8 @@ describe("ProcessTranscriptLeaseStore", () => {
         blocked = true;
         const count = vi.mocked(sessions.readOnlySubagentTranscriptPage).mock.calls.length;
         reads.push(store.page("client", lease.leaseId).catch(error => error));
-        await vi.waitFor(() => expect(sessions.readOnlySubagentTranscriptPage).toHaveBeenCalledTimes(count + 1));
+        await waitFor(() =>
+          vi.mocked(sessions.readOnlySubagentTranscriptPage).mock.calls.length === count + 1, "the retired viewer to start its physical read");
         store.closeOwned("client", lease.leaseId);
         store.closeOwned("client", lease.leaseId); // repeated close must not release physical ownership
       }
@@ -181,7 +183,7 @@ describe("ProcessTranscriptLeaseStore", () => {
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(),
     );
     const first = store.page("client-1", opened.leaseId, undefined, undefined, "revision-1");
-    await vi.waitFor(() => expect(reads).toBe(2));
+    await waitFor(() => reads === 2, "both concurrent reads to be in flight");
     const staleConcurrent = store.page("client-1", opened.leaseId, undefined, undefined, "revision-1");
     await Promise.resolve();
     expect(reads).toBe(2);
@@ -218,7 +220,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const requestedPage = store.page(
       "client-1", opened.leaseId, undefined, undefined, "revision-1",
     );
-    await vi.waitFor(() => expect(reads).toBe(2));
+    await waitFor(() => reads === 2, "both concurrent reads to be in flight");
     const invalidation = (store as unknown as { invalidate: (leaseId: string) => Promise<void> })
       .invalidate(opened.leaseId);
     await Promise.resolve();
@@ -281,11 +283,10 @@ describe("ProcessTranscriptLeaseStore", () => {
     const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
     revision = "revision-2";
     await writeFile(path, "{\"changed\":true}\n");
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
-      "session.processTranscript.changed",
-      "parent-1",
-      expect.objectContaining({ leaseId: opened.leaseId, revision: "revision-2", total: 1 }),
-    ));
+    await waitFor(() => notify.mock.calls.some(([topic, sessionId, payload]) =>
+      topic === "session.processTranscript.changed" && sessionId === "parent-1"
+      && payload?.leaseId === opened.leaseId && payload.revision === "revision-2" && payload.total === 1
+    ), "the invalidation announcement with its refreshed total");
     // Invalidation announces revision-2 but revision-1 remains the client's
     // acknowledged lease generation until this same-lease refresh completes.
     await expect(store.page(
@@ -319,11 +320,10 @@ describe("ProcessTranscriptLeaseStore", () => {
     const opened = await openLease(store,
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify,
     );
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
-      "session.processTranscript.changed",
-      "parent-1",
-      expect.objectContaining({ leaseId: opened.leaseId, revision: "revision-2" }),
-    ));
+    await waitFor(() => notify.mock.calls.some(([topic, sessionId, payload]) =>
+      topic === "session.processTranscript.changed" && sessionId === "parent-1"
+      && payload?.leaseId === opened.leaseId && payload.revision === "revision-2"
+    ), "the invalidation announcement");
     store.releaseClient("client-1");
   });
 
@@ -345,11 +345,10 @@ describe("ProcessTranscriptLeaseStore", () => {
     const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
     replaced = true;
     await writeFile(path, "{\"replaced\":true}\n");
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
-      "session.processTranscript.changed",
-      "parent-1",
-      expect.objectContaining({ leaseId: opened.leaseId, closed: true, reason: "session unavailable" }),
-    ));
+    await waitFor(() => notify.mock.calls.some(([topic, sessionId, payload]) =>
+      topic === "session.processTranscript.changed" && sessionId === "parent-1"
+      && payload?.leaseId === opened.leaseId && payload.closed === true && payload.reason === "session unavailable"
+    ), "the exact-authorization close announcement");
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
 
@@ -409,7 +408,7 @@ describe("ProcessTranscriptLeaseStore", () => {
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(), undefined,
       { viewerId: "viewer-1", parentSubscriptionToken: "token-1", signal: controller.signal },
     );
-    await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalled());
+    await waitFor(() => vi.mocked(sessions.resolveReadOnlySubagentPath).mock.calls.length > 0, "the admission read to start");
     controller.abort();
     releaseAdmission?.();
     await expect(opening).rejects.toMatchObject({ code: "conflict", retryable: true });
@@ -437,7 +436,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const store = new ProcessTranscriptLeaseStore(sessions);
     const first = openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
     const second = openLease(store, "client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
-    await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalledTimes(2));
+    await waitFor(() => vi.mocked(sessions.resolveReadOnlySubagentPath).mock.calls.length === 2, "both admissions to start");
     await expect(openLease(store,
       "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn(),
     )).rejects.toMatchObject({ code: "busy", retryable: true });
@@ -468,7 +467,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const openings = Array.from({ length: 8 }, (_, index) => openLease(store,
       "client-1", `parent-${index}`, `process-${index}`, `child-${index}`, "run-1", undefined, vi.fn(),
     ));
-    await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalledTimes(8));
+    await waitFor(() => vi.mocked(sessions.resolveReadOnlySubagentPath).mock.calls.length === 8, "all eight admissions to start");
     await expect(openLease(store,
       "client-1", "parent-9", "process-9", "child-9", "run-1", undefined, vi.fn(),
     )).rejects.toMatchObject({ code: "busy", retryable: true });

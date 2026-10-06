@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
 import { GatewayClientError } from "./gateway-client.js";
 import { connectResilient, listSessions, synchronizeTerminalSession } from "./terminal-chat.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return { id, cwd: "/workspace", firstMessage: id, ...extra };
@@ -58,7 +59,7 @@ describe("terminal chat synchronization", () => {
     expect(synchronized.completionRevision).toBe(19);
     expect(order).toEqual(["session.open", "session.sync", "install", "session.attention.read"]);
     releaseAttention();
-    await vi.waitFor(() => expect(attentionAttempts).toBe(2));
+    await waitFor(() => attentionAttempts === 2, "the retried attention read");
     expect(request.mock.calls.filter(([method]) => method === "session.attention.read"))
       .toEqual(Array(2).fill(["session.attention.read", { sessionId: "session", throughCompletionRevision: 19 }, 8_000]));
   });

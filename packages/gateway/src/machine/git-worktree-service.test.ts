@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { GitWorktreeService } from "./git-worktree-service.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -128,9 +129,10 @@ describe("GitWorktreeService", () => {
       await expect(service.prepare(root, { mode: "newBranchWorktree", branch: "feature/hook-failure" }))
         .rejects.toMatchObject({ details: { outcomeUnknown: true }, retryable: false });
       pid = Number(await readFile(pidFile, "utf8"));
-      await vi.waitFor(() => {
-        expect(() => process.kill(pid!, 0)).toThrow();
-      }, { timeout: 2_000 });
+      await waitFor(() => {
+        try { process.kill(pid!, 0); return false; }
+        catch { return true; }
+      }, "the hook's background process to exit");
       // The command's uncertain outcome does not grant cleanup authority.
       expect(await git(root, "branch", "--list", "feature/hook-failure")).toContain("feature/hook-failure");
     } finally {

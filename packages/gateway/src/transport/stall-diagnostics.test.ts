@@ -2,6 +2,7 @@ import type { EventLoopUtilization } from "node:perf_hooks";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
+import { waitFor } from "../../test-support/wait-for.js";
 import { GatewayServer } from "./server.js";
 import { eventLoopDelayLatenessMs, formatHostEvidence, formatStallEvidence, formatResourceSample, parseHostSysctl, probeHostKernel, resourceSampleLevel, ResourceSampler, HEAP_USED_INFO_STEP_BYTES, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
 
@@ -471,7 +472,7 @@ it("attaches stall evidence to a delayed-heartbeat record", async () => {
   utilization.clock.active += 7_000; utilization.clock.idle += 3_000;
   now += interval + 7_000;
   await vi.advanceTimersByTimeAsync(interval);
-  await vi.waitFor(() => expect(log.mock.calls.some((call) => call[2]?.event === "gateway.event-loop-delay")).toBe(true));
+  await waitFor(() => log.mock.calls.some((call) => call[2]?.event === "gateway.event-loop-delay"), "the delayed-heartbeat record");
   const [level, message, metadata] = log.mock.calls.find((call) => call[2]?.event === "gateway.event-loop-delay")!;
   expect(level).toBe("warning");
   expect(metadata).toMatchObject({ event: "gateway.event-loop-delay", source: "transport", durationMs: 7_000 });

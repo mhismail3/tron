@@ -7,6 +7,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPromp
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -55,7 +56,7 @@ async function fixture(extension?: string) {
   return { root, agentDir, cwd, tronHome, registry, slot, faux, contexts, response };
 }
 async function settle(slot: { isBusy: boolean }) {
-  await vi.waitFor(() => expect(slot.isBusy).toBe(false), { timeout: 5_000, interval: 10 });
+  await waitFor(() => !slot.isBusy, "the turn to settle");
 }
 
 describe("Tron workspace through the pinned runtime", () => {

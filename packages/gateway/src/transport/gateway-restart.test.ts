@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const client: ClientContext = {
   id: "phone",
@@ -109,7 +110,7 @@ describe("Gateway administrative restart", () => {
     let finishRename!: () => void;
     const gateway = service({ workRegistry: registry, rename: () => new Promise<void>((resolve) => { finishRename = resolve; }) });
     const pending = gateway.invoke(client, "session.rename", { commandId: "rename-command", sessionId: "session-1", name: "Renamed" });
-    await vi.waitFor(() => expect(finishRename).toBeTypeOf("function"));
+    await waitFor(() => typeof finishRename === "function", "the rename to be pending");
     expect(registry.facts()).toEqual([
       expect.objectContaining({ kind: "rpc-mutation", method: "session.rename", sessionId: "session-1" }),
     ]);
@@ -281,9 +282,9 @@ describe("Gateway administrative restart", () => {
     });
 
     const first = gateway.invoke(client, "push.registration.upsert", params("command-one"));
-    await vi.waitFor(() => expect(calls).toBe(1));
+    await waitFor(() => calls === 1, "the first registration call");
     const second = gateway.invoke(client, "push.registration.upsert", params("command-two"));
-    await vi.waitFor(() => expect(registry.size).toBe(2));
+    await waitFor(() => registry.size === 2, "both registered mutations");
     registry.beginDrain();
     releaseFirst();
 

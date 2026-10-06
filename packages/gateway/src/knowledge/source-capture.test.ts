@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { captureSource, isPrivateAddress, refreshSourcePreview } from "./source-capture.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const homes: string[] = [];
 const command = (value: string) => `source-test-${value}`;
@@ -220,19 +221,23 @@ describe("safe source capture", () => {
   it("serializes concurrent redirect aliases at the source publication owner", async () => {
     const { store } = await fixture();
     // The fetcher pauses on the fake clock, so both alias reads are provably in
-    // flight together. `waitFor` advances that clock while it polls, so the race
-    // is real but costs no wall time.
+    // flight together. `waitFor` never moves a clock a test owns, so the poll
+    // advances it here; the race is real but costs no wall time. A capture that
+    // fails still surfaces from the awaited promise rather than as a timeout.
     vi.useFakeTimers();
     const fetcher = async (url: URL) => {
       await new Promise(resolve => setTimeout(resolve, 10));
       if (["https://example.com/alias-a", "https://example.com/alias-b"].includes(url.toString())) return new Response(null, { status: 302, headers: { location: "https://example.com/canonical" } });
       return new Response("concurrent canonical", { headers: { "content-type": "text/plain" } });
     };
+    let settled = false;
     const captures = Promise.all([
       captureSource(store, { commandId: command("concurrent-a"), url: "https://example.com/alias-a", scope: "research" }, { fetcher, resolveHost: publicResolver }),
       captureSource(store, { commandId: command("concurrent-b"), url: "https://example.com/alias-b", scope: "research" }, { fetcher, resolveHost: publicResolver }),
     ]);
-    const [first, second] = await vi.waitFor(() => captures, { interval: 10, timeout: 3_000 });
+    void captures.then(() => { settled = true; }, () => { settled = true; });
+    await waitFor(async () => { await vi.advanceTimersByTimeAsync(10); return settled; }, "both concurrent alias captures to settle");
+    const [first, second] = await captures;
     expect(first.record.id).toBe(second.record.id);
     expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
   });
