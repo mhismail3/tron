@@ -871,9 +871,8 @@ enum ModelPickerLayout {
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
-    /// Non-nil while the owner cannot accept a model change (the Gateway
-    /// rejects it during session work); cards and rows show but do not select.
-    var selectionLockedReason: String? = nil
+    /// The session owner supplies admission/receipt state; browsing stays live.
+    var selectionAvailability: ModelSelectionAvailability = .ready
     @State private var search = ""
     @State private var showingSearch = false
     @State private var closingSearch = false
@@ -899,14 +898,9 @@ struct ModelPicker: View {
         let sections = self.sections
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if !sections.recent.isEmpty || !sections.latest.isEmpty || selectionLockedReason != nil {
-                    // One measured block: the sheet opens exactly this tall.
+                if !sections.recent.isEmpty || !sections.latest.isEmpty {
+                    // Availability changes only control chrome, never rail fit.
                     VStack(alignment: .leading, spacing: 8) {
-                        if let selectionLockedReason {
-                            Label(selectionLockedReason, systemImage: "lock.fill")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                        }
                         if !sections.recent.isEmpty {
                             sectionTitle("Recent")
                             cardRail(sections.recent)
@@ -965,7 +959,10 @@ struct ModelPicker: View {
         .preference(key: TronSheetFitHeightKey.self, value: fitHeight)
         .tronScrollEdgeChrome()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                if case .blocked(let reason) = selectionAvailability {
+                    ModelSelectionLockInfoLink(reason: reason)
+                }
                 if !showingSearch {
                     Button { beginSearch() } label: {
                         Image(systemName: "magnifyingglass")
@@ -1046,14 +1043,18 @@ struct ModelPicker: View {
             accent: accent,
             cornerRadius: 16,
             isSelected: { $0.ref == selection },
-            isEnabled: selectionLockedReason == nil,
+            isEnabled: selectionAvailability.canSelect,
             accessibilityLabel: ModelRailCard.accessibilityLabel,
-            accessibilityValue: { $0.ref == selection ? "Selected" : "" },
+            accessibilityValue: { model in
+                if model.ref == selection && selectionAvailability.isApplying { return "Applying configuration" }
+                return model.ref == selection ? "Selected" : ""
+            },
             action: { select($0.ref) }
         ) { model in
             ModelRailCard(
                 model: model,
-                selectionAccent: model.ref == selection ? rowAccent(isSelected: true) : nil
+                selectionAccent: model.ref == selection ? rowAccent(isSelected: true) : nil,
+                isApplying: model.ref == selection && selectionAvailability.isApplying
             )
             #if HOSTED_TEST
             .modifier(ModelPickerHostedActionModifier(
@@ -1103,12 +1104,18 @@ struct ModelPicker: View {
         let identity = model.pickerIdentity
         return Button { select(model.ref) } label: {
             HStack(spacing: 12) {
-                Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
-                    .foregroundStyle(
-                        settingsTheme?.accent
-                            ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
-                    )
-                    .frame(width: 22)
+                Group {
+                    if selection == model.ref && selectionAvailability.isApplying {
+                        TronPulseLoadingIndicator(accent: accent, size: 14)
+                    } else {
+                        Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
+                            .foregroundStyle(
+                                settingsTheme?.accent
+                                    ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
+                            )
+                    }
+                }
+                .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(model.displayName)
@@ -1151,10 +1158,11 @@ struct ModelPicker: View {
             cornerRadius: 14,
             tintOpacity: selection == model.ref ? 0.18 : 0.08
         )
-        .disabled(selectionLockedReason != nil)
+        .disabled(!selectionAvailability.canSelect)
         .accessibilityLabel([model.displayName, summary, identity]
             .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(selection == model.ref ? "Selected" : "")
+        .accessibilityValue(selection == model.ref && selectionAvailability.isApplying
+            ? "Applying configuration" : selection == model.ref ? "Selected" : "")
         #if HOSTED_TEST
         .modifier(ModelPickerHostedActionModifier(
             id: "picker.row.\(model.provider)/\(model.id)",
@@ -1179,7 +1187,7 @@ struct ModelPicker: View {
     }
 
     private func select(_ ref: ModelRef) {
-        guard selectionLockedReason == nil else { return }
+        guard selectionAvailability.canSelect else { return }
         selection = ref
     }
 
