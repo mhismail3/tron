@@ -263,6 +263,19 @@ manifests plus the disposable installed tree with `npm ci` on failure. Do not su
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 
+`test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
+layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote
+through the real Gateway, plus the Tron-level observation of that corpus reopened
+from a staged copy. It is generated, not hand-authored — `npm run
+record:pi-corpus` runs the recorder under the installed SDK, and
+`vitest.corpus.config.ts` owns that run because recording rewrites committed
+fixtures. Regenerate the corpus with `npm run record:pi-corpus` **before** bumping
+the family, so `src/sessions/pi-persisted-state-corpus.integration.test.ts`
+reopens state the previous SDK actually wrote and fails when an existing session,
+per-chat tool selection, model, saved provider key or MCP credential stops
+resolving. `test-fixtures/pi-sdk/README.md` describes what the corpus contains and
+which values are environment tokens.
+
 After each candidate update, inventory every release-note/API/documentation delta
 against its owning Gateway seam and record whether it is inherited, adapted with
 evidence, deferred with rationale and acceptance criteria, or not applicable.
