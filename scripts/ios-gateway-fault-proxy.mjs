@@ -276,10 +276,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   });
   server.timeout = 10_000;
   // Name the fixture's own idle retirement in proxy.log, which CI retains, so a
-  // reset client is attributed in one step. A listener replaces Node's
-  // implicit destroy, so it destroys the socket itself.
+  // reset client is attributed in one step. The socket's armed bound tells a
+  // keep-alive expiry (5 s) from a stalled client (10 s). A listener replaces
+  // Node's implicit destroy, so it destroys the socket itself.
   server.on("timeout", socket => {
-    console.log(JSON.stringify({ event: "proxy.client-idle-timeout", elapsedMs: elapsedMilliseconds(), idleTimeoutMs: server.timeout, shaped: Boolean(shaper) }));
+    console.log(JSON.stringify({ event: "proxy.client-idle-timeout", elapsedMs: elapsedMilliseconds(), idleTimeoutMs: socket.timeout, shaped: Boolean(shaper) }));
     socket.destroy();
   });
   server.on("connection", socket => {

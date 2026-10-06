@@ -732,7 +732,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         // lane's hello is held so the race is decided by which lane can
         // answer, not by whether this host completes the LAN TLS handshake
         // inside the 250 ms stagger. The stagger preference itself is owned
-        // by GatewayClientTransportTests' scripted lane-race cases.
+        // by the scripted GatewayClientLanLaneTests suite.
         try await control("hold-hello", port: port, token: proxyToken)
         let lanClient = makeClient(networkPath: onWifi)
         _ = try await lanClient.connect(profile: paired, token: token)

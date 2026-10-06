@@ -2131,7 +2131,9 @@ how fast it reads a shaped body, its listener bounds measure client inactivity
 rather than that pacing: no whole-request deadline, and the idle bound is
 disarmed while a body part waits in the shared schedule and re-armed once it is
 forwarded, so a stalled client is still retired. Each such retirement writes a
-`proxy.client-idle-timeout` line to `proxy.log`, which CI retains. A separate common-proxy
+`proxy.client-idle-timeout` line to `proxy.log`, which CI retains; its
+`idleTimeoutMs` is the bound armed on that socket, so Node's 5 s keep-alive
+expiry of an idle connection (5000) is distinct from a stalled client (10000). A separate common-proxy
 blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
 `system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
 fixture counters increment once at the proxy forwarding transition, rather
@@ -2164,7 +2166,7 @@ scripts/ios-gateway-e2e-test iterate
 then runs `testRacesLanAndTailscaleLanes` — the E-3c two-lane case — instead of
 the boundary test. Its first connect holds the saved lane's hello, so the LAN
 win it asserts does not depend on the host finishing the LAN TLS handshake
-inside the 250 ms stagger; scripted `GatewayClientTransportTests` own the
+inside the 250 ms stagger; the scripted `GatewayClientLanLaneTests` suite owns the
 stagger preference. It needs the Mac to hold a private IPv4/IPv6 address, because
 the lane binds that address (the main listener's port on it) and the case fails
 at the pairing response's missing `lanEndpoints` without one; the case drives
