@@ -10,12 +10,14 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_TARGET = "TronMobileTests"
-# Fixture-owned suites run through the harness that owns their fixture, never
-# through the ordinary hosted runner, where every case would correctly skip for
-# a missing fixture. Each value is that harness's own command for the suite.
-FIXTURE_ONLY_TESTS = {
+# Inputs proven only by a real fixture runner: fixture-owned suites (which skip
+# under the ordinary hosted runner, where every case would correctly skip for a
+# missing fixture) and the fault proxy that shapes every real-Gateway case. Each
+# value is the owning harness and its command for that input.
+FIXTURE_RUNNER_INPUTS = {
     "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift": ("scripts/ios-gateway-e2e-test", "all"),
     "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift": ("scripts/ios-gateway-e2e-test", "run-ui"),
+    "scripts/ios-gateway-fault-proxy.mjs": ("scripts/ios-gateway-e2e-test", "all"),
 }
 # Focus only sources with an audited owner. Other Settings files remain full-suite
 # until their test ownership has been established.
@@ -195,7 +197,7 @@ def test_commands(paths: list[str], *, has_deletions: bool = False) -> list[list
     ordinary_paths = []
     for raw_path in paths:
         relative = _relative(raw_path)
-        owned = FIXTURE_ONLY_TESTS.get(relative or "")
+        owned = FIXTURE_RUNNER_INPUTS.get(relative or "")
         if owned is None:
             ordinary_paths.append(raw_path)
         elif list(owned) not in fixture_commands:
@@ -216,7 +218,7 @@ def test_commands(paths: list[str], *, has_deletions: bool = False) -> list[list
 
 
 def fixture_runners() -> set[str]:
-    return {runner for runner, _ in FIXTURE_ONLY_TESTS.values()}
+    return {runner for runner, _ in FIXTURE_RUNNER_INPUTS.values()}
 
 
 def main() -> int:

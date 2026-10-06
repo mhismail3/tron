@@ -103,10 +103,8 @@ final class DashboardChromeTests: XCTestCase {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(type, in: $0) }
     }
 
-    private func waitUntil(file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(4)
-        while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertTrue(condition(), "Hosted dashboard did not reach the expected state", file: file, line: line)
+    private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async throws {
+        try await awaitHostedCondition("Hosted dashboard reached the expected state", condition)
     }
 
     private func attach(_ view: UIView, name: String) async throws {

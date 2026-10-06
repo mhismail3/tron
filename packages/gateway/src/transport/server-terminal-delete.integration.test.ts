@@ -9,6 +9,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { GatewayServer } from "./server.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -20,14 +21,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("probe did not bind");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
 }
 
 describe("terminal attachment revocation after session deletion", () => {
@@ -91,12 +84,12 @@ describe("terminal attachment revocation after session deletion", () => {
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       await new Promise<void>((resolve) => socket.once("open", () => resolve()));
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-      await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+      await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
       return { socket, frames };
     };
     const request = async (client: { socket: WebSocket; frames: any[] }, id: string, method: string, params: Record<string, string>) => {
       client.socket.send(JSON.stringify({ type: "request", id, method, params }));
-      await waitUntil(() => client.frames.some((frame) => frame.id === id));
+      await waitFor(() => client.frames.some((frame) => frame.id === id), "the client's response frame");
       return client.frames.find((frame) => frame.id === id);
     };
     const openAndSync = async (client: { socket: WebSocket; frames: any[] }, prefix: string) => {
@@ -194,12 +187,12 @@ describe("terminal attachment revocation after session deletion", () => {
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       await new Promise<void>((resolve) => socket.once("open", () => resolve()));
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-      await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+      await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
       return { socket, frames };
     };
     const request = async (client: { socket: WebSocket; frames: any[] }, id: string, method: string, params: Record<string, string>) => {
       client.socket.send(JSON.stringify({ type: "request", id, method, params }));
-      await waitUntil(() => client.frames.some((frame) => frame.id === id));
+      await waitFor(() => client.frames.some((frame) => frame.id === id), "the client's response frame");
       return client.frames.find((frame) => frame.id === id);
     };
     const openAndSync = async (client: { socket: WebSocket; frames: any[] }, prefix: string) => {
@@ -216,8 +209,8 @@ describe("terminal attachment revocation after session deletion", () => {
     await request(second, "second-attach", "terminal.attach", { terminalId: "terminal-1" });
 
     (slot as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
-    await waitUntil(() => slot.isDisposed);
-    await waitUntil(() => sessionClosed.mock.calls.length === 1);
+    await waitFor(() => slot.isDisposed, "the slot disposal");
+    await waitFor(() => sessionClosed.mock.calls.length === 1, "the session closed signal");
     expect(sessionClosed).toHaveBeenCalledWith(slot.id);
 
     for (const [client, prefix] of [[first, "first"], [second, "second"]] as const) {

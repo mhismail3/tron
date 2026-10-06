@@ -373,10 +373,8 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    private func waitForRouting(_ predicate: () -> Bool) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertTrue(predicate(), "Mounted routing did not settle before its deadline")
+    private func waitForRouting(_ predicate: @escaping @MainActor () -> Bool) async throws {
+        try await awaitHostedCondition("Mounted routing settled", predicate)
     }
 
     /// Waits until the write log carries the `C-6` cancel control frame for the
@@ -456,21 +454,21 @@ final class SessionSheetPresentationTests: XCTestCase {
                                "Presentation activation must not inspect an unreconciled session")
                 model.completeHostedReconciliationAggregate(succeeded: true)
                 try await gateway.respond(at: 1, method: "session.workspace.inspect", result: Self.workspaceInspection)
-                await self.waitForWorkspace(probe, matching: .notRepository)
+                try await self.waitForWorkspace(probe, matching: .notRepository)
 
                 activity.value = .covered
                 model.beginHostedReconciliationAggregate()
                 // Let SwiftUI retire the presentation task before reactivation.
                 try await Task.sleep(for: .milliseconds(80))
                 activity.value = .active
-                await self.waitForWorkspace(probe, matching: .loading)
+                try await self.waitForWorkspace(probe, matching: .loading)
                 let waitingRequestCount = await gateway.socket.sentFrames().count
                 XCTAssertEqual(waitingRequestCount, 2)
                 model.completeHostedReconciliationAggregate(succeeded: true)
                 try await gateway.respond(at: 2, method: "session.workspace.inspect", result: Self.workspaceInspection)
-                await self.waitForWorkspace(probe, matching: .notRepository)
+                try await self.waitForWorkspace(probe, matching: .notRepository)
                 model.beginHostedReconciliationAggregate()
-                await self.waitForWorkspace(probe, matching: .loading)
+                try await self.waitForWorkspace(probe, matching: .loading)
                 model.completeHostedReconciliationAggregate(succeeded: true)
                 try await gateway.waitForRequest(at: 3)
                 var replacement = snapshot
@@ -481,7 +479,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                 try await Task.sleep(for: .milliseconds(80))
                 XCTAssertEqual(probe.presentation, .loading, "A retired runtime's decode failure cannot publish into its successor")
                 try await gateway.respond(at: 4, method: "session.workspace.inspect", result: Self.workspaceInspection)
-                await self.waitForWorkspace(probe, matching: .notRepository)
+                try await self.waitForWorkspace(probe, matching: .notRepository)
                 self.capture(controller, name: "manage-session-foreground-refreshed")
             }
             await gateway.client.close()
@@ -493,12 +491,10 @@ final class SessionSheetPresentationTests: XCTestCase {
     }
 
     private func waitForWorkspace(_ probe: SessionWorkspaceRefreshProbe,
-                                  matching value: SessionWorkspaceRowPresentation) async {
-        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            MainActor.assumeIsolated { probe.presentation == value }
-        }, object: nil)
-        let result = await XCTWaiter.fulfillment(of: [changed], timeout: 2)
-        XCTAssertEqual(result, .completed, "The mounted production sheet must publish the current read without another activation")
+                                  matching value: SessionWorkspaceRowPresentation) async throws {
+        try await awaitHostedCondition("The mounted production sheet must publish the current read without another activation") {
+            probe.presentation == value
+        }
     }
 
     func testHTMLDocumentUsesOnlyCustomTopBlur() async throws {
@@ -649,8 +645,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                     XCTAssertFalse(self.views(of: UIActivityIndicatorView.self, in: controller.view).isEmpty)
                     state.ready = true
                     state.active = true
-                    let request = await XCTWaiter.fulfillment(of: [arrived], timeout: 3)
-                    XCTAssertEqual(request, .completed)
+                    try await awaitHostedEvents([arrived])
                     // Finish the appearance/readiness callbacks before allowing the
                     // real loader's response to publish. No sheet or tap wakes it.
                     for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
@@ -1062,11 +1057,7 @@ final class SessionSheetPresentationTests: XCTestCase {
         let state = JSONReaderContinuityState()
         try await withSheet(JSONReaderContinuityFixture(state: state)) { controller in
             let reader = try XCTUnwrap(self.views(of: TronDocumentTextView.self, in: controller.view).first)
-            let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                MainActor.assumeIsolated { reader.text.contains("last-original-item") }
-            }, object: nil)
-            let result = await XCTWaiter.fulfillment(of: [loaded], timeout: 2)
-            XCTAssertEqual(result, .completed)
+            try await awaitHostedCondition("JSON reader loaded") { reader.text.contains("last-original-item") }
             reader.selectedRange = NSRange(location: 40, length: 8)
             reader.setContentOffset(CGPoint(x: 0, y: 120), animated: false)
             let offset = reader.contentOffset
@@ -1080,11 +1071,7 @@ final class SessionSheetPresentationTests: XCTestCase {
             XCTAssertEqual(reader.contentOffset.y, offset.y, accuracy: 0.01)
             XCTAssertTrue(reader.text.contains("last-original-item"))
             state.value = .object(["replacement": .string("new-source-content")])
-            let replaced = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                MainActor.assumeIsolated { reader.text.contains("new-source-content") }
-            }, object: nil)
-            let replacement = await XCTWaiter.fulfillment(of: [replaced], timeout: 2)
-            XCTAssertEqual(replacement, .completed)
+            try await awaitHostedCondition("JSON reader replaced its source") { reader.text.contains("new-source-content") }
             XCTAssertFalse(reader.text.contains("last-original-item"))
         }
     }
@@ -1162,14 +1149,12 @@ final class SessionSheetPresentationTests: XCTestCase {
             window.rootViewController = nil
             previous?.makeKeyAndVisible()
         }
-        let appearance = await XCTWaiter.fulfillment(of: [appeared], timeout: 3)
-        XCTAssertEqual(appearance, .completed)
+        try await awaitHostedEvents([appeared])
         let presented = try XCTUnwrap(host.presentedViewController)
         if let transition = presented.transitionCoordinator {
             let completed = expectation(description: "Sheet transition completed")
             if transition.animate(alongsideTransition: nil, completion: { _ in completed.fulfill() }) {
-                let result = await XCTWaiter.fulfillment(of: [completed], timeout: 3)
-                XCTAssertEqual(result, .completed)
+                try await awaitHostedEvents([completed])
             }
         }
         presented.view.layoutIfNeeded()

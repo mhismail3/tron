@@ -76,6 +76,13 @@ class IOSVerifyTestSelectionTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "ui-run.json").read_text()), ["run-ui"])
             self.assertEqual(json.loads((root / "ui-stopped.json").read_text()), ["stop"])
 
+    def test_fault_proxy_change_runs_the_real_boundary_fixture(self):
+        # The proxy shapes every boundary case's traffic; a unit run skips them all.
+        self.assertEqual(
+            test_commands(["scripts/ios-gateway-fault-proxy.mjs"]),
+            [["scripts/ios-gateway-e2e-test", "all"]],
+        )
+
     def test_ordinary_suite_still_uses_unit_runner(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

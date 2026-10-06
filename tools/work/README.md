@@ -294,6 +294,10 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   their declared suites only when every non-private top-level declaration is a
   test suite; shared helpers or unrecognized syntax force the complete unit
   target. Audited Settings UI sources select their explicit owning suites.
+  The fixture-only `RealGatewayPiBoundaryTests` and the fault proxy that shapes
+  its cases (`scripts/ios-gateway-fault-proxy.mjs`) dispatch to the real
+  `scripts/ios-gateway-e2e-test all` runner, where an ordinary run would skip
+  every case.
   Any deletion or rename anywhere in the branch diff forces the complete unit
   target because `{paths}` omits files that do not exist at HEAD. Unmapped
   source paths and empty selections also run the full target. Do not infer a
@@ -317,6 +321,15 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   Jobs keep real failure conclusions;
   only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
   unapplied by maintainer decision; no schedule or deployment is added.
+  The workflow's concurrency group stays ref-scoped, and it cancels in progress
+  only for `pull_request` events. A started base-branch push run therefore always
+  finishes - its result is the evidence the epic's consecutive green `main`
+  pushes need - while GitHub's one pending run per group still lets the newest
+  pending `main` run supersede an older pending one. So the advisory-CI section's
+  base-branch evidence is that push run's own result, not the next land's
+  cancellation of it, and `land` cancels a merged pull request's own runs
+  (step 8) so it stops holding the macOS queue the base push run and later lands
+  need.
 - **CI policy's iOS infrastructure test** uses
   `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
   The workflow compares the available base and head trees directly (two-dot
@@ -665,6 +678,11 @@ work is committed. The `land` section of `.github/work.json` configures it.
    requires up-to-date branches and these checks, GitHub auto-merge could
    replace the wait in step 5; `land` does not rely on it.
 8. **After the merge.** Once GitHub reports the pull request as MERGED:
+   - It cancels the merged pull request's own queued or in-progress runs for the
+     merged head and branch, `pull_request` runs only, one reported line per run. The
+     merged run is stale and its macOS jobs hold the queue later lands need.
+     This is best effort: a failure to list or cancel the runs is printed as a
+     warning and never fails a land that already merged.
    - With `--needs-user-validation`, it reopens the issue if GitHub closed it.
      It then comments the exact text, adds `land.userValidationLabel` and sets
      Status to `dashboard.needsYouStatus`. The issue stays open until the
@@ -796,6 +814,12 @@ Project state and records every call. The live E2E covers GitHub itself.
     earlier run finished it. Another session's claim and a
     validation text that contradicts the merged body are refused. A merge at
     an older head or from a fork is not a resume.
+66. **A merged pull request's own runs keep holding the queue.** After the
+    merge (a resumed `land` and `steward --land` share the same after-merge
+    step), `land` cancels the merged branch's queued or in-progress
+    `pull_request` runs at the merged head and reports one line per run.
+    Completed runs and runs of another event, head or branch are left alone. A refused run list or cancellation is a warning, and never fails
+    a land that already merged.
 
 ## `cleanup`
 
@@ -810,10 +834,25 @@ A worktree is provably done when all of these hold:
 
 - it is a linked worktree under `claim.worktreeRoot`, never the primary
   checkout, on a claim branch (`<type>/<issue>-<slug>`), and not locked;
-- GitHub reports a pull request from that branch in this repository MERGED
-  into `claim.baseBranch`, and that pull request's head is the local branch
-  head. Ancestry is not used, because a squash merge leaves the branch head
-  outside the base branch;
+- the branch head is accounted for, in either of two ways:
+  - GitHub reports a pull request from that branch in this repository MERGED
+    into `claim.baseBranch`, and that pull request's head is the local branch
+    head. Ancestry is not used, because a squash merge leaves the branch head
+    outside the base branch;
+  - or the issue the branch claims is CLOSED and the branch holds nothing
+    beyond the one claim commit `start` created for it. That commit is
+    identified as `start`, the dashboard and `land` identify it: the only
+    commit in `<remote>/<base>..HEAD`, carrying both the issue's
+    `Work-Claim-Issue` and `Work-Claim-Session` trailers, and empty. `start`
+    makes it with `commit-tree` on the base tip's tree, so it has one parent
+    and the same tree as that parent; the content is what proves the claim
+    spent, because work amended or squashed into the commit keeps its message
+    and trailers. This is how an evidence-only task, which produces no pull
+    request, proves itself spent. A later base branch tip is not another
+    commit of this branch, so a claim made before it still qualifies. An open
+    issue, any commit beyond the claim, a single commit without that marker
+    for the issue, a single commit carrying changes, and a `<remote>/<base>`
+    that cannot be resolved all keep the worktree;
 - the worktree has no modified, staged or untracked files, and no merge,
   rebase, cherry-pick, revert or bisect in progress;
 - every ignored file matches a `cleanup.regenerableIgnored` glob. These are
@@ -829,7 +868,9 @@ For a worktree that is provably done, `cleanup`:
    own process group, bounded by its `timeoutSeconds`. These release what the
    worktree's own tooling holds outside it. A non-zero exit or a timeout keeps
    the worktree and prints the end of the command's output;
-2. checks every condition above again, since the commands take time;
+2. checks every condition above again, since the commands take time. A claim's
+   proof re-reads the issue state, because an issue can be reopened while a
+   release command runs; a merged pull request cannot unmerge;
 3. gives the owner read, write and search permission on every directory in the
    worktree through no-follow descriptors, so a replaced directory name cannot
    redirect permission changes outside it. Read-only generated output (the
@@ -838,13 +879,13 @@ For a worktree that is provably done, `cleanup`:
    keeps the worktree;
 4. runs `git worktree remove` without `--force`. Git deletes the regenerable
    ignored files with the worktree;
-5. deletes the local branch only if it is still at the merged head
-   (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings in
-   the shared Git config. The head check guards the short window after step
+5. deletes the local branch only if it is still at the head that proved it
+   done (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings
+   in the shared Git config. The head check guards the short window after step
    2; while the branch is checked out, the recheck already covers it;
-6. deletes the remote branch with a lease on the merged head, as `land` does.
-   A branch already gone is fine; a branch at any other commit is kept and
-   reported.
+6. deletes the remote branch with a lease on the head that proved it done —
+   the merged head, or the claim commit — as `land` does. A branch already
+   gone is fine; a branch at any other commit is kept and reported.
 
 Any other worktree is never touched and no release command runs for it.
 Without `--all`, `cleanup` refuses the current worktree with its reasons.
@@ -899,8 +940,8 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     the worktree, and a command past its timeout has its process group killed
     and keeps it too.
 58. **A branch that moved is deleted.** The remote branch is deleted only
-    with a lease on the merged head. A remote branch pushed to after the
-    merge is kept and reported.
+    with a lease on the head that proved the worktree done. A remote branch
+    pushed to after the merge, or after the claim commit, is kept and reported.
 59. **The worktree changes between the check and the removal.** A commit or a
     new file made while the release commands run keeps the worktree.
 60. **A dry run changes something.** `--dry-run` runs no release command and
@@ -920,3 +961,17 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     After assertions, fixture teardown walks the surviving payload without
     following symlinks, including directories renamed by the controlled race;
     captured pre-race names would leave read-only children behind on Python 3.9.
+70. **An evidence-only claim is removed while its branch still holds work, or
+    kept after it is spent.** `test_cleanup.py` removes a claim worktree whose
+    issue is CLOSED and whose branch is nothing but its empty claim commit,
+    including after the base branch has moved on, and keeps it for an open
+    issue, a `<remote>/<base>` it cannot resolve, any commit beyond the claim, a
+    single commit carrying no claim marker for the issue, a single empty commit
+    that is another issue's claim, and work amended or squashed into the claim
+    commit, which keeps its message and trailers. It also keeps a modified,
+    untracked or non-regenerable ignored file, an operation in progress, an
+    issue reopened while a release command ran, and a failed `gh` lookup, under
+    `--all` per worktree and, for one worktree, before anything is touched. With
+    no pull request the claim commit is the whole proof, so the remote claim
+    branch keeps its lease on exactly that commit, as for a merged worktree, and
+    a dry run of the same proof changes nothing.

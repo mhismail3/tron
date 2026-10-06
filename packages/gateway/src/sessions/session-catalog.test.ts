@@ -38,6 +38,7 @@ import {
   type SessionCatalogWatchHandle,
   type SessionCatalogWatchRequest,
 } from "./session-catalog.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes this file covers, written before the owner existed:
 // 1. A canonical file written while the index was not watching (a crash between
@@ -223,16 +224,6 @@ async function fixture(
     catalog,
     indexPath: join(state, "catalog-metadata-v2.json"),
   };
-}
-
-/** Wait for a condition the watcher's own timers produce. The watcher fires
- * outside the owner's lane, so `settled()` alone cannot observe it. */
-async function waitFor(check: () => boolean, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check() && Date.now() <= deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  expect(check(), "condition was not met in time").toBe(true);
 }
 
 /** A folder watcher a test drives by hand: it delivers exactly the events the
@@ -493,7 +484,7 @@ describe("SessionCatalog", () => {
     try {
       const restarted = new SessionCatalog({ catalogRoot: () => sessions, index, source });
       restarted.start();
-      while (parses.length === 0) await new Promise((resolve) => setImmediate(resolve));
+      await waitFor(() => parses.length > 0, "the first catalog parse to start");
       await restarted.dispose();
       // One batch (RECONCILE_CONCURRENCY candidates) at most: a shutdown that
       // waited for the other three batches would parse all 64 files.
@@ -628,7 +619,7 @@ describe("SessionCatalog", () => {
     const walks = vi.spyOn(source, "scan");
     const appendedAt = Date.now();
     await appendMessage(child, "an external writer appended", 1);
-    await waitFor(() => catalog.row(child)?.messageCount === 2, 5_000);
+    await waitFor(() => catalog.row(child)?.messageCount === 2, "the child's second catalog message");
     const observedInMs = Date.now() - appendedAt;
 
     // The Done-when bound: an external append reaches its row within one second.
@@ -656,7 +647,7 @@ describe("SessionCatalog", () => {
     // before writing so a fast first pass cannot escape instrumentation.
     const walks = vi.spyOn(source, "scan");
     await appendMessage(file, "two", 2);
-    await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     // The interval's own cut is what found it; no event was emitted.
     expect(walks).toHaveBeenCalled();
   });
@@ -683,17 +674,17 @@ describe("SessionCatalog", () => {
     // The replacement waits for the retry cadence instead of restarting in
     // place, so a watcher that fails at every attach cannot spin.
     expect(watch.requests).toHaveLength(1);
-    await waitFor(() => watch.requests.length === 2, 5_000);
+    await waitFor(() => watch.requests.length === 2, "the second watch request");
     expect(watch.closed[0]).toBe(true);
     expect(resets).toEqual([{ reason: "error" }]);
-    await waitFor(() => walks.mock.calls.length >= 1, 5_000);
+    await waitFor(() => walks.mock.calls.length >= 1, "a catalog walk");
     await catalog.settled();
     // Reads still come from the last good index, and the replacement watcher
     // sees the next external append.
     expect(catalog.row(file)?.messageCount).toBe(1);
     await appendMessage(file, "two", 1);
     watch.emit("workspace/a.jsonl");
-    await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.dispose();
   });
 
@@ -742,15 +733,15 @@ describe("SessionCatalog", () => {
 
     watch.fail = false;
     const walks = vi.spyOn(source, "scan");
-    await waitFor(() => watch.requests.length === 1, 5_000);
+    await waitFor(() => watch.requests.length === 1, "the first watch request");
     expect(resets).toHaveLength(1);
     // The attach is the first moment the folder can be read again, so the cut
     // that repairs everything the outage missed is read here and not earlier.
-    await waitFor(() => walks.mock.calls.length >= 1, 5_000);
+    await waitFor(() => walks.mock.calls.length >= 1, "a catalog walk");
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
     watch.emit("workspace/a.jsonl");
-    await waitFor(() => catalog.row(file)?.id === "id-a", 5_000);
+    await waitFor(() => catalog.row(file)?.id === "id-a", "the file's catalog identity");
     await catalog.dispose();
   });
 
@@ -766,7 +757,7 @@ describe("SessionCatalog", () => {
 
     const walks = vi.spyOn(source, "scan");
     watch.emit(null);
-    await waitFor(() => catalog.row(file)?.id === "id-a", 5_000);
+    await waitFor(() => catalog.row(file)?.id === "id-a", "the file's catalog identity");
     expect(walks).toHaveBeenCalledTimes(1);
   });
 
@@ -785,7 +776,7 @@ describe("SessionCatalog", () => {
     // the quiet spell forever, so without a ceiling no pass would ever run.
     const ticker = setInterval(() => watch.emit(null), 100);
     try {
-      await waitFor(() => outcomes.length > before, 5_000);
+      await waitFor(() => outcomes.length > before, "the next reconcile outcome");
     } finally {
       clearInterval(ticker);
     }
@@ -830,7 +821,7 @@ describe("SessionCatalog", () => {
     const replacement = join(sessions, "workspace", "replacement.jsonl");
     await writeSession(replacement, "id-a", sessions, ["one", "two", "three"]);
     await rename(replacement, file);
-    await waitFor(() => catalog.row(file)?.messageCount === 3, 5_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 3, "the file's third catalog message");
 
     const after = catalog.row(file)!;
     expect(after.fileIdentity).not.toBe(before.fileIdentity);
@@ -852,18 +843,18 @@ describe("SessionCatalog", () => {
     const project = join(staged, "proj");
     await writeSession(join(project, "moved.jsonl"), "id-moved", sessions, ["moved prompt"]);
     await rename(project, join(sessions, "proj"));
-    await waitFor(() => catalog.row(join(sessions, "proj", "moved.jsonl"))?.id === "id-moved", 10_000);
+    await waitFor(() => catalog.row(join(sessions, "proj", "moved.jsonl"))?.id === "id-moved", "the moved file's catalog identity");
 
     // A subagent run folder renamed inside the root: the folder event names both
     // the folder and its new name, so the transcript under the new one is read
     // and the path that no longer exists is not.
     const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
     await writeSession(child, "id-child", sessions, ["child prompt"]);
-    await waitFor(() => catalog.row(child)?.id === "id-child", 10_000);
+    await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
     const renamed = join(sessions, "parent", "producer", "run-2");
     await rename(dirname(child), renamed);
     const movedChild = join(renamed, "session.jsonl");
-    await waitFor(() => catalog.row(movedChild)?.id === "id-child", 10_000);
+    await waitFor(() => catalog.row(movedChild)?.id === "id-child", "the moved child's catalog identity");
     expect(catalog.row(child)).toBeUndefined();
     expect(catalog.row(movedChild)?.delegated).toBe(true);
     await catalog.dispose();
@@ -892,7 +883,7 @@ describe("SessionCatalog", () => {
     // then removes it; both names are non-transcript paths that are gone.
     const doomed = join(sessions, "workspace", "doomed.jsonl");
     await writeSession(doomed, "id-doomed", sessions, ["doomed"]);
-    await waitFor(() => catalog.row(doomed)?.id === "id-doomed", 5_000);
+    await waitFor(() => catalog.row(doomed)?.id === "id-doomed", "the doomed file's catalog identity");
     const quarantine = `${doomed}.tron-delete-0f0f0f0f`;
     await rename(doomed, quarantine);
     await rm(quarantine);
@@ -900,7 +891,7 @@ describe("SessionCatalog", () => {
     // The append fences every event above: one watch reports its events in
     // order, so a row published from this append means they were all resolved.
     await appendMessage(file, "after", 1);
-    await waitFor(() => catalog.row(file)?.messageCount === 2, 10_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.settled();
     expect(walks).not.toHaveBeenCalled();
     expect(catalog.rows().map((row) => row.id)).toEqual(["id-a"]);
@@ -923,10 +914,48 @@ describe("SessionCatalog", () => {
     const walks = vi.spyOn(source, "scan");
     await rm(dirname(dirname(child)), { recursive: true, force: true });
     await appendMessage(file, "after", 1);
-    await waitFor(() => catalog.row(file)?.messageCount === 2, 10_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.settled();
     expect(walks).not.toHaveBeenCalled();
     expect(catalog.rows().map((row) => row.id)).toEqual(["id-a"]);
+    await catalog.dispose();
+  });
+
+  it("treats a folder removed while a named parent is walked as absence, without a whole-folder pass", async () => {
+    // Linux reports the parent of an `rm -rf` while the removal is still in
+    // progress, so the walk of that parent can list a folder that is gone by the
+    // time it is read (#406). That folder is absent, not unreadable: its rows are
+    // re-read and dropped instead of a whole-folder pass. The race is driven by
+    // hand: each removal overlaps events naming the parent it empties.
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
+    const producers = Array.from({ length: 40 }, (_, attempt) => join(sessions, "parent", `producer-${attempt}`));
+    for (const [attempt, producer] of producers.entries()) {
+      await writeSession(join(producer, "run-1", "session.jsonl"), `id-child-${attempt}`, sessions, ["child"]);
+      // Empty folders lengthen each removal, widening the window the walk races.
+      for (let index = 0; index < 20; index += 1) await mkdir(join(producer, `empty-${index}`, "deep"), { recursive: true });
+    }
+    catalog.start();
+    await catalog.settled();
+    expect(catalog.rows()).toHaveLength(producers.length);
+
+    const walks = vi.spyOn(source, "scan");
+    const removals: Promise<void>[] = [];
+    for (const producer of producers) {
+      removals.push(rm(producer, { recursive: true, force: true }));
+      for (let index = 0; index < 5; index += 1) {
+        watch.emit("parent");
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+    await Promise.all(removals);
+    // The platform also names each removed folder once it is gone.
+    for (const producer of producers) watch.emit(relative(sessions, producer));
+    await waitFor(() => catalog.rows().length === 0, "the catalog to empty");
+    // A whole-folder pass would follow the unnamed-event debounce.
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_EVENT_DEBOUNCE_MS + 200));
+    await catalog.settled();
+    expect(walks).not.toHaveBeenCalled();
     await catalog.dispose();
   });
 
@@ -966,7 +995,7 @@ describe("SessionCatalog", () => {
     expect(catalog.row(file)?.messageCount).toBe(1);
 
     await rename(moved, sessions);
-    await waitFor(() => catalog.row(file)?.messageCount === 2, 15_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.dispose();
   });
 
@@ -994,7 +1023,7 @@ describe("SessionCatalog", () => {
     watch.fail = true;
     const walks = vi.spyOn(catalog, "reconcile");
     watch.emit(basename(sessions));
-    await waitFor(() => resets.length === 1, 5_000);
+    await waitFor(() => resets.length === 1, "the watcher reset");
     expect(resets).toEqual([{ reason: "unavailable" }]);
     // No cut ran for the event, and the row the folder proved stays published:
     // the file is not gone, the folder is.
@@ -1005,10 +1034,10 @@ describe("SessionCatalog", () => {
     await appendMessage(join(moved, "workspace", "a.jsonl"), "while unwatched", 1);
     await rename(moved, sessions);
     watch.fail = false;
-    await waitFor(() => watch.requests.length === 2, 5_000);
+    await waitFor(() => watch.requests.length === 2, "the second watch request");
     // The replacement attaches to the folder that is back and its own cut is
     // what publishes the append the outage could not see.
-    await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.dispose();
   });
 
@@ -1029,7 +1058,7 @@ describe("SessionCatalog", () => {
     const appends = vi.spyOn(index, "append");
     await rm(rolledBack);
     watch.emit("workspace/rolled-back.jsonl");
-    await waitFor(() => catalog.row(rolledBack) === undefined, 5_000);
+    await waitFor(() => catalog.row(rolledBack) === undefined, "the rolled-back file to leave the catalog");
     await catalog.settled();
 
     // An absent path is not read at all: no tail read and no whole-file parse,
@@ -1079,13 +1108,13 @@ describe("SessionCatalog", () => {
     const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
     await writeSession(child, "id-child", sessions, ["child prompt"]);
     watch.emit("parent/producer/run-1/session.jsonl");
-    await waitFor(() => catalog.row(child)?.id === "id-child", 5_000);
+    await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
     expect(catalog.row(child)?.delegated).toBe(true);
 
     const parent = join(sessions, "parent.jsonl");
     await writeSession(parent, "id-parent", sessions, ["parent prompt"]);
     watch.emit("parent.jsonl");
-    await waitFor(() => catalog.row(parent)?.id === "id-parent", 5_000);
+    await waitFor(() => catalog.row(parent)?.id === "id-parent", "the parent's catalog identity");
     await catalog.settled();
     expect(catalog.rows().map((row) => row.id).sort()).toEqual(["id-child", "id-parent"]);
     expect(catalog.row(parent)?.delegated).toBe(false);
@@ -1117,7 +1146,7 @@ describe("SessionCatalog", () => {
       for (let event = 0; event < eventsPerPath; event += 1) watch.emit(relative(sessions, path));
     }
 
-    await waitFor(() => catalog.rows().length === pathCount, 30_000);
+    await waitFor(() => catalog.rows().length === pathCount, "the catalog to reach every path");
     await catalog.settled();
     summary.mockRestore();
     expect(walks).not.toHaveBeenCalled();
@@ -1141,10 +1170,13 @@ describe("SessionCatalog", () => {
     await Promise.all(paths.map((path, index) => writeSession(path, `overflow-${index}`, sessions, ["created"])));
     for (const path of paths) watch.emit(relative(sessions, path));
 
-    await waitFor(() => catalog.rows().length === pathCount, 30_000);
+    await waitFor(() => catalog.rows().length === pathCount, "the catalog to reach every path");
     await catalog.settled();
     // Keep the watcher busy after the overflow pass has completed. An event storm
     // used to schedule another full scan for every event while a scan was active.
+    // The storm window itself is the requirement here (the assertion counts the
+    // scans one sustained storm may schedule), so this loop keeps an explicit
+    // bound; it waits for no event that a host speed could delay.
     const end = Date.now() + 500;
     while (Date.now() < end) {
       watch.emit(relative(sessions, "workspace/live.jsonl"));
@@ -1158,9 +1190,15 @@ describe("SessionCatalog", () => {
   });
 
   it("re-reads a path whose events never stop arriving", async () => {
+    // The ceiling is measured on the catalog's own clock, which this test owns:
+    // the oracle is that a row is re-read once its event window reaches the
+    // ceiling even though events never stop. How long the read then takes in
+    // wall time is host load, not the requirement (#406: 1.7–2.1 s under the
+    // full suite against a 1.5 s wall bound).
     const watch = manualWatch();
+    let catalogNow = Date.now();
     const { sessions, catalog } = await fixture({
-      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+      watchCatalog: watch.backend, reconcileIntervalMs: 0, now: () => catalogNow,
     });
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
@@ -1168,16 +1206,19 @@ describe("SessionCatalog", () => {
     await catalog.settled();
 
     await appendMessage(file, "two", 1);
-    const appendedAt = Date.now();
+    const windowStartedAt = catalogNow;
     // A writer that appends faster than the quiet spell re-arms the debounce on
-    // every event; the ceiling is what reaches the row.
-    const deadline = appendedAt + 4_000;
-    while (Date.now() < deadline && catalog.row(file)?.messageCount !== 2) {
+    // every event; only the ceiling can reach the row. Each event advances the
+    // catalog clock by one event gap until the window reaches the ceiling, so the
+    // wait runs on the catalog's own clock and the shared hang bound only names a
+    // ceiling that never released the row.
+    await waitFor(async () => {
+      catalogNow = Math.min(catalogNow + 50, windowStartedAt + CATALOG_EVENT_MAX_WAIT_MS);
       watch.emit("workspace/a.jsonl");
       await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    expect(catalog.row(file)?.messageCount).toBe(2);
-    expect(Date.now() - appendedAt).toBeLessThanOrEqual(CATALOG_EVENT_MAX_WAIT_MS + 500);
+      return catalog.row(file)?.messageCount === 2;
+    }, "the catalog clock ceiling to release the never-quiet row");
+    expect(catalog.row(file)?.messageCount, "the ceiling never released the never-quiet path").toBe(2);
   });
 
   it("reports one catalog.changed per row the watcher changed, and how it was derived", async () => {
@@ -1197,7 +1238,7 @@ describe("SessionCatalog", () => {
 
     await appendMessage(file, "two", 1);
     watch.emit("workspace/a.jsonl");
-    await waitFor(() => changes.length === 1, 5_000);
+    await waitFor(() => changes.length === 1, "the first change record");
     expect(changes[0]).toMatchObject({ sessionId: "id-a", outcome: "appended" });
 
     // The Gateway's own change at its commit point is not this record: it is
@@ -1219,14 +1260,14 @@ describe("SessionCatalog", () => {
     await writeSession(replacement, "id-a", sessions, ["one", "two", "three"]);
     await rename(replacement, file);
     watch.emit("workspace/a.jsonl");
-    await waitFor(() => changes.length === 2, 5_000);
+    await waitFor(() => changes.length === 2, "the second change record");
     expect(changes[1]).toMatchObject({ sessionId: "id-a", outcome: "rebuilt" });
 
     // A deletion the Gateway did not announce is a removal of the row it
     // published, so the change stream says so instead of going quiet.
     await rm(file);
     watch.emit("workspace/a.jsonl");
-    await waitFor(() => changes.length === 3, 5_000);
+    await waitFor(() => changes.length === 3, "the third change record");
     expect(changes[2]).toMatchObject({ sessionId: "id-a", outcome: "removed" });
     expect(catalog.row(file)).toBeUndefined();
   });

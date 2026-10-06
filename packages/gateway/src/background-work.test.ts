@@ -7,6 +7,7 @@ import {
   type BackgroundBacklogRecord,
   type BackgroundSliceRecord,
 } from "./background-work.js";
+import { waitFor } from "../test-support/wait-for.js";
 
 // Failure modes this file covers, written before the scheduler existed:
 // 1. A slice starts while a request is in flight: the request shares the loop
@@ -236,14 +237,7 @@ describe("BackgroundWorkScheduler", () => {
     });
     scheduler.start({ requestsInFlight: () => state.requests, eventLoopP99Ms: () => 0 });
     try {
-      const waitFor = async (check: () => boolean): Promise<void> => {
-        const deadline = Date.now() + 2_000;
-        while (!check()) {
-          expect(Date.now(), "the scheduler did not resume the held slice").toBeLessThan(deadline);
-          await new Promise((resolve) => setTimeout(resolve, 5));
-        }
-      };
-      await waitFor(() => batches.length >= 1);
+      await waitFor(() => batches.length >= 1, "the first background batch");
 
       // The request arrives while the slice is between batches: the yield waits
       // for the same pause the next slice would.
@@ -254,7 +248,7 @@ describe("BackgroundWorkScheduler", () => {
       expect(finished).toBe(false);
 
       state.requests = false;
-      await waitFor(() => finished);
+      await waitFor(() => finished, "the scheduler run to finish");
       // Later runs repeat the same two batches; the case is the first run's.
       expect(batches.slice(0, 2)).toEqual([1, 2]);
     } finally {

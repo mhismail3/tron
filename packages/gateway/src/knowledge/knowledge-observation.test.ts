@@ -10,6 +10,7 @@ import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, projectObservationEntry, type ObservationModel } from "./knowledge-observation.js";
 import { KnowledgeService } from "./knowledge-service.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -19,7 +20,11 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(model: ObservationModel, workRegistry?: GatewayWorkRegistry): Promise<{ store: KnowledgeStore; observer: KnowledgeObservationService }> {
+async function fixture(
+  model: ObservationModel,
+  workRegistry?: GatewayWorkRegistry,
+  sessionExcluded?: (sessionId: string) => boolean,
+): Promise<{ store: KnowledgeStore; observer: KnowledgeObservationService }> {
   const root = await mkdtemp(join(tmpdir(), "tron-observer-")); roots.push(root);
   const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
   const store = new KnowledgeStore(workspace);
@@ -28,7 +33,7 @@ async function fixture(model: ObservationModel, workRegistry?: GatewayWorkRegist
     eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
     observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
   });
-  return { store, observer: new KnowledgeObservationService(store, model, workRegistry) };
+  return { store, observer: new KnowledgeObservationService(store, model, workRegistry, undefined, sessionExcluded) };
 }
 
 const entries = [
@@ -39,19 +44,35 @@ const entries = [
 
 const output = JSON.stringify({ observations: [{ text: "The release is planned for Friday.", attribution: "user", certainty: "qualified", observedAt: "2026-01-01T00:00:01Z" }] });
 
-/** Waits for an observable condition. `waitFor` polls on real timers, so store
- * I/O still progresses between its polls while a test's fake clock stays under
- * the test's control; tests that would otherwise sleep advance it explicitly. */
-async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  await vi.waitFor(async () => expect(await predicate()).toBe(true), { timeout: 3_000, interval: 10 });
-}
-
 describe("KnowledgeObservationService", () => {
+  it("keeps a session the Gateway excludes out of automatic observation", async () => {
+    // Tron Home is excluded by the Gateway's predicate (its memory is its own,
+    // docs/home.md). The refused cut must leave no observation and no coverage,
+    // and the same cut for a session the predicate allows must still publish.
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer }, undefined, (sessionId) => sessionId === "session-1");
+    try {
+      // The predicate is consulted before anything is queued, so the refusal is
+      // complete when `admit` returns false: no inference can be pending behind
+      // it, and no coverage was written.
+      expect(observer.admit({ sessionId: "session-1", entries, outcome: "completed" })).toBe(false);
+      expect(infer).not.toHaveBeenCalled();
+      expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+      expect((await store.status()).coverageCount).toBe(0);
+
+      const eligible = await fixture({ infer: async () => output });
+      try {
+        expect(eligible.observer.admit({ sessionId: "session-1", entries, outcome: "completed" })).toBe(true);
+        await waitFor(async () => (await eligible.store.list({ kind: "observation" })).records.length === 1);
+      } finally { eligible.observer.dispose(); }
+    } finally { observer.dispose(); }
+  });
+
   it("publishes observations from one prose-wrapped JSON object", async () => {
     const { store, observer } = await fixture({ infer: async () => "Observations follow.\n" + output + "\nEnd." });
     try {
       observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-      await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+      await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");
       const records = (await store.list({ kind: "observation" })).records;
       const record = await store.read(records[0]!.id);
       expect(record?.content).toMatchObject({ items: [{ text: "The release is planned for Friday." }] });
@@ -83,8 +104,8 @@ describe("KnowledgeObservationService", () => {
     const infer = vi.fn(async () => { observer.dispose(); return output; });
     const { store, observer: created } = await fixture({ infer }, work); observer = created;
     observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 1);
-    await waitFor(() => work.size === 0);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
+    await waitFor(() => work.size === 0, "the observation work queue to drain");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
   });
 
@@ -97,15 +118,15 @@ describe("KnowledgeObservationService", () => {
     const first = { type: "message", id: "turn-a", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "first turn" } };
     const second = { type: "message", id: "turn-b", timestamp: "2026-01-01T00:00:02Z", message: { role: "user", content: "failed turn" } };
     observer.admit({ sessionId: "session-1", entries: [first], outcome: "completed", invocationId: "invocation-a" });
-    await waitFor(() => infer.mock.calls.length === 1);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
     observer.admit({ sessionId: "session-1", entries: [second], outcome: "failed", invocationId: "invocation-c" });
     await vi.advanceTimersByTimeAsync(25);
     expect(infer).toHaveBeenCalledTimes(1);
     release(output);
-    await waitFor(() => infer.mock.calls.length === 2);
+    await waitFor(() => infer.mock.calls.length === 2, "the second observation inference");
     expect(infer.mock.calls[1]?.[0].outcome).toBe("failed");
     expect(infer.mock.calls[1]?.[0].range.invocationIds).toEqual(["invocation-c"]);
-    await waitFor(async () => (await store.status()).coverageCount === 2);
+    await waitFor(async () => (await store.status()).coverageCount === 2, "two observation coverage records");
     observer.dispose();
     await vi.advanceTimersByTimeAsync(1_000);
   });
@@ -119,7 +140,7 @@ describe("KnowledgeObservationService", () => {
     const config = await store.config();
     await store.configure("observer-short-deadline", { ...config, observation: { ...config.observation, timeoutMs: 1_000, maxAttempts: 1 } });
     observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"));
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"), "a failed observation coverage");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     expect((await store.pendingObservationCoverage()).at(-1)?.disposition).toBe("failed");
     observer.dispose();
@@ -142,12 +163,12 @@ describe("KnowledgeObservationService", () => {
     const config = await store.config();
     await store.configure("observer-retry-deadline", { ...config, observation: { ...config.observation, timeoutMs: 1_000, maxAttempts: 2 } });
     observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-    await waitFor(() => calls === 2);
+    await waitFor(() => calls === 2, "the second observation call");
     expect(work.size).toBe(1);
     work.beginDrain();
     await work.requestCancellation();
     release(output);
-    await waitFor(() => work.size === 0);
+    await waitFor(() => work.size === 0, "the observation work queue to drain");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
   });
@@ -167,8 +188,8 @@ describe("KnowledgeObservationService", () => {
     const config = await store.config();
     await store.configure("observer-terminal-bound", { ...config, observation: { ...config.observation, maxInputChars: 1_000 } });
     observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "redaction-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: sensitiveText } }], outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 1);
-    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(1);
     observer.dispose();
   });
@@ -180,7 +201,7 @@ describe("KnowledgeObservationService", () => {
     const config = await store.config();
     await store.configure("observer-small-input", { ...config, observation: { ...config.observation, maxInputChars: 1_000 } });
     observer.admit({ sessionId: "session-1", entries: [long], outcome: "completed" });
-    await waitFor(async () => (await store.status()).coverageCount === 1);
+    await waitFor(async () => (await store.status()).coverageCount === 1, "one observation coverage record");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     expect((await store.observationCoverageForScope("session-1")).at(-1)?.disposition).toBe("unavailable");
     observer.dispose();
@@ -192,12 +213,12 @@ describe("KnowledgeObservationService", () => {
     const { store, observer } = await fixture({ infer });
     const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
     observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "admission-retry-invocation" });
-    await waitFor(() => failure.mock.calls.length >= 1);
+    await waitFor(() => failure.mock.calls.length >= 1, "the first observation failure");
     // The failed admission must not leak the cut to the model...
     expect(infer).not.toHaveBeenCalled();
     // ...and must not be dropped: advance the owner's existing retry backoff.
     await vi.advanceTimersByTimeAsync(1_000);
-    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");
     expect(infer).toHaveBeenCalledTimes(1);
     observer.dispose();
   });
@@ -207,9 +228,9 @@ describe("KnowledgeObservationService", () => {
     const { store, observer } = await fixture({ infer });
     const scopeRead = vi.spyOn(store, "scopeExcluded").mockRejectedValueOnce(new Error("privacy store unavailable"));
     observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "scope-read-retry" });
-    await waitFor(() => scopeRead.mock.calls.length >= 1);
+    await waitFor(() => scopeRead.mock.calls.length >= 1, "the scope read");
     expect(infer).not.toHaveBeenCalled();
-    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1, "one observed coverage entry");
     expect((await store.status()).coverage.excludedCount).toBe(0);
     expect(infer).toHaveBeenCalledTimes(1);
     observer.dispose();
@@ -222,7 +243,7 @@ describe("KnowledgeObservationService", () => {
     const { store, observer } = await fixture({ infer });
     const scopeRead = vi.spyOn(store, "scopeExcluded").mockReturnValueOnce(blocked);
     observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "dispose-scope-read" });
-    await waitFor(() => scopeRead.mock.calls.length === 1);
+    await waitFor(() => scopeRead.mock.calls.length === 1, "the scope read");
     const coverageWrites = vi.spyOn(store, "setCoverage");
     observer.dispose();
     release(false);
@@ -240,10 +261,10 @@ describe("KnowledgeObservationService", () => {
     await store.setScopeExclusion("observer-exclusion-fence", { sessionId: "session-1" }, true, "privacy");
     const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
     observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "excluded-retry-invocation" });
-    await waitFor(() => failure.mock.calls.length >= 1);
+    await waitFor(() => failure.mock.calls.length >= 1, "the first observation failure");
     expect(infer).not.toHaveBeenCalled();
     await waitFor(async () => (await store.observationCoverageForScope("session-1"))
-      .some((coverage) => coverage.disposition === "excluded"));
+      .some((coverage) => coverage.disposition === "excluded"), "an excluded coverage");
     expect(infer).not.toHaveBeenCalled();
     observer.dispose();
   });
@@ -263,13 +284,13 @@ describe("KnowledgeObservationService", () => {
     const config = await store.config();
     await store.configure("observer-exact-bound", { ...config, observation: { ...config.observation, maxInputChars } });
     observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "boundary-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "x".repeat(exactLength) } }], outcome: "completed", invocationId: "boundary-invocation" });
-    await waitFor(() => infer.mock.calls.length === 1);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
     expect(infer.mock.calls[0]![0].sourceText.length).toBe(maxInputChars);
 
     // One character more cannot hold the complete cut, so it is recorded as
     // explicitly unavailable instead of publishing a truncated prompt.
     observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "boundary-overflow-entry", timestamp: "2026-01-01T00:00:02Z", message: { role: "user", content: "x".repeat(exactLength + 1) } }], outcome: "completed", invocationId: "boundary-overflow-invocation" });
-    await waitFor(async () => (await store.observationCoverageForScope("session-1")).some(coverage => coverage.disposition === "unavailable"));
+    await waitFor(async () => (await store.observationCoverageForScope("session-1")).some(coverage => coverage.disposition === "unavailable"), "an unavailable coverage");
     expect(infer).toHaveBeenCalledTimes(1);
     observer.dispose();
   });
@@ -376,8 +397,8 @@ describe("KnowledgeObservationService", () => {
     });
     const { store, observer } = await fixture({ infer });
     observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 1);
-    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(1);
     const tool = await new KnowledgeService(store, observer).tool({ action: "search", query: "release", limit: 8 });
     expect(tool.text).toContain("release");
@@ -387,8 +408,8 @@ describe("KnowledgeObservationService", () => {
     expect(infer).toHaveBeenCalledTimes(1);
     const nextEntries = [...entries, { type: "message", id: "entry-3", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "The date is still Friday." } }];
     observer.admit({ sessionId: "session-1", entries: nextEntries, outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 2);
-    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 2);
+    await waitFor(() => infer.mock.calls.length === 2, "the second observation inference");
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 2, "the second observation record");
     expect(infer.mock.calls[1]?.[0].sourceText).toContain("The date is still Friday");
     expect(infer.mock.calls[1]?.[0].sourceText).not.toContain("release is Friday");
     observer.dispose();
@@ -400,17 +421,17 @@ describe("KnowledgeObservationService", () => {
     const infer = vi.fn(async (input) => output.replace("planned for Friday", input.sourceText.includes("entry-3") ? "the date is still Friday" : "planned for Friday"));
     const { store, observer } = await fixture({ infer });
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1]], outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 1);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
     const third = { type: "message", id: "entry-3", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "The date is still Friday." } } as const;
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third], outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 2);
+    await waitFor(() => infer.mock.calls.length === 2, "the second observation inference");
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third], outcome: "completed" });
     // The already-covered snapshot adds no inference. The next snapshot proves
     // that positively: its cut must hold only the new entry, so a replay of the
     // committed chunks would land in this call instead of entry-4 alone.
     const fourth = { type: "message", id: "entry-4", timestamp: "2026-01-01T00:00:04Z", message: { role: "user", content: "The date moved to Monday." } };
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third, fourth], outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 3);
+    await waitFor(() => infer.mock.calls.length === 3, "the third observation inference");
     expect(infer.mock.calls[2]?.[0].sourceText).toContain("The date moved to Monday");
     expect(infer.mock.calls[2]?.[0].sourceText).not.toContain("The date is still Friday");
     observer.dispose();
@@ -426,7 +447,7 @@ describe("KnowledgeObservationService", () => {
     const infer = vi.fn(async () => output);
     const observer = new KnowledgeObservationService(store, { infer });
     observer.admit({ sessionId: "unselected-session", entries, outcome: "completed" });
-    await waitFor(async () => (await store.status()).coverageCount === 1);
+    await waitFor(async () => (await store.status()).coverageCount === 1, "one observation coverage record");
     expect(infer).not.toHaveBeenCalled();
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
@@ -441,7 +462,7 @@ describe("KnowledgeObservationService", () => {
       await store.configure("observer-global-config", { ...config, eligibility: { ...config.eligibility, allSessions: true, sessionIds: [], projectIds: [] } });
       observer.admit({ sessionId: "new-project-session", projectId: "another-project", entries, outcome: "completed" });
       observer.admit({ sessionId: "new-unscoped-session", entries, outcome: "completed" });
-      await waitFor(async () => (await store.status()).coverage.observedCount === 2);
+      await waitFor(async () => (await store.status()).coverage.observedCount === 2, "two observed coverage entries");
       expect(infer).toHaveBeenCalledTimes(2);
       expect((await store.list({ kind: "observation" })).records.map(record => record.provenance.sessionId).sort()).toEqual(["new-project-session", "new-unscoped-session"]);
     } finally { observer.dispose(); }
@@ -458,7 +479,7 @@ describe("KnowledgeObservationService", () => {
       } });
       observer.admit({ sessionId: "private-session", entries, outcome: "completed" });
       observer.admit({ sessionId: "another-session", projectId: "private-project", entries, outcome: "completed" });
-      await waitFor(async () => (await store.status()).coverage.excludedCount === 2);
+      await waitFor(async () => (await store.status()).coverage.excludedCount === 2, "two excluded coverage entries");
       expect(infer).not.toHaveBeenCalled();
       expect((await store.list()).records).toHaveLength(0);
     } finally { observer.dispose(); }
@@ -474,7 +495,7 @@ describe("KnowledgeObservationService", () => {
         : kind === "branch" ? { sessionId: "session-1", branchId: "private-branch" } : { projectId: "private-project" };
       await store.setScopeExclusion("observer-private-scope", scope, true);
       observer.admit({ sessionId: "session-1", branchId: "private-branch", projectId: "private-project", entries, outcome: "completed" });
-      await waitFor(async () => (await store.status()).coverage.excludedCount === 1);
+      await waitFor(async () => (await store.status()).coverage.excludedCount === 1, "one excluded coverage entry");
       expect(infer).not.toHaveBeenCalled();
       expect((await store.list()).records).toHaveLength(0);
     } finally { observer.dispose(); }
@@ -494,7 +515,7 @@ describe("KnowledgeObservationService", () => {
     });
     try {
       observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-      await waitFor(() => rejected);
+      await waitFor(() => rejected, "the rejected work");
       // Join the attempted admission rather than interpreting zero records as
       // proof that private text did not cross the inference boundary.
       await Promise.allSettled(admission.mock.results.map(result => result.value));
@@ -512,10 +533,10 @@ describe("KnowledgeObservationService", () => {
       const config = await store.config();
       const global = await store.configure("observer-global-before-narrowing", { ...config, eligibility: { ...config.eligibility, allSessions: true, sessionIds: [] } });
       observer.admit({ sessionId: "new-session", entries, outcome: "completed" });
-      await waitFor(() => infer.mock.calls.length === 1);
+      await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
       await store.configure("observer-selected-after-global", { ...global, eligibility: { sessionIds: ["different-session"], projectIds: [], excludedSessionIds: [], excludedProjectIds: [] } });
       release(output);
-      await waitFor(async () => (await store.status()).coverage.excludedCount === 1);
+      await waitFor(async () => (await store.status()).coverage.excludedCount === 1, "one excluded coverage entry");
       const coverage = await store.observationCoverageForScope("new-session");
       expect(coverage).toHaveLength(1);
       expect(coverage[0]?.range.entryIds).toEqual(["entry-1", "entry-2"]);
@@ -534,9 +555,9 @@ describe("KnowledgeObservationService", () => {
     });
     const { store, observer } = await fixture({ infer });
     observer.admit({ sessionId: "session-1", entries, outcome: "failed", invocationId: "failed-retry-invocation" });
-    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"));
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"), "a failed observation coverage");
     observer.admit({ sessionId: "session-1", entries, outcome: "failed", invocationId: "failed-retry-invocation" });
-    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1, "one observed coverage entry");
     expect(infer).toHaveBeenCalledTimes(2);
     observer.dispose();
   });
@@ -559,13 +580,13 @@ describe("KnowledgeObservationService", () => {
     });
     const pendingObserver = new KnowledgeObservationService(store, { infer: initial });
     pendingObserver.admit({ sessionId: "session-1", entries, outcome: "completed", invocationId: "pending-recovery-invocation" });
-    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "pending"));
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "pending"), "a pending observation coverage");
     pendingObserver.dispose();
     releaseFirst();
     const recovered = vi.fn(async () => output);
     const recoveryObserver = new KnowledgeObservationService(store, { infer: recovered });
     recoveryObserver.admit({ sessionId: "session-1", entries, outcome: "completed", invocationId: "pending-recovery-invocation" });
-    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1, "one observed coverage entry");
     expect(recovered).toHaveBeenCalledTimes(1);
     recoveryObserver.dispose();
   });
@@ -577,11 +598,11 @@ describe("KnowledgeObservationService", () => {
     const infer = vi.fn(async () => blocked);
     const { store, observer } = await fixture({ infer });
     observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-    await waitFor(() => infer.mock.calls.length === 1);
+    await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
     const config = await store.config();
     await store.configure("observer-reconfigure", { ...config, observation: { ...config.observation, maxOutputChars: config.observation.maxOutputChars - 1 } });
     release();
-    await waitFor(async () => (await store.status()).coverageCount === 1);
+    await waitFor(async () => (await store.status()).coverageCount === 1, "one observation coverage record");
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
     await vi.advanceTimersByTimeAsync(25);

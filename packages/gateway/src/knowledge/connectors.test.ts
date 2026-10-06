@@ -145,18 +145,21 @@ describe("knowledge connectors", () => {
 
   it("acknowledges an agent-archived personal source without assessment or intake error", async () => {
     let assessmentCalls = 0;
+    let sourceFetches = 0;
     const assessment: SourceAssessmentModel = { async assess() { assessmentCalls += 1; return { summary: "not called", evidenceQuality: "unknown", freshness: "unknown" }; } };
     const { store, extension } = await mappedRaindropFixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/8?")) return response({ items: [{ _id: 880, title: "Archived personal item", link: "https://example.com/880", collection: { $id: 8 } }] });
       throw new Error("unexpected provider request");
-    }, undefined, assessment);
+    }, async () => { sourceFetches += 1; throw new Error("synthetic source fetch failure"); }, assessment);
     const seed = await store.captureSource({ commandId: command("agent-archived-personal-seed"), record: { kind: "source", scope: "personal", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Archived personal item", uri: "https://example.com/880", text: "Saved private evidence.", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z", identity: { provider: "raindrop", accountId: "42", itemId: "880" }, admission: { status: "pending", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "connector" } } } } });
     const archived = await store.curateSource({ commandId: command("agent-archived-personal-decision"), operation: "placement", producer: { actor: "agent" }, item: { recordId: seed.record.id, expectedRevision: seed.record.revisionId, placement: { admission: "archived", reason: "Agent archived it" } } });
     const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("agent-archived-personal-intake"), connectionId: "mapped", sourceCollection: "8", limit: 1 } }) as any;
     expect(result).toMatchObject({ archived: 1, pending: 0, assessmentFailed: 0 });
     expect(result.outcomes[0]).toMatchObject({ itemId: "880", disposition: "archived", assessment: "not-run" });
     expect(assessmentCalls).toBe(0);
+    // Re-capture may retry the partial evidence once; it never reaches the network.
+    expect(sourceFetches).toBeLessThanOrEqual(1);
     const state = await store.connectorState("raindrop", "mapped");
     expect(state?.pending.some(item => item.id === "880")).toBe(false);
     expect(state?.processedItems?.find(item => item.id === "880")).toMatchObject({ disposition: "skipped" });

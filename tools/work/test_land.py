@@ -1,4 +1,4 @@
-"""Isolated checks for land and steward failure modes 32-42, 64 and 65 in README.md.
+"""Isolated checks for land and steward failure modes 32-42 and 64-66 in README.md.
 
 Real temporary repositories with a local bare remote. GitHub is a fake `gh`
 (WORK_GH) that keeps pull request, check, status, issue and Project state in a
@@ -135,6 +135,16 @@ FAKE_GH = textwrap.dedent(
         body = json.loads(stdin) if stdin else None
         if "/statuses/" in api:
             state["statuses"].setdefault(api.rsplit("/", 1)[1], {})[body["context"]] = body["state"].upper()
+            done("{}")
+        if "/actions/runs" in api:
+            if state.get("failRuns"):
+                fail("gh: Bad Gateway (HTTP 502)")
+            if api.endswith("/cancel"):
+                if state.get("failCancel"):
+                    fail("gh: Bad Gateway (HTTP 502)")
+                state.setdefault("cancelled", []).append(api)
+            else:
+                done({"workflow_runs": state.get("runs", [])})
             done("{}")
         if method == "GET" and api == "repos/%s-evidence" % repo:
             done({"private": True})
@@ -645,6 +655,62 @@ class BranchDeletionTests(LandFixture):
         self.set_state(deleteOnMerge=True)
         self.assertEqual(self.land(), 0)
         self.assertEqual(self.remote_head(), "")
+
+
+class StaleRunTests(LandFixture):
+    # Failure mode 66.
+    def workflow_run(self, run_id: int, sha: str, event: str = "pull_request", status: str = "queued",
+                     branch: str = "") -> dict:
+        return {"id": run_id, "head_sha": sha, "event": event, "status": status,
+                "head_branch": branch or git(self.repo, "branch", "--show-current")}
+
+    def cancelled(self) -> list:
+        return self.state().get("cancelled", [])
+
+    def land_output(self) -> str:
+        text = io.StringIO()
+        with contextlib.redirect_stdout(text):
+            self.assertEqual(self.land(), 0)
+        return text.getvalue()
+
+    def assert_finished(self) -> None:
+        self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+        self.assertEqual(self.remote_head(), "")
+
+    def test_only_the_merged_heads_pull_request_runs_are_cancelled(self):
+        head = git(self.repo, "rev-parse", "HEAD")
+        self.set_state(runs=[
+            self.workflow_run(1, head),
+            self.workflow_run(2, head, status="in_progress"),
+            self.workflow_run(3, head, status="completed"),
+            self.workflow_run(4, head, event="push"),
+            self.workflow_run(5, "a" * 40),
+            self.workflow_run(6, head, branch="feat/other-pull-at-the-same-commit"),
+        ])
+        text = self.land_output()
+        self.assertEqual(self.cancelled(), [f"repos/{REPO}/actions/runs/1/cancel",
+                                            f"repos/{REPO}/actions/runs/2/cancel"])
+        self.assertIn(f"ci:       run 1 for {head[:12]} cancelled", text)
+        self.assertIn(f"ci:       run 2 for {head[:12]} cancelled", text)
+        for untouched in ("run 3", "run 4", "run 5", "run 6"):
+            self.assertNotIn(untouched, text)
+        self.assert_finished()
+
+    def test_a_refused_cancellation_warns_but_land_still_succeeds(self):
+        head = git(self.repo, "rev-parse", "HEAD")
+        self.set_state(runs=[self.workflow_run(1, head)], failCancel=True)
+        text = self.land_output()
+        self.assertIn(f"warning:  CI run 1 for {head[:12]} was not cancelled", text)
+        self.assertEqual(self.cancelled(), [])
+        self.assert_finished()
+
+    def test_a_refused_run_list_warns_but_land_still_succeeds(self):
+        self.set_state(runs=[], failRuns=True)
+        text = self.land_output()
+        self.assertIn("warning:  CI runs for", text)
+        self.assertEqual(self.cancelled(), [])
+        self.assert_finished()
 
 
 class HandoffTests(LandFixture):
