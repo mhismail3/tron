@@ -1,5 +1,42 @@
 import Foundation
+import ImageIO
 import UniformTypeIdentifiers
+
+/// Image formats every model provider accepts inline. A photo in any other
+/// format (an iPhone copies HEIC) is re-encoded as JPEG here on the device,
+/// because the Gateway's model runtime cannot decode HEIC and a rejected inline
+/// image breaks every later turn of its session (#407).
+enum ProviderImageFormat {
+    static let accepted: [UTType] = [.jpeg, .png, .gif, .webP]
+
+    static func isAccepted(_ type: UTType) -> Bool {
+        accepted.contains { type.conforms(to: $0) }
+    }
+
+    /// Full-resolution JPEG with the source orientation applied to the pixels
+    /// (EXIF orientation and other metadata are not carried over), or nil when
+    /// the bytes cannot be decoded.
+    static func jpeg(from data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+              ] as CFDictionary) else { return nil }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, [
+            kCGImageDestinationLossyCompressionQuality: 0.92,
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+}
 
 /// Clipboard representations become the same upload candidates as PhotosPicker.
 /// Read temporary provider files inside their callback lifetime, before admitting
@@ -12,8 +49,10 @@ enum ComposerPastedImages {
     @MainActor
     static func load(_ provider: NSItemProvider, maximumBytes: Int) async throws -> ComposerAttachmentUploadCandidate {
         guard maximumBytes > 0 else { throw ImportError.tooLarge }
-        guard let type = provider.registeredTypeIdentifiers.compactMap(UTType.init)
-            .first(where: { $0.conforms(to: .image) && $0.preferredMIMEType != nil }),
+        let images = provider.registeredTypeIdentifiers.compactMap(UTType.init)
+            .filter { $0.conforms(to: .image) && $0.preferredMIMEType != nil }
+        // Prefer a representation the provider can already use over transcoding.
+        guard let type = images.first(where: ProviderImageFormat.isAccepted) ?? images.first,
               let mimeType = type.preferredMIMEType else { throw ImportError.unsupported }
         let load = ProviderLoad()
         let data = try await withTaskCancellationHandler {
@@ -38,7 +77,12 @@ enum ComposerPastedImages {
             load.cancel()
         }
         try Task.checkCancellation()
-        return .init(name: "photo.\(type.preferredFilenameExtension ?? "image")", mimeType: mimeType, data: data)
+        if ProviderImageFormat.isAccepted(type) {
+            return .init(name: "photo.\(type.preferredFilenameExtension ?? "image")", mimeType: mimeType, data: data)
+        }
+        guard let jpeg = ProviderImageFormat.jpeg(from: data) else { throw ImportError.unsupported }
+        guard jpeg.count <= maximumBytes else { throw ImportError.tooLarge }
+        return .init(name: "photo.jpg", mimeType: "image/jpeg", data: jpeg)
     }
 
     enum ImportError: LocalizedError {
