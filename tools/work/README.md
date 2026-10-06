@@ -622,9 +622,11 @@ lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
 ## `land`
 
 `scripts/tron work land [--title <title>] [--summary-file <path>]
-[--needs-user-validation <text>] [--session <id>]` merges the current claim
-branch. The agent that owns the claim runs it from its task worktree once the
-work is committed. The `land` section of `.github/work.json` configures it.
+[--needs-user-validation <text> --irreducible <part>]
+[--acceptance <journey-id>[,<journey-id>]] [--session <id>]` merges the current
+claim branch. The agent that owns the claim runs it from its task worktree once
+the work is committed. The `land` section of `.github/work.json` configures it,
+as does `acceptance` for the journeys it can run.
 
 1. **Gates.** Before any GitHub write, `land` refuses when:
    - the current branch is not a claim branch on the remote, or its claim
@@ -633,17 +635,27 @@ work is committed. The `land` section of `.github/work.json` configures it.
      or a merge, rebase, cherry-pick, revert or bisect is in progress;
    - the issue is closed or not in the Project;
    - no pull request is open for the branch and `--summary-file` is missing;
+   - `--needs-user-validation` is given without `--irreducible`, or
+     `--irreducible` without `--needs-user-validation`;
+   - `--acceptance` names no journeys, or an id the registry does not hold;
    - the scrub command (`verify.scrubCommand`) finds anything in the title,
-     the summary or the validation text.
+     the summary, the validation text or the acceptance evidence.
 2. **Update.** It fetches the remote base branch and, when the branch does not
    contain its tip, merges it in. It merges rather than rebases, so the
    incremental re-verify can carry over checks whose inputs did not change. On
    a conflict it stops and leaves the merge for the agent to resolve and
    commit; running `land` again continues.
-3. **Receipt.** It runs `verify` and stops on a failing receipt. It then
+3. **Acceptance.** With `--acceptance`, it runs each named journey against the
+   head it is about to verify, and refuses unless every report proves that run:
+   the journey passed, its evidence is complete, its stamped source revision is
+   that head, its stamped source is not dirty, and it carries a source
+   fingerprint. A journey that fails, or a report that does not name that head,
+   stops `land` with nothing pushed, posted or merged (see
+   [Acceptance journeys](#acceptance-journeys)).
+4. **Receipt.** It runs `verify` and stops on a failing receipt. It then
    pushes the branch (fast-forward only) and posts the receipt as
    `verify --post` does.
-4. **Pull request.** It opens one pull request for the branch, or updates the
+5. **Pull request.** It opens one pull request for the branch, or updates the
    open one. A pull request from a fork never counts.
    - The title is `--title`. Otherwise a new pull request is titled
      `<type>: <issue title>`, where `<type>` is the branch type, and an
@@ -651,42 +663,47 @@ work is committed. The `land` section of `.github/work.json` configures it.
    - The body is `Closes #N`, a Summary section and a Verification section.
      The summary is the Markdown in `--summary-file`; an update without it
      keeps the current summary. The Verification section lists each receipt
-     check with its result, wall time and the commit it was carried from.
+     check with its result, wall time and the commit it was carried from, and
+     with `--acceptance` also each journey with the sha256 of its report and
+     its summary fields. No report path is published.
    - With `--needs-user-validation` the body says `Refs #N` instead, so the
      merge does not close the issue. It also ends with a Maintainer validation
-     section holding the text, so the text is on GitHub before the merge.
+     section holding the irreducible part and then the check, so both are on
+     GitHub before the merge.
    - The body holds only text the scrub command has passed: the title,
-     summary and validation text in step 1, and receipt fields that the
-     receipt comment's scrub passed. The issue's Project Status becomes
-     `land.reviewStatus`.
-5. **Wait.** It polls the pull request every `land.pollSeconds`, for at most
+     summary, validation text and acceptance evidence in step 1, and receipt
+     fields that the receipt comment's scrub passed. The issue's Project
+     Status becomes `land.reviewStatus`.
+6. **Wait.** It polls the pull request every `land.pollSeconds`, for at most
    `land.waitSeconds`. It waits until every check run named in
    `land.requiredChecks` and the `verify.statusContext` status succeed on the
    pull request's head, and that head is the commit it pushed. A required check
    that fails stops `land` and names the check. A timeout also stops it.
    Neither merges.
-6. **Base moves.** Once the checks pass, it fetches the base branch again.
-   When the head no longer contains its tip, steps 2 to 5 repeat, at most
-   `land.maxRounds` times in all. Until a branch rule requires up-to-date
-   branches, this check is the only guard, and a move in the second between it
-   and the merge call is not caught.
-7. **Merge.** It squash-merges with `--match-head-commit`, so GitHub merges
+7. **Base moves.** Once the checks pass, it fetches the base branch again.
+   When the head no longer contains its tip, steps 2 to 6 repeat, at most
+   `land.maxRounds` times in all, and the journeys run again against the new
+   head. Until a branch rule requires up-to-date branches, this check is the
+   only guard, and a move in the second between it and the merge call is not
+   caught.
+8. **Merge.** It squash-merges with `--match-head-commit`, so GitHub merges
    only the commit that was verified. The subject is the pull request title
    plus ` (#N)` unless the title already has it, and the body is `Closes #N` or
    `Refs #N`. `land` never uses `gh pr merge --delete-branch`, which checks out
    the base branch and fails in a linked worktree. Once the branch ruleset
    requires up-to-date branches and these checks, GitHub auto-merge could
-   replace the wait in step 5; `land` does not rely on it.
-8. **After the merge.** Once GitHub reports the pull request as MERGED:
+   replace the wait in step 6; `land` does not rely on it.
+9. **After the merge.** Once GitHub reports the pull request as MERGED:
    - It cancels the merged pull request's own queued or in-progress runs for the
      merged head and branch, `pull_request` runs only, one reported line per run. The
      merged run is stale and its macOS jobs hold the queue later lands need.
      This is best effort: a failure to list or cancel the runs is printed as a
      warning and never fails a land that already merged.
    - With `--needs-user-validation`, it reopens the issue if GitHub closed it.
-     It then comments the exact text, adds `land.userValidationLabel` and sets
-     Status to `dashboard.needsYouStatus`. The issue stays open until the
-     maintainer confirms.
+     It then comments the irreducible part and the exact text, adds
+     `land.userValidationLabel` and sets Status to
+     `dashboard.needsYouStatus`. The issue stays open until the maintainer
+     confirms.
    - Otherwise, it closes the issue if GitHub has not, with a comment naming the
      pull request and the merge commit. Status becomes `land.doneStatus`.
    - It deletes the remote branch with a lease on the merged head. A branch
@@ -700,7 +717,7 @@ work is committed. The `land` section of `.github/work.json` configures it.
 Running `land` again after a stop before the merge resumes: it reuses the open
 pull request and the carried checks.
 
-Running `land` again after a stop once GitHub reported MERGED finishes step 8
+Running `land` again after a stop once GitHub reported MERGED finishes step 9
 and nothing else. Before the claim check it looks for a pull request from the
 branch in this repository that GitHub merged into the base branch at exactly
 the local head. When there is one:
@@ -709,8 +726,9 @@ the local head. When there is one:
   may already be gone;
 - the merged pull request's body decides the outcome: `Closes #N` closes the
   issue, and `Refs #N` hands it off with the text of its Maintainer validation
-  section. A `--needs-user-validation` text that differs from the body is
-  refused; `--title` and `--summary-file` are ignored;
+  section. A `--needs-user-validation --irreducible` section that differs from
+  the body's is refused; `--title`, `--summary-file` and `--acceptance` are
+  ignored, because the merged body already cites the journeys it ran;
 - nothing is verified, pushed, posted or merged again, and a handoff comment
   already on the issue for that pull request is not posted twice;
 - an outcome an earlier run finished and the maintainer changed since is left
@@ -721,8 +739,93 @@ the local head. When there is one:
 The error of a stop after the merge says that running `land` again finishes
 it, and also names the steps left to do by hand (close the issue or hand it
 off, set Status, delete the branch). With `--needs-user-validation` it repeats
-the text, which is also in the pull request body. A stop after a
+the section, which is also in the pull request body. A stop after a
 `steward --land` merge names only the steps by hand.
+
+### Acceptance journeys
+
+`--acceptance` takes comma-separated ids the repository's registry holds, and
+runs them in the order given. The registry is one declarative section of
+`.github/work.json`; nothing else in the tooling names a journey, a framework
+or a language:
+
+```json
+"acceptance": {
+  "evidenceEnv": "HARNESS_EVIDENCE_DIR",
+  "journeys": {
+    "journey-id": {
+      "command": "<shell command, run from the repository root>",
+      "report": "<its report.json, inside the evidence directory>"
+    }
+  }
+}
+```
+
+`land` runs the command with `evidenceEnv` in its environment pointing at
+`<git-dir>/work/acceptance/<head>`: one directory for every journey of the head
+being landed, beside verify's receipts and logs, so a second journey reuses the
+fixture state and dependency install the first one paid for. `report` is
+relative to that directory, and `land` copies the bytes it validated to
+`<journey-id>.report.json` there, because the next run in the directory
+replaces the link that report path resolves through.
+
+A report is JSON. `land` refuses it unless `journey_status` is 0,
+`evidence_complete` is true, `source.revision` is the head being landed,
+`source.dirty` is false, and `source.source_fingerprint` is a non-empty string.
+Those five fields are the run's proof of what it did and which source bytes
+produced it; the harness that writes them proves its own build products against
+the live source state before it runs the journey. The reports and their
+digests stay local; the pull request's Verification section carries each
+report's sha256 with its summary fields, and no report path, so a reviewer can
+compare the digest and re-run the journey with the same command.
+
+Screenshots and recordings are not attached from a journey. `--evidence-manifest`
+remains the explicit opt-in it is ([UI evidence](#ui-evidence)); exporting a
+manifest from a result bundle is not part of this path, which is the one
+residual of the journey evidence.
+
+### Tron's acceptance journeys
+
+`.github/work.json` registers the two real-UI journeys of
+`scripts/ios-gateway-e2e-test` (`run-ui`) that landed with the harness. Their
+commands run from the repository root and their reports are the ones that
+harness writes under its fixture's `results/latest-ui` link:
+
+```json
+"acceptance": {
+  "evidenceEnv": "TRON_IOS_E2E_STATE_DIR",
+  "journeys": {
+    "real-gateway-pair-and-chat": {
+      "command": "scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+      "report": "results/latest-ui/report.json"
+    },
+    "real-gateway-wrong-pairing-code": {
+      "command": "scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+      "report": "results/latest-ui/report.json"
+    }
+  }
+}
+```
+
+Tron's iOS verification routes those two journeys to the same `run-ui` command
+([Tron's check set](#trons-check-set)). A journey for another layer is added
+here with the command a developer would run by hand and the report it leaves.
+
+### Maintainer validation handoffs
+
+`--needs-user-validation <text>` is the maintainer-only check itself, and it
+requires `--irreducible "<part>"`: the part no acceptance journey can prove,
+such as real third-party consent, the maintainer's own route, or
+physical-device-only behavior. `land` refuses either flag without the other,
+before any GitHub write, and states both in the pull request body and the
+handoff comment.
+
+Installing or deploying a build is a deployment step, not validation: state it
+in the summary, next to the handoff, never as the check the maintainer is asked
+to perform. The handoff comment keeps its `<!-- work:needs-you pull=N -->`
+marker exactly as it is; #334 types that marker with the runner and the
+deployment prerequisite it needs, and re-marks existing handoffs by hand, so
+nothing here writes a second marker format.
 
 ## `steward`
 
@@ -820,6 +923,24 @@ Project state and records every call. The live E2E covers GitHub itself.
     `pull_request` runs at the merged head and reports one line per run.
     Completed runs and runs of another event, head or branch are left alone. A refused run list or cancellation is a warning, and never fails
     a land that already merged.
+71. **An acceptance report does not prove the head being landed.** `land
+    --acceptance` runs each registered journey against the head it is about to
+    verify and refuses unless the report says the journey passed, left complete
+    evidence, ran from exactly that revision with no dirty source flag, and
+    carries a source fingerprint. A failure stops land before the receipt is
+    pushed, before the pull request is written and before the merge, and the
+    bytes it refused stay inspectable under the journey's own name in the
+    head's evidence directory.
+72. **An unknown journey id is run.** `--acceptance` admits only ids the
+    registry holds, refuses a value with an empty id, and names the registered
+    ids it refused, before any journey runs or any GitHub write happens.
+73. **A handoff asks for work a journey could have done, or names no
+    irreducible part.** `--needs-user-validation` is refused without
+    `--irreducible` and `--irreducible` without it, before any GitHub write.
+    The pull request body's Maintainer validation section states the
+    irreducible part and then the check, and the handoff comment carries both;
+    a resumed land compares that whole section with the merged body, so a
+    resume cannot quietly drop or change the irreducible part.
 
 ## `cleanup`
 

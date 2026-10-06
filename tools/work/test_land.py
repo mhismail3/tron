@@ -1,4 +1,4 @@
-"""Isolated checks for land and steward failure modes 32-42 and 64-66 in README.md.
+"""Isolated checks for land and steward failure modes 32-42, 64-66 and 71-73 in README.md.
 
 Real temporary repositories with a local bare remote. GitHub is a fake `gh`
 (WORK_GH) that keeps pull request, check, status, issue and Project state in a
@@ -8,6 +8,7 @@ Run: python3 -m unittest discover -s tools/work
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -18,6 +19,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+import acceptance
 import claim as claims
 import dashboard
 import land
@@ -31,6 +33,45 @@ BRANCH = "feat/7-add-the-widget"
 SESSION = "session-a"
 REPO = "acme/widget"
 STATUSES = ["Proposed", "Ready", "In progress", "In review", "Needs you", "Blocked", "Done"]
+# The fixture's acceptance registry: two journeys and the report each one leaves,
+# shaped exactly like the declaration a real `.github/work.json` holds.
+PAIR = "pair-and-chat"
+WRONG_CODE = "wrong-code"
+REPORT_PATH = "results/latest-ui/report.json"
+
+# The stand-in for a registered journey: it writes the report its spec names into
+# the evidence directory land hands the run, so every report field land has to
+# refuse is reachable from a test.
+FAKE_JOURNEY = textwrap.dedent(
+    """\
+    #!/usr/bin/env python3
+    import json, os, subprocess, sys
+    from pathlib import Path
+    journey = sys.argv[1]
+    spec = json.loads(Path(os.environ["FAKE_ACCEPTANCE_SPEC"]).read_text()).get(journey, {})
+    if spec.get("exit"):
+        sys.exit(spec["exit"])
+    if spec.get("report", True):
+        # The same relative report path the registry declares (REPORT_PATH).
+        report_dir = Path(os.environ["FAKE_ACCEPTANCE_EVIDENCE"]) / "results/latest-ui"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        revision = spec.get("revision", "HEAD")
+        if revision == "HEAD":
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                                      check=True).stdout.strip()
+        report = {
+            "schema": "tron.ios-e2e-ui-journey.v1",
+            "journey": spec.get("selector", journey),
+            "journey_status": spec.get("status", 0),
+            "journey_seconds": spec.get("seconds", 9),
+            "evidence_complete": spec.get("evidence_complete", True),
+            "source": {"revision": revision, "dirty": spec.get("dirty", False),
+                       "source_fingerprint": spec.get("fingerprint", "ab" * 32)},
+            "artifacts": [{"path": "Journeys.xcresult", "kind": "tree-sha256", "sha256": "cd" * 32}],
+        }
+        (report_dir / "report.json").write_text(spec.get("raw") or json.dumps(report, indent=2, sort_keys=True) + "\\n")
+    """
+)
 
 FAKE_GH = textwrap.dedent(
     """\
@@ -286,6 +327,19 @@ class LandFixture(unittest.TestCase):
         self.summary = self.tmp / "summary.md"
         self.summary.write_text("Adds the widget.\n")
 
+        # The acceptance registry's journeys are real commands, so the fixture's
+        # are scripts that write the report each test asks for.
+        self.acceptance_spec = self.tmp / "acceptance-reports.json"
+        journey_script = self.tmp / "journey"
+        journey_script.write_text(FAKE_JOURNEY.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
+        journey_script.chmod(0o755)
+        self.config["acceptance"] = {
+            "evidenceEnv": "FAKE_ACCEPTANCE_EVIDENCE",
+            "journeys": {name: {"command": f"{journey_script} {name}", "report": REPORT_PATH}
+                         for name in (PAIR, WRONG_CODE)},
+        }
+        self.spec({PAIR: {}, WRONG_CODE: {}})
+
         self.state_path = self.tmp / "state.json"
         self.gh_log = self.tmp / "gh.jsonl"
         self.set_state(
@@ -297,7 +351,8 @@ class LandFixture(unittest.TestCase):
         fake = self.tmp / "gh"
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         fake.chmod(0o755)
-        env = {"WORK_GH": str(fake), "FAKE_GH_STATE": str(self.state_path), "FAKE_GH_LOG": str(self.gh_log)}
+        env = {"WORK_GH": str(fake), "FAKE_GH_STATE": str(self.state_path), "FAKE_GH_LOG": str(self.gh_log),
+               "FAKE_ACCEPTANCE_SPEC": str(self.acceptance_spec)}
         saved = {key: os.environ.get(key) for key in env}
         os.environ.update(env)
         self.addCleanup(self._restore, saved)
@@ -382,6 +437,26 @@ class LandFixture(unittest.TestCase):
     def issue(self) -> dict:
         return self.state()["issues"][str(NUMBER)]
 
+    # ------------------------------------------------------- acceptance
+
+    def spec(self, reports: dict) -> None:
+        """What each fake journey's report says; a journey absent from it passes at HEAD."""
+        self.acceptance_spec.write_text(json.dumps(
+            {journey: {"revision": "HEAD", **values} for journey, values in reports.items()}))
+
+    def acceptance_evidence(self, head: str) -> Path:
+        """The evidence directory land gives the journeys of one head."""
+        return Path(git(self.repo, "rev-parse", "--absolute-git-dir")) / "work" / "acceptance" / head
+
+    def kept_report(self, journey: str, head: str) -> bytes:
+        return (self.acceptance_evidence(head) / f"{journey}.report.json").read_bytes()
+
+    def assert_nothing_published(self) -> None:
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+        self.assertEqual(self.issue()["state"], "OPEN")
+
     # ------------------------------------------------------------------ land
 
     # Waiting runs on a fake clock that only sleeping advances.
@@ -392,9 +467,11 @@ class LandFixture(unittest.TestCase):
     def clock(self) -> float:
         return self.now
 
-    def land(self, session: str = SESSION, title=None, summary=True, validation=None, sleep=None) -> int:
+    def land(self, session: str = SESSION, title=None, summary=True, validation=None, irreducible=None,
+             acceptance=None, sleep=None) -> int:
         return land.land(Gh(self.repo), self.repo, self.config, session, title,
-                         self.summary if summary else None, validation, sleep=sleep or self.sleep, clock=self.clock)
+                         self.summary if summary else None, validation, irreducible, acceptance,
+                         sleep=sleep or self.sleep, clock=self.clock)
 
 
 class ClaimOwnerTests(LandFixture):
@@ -575,9 +652,11 @@ class PublicTextTests(LandFixture):
         for field in ("summary", "title", "validation"):
             with self.subTest(field=field):
                 self.summary.write_text("FORBIDDEN summary\n" if field == "summary" else "Fine.\n")
+                handoff = field == "validation"
                 with self.assertRaises(land.LandError) as raised:
                     self.land(title="FORBIDDEN title" if field == "title" else None,
-                              validation="FORBIDDEN action" if field == "validation" else None)
+                              validation="FORBIDDEN action" if handoff else None,
+                              irreducible="a physical device" if handoff else None)
                 self.assertIn(field, str(raised.exception))
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.remote_head(), self.claim_sha)
@@ -601,7 +680,8 @@ class IssueOutcomeTests(LandFixture):
 
     def test_validation_keeps_the_issue_open_even_when_github_closes_it(self):
         self.set_state(closeAnyway=True)
-        self.land(validation="Restart the dev Gateway, then check its status.")
+        self.land(validation="Restart the dev Gateway, then check its status.",
+                  irreducible="a physical device")
         pull = self.state()["pulls"][0]
         self.assertTrue(pull["body"].startswith("Refs #7\n"))
         self.assertNotIn("Closes #7", pull["body"])
@@ -714,20 +794,37 @@ class StaleRunTests(LandFixture):
 
 
 class HandoffTests(LandFixture):
-    # Failure mode 40.
+    # Failure modes 40 and 73.
+    IRREDUCIBLE = "the user's real X consent page"
+
     def test_action_text_label_and_status_reach_the_issue(self):
         action = "Run `scripts/example restart`, then check:\n\n- status names this branch"
-        self.land(validation=action)
+        self.land(validation=action, irreducible=self.IRREDUCIBLE)
         issue = self.issue()
         self.assertIn(action, issue["comments"][-1])
+        self.assertIn(f"Irreducible: {self.IRREDUCIBLE}", issue["comments"][-1])
         self.assertIn("needs-user-validation", issue["labels"])
         self.assertEqual((issue["state"], issue["status"]), ("OPEN", "Needs you"))
+        pull = self.state()["pulls"][0]
+        self.assertTrue(pull["body"].startswith("Refs #7\n"))
+        self.assertIn(action, pull["body"])
+        self.assertIn(f"Irreducible: {self.IRREDUCIBLE}", pull["body"])
+
+    def test_a_handoff_that_names_no_irreducible_part_is_refused(self):
+        cases = {"validation without its irreducible part": dict(validation="Restart the Gateway."),
+                 "an irreducible part without validation": dict(irreducible="a physical device")}
+        for name, kwargs in cases.items():
+            with self.subTest(case=name):
+                with self.assertRaises(land.LandError):
+                    self.land(**kwargs)
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
 
     def test_a_failure_after_the_merge_keeps_the_action_text(self):
         action = "Run `scripts/example restart`, then check that status names this branch."
         self.set_state(failIssue=["comment"])
         with self.assertRaises(land.LandError) as raised:
-            self.land(validation=action)
+            self.land(validation=action, irreducible=self.IRREDUCIBLE)
         pull = self.state()["pulls"][0]
         self.assertEqual(pull["state"], "MERGED")
         # The pull request body was on GitHub before the merge.
@@ -737,15 +834,109 @@ class HandoffTests(LandFixture):
         self.assertFalse(any(action in comment for comment in self.issue()["comments"]))
 
 
+class AcceptanceLandingTests(LandFixture):
+    # Failure modes 71 and 72.
+    def test_a_passing_journey_reaches_the_pull_request_as_its_report_digest(self):
+        self.assertEqual(self.land(acceptance=PAIR), 0)
+        head = git(self.repo, "rev-parse", "HEAD")
+        digest = hashlib.sha256(self.kept_report(PAIR, head)).hexdigest()
+        body = self.state()["pulls"][0]["body"]
+        self.assertIn("### Acceptance journeys", body)
+        self.assertIn(f"report sha256 `{digest}`", body)
+        self.assertIn(PAIR, body)
+        self.assertIn(f"source `{head}`", body)
+        self.assertNotIn(str(self.tmp), body)
+        self.assertEqual(len(self.merges()), 1)
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+
+    def test_each_journey_is_checked_against_the_report_its_own_run_left(self):
+        # Both runs share the head's evidence directory, so the second one
+        # replaces the report path the first one left behind.
+        self.spec({PAIR: {}, WRONG_CODE: {"revision": self.claim_sha}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=f"{PAIR},{WRONG_CODE}")
+        self.assertIn(WRONG_CODE, str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_from_another_head_is_refused(self):
+        self.spec({PAIR: {"revision": self.claim_sha}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn(self.claim_sha[:12], str(raised.exception))
+        self.assertIn(git(self.repo, "rev-parse", "HEAD")[:12], str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_that_is_not_from_a_completed_clean_run_is_refused(self):
+        cases = {"a dirty run": {"dirty": True},
+                 "incomplete evidence": {"evidence_complete": False},
+                 "a failed journey": {"status": 1},
+                 "no report": {"report": False},
+                 "an unreadable report": {"raw": "not json"},
+                 "no source fingerprint": {"fingerprint": ""}}
+        for name, spec in cases.items():
+            with self.subTest(case=name):
+                self.spec({PAIR: spec})
+                with self.assertRaises(acceptance.AcceptanceError):
+                    self.land(acceptance=PAIR)
+        self.assert_nothing_published()
+
+    def test_a_journey_command_that_fails_is_refused(self):
+        self.spec({PAIR: {"exit": 3}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn(PAIR, str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_the_scrub_refuses_stops_before_any_github_write(self):
+        self.spec({PAIR: {"fingerprint": "FORBIDDEN fingerprint"}})
+        with self.assertRaises(land.LandError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("acceptance evidence", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_an_unknown_journey_id_is_refused_with_the_registered_ids(self):
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=f"{PAIR},typo")
+        message = str(raised.exception)
+        self.assertIn("typo", message)
+        self.assertIn(WRONG_CODE, message)
+        self.assert_nothing_published()
+        self.assertFalse(self.acceptance_evidence(git(self.repo, "rev-parse", "HEAD")).exists())
+
+    def test_an_empty_journey_id_is_refused(self):
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=f"{PAIR},")
+        self.assertIn("comma-separated", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_repository_without_a_usable_registry_refuses(self):
+        journeys = self.config["acceptance"]["journeys"]
+        cases = {"no acceptance section": (None, "registers no acceptance journeys"),
+                 "no journeys": ({"evidenceEnv": "FAKE_ACCEPTANCE_EVIDENCE", "journeys": {}},
+                                 "registers no acceptance journeys"),
+                 "no evidence variable": ({"journeys": journeys}, "evidenceEnv")}
+        for name, (section, named) in cases.items():
+            with self.subTest(case=name):
+                if section is None:
+                    self.config.pop("acceptance", None)
+                else:
+                    self.config["acceptance"] = section
+                with self.assertRaises(acceptance.AcceptanceError) as raised:
+                    self.land(acceptance=PAIR)
+                self.assertIn(named, str(raised.exception))
+        self.assert_nothing_published()
+
+
 class ResumeTests(LandFixture):
     # Failure mode 65.
     ACTION = "Run `scripts/example restart`, then check that status names this branch."
+    IRREDUCIBLE = "the maintainer's own route to the Gateway"
 
     def stopped_after_merge(self, failing: list, validation=None) -> None:
         """Land until GitHub reports MERGED, then stop as an outage would."""
         self.set_state(failIssue=failing)
         with self.assertRaises(land.LandError):
-            self.land(validation=validation)
+            self.land(validation=validation, irreducible=self.IRREDUCIBLE if validation else None)
         self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
         self.set_state(failIssue=[])
         self.before = len(self.calls())
@@ -788,13 +979,13 @@ class ResumeTests(LandFixture):
 
     def test_rerun_with_the_same_text_finishes_the_handoff(self):
         self.stopped_after_merge(["comment"], validation=self.ACTION)
-        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.assertEqual(self.land(validation=self.ACTION, irreducible=self.IRREDUCIBLE), 0)
         self.assertEqual(sum(self.ACTION in comment for comment in self.issue()["comments"]), 1)
         self.assertEqual(self.issue()["status"], "Needs you")
         self.assert_nothing_redone()
 
     def test_rerun_after_a_finished_handoff_keeps_the_maintainers_close(self):
-        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.assertEqual(self.land(validation=self.ACTION, irreducible=self.IRREDUCIBLE), 0)
         self.set_state(issues={str(NUMBER): dict(self.issue(), state="CLOSED", status="Done")})
         before = len(self.calls())
         self.assertEqual(self.land(summary=False), 0)
@@ -813,7 +1004,7 @@ class ResumeTests(LandFixture):
         self.stopped_after_merge(["close"])
         cases = {
             "another session": dict(session="session-b"),
-            "validation the merge did not ask for": dict(validation=self.ACTION),
+            "validation the merge did not ask for": dict(validation=self.ACTION, irreducible=self.IRREDUCIBLE),
         }
         for name, kwargs in cases.items():
             with self.subTest(case=name):
@@ -826,7 +1017,7 @@ class ResumeTests(LandFixture):
     def test_a_contradicting_validation_text_is_refused(self):
         self.stopped_after_merge(["comment"], validation=self.ACTION)
         with self.assertRaises(land.LandError):
-            self.land(validation="Something else entirely.")
+            self.land(validation="Something else entirely.", irreducible=self.IRREDUCIBLE)
         self.assertFalse(any(self.ACTION in comment for comment in self.issue()["comments"]))
 
     def test_a_merge_at_an_older_head_or_from_a_fork_is_not_resumed(self):

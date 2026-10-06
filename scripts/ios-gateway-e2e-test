@@ -824,6 +824,9 @@ run_ui_journey() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest-ui"
+  # One report path for every journey: the consumer that asked for this journey
+  # reads `results/latest-ui/report.json` as soon as the command returns, before
+  # the next journey's run moves this link.
   if ((status == 0)); then
     # A journey that cannot reach the fixture skips, and a skip is not a passing
     # real-UI journey: exactly one journey must have executed and passed.
