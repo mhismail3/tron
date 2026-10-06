@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { promisify } from "node:util";
 
 /**
  * Shared machinery for the SDK-boundary behavior trace (epic #468, layer L2).
@@ -14,13 +16,17 @@ import { dirname } from "node:path";
  * What must never be normalized away is the *shape and wording* the SDK
  * produces: a tool name, a prompt section heading, a tool-result text. Those are
  * the deltas an SDK upgrade has to justify hunk by hunk.
+ *
+ * The comparison's diff is produced by `git diff --no-index`, not by a
+ * hand-written algorithm: the same tool a reviewer would run, with real hunk
+ * boundaries on a golden whose blocks repeat.
  */
 
 /** Set to `1` to rewrite the committed golden from a real run instead of comparing. */
 export const BEHAVIOR_TRACE_UPDATE_ENV = "TRON_UPDATE_SDK_BEHAVIOR_TRACE";
 
-/** A mismatch prints at most this many diff lines; the whole diff stays in the artifact. */
-const MAXIMUM_REPORTED_DIFF_LINES = 600;
+/** A mismatch prints at most this many diff lines; the whole diff is in the artifact. */
+const MAXIMUM_REPORTED_DIFF_LINES = 400;
 
 export type TraceValue = null | boolean | number | string | TraceValue[] | { [key: string]: TraceValue };
 
@@ -28,10 +34,18 @@ export type TraceValue = null | boolean | number | string | TraceValue[] | { [ke
 export interface TraceNormalization {
   /** Absolute directories (and their realpaths) that become `<tmp>`. */
   readonly roots: readonly string[];
+  /**
+   * Identity values that are the scenario's own, not the SDK's: a fixed
+   * tool-call ID the script names. Anything else under an identity key is
+   * generated per run and becomes `<id>`.
+   */
+  readonly stableIds?: readonly string[];
 }
 
-/** One provider request as the SDK handed it to the model API. */
+/** One distinct provider request, with how many consecutive requests it covers. */
 export interface ProviderRequestTrace {
+  /** Consecutive identical requests this record stands for; `1` for a one-off. */
+  readonly repeats: number;
   /** Declared tool names, in declaration order. */
   readonly tools: readonly string[];
   /** System-prompt section headings, in the order they appear in the prompt. */
@@ -49,6 +63,8 @@ export interface ClientEventTrace {
 export interface BehaviorTrace {
   readonly scenario: string;
   readonly providerRequests: readonly ProviderRequestTrace[];
+  /** The non-chat provider boundary the scenario exercises: TypeSafe classify. */
+  readonly classifierRequests: readonly TraceValue[];
   readonly clientEvents: readonly ClientEventTrace[];
   /** Canonical session JSONL entries, in file order, normalized. */
   readonly canonicalJsonl: readonly TraceValue[];
@@ -69,8 +85,16 @@ const TIMESTAMP_KEYS = new Set([
 ]);
 const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "latencyMs"]);
 const COUNTER_KEYS = new Set(["sequence", "eventSequence", "revision", "progressSequence", "callCount"]);
-/** Values whose exact numbers are host- and timing-derived; only their structure is compared. */
-const STRUCTURE_ONLY_KEYS = new Set(["usage", "cost", "stats"]);
+/**
+ * Values whose exact numbers are host- and checkout-derived; only their
+ * structure is compared. `tokensBefore` is one of them: Pi estimates the
+ * pre-compaction context from the last assistant usage plus a chars/4 estimate
+ * of the serialized context, and that context contains absolute package and
+ * temp paths, so the same scenario on a checkout of a different path length
+ * produces a different number. The prompt-size signal stays visible through the
+ * prompt sections, the per-request prompt hash and the section text.
+ */
+const STRUCTURE_ONLY_KEYS = new Set(["usage", "cost", "stats", "tokensBefore"]);
 
 const IDENTITY_MARKER = "<id>";
 const TIMESTAMP_MARKER = "<timestamp>";
@@ -78,8 +102,12 @@ const DURATION_MARKER = "<duration>";
 const COUNTER_MARKER = "<n>";
 const STRUCTURE_MARKER = "<value>";
 
-/** Absolute package paths differ per checkout and machine; only the package identity matters. */
-const PACKAGE_PATH = /(?:[A-Za-z]:)?(?:[/\\][^\s"']*?)*[/\\]node_modules[/\\]((?:@[^/\\]+[/\\])?[^/\\]+)/g;
+/**
+ * Absolute package paths differ per checkout and machine; only the package
+ * identity matters. Deliberately a single bounded quantifier: a star over a
+ * group that itself repeats is exponential on a long slash-heavy token.
+ */
+const PACKAGE_PATH = /(?:[^\s"'`()[\]]*[/\\])?node_modules[/\\]((?:@[^/\\]+[/\\])?[^/\\]+)/g;
 const TEMP_PATH = /(?:[/\\]private)?[/\\](?:var[/\\]folders|tmp|private[/\\]tmp)[^\s"',;)]*/g;
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
@@ -131,7 +159,9 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
 export function normalizeTraceValue(value: unknown, normalization: TraceNormalization): TraceValue {
   if (value === null || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : "<nonfinite>";
-  if (typeof value === "string") return normalizeTraceString(value, normalization);
+  if (typeof value === "string") {
+    return (normalization.stableIds ?? []).includes(value) ? value : normalizeTraceString(value, normalization);
+  }
   if (Array.isArray(value)) return value.map((item) => normalizeTraceValue(item, normalization));
   if (typeof value === "object") {
     const out: Record<string, TraceValue> = {};
@@ -139,11 +169,54 @@ export function normalizeTraceValue(value: unknown, normalization: TraceNormaliz
       const child = (value as Record<string, unknown>)[key];
       if (child === undefined) continue;
       if (STRUCTURE_ONLY_KEYS.has(key)) { out[key] = blindStructure(child); continue; }
-      if (IDENTITY_KEYS.has(key)) { out[key] = IDENTITY_MARKER; continue; }
+      if (key === "systemMessage") { out[key] = summarizeSystemPromptState(child); continue; }
+      if (IDENTITY_KEYS.has(key)) {
+        out[key] = typeof child === "string" && (normalization.stableIds ?? []).includes(child)
+          ? child
+          : IDENTITY_MARKER;
+        continue;
+      }
       if (TIMESTAMP_KEYS.has(key)) { out[key] = TIMESTAMP_MARKER; continue; }
       if (DURATION_KEYS.has(key)) { out[key] = DURATION_MARKER; continue; }
       if (COUNTER_KEYS.has(key)) { out[key] = COUNTER_MARKER; continue; }
       out[key] = normalizeTraceValue(child, normalization);
+    }
+    return out;
+  }
+  return `<${typeof value}>`;
+}
+
+/**
+ * A compaction entry repeats the whole system prompt it was cut at, which is
+ * already recorded by the live system message and by every request's section
+ * headings and prompt hash. Keep which sections and tools the boundary carried,
+ * drop the duplicated text.
+ */
+function summarizeSystemPromptState(value: unknown): TraceValue {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return normalizeShapeOnly(value);
+  const state = value as { content?: unknown; sections?: unknown; toolsAdded?: unknown };
+  const sections = state.sections !== null && typeof state.sections === "object" && !Array.isArray(state.sections)
+    ? Object.keys(state.sections as Record<string, unknown>).sort()
+    : [];
+  const tools = Array.isArray(state.toolsAdded)
+    ? state.toolsAdded.flatMap((tool) => tool !== null && typeof tool === "object" && typeof (tool as { name?: unknown }).name === "string"
+      ? [(tool as { name: string }).name]
+      : [])
+    : [];
+  return {
+    contentChars: typeof state.content === "string" ? state.content.length : 0,
+    sectionNames: sections,
+    toolsAdded: tools,
+  };
+}
+
+function normalizeShapeOnly(value: unknown): TraceValue {
+  if (value === null) return "<null>";
+  if (Array.isArray(value)) return value.map(normalizeShapeOnly);
+  if (typeof value === "object") {
+    const out: Record<string, TraceValue> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = normalizeShapeOnly((value as Record<string, unknown>)[key]);
     }
     return out;
   }
@@ -235,184 +308,122 @@ export function clientEventTrace(events: Iterable<{ topic: string; paths: readon
   return order.map((topic) => ({ topic, paths: [...(byTopic.get(topic) ?? [])].sort() }));
 }
 
+/**
+ * Collapse each run of identical consecutive provider requests into one record
+ * carrying its `repeats`. A turn makes several requests with the same prompt and
+ * tool set; recording them once keeps the trace's *sequence* and count while
+ * sparing the reviewer eight identical blocks, and any request that differs
+ * splits the run and stays visible.
+ */
+export function collapseRepeatedRequests(requests: readonly Omit<ProviderRequestTrace, "repeats">[]): ProviderRequestTrace[] {
+  const collapsed: ProviderRequestTrace[] = [];
+  for (const request of requests) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous !== undefined
+      && previous.promptHash === request.promptHash
+      && previous.promptSections.join("\n") === request.promptSections.join("\n")
+      && previous.tools.join("\n") === request.tools.join("\n")) {
+      collapsed[collapsed.length - 1] = { ...previous, repeats: previous.repeats + 1 };
+      continue;
+    }
+    collapsed.push({ repeats: 1, tools: request.tools, promptSections: request.promptSections, promptHash: request.promptHash });
+  }
+  return collapsed;
+}
+
 /** The canonical rendering both the golden and the retained artifact use. */
 function renderTrace(trace: BehaviorTrace): string {
   return `${JSON.stringify(trace, null, 2)}\n`;
 }
 
-type Edit = { readonly op: "keep" | "delete" | "insert"; readonly text: string };
-
-/**
- * Patience diff over lines.
- *
- * A golden comparison reports a change in *wording*, not in line numbers, so the
- * diff has to stay readable when many lines shift at once (a renamed tool
- * changes every request and every transcript row). Anchoring on lines that are
- * unique on both sides keeps unrelated shifts out of the hunks, and a region
- * with no unique line is reported as its own replacement instead of a
- * line-by-line cascade.
- */
-function diffLines(before: string, after: string): Edit[] {
-  const a = before.split("\n");
-  const b = after.split("\n");
-  const out: Edit[] = [];
-  diffRange(a, 0, a.length, b, 0, b.length, out);
-  return out;
-}
-
-function diffRange(a: string[], a0: number, a1: number, b: string[], b0: number, b1: number, out: Edit[]): void {
-  while (a0 < a1 && b0 < b1 && a[a0] === b[b0]) { out.push({ op: "keep", text: a[a0] ?? "" }); a0 += 1; b0 += 1; }
-  const suffix: Edit[] = [];
-  while (a1 > a0 && b1 > b0 && a[a1 - 1] === b[b1 - 1]) { suffix.push({ op: "keep", text: a[a1 - 1] ?? "" }); a1 -= 1; b1 -= 1; }
-  if (a0 === a1) {
-    for (let index = b0; index < b1; index += 1) out.push({ op: "insert", text: b[index] ?? "" });
-  } else if (b0 === b1) {
-    for (let index = a0; index < a1; index += 1) out.push({ op: "delete", text: a[index] ?? "" });
-  } else {
-    const countA = new Map<string, number>();
-    const countB = new Map<string, number>();
-    for (let index = a0; index < a1; index += 1) countA.set(a[index] ?? "", (countA.get(a[index] ?? "") ?? 0) + 1);
-    for (let index = b0; index < b1; index += 1) countB.set(b[index] ?? "", (countB.get(b[index] ?? "") ?? 0) + 1);
-    const uniqueInB = new Map<string, number>();
-    for (let index = b0; index < b1; index += 1) {
-      const line = b[index] ?? "";
-      if (countB.get(line) === 1 && countA.get(line) === 1) uniqueInB.set(line, index);
-    }
-    const candidates: Array<{ a: number; b: number }> = [];
-    for (let index = a0; index < a1; index += 1) {
-      const position = uniqueInB.get(a[index] ?? "");
-      if (position !== undefined) candidates.push({ a: index, b: position });
-    }
-    const anchors = longestIncreasing(candidates);
-    if (anchors.length === 0) {
-      for (let index = a0; index < a1; index += 1) out.push({ op: "delete", text: a[index] ?? "" });
-      for (let index = b0; index < b1; index += 1) out.push({ op: "insert", text: b[index] ?? "" });
-    } else {
-      let previousA = a0;
-      let previousB = b0;
-      for (const anchor of anchors) {
-        diffRange(a, previousA, anchor.a, b, previousB, anchor.b, out);
-        out.push({ op: "keep", text: a[anchor.a] ?? "" });
-        previousA = anchor.a + 1;
-        previousB = anchor.b + 1;
-      }
-      diffRange(a, previousA, a1, b, previousB, b1, out);
-    }
-  }
-  for (const edit of suffix.reverse()) out.push(edit);
-}
-
-/** Longest strictly increasing subsequence of `candidates[].b`, keeping `a` order. */
-function longestIncreasing(candidates: Array<{ a: number; b: number }>): Array<{ a: number; b: number }> {
-  const tails: number[] = [];
-  const tailIndex: number[] = [];
-  const previous: number[] = new Array<number>(candidates.length).fill(-1);
-  for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index];
-    if (candidate === undefined) continue;
-    let low = 0;
-    let high = tails.length;
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if ((tails[middle] ?? Number.NEGATIVE_INFINITY) < candidate.b) low = middle + 1;
-      else high = middle;
-    }
-    tails[low] = candidate.b;
-    tailIndex[low] = index;
-    previous[index] = low > 0 ? (tailIndex[low - 1] ?? -1) : -1;
-  }
-  const result: Array<{ a: number; b: number }> = [];
-  let cursor = tails.length > 0 ? (tailIndex[tails.length - 1] ?? -1) : -1;
-  while (cursor >= 0) {
-    const candidate = candidates[cursor];
-    if (candidate !== undefined) result.push(candidate);
-    cursor = previous[cursor] ?? -1;
-  }
-  return result.reverse();
-}
-
-/** A unified diff (3 lines of context) between two golden renderings; `""` when equal. */
-function renderUnifiedDiff(before: string, after: string, contextLines = 3): string {
-  const edits = diffLines(before, after);
-  // The A/B line each edit starts at (1-based), so hunk headers never depend on
-  // how the hunk boundaries were chosen.
-  const aAt: number[] = [];
-  const bAt: number[] = [];
-  let aLine = 1;
-  let bLine = 1;
-  for (const edit of edits) {
-    aAt.push(aLine);
-    bAt.push(bLine);
-    if (edit.op !== "insert") aLine += 1;
-    if (edit.op !== "delete") bLine += 1;
-  }
-  const changes: number[] = [];
-  for (let index = 0; index < edits.length; index += 1) if (edits[index]?.op !== "keep") changes.push(index);
-  if (changes.length === 0) return "";
-  const hunks: Array<{ start: number; end: number }> = [];
-  for (const change of changes) {
-    const last = hunks[hunks.length - 1];
-    if (last !== undefined && change - last.end <= contextLines * 2 + 1) { last.end = change; continue; }
-    hunks.push({ start: change, end: change });
-  }
-  const lines: string[] = [];
-  let previousEnd = 0;
-  for (const hunk of hunks) {
-    const start = Math.max(previousEnd, hunk.start - contextLines);
-    const end = Math.min(edits.length, hunk.end + contextLines + 1);
-    let removed = 0;
-    let added = 0;
-    for (let cursor = start; cursor < end; cursor += 1) {
-      if (edits[cursor]?.op !== "insert") removed += 1;
-      if (edits[cursor]?.op !== "delete") added += 1;
-    }
-    const aStart = removed === 0 ? (aAt[start] ?? 1) - 1 : (aAt[start] ?? 1);
-    const bStart = added === 0 ? (bAt[start] ?? 1) - 1 : (bAt[start] ?? 1);
-    lines.push(`@@ -${aStart},${removed} +${bStart},${added} @@`);
-    for (let cursor = start; cursor < end; cursor += 1) {
-      const edit = edits[cursor];
-      if (edit === undefined) continue;
-      lines.push(`${edit.op === "keep" ? " " : edit.op === "delete" ? "-" : "+"}${edit.text}`);
-    }
-    previousEnd = end;
-  }
-  return lines.join("\n");
-}
-
 export interface GoldenComparison {
   readonly goldenPath: string;
+  /** Where the exact trace that produced the diff is retained. */
   readonly actualPath: string;
+  /** Where the full unified diff is retained for review. */
+  readonly diffPath: string;
   readonly trace: BehaviorTrace;
+  /**
+   * Rewrite the golden from this trace. Only the idle case passes `true` (and
+   * only under {@link BEHAVIOR_TRACE_UPDATE_ENV}), so the load case still has to
+   * agree with the golden this run just wrote.
+   */
+  readonly update: boolean;
+  /**
+   * Assert the scenario itself ran. Called once the trace is known to *match*
+   * the golden — and, in update mode, before the golden is written — so a golden
+   * can never be accepted from a run whose own steps stopped exercising a seam,
+   * while a real SDK delta is still reported as a diff.
+   */
+  readonly validate: (trace: BehaviorTrace) => void;
 }
 
 /**
  * Compare one scenario's trace with the committed golden, or rewrite it.
  *
- * A mismatch throws a unified diff; the exact rendering that produced it is also
- * written to `actualPath` (a retained, gitignored artifact) so a reviewer can
- * regenerate and inspect the whole trace without re-running anything.
+ * A mismatch throws a unified diff produced by `git diff --no-index` — the same
+ * command a reviewer runs — and retains the full diff and the exact trace at
+ * stable paths so the whole comparison can be inspected without re-running
+ * anything.
  */
-export async function compareWithGolden(comparison: GoldenComparison): Promise<{ updated: boolean }> {
+export async function compareWithGolden(comparison: GoldenComparison): Promise<{ updated: boolean; hunks: number }> {
   const rendered = renderTrace(comparison.trace);
   await mkdir(dirname(comparison.actualPath), { recursive: true });
   await writeFile(comparison.actualPath, rendered);
-  if (process.env[BEHAVIOR_TRACE_UPDATE_ENV] === "1") {
-    await mkdir(dirname(comparison.goldenPath), { recursive: true });
-    await writeFile(comparison.goldenPath, rendered);
-    return { updated: true };
+  const golden = await readFile(comparison.goldenPath, "utf8").catch(() => undefined);
+  if (golden === undefined) {
+    if (!comparison.update) throw new Error(`The SDK boundary behavior trace has no golden at ${comparison.goldenPath}.`);
+    comparison.validate(comparison.trace);
+    await writeGolden(comparison.goldenPath, rendered);
+    return { updated: true, hunks: 0 };
   }
-  const golden = await readFile(comparison.goldenPath, "utf8");
-  if (golden === rendered) return { updated: false };
-  const diff = renderUnifiedDiff(golden, rendered);
+  if (golden === rendered) {
+    comparison.validate(comparison.trace);
+    return { updated: false, hunks: 0 };
+  }
+  const diff = await unifiedDiff(comparison.goldenPath, comparison.actualPath);
+  await mkdir(dirname(comparison.diffPath), { recursive: true });
+  await writeFile(comparison.diffPath, diff);
+  const hunks = diff.split("\n").filter((line) => line.startsWith("@@")).length;
+  if (comparison.update) {
+    comparison.validate(comparison.trace);
+    await writeGolden(comparison.goldenPath, rendered);
+    return { updated: true, hunks };
+  }
   const lines = diff.split("\n");
   const shown = lines.slice(0, MAXIMUM_REPORTED_DIFF_LINES);
   throw new Error([
-    `The SDK boundary behavior trace differs from ${comparison.goldenPath}.`,
+    `The SDK boundary behavior trace differs from ${comparison.goldenPath} (${hunks} hunks).`,
     `Retained actual trace: ${comparison.actualPath}`,
+    `Retained unified diff: ${comparison.diffPath}`,
+    `Reproduce it with: git diff --no-index --no-color --unified=3 ${comparison.goldenPath} ${comparison.actualPath}`,
     "Review every hunk: an intended change updates the golden with",
     `\`${BEHAVIOR_TRACE_UPDATE_ENV}=1 npm run update:sdk-behavior-trace\`, and the pull request lists each hunk.`,
     "",
     ...shown,
-    ...(lines.length > shown.length ? [`… ${lines.length - shown.length} more diff lines in ${comparison.actualPath}`] : []),
+    ...(lines.length > shown.length ? [`… ${lines.length - shown.length} more diff lines in ${comparison.diffPath}`] : []),
   ].join("\n"));
+}
+
+async function writeGolden(goldenPath: string, rendered: string): Promise<void> {
+  await mkdir(dirname(goldenPath), { recursive: true });
+  await writeFile(goldenPath, rendered);
+}
+
+/** The reviewable unified diff between two trace files, from git itself. */
+async function unifiedDiff(beforePath: string, afterPath: string): Promise<string> {
+  const run = promisify(execFile);
+  try {
+    const { stdout } = await run("git", ["diff", "--no-index", "--no-color", "--unified=3", beforePath, afterPath], {
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (error) {
+    // `git diff --no-index` exits 1 for "differences found", which is the
+    // expected case; anything else is reported with the two files so the
+    // comparison is still reproducible by hand.
+    const stdout = (error as { stdout?: unknown }).stdout;
+    if (typeof stdout === "string" && stdout.length > 0) return stdout;
+    throw new Error(`Could not diff the behavior trace (${String(error)}); compare ${beforePath} with ${afterPath} by hand.`);
+  }
 }

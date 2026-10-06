@@ -296,25 +296,53 @@ deterministic faux-provider scenario runs through the real Gateway
 (`RuntimeRegistry`, `RuntimeSlot`, and Pi's own codemode/tool-search/mcp
 built-ins) and covers streamed text and thinking, a direct tool, codemode with a
 nested call plus `models.classify()` and `image()`, direct and codemode-exposed
-MCP tools from a hyphenated fixture server, tool search, steer and follow-up,
-abort, and manual compaction. Its normalized trace is compared byte-for-byte
-with `packages/gateway/test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`.
+MCP tools from hyphenated fixture servers, tool search over the tool the
+codemode exposure keeps undeclared, steer and follow-up, abort, and manual
+compaction. Its normalized trace is compared byte-for-byte with
+`packages/gateway/test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`.
 
-The trace records each provider request's declared tool names, system-prompt
-section headings and a hash of the normalized prompt text; every client
-broadcast topic with the union of its payload structure; every canonical JSONL
-entry; and the slot's transcript projection. Ids, timestamps, durations,
-counters and the disposable temp root are normalized, so a diff means a behavior
-change rather than a new run. The one ordering the trace does not compare is the
-tool list a tool search loads from *several* servers, which follows server
-connection order; the scenario therefore keeps a single searchable server.
+The trace records each distinct provider request's declared tool names,
+system-prompt section headings, a hash of the normalized prompt text and how
+many consecutive requests it covers; the TypeSafe classifier request the
+codemode step makes, so a classify delta is shown rather than inferred; every
+client broadcast topic with the union of its payload structure; every canonical
+JSONL entry; and the slot's transcript projection. Ids, timestamps, durations,
+counters, the disposable temp root and package paths are normalized, and
+host- or checkout-derived numbers (`usage`, `cost`, `stats`, and the compaction
+entry's `tokensBefore`, which Pi estimates from the serialized context) are
+compared as structure only. A diff therefore means a behavior change rather than
+a new run or a different checkout.
+
+Two things the trace deliberately does not compare. A tool search that loads from
+*several* servers orders its tools by server connection order, so the scenario
+keeps a single searchable server. And a live-progress subtree (`streaming`, the
+live `toolExecutions` list, `partialResult`, `nestedCalls`, and the in-flight
+`message` of the progress topics) is pruned from an event's shape, because
+whether a run observed it is host timing rather than SDK behavior; its settled
+form is recorded by the transcript projection.
 
 Run it with `npm run test:sdk-behavior-trace`. A mismatch prints a unified diff
-and retains the exact trace at `test-results/sdk-behavior-trace.actual.json`; an
+and retains the full diff at `test-results/sdk-behavior-trace.diff` and the exact
+trace at `test-results/sdk-behavior-trace.actual.json`; the same comparison by
+hand is `git diff --no-index --no-color --unified=3 <golden> <actual>`. An
 intended change updates the golden with `npm run update:sdk-behavior-trace`
-(`TRON_UPDATE_SDK_BEHAVIOR_TRACE=1`). A second case runs the same scenario under
-in-process CPU load and must produce the same trace, so the golden cannot encode
-host timing.
+(`TRON_UPDATE_SDK_BEHAVIOR_TRACE=1`), which prints the hunks it accepted. A
+second case runs the same scenario on one busy event-loop thread with an injected
+delay on every provider response, and must produce the same trace — so the golden
+cannot encode host timing, and only the idle case may write it. The scenario
+asserts that its own steps succeeded before the golden is accepted, so a golden
+cannot record a degraded scenario (a tool that was never active, a search that
+never ran) as correct behavior.
+
+The golden is darwin-specific: Tron's `computer` module registers only on darwin
+and its description and rule lines reach the prompt. The Gateway check that runs
+this file is macOS. Tron-owned prompt text (Tron's tool snippets, rule lines and
+operating context) is part of what the model is sent, so it is part of the
+golden: a Tron change to those surfaces updates this golden in the same pull
+request, and the diff names exactly which text moved. Masking it was rejected
+because the SDK's own tool-declaration wording sits in the same field: the 1.0.4
+trial rewrites the codemode declaration of Tron's own tools as well, and masking
+those descriptions would hide those hunks.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat

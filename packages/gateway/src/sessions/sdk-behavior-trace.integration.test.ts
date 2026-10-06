@@ -11,8 +11,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import {
-  clientEventTrace, compareWithGolden, eventShapePaths, hashPromptText, normalizeTraceValue,
-  promptSectionHeadings, type BehaviorTrace, type ProviderRequestTrace,
+  clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,
+  normalizeTraceValue, promptSectionHeadings,
+  type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
 } from "../../test-support/sdk-behavior-trace.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
@@ -30,30 +31,45 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
  * built-ins), and every seam an SDK upgrade can move is recorded in a normalized
  * trace compared byte-for-byte with a committed golden:
  *
- * - each provider request: declared tool names, system-prompt section headings,
- *   and a hash of the normalized prompt text;
+ * - each distinct provider request: declared tool names, system-prompt section
+ *   headings, a hash of the normalized prompt text, and how many consecutive
+ *   requests it covers;
+ * - the TypeSafe classifier request the codemode step makes, so a classify
+ *   delta is shown rather than inferred;
  * - each client-facing broadcast topic, with the union of its payload structure;
  * - every canonical session JSONL entry, normalized;
  * - the transcript projection from the slot snapshot.
  *
- * The comparison's unified diff *is* the behavior-delta inventory an upgrade
- * pull request reviews hunk by hunk. Intended changes update the golden with
- * `npm run update:sdk-behavior-trace` (or `TRON_UPDATE_SDK_BEHAVIOR_TRACE=1`).
+ * The comparison's diff is `git diff --no-index` over the two traces, so an
+ * upgrade pull request reviews the behavior-delta inventory hunk by hunk.
+ * Intended changes update the golden with `npm run update:sdk-behavior-trace`.
+ *
+ * The golden is darwin-specific: Tron's `computer` module registers only on
+ * darwin and its description and rule lines reach the prompt. The Gateway check
+ * that runs this file is macOS, so that is the recorded platform.
  */
 
 const GOLDEN_PATH = resolve(process.cwd(), "test-fixtures", "pi-sdk", "sdk-behavior-trace.golden.json");
 const ACTUAL_PATH = resolve(process.cwd(), "test-results", "sdk-behavior-trace.actual.json");
 const LOADED_ACTUAL_PATH = resolve(process.cwd(), "test-results", "sdk-behavior-trace.load.actual.json");
+const DIFF_PATH = resolve(process.cwd(), "test-results", "sdk-behavior-trace.diff");
 
 /** A 1x1 PNG, so the codemode `image()` output is a real, fixed image payload. */
 const IMAGE_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
 
+/** The tool-call IDs the scenario names itself; every other identity is generated. */
+const SCRIPTED_TOOL_CALL_IDS = [
+  "trace-read", "trace-codemode", "trace-mcp-direct", "trace-tool-search",
+  "trace-mcp-loaded", "trace-steer-read",
+];
+
 /**
  * The codemode script the scenario runs: `image()`, a nested tool call,
  * `models.classify()` and a codemode-exposed MCP call. `text()` is a statement
  * that appends output rather than a value, so the script reads tool results
- * through its own `asText`.
+ * through its own `asText`. The classify `catch` keeps the error text: a
+ * rejection has to be readable in the trace, not just counted.
  */
 const CODEMODE_SCRIPT = [
   "const lines = [];",
@@ -65,7 +81,7 @@ const CODEMODE_SCRIPT = [
   "try {",
   '  const answer = await models.classify(model, { state: { text: "boundary state" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?" } } });',
   "  classified = JSON.stringify(answer);",
-  '} catch (error) { classified = "classify-unavailable"; }',
+  '} catch (error) { classified = "classify-error: " + String(error && error.message ? error.message : error); }',
   'let scripted = "scripted-mcp-unavailable";',
   // Pi exposes a codemode tool under its JavaScript-safe identifier, which is
   // how the scripted MCP server (a hyphenated name) is reachable from a script.
@@ -78,8 +94,17 @@ const CODEMODE_SCRIPT = [
 /**
  * A hang bound for the abort step, not a speed budget: the abort signal is the
  * contract, and this only keeps a broken one from turning into a test timeout.
+ * Well under the 15 s `testTimeout` so the trace delta, not the runner, reports
+ * a broken abort.
  */
-const ABORT_STEP_FALLBACK_MS = 8_000;
+const ABORT_STEP_FALLBACK_MS = 5_000;
+
+/**
+ * The loaded case perturbs the *schedule* as well as the CPU: each scripted
+ * provider response lands this much later, so snapshot coalescing and progress
+ * throttling see a different interleaving than the idle case.
+ */
+const INJECTED_DELAY_MS = 40;
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -96,10 +121,11 @@ afterEach(async () => {
 });
 
 /**
- * Bounded in-process CPU load: two chains of 4 ms bursts keep roughly one and a
- * half cores busy for the scenario. Deliberately modest — the Gateway suite runs
- * four workers on a Mac shared with other agents, and an event-loop-stall owner
- * (`session-search-stall.test.ts`) measures the host this test also runs on.
+ * Bounded in-process CPU load: two chains of 4 ms bursts. Both run on this
+ * worker's event loop, so this is one thread kept busy, not several cores — and
+ * deliberately modest, because the Gateway suite runs four workers on a Mac
+ * shared with other agents and an event-loop-stall owner
+ * (`session-search-stall.test.ts`) measures that same host.
  */
 function startInProcessLoad(): () => void {
   let running = true;
@@ -117,6 +143,21 @@ interface ScenarioOptions {
   readonly load: boolean;
 }
 
+type SessionSlot = Awaited<ReturnType<RuntimeRegistry["acquire"]>>;
+
+/**
+ * The tools the session has registered, through the public slot projection.
+ * Hidden (codemode-exposed) tools have to be joined before a prompt names them,
+ * and no public SDK call lists them ahead of a turn.
+ */
+async function availableTools(slot: SessionSlot): Promise<Array<{ name: string }>> {
+  const context = await slot.context() as { availableTools?: unknown };
+  const tools = Array.isArray(context.availableTools) ? context.availableTools : [];
+  return tools.flatMap((tool) => tool !== null && typeof tool === "object" && typeof (tool as { name?: unknown }).name === "string"
+    ? [{ name: (tool as { name: string }).name }]
+    : []);
+}
+
 /**
  * One deterministic run of the whole boundary scenario. The caller owns nothing:
  * every process, directory and env mutation is released before this resolves.
@@ -130,7 +171,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
   // The Gateway reports `cwd` through its realpath; both spellings must normalize
   // to the same placeholder or the prompt hash differs per host.
-  const normalization = { roots: [root, await realpath(root)] };
+  const normalization = { roots: [root, await realpath(root)], stableIds: SCRIPTED_TOOL_CALL_IDS };
 
   const fixture = resolve(process.cwd(), "test-fixtures", "pi-sdk", "mcp-jsonrpc-fixture.mjs");
   const fixtureTools = [{
@@ -153,9 +194,9 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     writeFile(join(cwd, "notes.txt"), "boundary notes\n"),
     writeFile(join(agentDir, "settings.json"), JSON.stringify({
       sessionDir,
-      // Pi's built-ins are registered by `RuntimeSlot`; these make codemode and
-      // tool search active so the scenario reaches them without MCP exposure.
-      defaultTools: ["+codemode", "+tool-search"],
+      // `defaultTools` entries are *tool* names, not extension names: `tool_search`
+      // is the tool the tool-search built-in registers inactive.
+      defaultTools: ["+codemode", "+tool_search"],
       // Automatic compaction off, and a small retained tail so the scenario's
       // explicit `compact()` has a real cut point: the summary request and the
       // compaction entry's recorded prompt/tool state are part of the trace.
@@ -169,7 +210,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   const trust = new TrustService(agentDir);
   await trust.set(cwd, true);
 
-  const providerRequests: ProviderRequestTrace[] = [];
+  const providerRequests: Array<Omit<ProviderRequestTrace, "repeats">> = [];
   const recordRequest = (context: TranscriptContext): void => {
     const prompt = getCurrentSystemPrompt(context.messages);
     providerRequests.push({
@@ -178,13 +219,19 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
       promptHash: hashPromptText(prompt, normalization),
     });
   };
+  const classifierRequests: unknown[] = [];
+  const delay = async (): Promise<void> => {
+    if (!options.load) return;
+    await new Promise((settle) => setTimeout(settle, INJECTED_DELAY_MS));
+  };
 
   const faux = fauxProvider({ provider: "tron-sdk-behavior-trace", tokensPerSecond: 10_000, tokenSize: { min: 4, max: 4 } });
   const steps: Array<(context: TranscriptContext, options: SimpleStreamOptions | undefined) => AssistantMessage | Promise<AssistantMessage>> = [];
 
   // Turn 1, step 1: streamed thinking and text plus a direct tool and codemode.
-  steps.push((context) => {
+  steps.push(async (context) => {
     recordRequest(context);
+    await delay();
     return fauxAssistantMessage([
       fauxThinking("Reading the boundary fixture before scripting it."),
       { type: "text", text: "Tracing the SDK boundary." },
@@ -194,8 +241,9 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   });
   // Turn 1, step 2: a direct MCP tool and a tool search for the tool the
   // codemode exposure keeps out of the declared list.
-  steps.push((context) => {
+  steps.push(async (context) => {
     recordRequest(context);
+    await delay();
     return fauxAssistantMessage([
       fauxToolCall("mcp__tron-fixture__echo", { value: "direct" }, { id: "trace-mcp-direct" }),
       fauxToolCall("tool_search", { query: "Echo the boundary fixture value" }, { id: "trace-tool-search" }),
@@ -203,12 +251,14 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   });
   // Turn 1, step 3: the tool search result made the codemode-exposed MCP tool
   // callable directly as well.
-  steps.push((context) => {
+  steps.push(async (context) => {
     recordRequest(context);
-    return fauxAssistantMessage([fauxToolCall("mcp__tron-script__echo", { value: "direct-after-search" }, { id: "trace-mcp-loaded" })], { stopReason: "toolUse" });
+    await delay();
+    return fauxAssistantMessage([fauxToolCall("mcp__tron-script__echo", { value: "loaded-by-search" }, { id: "trace-mcp-loaded" })], { stopReason: "toolUse" });
   });
-  steps.push((context) => {
+  steps.push(async (context) => {
     recordRequest(context);
+    await delay();
     return fauxAssistantMessage("Boundary fixture traced.");
   });
 
@@ -221,15 +271,18 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   steps.push(async (context) => {
     recordRequest(context);
     steerRequestStarted();
+    await delay();
     await steerGate;
     return fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "trace-steer-read" })], { stopReason: "toolUse" });
   });
-  steps.push((context) => {
+  steps.push(async (context) => {
     recordRequest(context);
+    await delay();
     return fauxAssistantMessage("Steered work acknowledged.");
   });
-  steps.push((context) => {
+  steps.push(async (context) => {
     recordRequest(context);
+    await delay();
     return fauxAssistantMessage("Follow-up work acknowledged.");
   });
 
@@ -276,11 +329,19 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
 
   const originalFetch = globalThis.fetch;
   const stopLoad = options.load ? startInProcessLoad() : () => {};
-  globalThis.fetch = (async () => new Response(JSON.stringify({
-    model: "jev-latest",
-    answers: { relevant: { type: "noul", noul: 0.91 } },
-    usage: { input_tokens: 128, output_tokens: 8 },
-  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    // The classify boundary is recorded, not swallowed: the trace has to show
+    // whether a TypeSafe request was made and what shape it carried.
+    classifierRequests.push({
+      url: String(input),
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+    });
+    return new Response(JSON.stringify({
+      model: "jev-latest",
+      answers: { relevant: { type: "noul", noul: 0.91 } },
+      usage: { input_tokens: 128, output_tokens: 8 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
 
   try {
     await registry.initialize();
@@ -294,10 +355,11 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     // catalog arrives at dispatch. Join MCP registration before those calls —
     // by server, not by the exact tool name, because that name is one of the
     // facts this trace compares (Pi 1.0 maps `-` to `_` in it).
-    const session = (slot as unknown as { runtime: { session: { getAllTools(): Array<{ name: string }> } } }).runtime.session;
-    const registered = (server: string): boolean => session.getAllTools().some((tool) =>
-      tool.name.startsWith("mcp__") && tool.name.includes(server) && tool.name.endsWith("__echo"));
-    await waitFor(() => ["fixture", "script"].every(registered), "the fixture MCP tools to register");
+    await waitFor(async () => {
+      const names = (await availableTools(slot)).map((tool) => tool.name);
+      return ["fixture", "script"].every((server) => names.some((name) =>
+        name.startsWith("mcp__") && name.includes(server) && name.endsWith("__echo")));
+    }, "the fixture MCP tools to register");
 
     await slot.prompt("trace the Pi SDK boundary");
     await waitFor(() => !slot.isBusy, "the traced turn to settle");
@@ -326,7 +388,8 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     const transcript = slot.snapshot().transcript.map((item) => normalizeTraceValue(item, normalization));
     return {
       scenario: "pi-sdk-boundary",
-      providerRequests,
+      providerRequests: collapseRepeatedRequests(providerRequests),
+      classifierRequests: classifierRequests.map((entry) => normalizeTraceValue(entry, normalization)),
       clientEvents: clientEventTrace(clientEvents),
       canonicalJsonl: canonical,
       transcript,
@@ -347,29 +410,79 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   }
 }
 
-/** A trace that recorded nothing would make every golden comparison vacuous. */
-function expectSubstantialTrace(trace: BehaviorTrace): void {
-  expect(trace.providerRequests.length).toBeGreaterThanOrEqual(8);
+function isTraceObject(value: TraceValue | undefined): value is { readonly [key: string]: TraceValue } {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** One field of a normalized trace object, or `undefined` when it is not one. */
+function field(value: TraceValue | undefined, key: string): TraceValue | undefined {
+  return isTraceObject(value) ? value[key] : undefined;
+}
+
+/** The text of a normalized content list, or of a string. */
+function traceText(value: TraceValue | undefined): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map((item) => traceText(item)).join("\n");
+  if (isTraceObject(value)) return typeof value.text === "string" ? value.text : "";
+  return "";
+}
+
+/**
+ * The scenario's own steps must have run on the pinned SDK.
+ *
+ * This is not a restatement of the golden: it is what makes the golden evidence
+ * at all. A renamed tool, a `defaultTools` entry that names an extension instead
+ * of a tool, or a rejected classifier call would otherwise be recorded as the
+ * expected behavior — which is exactly how the golden once locked in
+ * "Tool tool_search not found".
+ *
+ * It runs only when the trace *matches* the golden (see `compareWithGolden`), so
+ * a real SDK delta is still reported as a diff rather than as this failure.
+ */
+function expectScenarioValid(trace: BehaviorTrace): void {
+  const results = trace.transcript.filter((item) => field(item, "kind") === "message" && field(item, "role") === "toolResult");
+  const resultText = (item: TraceValue): string => traceText(field(item, "content"));
+  expect(results.map(resultText).filter((text) => text.includes("not found"))).toEqual([]);
+  for (const name of ["read", "codemode", "mcp__tron-fixture__echo", "tool_search", "mcp__tron-script__echo"]) {
+    expect(results.some((item) => field(item, "toolName") === name && field(item, "isError") === false), `${name} must have succeeded`).toBe(true);
+  }
+  const search = results.find((item) => field(item, "toolName") === "tool_search");
+  expect(field(field(search, "details"), "loaded")).toEqual(["mcp__tron-script__echo"]);
+  const codemode = resultText(results.find((item) => field(item, "toolName") === "codemode") ?? null);
+  expect(codemode).toContain("nested=boundary notes");
+  // The classifier answered through the real TypeSafe path: a request was made
+  // and Pi parsed its response.
+  expect(codemode).toContain('"api":"typesafe-system-one"');
+  expect(codemode).toContain('scripted=fixture:echo:{"value":"scripted"}');
+  expect(trace.classifierRequests).toHaveLength(1);
+  expect(trace.clientEvents.map((event) => event.topic)).toContain("session.snapshot");
   expect(trace.canonicalJsonl.length).toBeGreaterThan(5);
   expect(trace.transcript.length).toBeGreaterThan(5);
-  expect(trace.clientEvents.map((event) => event.topic)).toContain("session.snapshot");
   expect(trace.providerRequests.some((request) => request.promptSections.includes("tools"))).toBe(true);
 }
+
+const updating = process.env.TRON_UPDATE_SDK_BEHAVIOR_TRACE === "1";
 
 describe("Pi SDK boundary behavior trace", () => {
   it("matches the committed golden for one deterministic scenario through the real Gateway", async () => {
     const trace = await runBoundaryScenario({ load: false });
-    expectSubstantialTrace(trace);
-    await compareWithGolden({ goldenPath: GOLDEN_PATH, actualPath: ACTUAL_PATH, trace });
+    // Only the idle case may write the golden; the load case has to agree with
+    // whatever this run wrote.
+    await compareWithGolden({
+      goldenPath: GOLDEN_PATH, actualPath: ACTUAL_PATH, diffPath: DIFF_PATH, trace,
+      update: updating, validate: expectScenarioValid,
+    });
   });
 
-  it("produces the same trace while the test process is under load", async () => {
+  it("produces the same trace under in-process load and an injected response delay", async () => {
     // Failure mode: the trace records timing- or ordering-dependent SDK
     // behavior, so a busy host produces a different "delta" than an idle one and
     // the golden stops being evidence. No wait in this file is a speed budget;
     // the load is bounded and confined to this process.
     const trace = await runBoundaryScenario({ load: true });
-    expectSubstantialTrace(trace);
-    await compareWithGolden({ goldenPath: GOLDEN_PATH, actualPath: LOADED_ACTUAL_PATH, trace });
+    await compareWithGolden({
+      goldenPath: GOLDEN_PATH, actualPath: LOADED_ACTUAL_PATH, diffPath: DIFF_PATH, trace,
+      update: false, validate: expectScenarioValid,
+    });
   });
 });
