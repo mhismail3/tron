@@ -11,5 +11,6 @@ export default defineConfig({
     // than weakening assertions or extending the behavioral deadlines.
     maxWorkers: Math.min(4, availableParallelism()),
     testTimeout: 15_000,
+    setupFiles: ["test-support/network-isolation.ts"],
   },
 });

@@ -3614,6 +3614,15 @@ struct ChatView: View {
         }
     }
 
+    /// PhotosPicker can deliver a library photo as HEIC; upload only formats
+    /// every model provider accepts (#407).
+    private static func providerAcceptedPhoto(_ data: Data, type: UTType?) -> (Data, String)? {
+        if let type, ProviderImageFormat.isAccepted(type), let mimeType = type.preferredMIMEType {
+            return (data, mimeType)
+        }
+        return ProviderImageFormat.jpeg(from: data).map { ($0, "image/jpeg") }
+    }
+
     private func importPhotos(_ values: [PhotosPickerItem], target: SessionPresentationIdentity) async {
         guard !values.isEmpty, presentationTarget == target else { return }
         var candidates: [ComposerAttachmentUploadCandidate] = []
@@ -3622,7 +3631,10 @@ struct ChatView: View {
         for item in values.prefix(ChatAttachmentImportPolicy.maximumPhotoSelection) {
             guard !Task.isCancelled, presentationTarget == target else { return }
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
+                guard let loaded = try await item.loadTransferable(type: Data.self),
+                      let (data, mimeType) = Self.providerAcceptedPhoto(
+                          loaded, type: item.supportedContentTypes.first
+                      ) else {
                     model.presentComposerActionError(
                         "The selected photo could not be prepared.",
                         target: target
@@ -3640,7 +3652,6 @@ struct ChatView: View {
                     break
                 }
                 candidateBytes = nextBytes
-                let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
                 let filename = "photo.\(UTType(mimeType: mimeType)?.preferredFilenameExtension ?? "jpg")"
                 candidates.append(.init(name: filename, mimeType: mimeType, data: data))
             } catch is CancellationError {

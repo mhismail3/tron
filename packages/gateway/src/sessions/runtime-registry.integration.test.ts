@@ -13,7 +13,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
 import { admitsAutomationAction } from "../automations/automation-contract.js";
@@ -6015,6 +6015,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, activity);
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    const admissionWindowStartedAt = Date.now();
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3,
       runId,
@@ -6030,7 +6031,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       status: "completed",
       completedAt: artifactCompletedAt,
     });
-    expect(admitted?.lifecycle?.terminalAt).toBe(admitted?.lifecycle?.observedAt);
+    // Terminal time is the Gateway's admission instant, never the producer's
+    // earlier `endedAt`. The registry's artifact discovery pass also re-reads
+    // this owned directory every 750 ms and may admit first, so the oracle is
+    // the admission window rather than this call's own observation (#406).
+    const terminalAt = Date.parse(admitted?.lifecycle?.terminalAt ?? "");
+    expect(terminalAt).toBeGreaterThanOrEqual(admissionWindowStartedAt);
+    expect(terminalAt).toBeLessThanOrEqual(Date.parse(admitted?.lifecycle?.observedAt ?? ""));
+    // A later observation of the same terminal artifact keeps that instant.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await internal.refreshSubagentActivityFromArtifact(asyncDir);
+    const reobserved = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
+    expect(reobserved?.lifecycle?.terminalAt).toBe(admitted?.lifecycle?.terminalAt);
 
     const foreignDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "foreign-run");
     await mkdir(foreignDir, { recursive: true });
@@ -9998,6 +10010,14 @@ export default function (pi) {
     const tools = [{ name: "echo", description: "Echo searchable fixture input", inputSchema: { type: "object", properties: { value: { type: "string" } } } }];
     await Promise.all([writeFile(stdioState, JSON.stringify({ tools })), writeFile(httpState, JSON.stringify({ tools })), writeFile(codeState, JSON.stringify({ tools })), writeFile(deferredState, JSON.stringify({ tools }))]);
     const httpProcess = spawn(process.execPath, [fixtureScript, "http", httpState, httpPortFile], { stdio: "ignore" });
+    // Registered as a test hook, not only in `finally`: a body vitest abandons
+    // at its timeout never reaches `finally`, which orphaned this server (#406).
+    onTestFinished(async () => {
+      if (httpProcess.exitCode !== null || httpProcess.signalCode !== null) return;
+      const exited = new Promise<void>((resolve) => httpProcess.once("exit", () => resolve()));
+      httpProcess.kill("SIGTERM");
+      await exited;
+    });
     const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
     try {
       await waitUntil(() => existsSync(httpPortFile));
@@ -10098,8 +10118,6 @@ export default function (pi) {
     } finally {
       if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
-      httpProcess.kill("SIGTERM");
-      await new Promise<void>((resolve) => httpProcess.once("exit", () => resolve()));
       await rm(root, { recursive: true, force: true });
     }
   });

@@ -64,12 +64,15 @@ struct HostedSessionConfigurationFixture: View {
                 }
         }
         .environment(model)
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
         .tronPresentation()
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 model.invalidateHostedPendingPresentation()
                 model.installHostedSubscribedSnapshot(snapshot)
+                let catalog = try JSONDecoder.gateway.decode([ModelSummary].self, from: Data(#"[{"provider":"fixture","id":"model","name":"Fixture Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-01"},{"provider":"fixture","id":"alternative","name":"Alternative Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-02"}]"#.utf8))
+                model.installHostedProviderCatalog(ProviderCatalog(providers: [], models: catalog), for: .session(id: snapshot.sessionId))
                 ready = true
             } catch { self.error = String(describing: error) }
         }

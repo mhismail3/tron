@@ -69,6 +69,17 @@
   intended behavior unless a product change is explicitly requested. Protect
   chat identity, scroll continuity, native layout, and composer/keyboard behavior;
   do not trade correctness or interaction quality for fewer lines or a benchmark.
+- **Integrate every UI/UX change with established patterns.** Before editing,
+  inspect neighboring surface owners, shared presentation components, and the
+  owning native architecture/development docs (iOS starts at
+  [Presentation parity](packages/ios-app/docs/architecture.md#presentation-parity),
+  with shared components in `TronPresentation.swift`). Reuse the standard typography,
+  colors, rows, controls, information treatment, loading, and sheet/navigation
+  chrome; do not append ad-hoc status text or invent a parallel visual language
+  for a runtime fix. Preserve accessibility, Dynamic Type, native layout,
+  identity, focus, and interaction behavior. If an approved change genuinely
+  introduces or changes a pattern, update its shared owner and canonical
+  pattern documentation in the same change, with behavioral and visual proof.
 - **Show useful visual results proactively.** When a screenshot, design preview,
   comparison, chart, or diagram helps the user understand or judge the result,
   show it without waiting to be asked. When `display` is available, prefer inline
@@ -164,6 +175,9 @@ process you start.
   running.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
+- Reproduce load-dependent failures inside the test process (constrained
+  workers, an in-process hog, an injected delay). Never load the whole Mac with
+  busy loops: other agents' checks and the Stable Gateway share it.
 - Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`, and
   never stop a process or release a simulator, lane or lease another session
   holds. Stop only processes you started, and ask before stopping anything you
@@ -308,6 +322,10 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
     scrubbed by `verify`.
   - Screenshots, recordings and full logs go only to the private evidence
     repository. The repository is public.
+  - Every agent working an issue posts evidence on it at each milestone
+    (reproduced, fix candidate, blocked, landed), separating verified from
+    inferred claims. A delegating agent passes this rule to each child; the
+    [tron-work skill](.agents/skills/tron-work/SKILL.md) owns the procedure.
 - **Discovered work:** file it, then stay in scope.
   - File a new task issue (Task form). If it belongs to the current epic, make
     it a sub-issue there; otherwise label it `needs-triage`.

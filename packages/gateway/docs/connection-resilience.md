@@ -536,7 +536,12 @@ rekey, fork, delete) apply the row at the same boundary that commits the change.
 A recursive `fs.watch` on the sessions root treats each event as a hint and
 re-reads that path once per `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) quiet spell,
 capped at `CATALOG_EVENT_MAX_WAIT_MS` (1 s) so a writer that never goes quiet
-still reaches its row. Pending per-path timers are capped at
+still reaches its row. An event naming a folder re-reads the transcripts under
+it; a folder that disappears while it is being walked (an `rm -rf` still in
+progress under the named folder) is absence, so only its published rows are
+re-read and dropped rather than starting a whole-folder pass. Only a folder
+that cannot be read (including one replaced by a file), or holds more transcripts than one event can name, falls
+back to that pass. Pending per-path timers are capped at
 `CATALOG_EVENT_PENDING_PATH_LIMIT` (256); a burst beyond that bound clears the
 individual hints and runs one whole-folder reconcile. Events arriving during
 that overflow pass use the unnamed-event debounce (250 ms quiet spell, capped at

@@ -99,11 +99,27 @@ took. If they ask for options, list the top three and wait.
    retained artifact.
 4. **Implement.** Ship code, its tests and its owning docs together.
    - For a bug, first record a failing reproduction (a test or log) as
-     evidence. If it cannot be reproduced, ask for the missing detail with
-     `needs-decision` instead of guessing a fix.
-5. **Report progress.** Comment on the issue when a milestone is reached, the
-   plan changes, or you are blocked. Anything out of scope becomes a new issue
-   (see AGENTS.md); do not grow the pull request.
+     evidence. If it cannot be reproduced, comment what was tried, add
+     `needs-decision`, set Status Needs you and ask for the missing detail
+     instead of guessing a fix.
+5. **Post evidence as you go.** Comment on the issue at each milestone, not
+   only at the end, so the issue alone shows where the work stands:
+   - **Reproduced:** what failed, the command or CI run, the retained log, and
+     which cause is proven and which is still a lead.
+   - **Candidate:** the root-cause evidence, the change, the negative control
+     (fix removed fails, restored passes) and focused results with counts.
+   - **Blocked or replanned:** what, why, and the decision needed.
+
+   Label each claim verified or inferred. Cite commits, run IDs and retained
+   log names, never local paths, device exports or personal data, and run
+   `scripts/personal-info-guard.sh --stdin` on the text before posting.
+   Screenshots and full logs go to the private evidence repository through
+   `verify --evidence-manifest`. When delegating, put this rule in every child
+   task and read the issue yourself rather than trusting the child's report.
+   A delegated child stops at a verified, pushed commit; the coordinator
+   dispatches and follows hosted CI, so no child spends its runtime polling.
+   Anything out of scope becomes a new issue (see AGENTS.md); do not grow the
+   pull request.
 6. **Verify.**
    - Run `scripts/tron work verify` until it passes.
    - A failure that also fails on unchanged `main` (prove it with a control
@@ -113,7 +129,8 @@ took. If they ask for options, list the top three and wait.
    - Write a short Markdown summary to a temporary file.
    - Run `scripts/tron work land --summary-file <file>`, adding
      `--needs-user-validation "<exact action and check>"` when only the
-     maintainer can complete the proof.
+     maintainer can complete the proof. The summary separates verified
+     behavior from assumptions and residual risks.
    - The Debug Gateway may be restarted by agents (AGENTS.md rule 8); Stable
      may not.
 8. **Clean up and sync.**
@@ -125,7 +142,12 @@ took. If they ask for options, list the top three and wait.
    - Fast-forward the primary checkout's `main` when it is clean.
    - Stop every process you started.
 9. **Report.** Give the user the PR, the merge commit, what was verified, and
-   anything handed to them.
+   anything handed to them. When work needs the maintainer's install, name the
+   checkpoint: which builds (Mac and Stable Gateway, iPhone) cover it, and every
+   other open handoff the same install makes ready, so one rebuild validates
+   and closes as many issues as possible. Offer the checkpoint only when no
+   agent work is running: a Stable restart drains and pauses it. Close an issue
+   only on the evidence its handoff asked for.
 
 ## Plan larger work
 
