@@ -9,6 +9,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const client: ClientContext = {
   id: "phone",
@@ -135,7 +136,7 @@ describe("session transcript paging", () => {
         deviceId: paired.deviceId,
         commandId: "revoke-command-1",
       });
-      await vi.waitFor(() => expect(removeDevice).toHaveBeenCalledOnce());
+      await waitFor(() => removeDevice.mock.calls.length === 1, "the device removal");
       expect(published).toHaveBeenCalledOnce();
       expect(JSON.parse(await readFile(join(root, "gateway", "devices.json"), "utf8")).devices).toEqual([]);
       expect(await devices.authenticateAndAdmit(paired.token, (identity) => identity)).toBeNull();

@@ -1,0 +1,11 @@
+{
+  // The Gateway's own `tsconfig.json` excludes `src/**/*.test.ts` and has no
+  // `include` for this package's test-only support modules, so a type error in
+  // `test-support/` reached `npm run check` and `npm run build` unnoticed (#460).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["test-support/**/*.ts"]
+}

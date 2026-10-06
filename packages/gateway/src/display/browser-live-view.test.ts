@@ -3,6 +3,7 @@ import { BrowserSocket, jpeg, registration } from "../../test-fixtures/browser-l
 import { BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { admitBrowserJPEG } from "./browser-live-cdp.js";
 import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: BrowserLiveViewRegistry[] = [];
 beforeEach(() => vi.useFakeTimers());
@@ -97,11 +98,11 @@ describe("browser live observation", () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(0);
     const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
     socket.open();
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast"), "the screencast start command");
     if (failure === "wrong-target") socket.frame(1, "two");
     expect(f.frame(lease.leaseId)).toEqual({ status: "waiting" });
     clock.mockReturnValue(5_001);
-    await vi.waitFor(() => expect(socket.readyState).toBe(3), { timeout: 1_500 });
+    await waitFor(() => socket.readyState === 3, "the ended browser socket");
     expect(() => f.frame(lease.leaseId)).toThrow("ended");
     expect(socket.commands.some((command) => command.method === "Browser.close")).toBe(false);
   });
@@ -111,20 +112,20 @@ describe("browser live observation", () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(0);
     const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
     socket.open();
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast"), "the screencast start command");
     socket.frame(1);
-    await vi.waitFor(() => expect(f.frame(lease.leaseId)).toMatchObject({ sequence: 1 }));
+    await waitFor(() => { const delivered = f.frame(lease.leaseId); return "sequence" in delivered && delivered.sequence === 1; }, "the first delivered frame");
     const evaluations = socket.commands.filter((command) => command.method === "Runtime.evaluate").length;
     clock.mockReturnValue(6_000);
-    await vi.waitFor(() => expect(socket.commands.filter((command) => command.method === "Runtime.evaluate").length).toBeGreaterThan(evaluations));
+    await waitFor(() => socket.commands.filter((command) => command.method === "Runtime.evaluate").length > evaluations, "the refreshed Runtime.evaluate");
     expect(socket.readyState).toBe(1);
     expect(f.frame(lease.leaseId, 1)).toEqual({ status: "unchanged" });
     socket.visible.set("one", false); socket.visible.set("two", true);
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two"), "the observer:two screencast start");
     expect(f.frame(lease.leaseId)).toEqual({ status: "waiting" });
     socket.frame(2, "one"); // The retired page cannot satisfy the new deadline.
     clock.mockReturnValue(11_001);
-    await vi.waitFor(() => expect(socket.readyState).toBe(3), { timeout: 1_500 });
+    await waitFor(() => socket.readyState === 3, "the ended browser socket");
     expect(() => f.frame(lease.leaseId)).toThrow("ended");
   });
 
@@ -198,25 +199,25 @@ describe("browser live observation", () => {
     vi.useRealTimers();
     const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
     socket.open();
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast"), "the screencast start command");
     socket.frame(1);
-    await vi.waitFor(() => expect(f.frame(lease.leaseId)).toMatchObject({ sequence: 1 }));
+    await waitFor(() => { const delivered = f.frame(lease.leaseId); return "sequence" in delivered && delivered.sequence === 1; }, "the first delivered frame");
     socket.visible.set("one", false); socket.visible.set("two", true);
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two")).toBe(true), { timeout: 1500 });
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two"), "the observer:two screencast start");
     socket.frame(2, "one");
     expect(f.frame(lease.leaseId)).toEqual({ status: "waiting" });
     socket.frame(3, "two");
-    await vi.waitFor(() => expect(f.frame(lease.leaseId)).toMatchObject({ sequence: 2 }));
+    await waitFor(() => { const delivered = f.frame(lease.leaseId); return "sequence" in delivered && delivered.sequence === 2; }, "the frame after the target change");
   });
 
   it("fences a detached target's late visibility reply and follows the remaining page", async () => {
     vi.useRealTimers();
     const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
     socket.open();
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast"), "the screencast start command");
     socket.silent.add("Page.screencastFrameAck");
     socket.frame(1, "one");
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.screencastFrameAck")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.screencastFrameAck"), "the screencast frame acknowledgement");
     socket.silent.add("Runtime.evaluate");
     const evaluations: Array<{ id: number; sessionId?: string }> = [];
     socket.on("sent", (command) => {
@@ -231,10 +232,10 @@ describe("browser live observation", () => {
         socket.silent.delete("Page.screencastFrameAck");
       });
     });
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two")).toBe(true), { timeout: 1500 });
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two"), "the observer:two screencast start");
     expect(socket.readyState).toBe(1);
     socket.frame(1, "two");
-    await vi.waitFor(() => expect(f.frame(lease.leaseId)).toHaveProperty("data"));
+    await waitFor(() => "data" in f.frame(lease.leaseId), "the frame after the detached target");
   });
 
   it("reads encoded JPEG dimensions, rejects corrupt/oversized frames and endpoint controls", () => {

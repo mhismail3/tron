@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NativeCaptureTransport } from "./native-capture-transport.js";
 import { openNativeCaptureClient } from "./native-capture-client.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const { openTransport } = vi.hoisted(() => ({ openTransport: vi.fn() }));
 vi.mock("./native-capture-transport.js", () => ({ openNativeCaptureTransport: openTransport }));
@@ -85,7 +86,7 @@ describe("NativeCaptureClient", () => {
     reply(4, "joined"); await Promise.resolve(); await Promise.resolve();
     expect(pending).toHaveLength(5); // Host receipt is not the JS read callback's retirement.
     reply(3, "empty", { readSequence: 1 }); await discarded; await paused;
-    await vi.waitFor(() => expect(pending).toHaveLength(6));
+    await waitFor(() => pending.length === 6, "the sixth native request");
     expect(at(5).request).toMatchObject({ operation: "start", handle, ...identity });
     const nextGeneration = randomUUID(); reply(5, "started", { generation: nextGeneration }); await resumed;
     const frame = client.pull(); reply(6, "frame", { generation: nextGeneration, readSequence: 2, sequence: "0", width: 3, height: 2 }, jpeg);
@@ -102,7 +103,7 @@ describe("NativeCaptureClient", () => {
     expect(at(2).request.region).toEqual(region); reply(2, "started", { generation }); await first;
     const paused = client.suspend(), mutable = { ...region };
     const resumed = client.start(handle, undefined, mutable); mutable.width = 999;
-    reply(3, "joined"); await paused; await vi.waitFor(() => expect(pending).toHaveLength(5));
+    reply(3, "joined"); await paused; await waitFor(() => pending.length === 5, "the fifth native request");
     expect(at(4).request.region).toEqual(region);
     reply(4, "started", { generation: randomUUID() }); await resumed;
     const pausedAgain = client.suspend(); reply(5, "joined"); await pausedAgain;
@@ -150,7 +151,7 @@ describe("NativeCaptureClient", () => {
   it("terminal Stop joins an in-flight suspension before using the reserved control lane", async () => {
     const client = await started(), paused = client.suspend(), closed = client.close();
     expect(client.suspend()).toBe(closed); expect(pending).toHaveLength(4);
-    reply(3, "joined"); await paused; await vi.waitFor(() => expect(pending).toHaveLength(5));
+    reply(3, "joined"); await paused; await waitFor(() => pending.length === 5, "the stop request after the joined suspension");
     expect(at(4).request.operation).toBe("stop"); reply(4, "joined"); await closed;
     await expect(client.start(handle)).rejects.toThrow("closed");
   });
@@ -256,7 +257,7 @@ describe("NativeCaptureClient", () => {
     let joined = false;
     void close.then(() => { joined = true; });
     reply(1, "joined");
-    await vi.waitFor(() => expect(localClose).toHaveBeenCalledOnce());
+    await waitFor(() => localClose.mock.calls.length === 1, "the local transport close");
     expect(joined).toBe(false);
     release();
     await close;

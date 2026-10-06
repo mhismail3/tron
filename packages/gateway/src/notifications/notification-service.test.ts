@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MAXIMUM_NOTIFICATION_INBOX_ENTRIES, NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
 import type { PushRelayClient, RelayNotificationOutcome } from "./relay-client.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const grant = {
   deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
@@ -72,7 +73,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { root, store, service, relay } = await fixture();
     await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
     await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-one", kind: "explicit", message: "sensitive text" })).resolves.toBe("queued");
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the relay delivery");
     expect(relay.sent[0].message).toBe("Tron has an update. Open Tron to view it.");
     await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-one", kind: "explicit", message: "changed" })).resolves.toBe("suppressed");
     const persisted = await readFile(join(root, "gateway", "notifications.json"), "utf8");
@@ -115,7 +116,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     // disables the grant. Nothing else announces that, so the revision the
     // phone compares against is what makes the next registration re-send.
     await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-one", kind: "explicit", message: "text" })).resolves.toBe("queued");
-    await vi.waitFor(async () => expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false));
+    await waitFor(async () => !(await service.status(grant.deviceId)).deviceRegistered, "the rejected delivery to disable the grant");
     expect(service.registrationRevision).not.toBe(acknowledged);
     expect(await service.registrationIsCurrent({ ...grant, notifyWhenAskPresented: true })).toBe(false);
 
@@ -130,7 +131,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, previewsEnabled: true });
     await service.enqueue({ sessionId: "session-one", sourceId: "tool-two", kind: "explicit", message: "Build finished" });
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the relay delivery");
     expect(relay.sent[0].message).toBe("Build finished");
   });
 
@@ -145,7 +146,7 @@ describe("NotificationGrantStore and NotificationService", () => {
       title: "Release audit",
       route: { sessionId: "session-finished", machineId: "machine-abcdefgh" },
     });
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the relay delivery");
     expect(relay.sent[0]).toMatchObject({
       title: "Release audit",
       sessionId: "session-finished",
@@ -204,7 +205,7 @@ describe("NotificationGrantStore and NotificationService", () => {
       kind: "explicit",
       message: "Explicit update",
     })).resolves.toBe("queued");
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the relay delivery");
   });
 
   it("keeps inbox invalidation callbacks outside canonical notification admission", async () => {
@@ -221,7 +222,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect((await service.inbox()).notifications).toHaveLength(1);
     // A throwing presentation owner is swallowed once the debounced broadcast
     // runs; it never owns canonical admission either way.
-    await vi.waitFor(() => expect(invoked).toBe(true));
+    await waitFor(() => invoked, "the debounced inbox broadcast");
   });
 
   it("pages canonical inbox rows and owns idempotent read state by notification or APNs request identity", async () => {
@@ -265,7 +266,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     await expect(service.markAllInboxRead({ through: keyOf(first.notifications[1]!) })).resolves.toEqual({ changed: 2 });
     await expect(service.markAllInboxRead({ through: keyOf(first.notifications[1]!) })).resolves.toEqual({ changed: 0 });
     expect((await service.inbox()).unreadCount).toBe(0);
-    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ unreadCount: 0 }));
+    await waitFor(() => changed.mock.calls.at(-1)?.[0]?.unreadCount === 0, "the read-all broadcast");
     expect(changed.mock.calls.at(-1)?.[0].revision).toEqual(expect.any(String));
   });
 
@@ -295,7 +296,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { service, relay } = await fixture(["invalid_token"]);
     await service.upsertGrant(grant);
     await service.enqueue({ sessionId: "session-one", sourceId: "tool-three", kind: "explicit", message: "hello" });
-    await vi.waitFor(async () => expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false));
+    await waitFor(async () => !(await service.status(grant.deviceId)).deviceRegistered, "the invalid-token delivery to disable the grant");
     await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-four", kind: "explicit", message: "hello" })).resolves.toBe("unavailable");
     expect(relay.sent).toHaveLength(1);
   });
@@ -304,9 +305,10 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { service } = await fixture(["invalid_grant"]);
     await service.upsertGrant(grant);
     await service.enqueue({ sessionId: "session-invalid-grant", sourceId: "tool-invalid-grant", kind: "explicit", message: "hello" });
-    await vi.waitFor(async () => expect((await service.status(grant.deviceId))).toMatchObject({
-      deviceRegistered: false, requiresGrantRotation: true,
-    }));
+    await waitFor(async () => {
+      const status = await service.status(grant.deviceId);
+      return !status.deviceRegistered && status.requiresGrantRotation;
+    }, "the rejected grant to require rotation");
     await expect(service.upsertGrant(grant)).resolves.toMatchObject({
       deviceRegistered: false, requiresGrantRotation: true,
     });
@@ -317,10 +319,10 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { service, store } = await fixture(["retryable"], Date.now, undefined, changed);
     await service.upsertGrant(grant);
     await service.enqueue({ sessionId: "session-remove", sourceId: "source-remove", kind: "explicit", message: "hello" });
-    await vi.waitFor(async () => expect((await store.snapshot()).pending[0]?.targets[0]?.outcome).toBe("retryable"));
+    await waitFor(async () => (await store.snapshot()).pending[0]?.targets[0]?.outcome === "retryable", "the retryable delivery outcome");
     await service.removeDevice(grant.deviceId);
     expect((await service.inbox()).notifications[0]).toMatchObject({ outcome: "failed" });
-    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ unreadCount: 1 }));
+    await waitFor(() => changed.mock.calls.at(-1)?.[0]?.unreadCount === 1, "the failed-row broadcast");
   });
 
   it("removes local authority first and drains a durable revocation tombstone", async () => {
@@ -329,7 +331,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     await expect(service.removeDevice(grant.deviceId)).resolves.toBe(true);
     expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false);
     await service.drain();
-    await vi.waitFor(() => expect(relay.revoked).toEqual([grant.grantId]));
+    await waitFor(() => relay.revoked.length === 1 && relay.revoked[0] === grant.grantId, "the revocation tombstone drain");
     expect((await store.snapshot()).revocations).toEqual([]);
   });
 
@@ -347,7 +349,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const service = new NotificationService(store, relay, () => clock);
     await service.upsertGrant(grant);
     await service.removeDevice(grant.deviceId);
-    await vi.waitFor(async () => expect((await store.snapshot()).revocations[0]?.attempts).toBeGreaterThan(0));
+    await waitFor(async () => ((await store.snapshot()).revocations[0]?.attempts ?? 0) > 0, "the first failed revocation attempt");
     clock += 365 * 24 * 60 * 60_000;
     await service.drain();
     const tombstone = (await store.snapshot()).revocations[0];
@@ -359,7 +361,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { service, relay } = await fixture();
     await service.upsertGrant(grant);
     await service.upsertGrant({ ...grant, grantId: "grant_ijklmnop", secret: Buffer.alloc(32, 8).toString("base64url") });
-    await vi.waitFor(() => expect(relay.revoked).toContain(grant.grantId));
+    await waitFor(() => relay.revoked.includes(grant.grantId), "the previous capability's revocation");
     expect((await service.status(grant.deviceId)).enabledDeviceCount).toBe(1);
   });
 
@@ -449,7 +451,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { store, service, relay } = await fixture(["retryable"], () => clock);
     await service.upsertGrant(grant);
     await service.enqueue({ sessionId: "session-restart", sourceId: "tool-restart", kind: "explicit", message: "hello" });
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the first relay attempt");
     const requestId = relay.sent[0].requestId;
     clock += 6_000;
     const recoveredRelay = fakeRelay(["accepted_by_apns"]);
@@ -493,7 +495,7 @@ describe("NotificationGrantStore and NotificationService", () => {
       machineId: "machine-abcdefgh",
       observed: false,
     });
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the relay delivery");
     expect(relay.sent[0]).toMatchObject({
       title: "Input needed",
       message: "Tron needs your input. Open Tron to respond.",
@@ -806,7 +808,7 @@ describe("canonical inbox keyset paging, retention and reads", () => {
       message: "Delivered while observed", readOnAdmission: true,
     })).resolves.toBe("queued");
     // Delivery is unchanged: only the inbox row starts read.
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    await waitFor(() => relay.sent.length === 1, "the relay delivery");
     expect(relay.sent[0]?.message).toBe("Delivered while observed");
     const page = await service.inbox();
     expect(page.notifications[0]).toMatchObject({ message: "Delivered while observed", isUnread: false });

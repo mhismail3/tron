@@ -3365,7 +3365,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       for (let index = 0; index < slots.length; index++) expect(acquired[index * 2 + 1]).toBe(slots[index]);
       const model = faux.getModel();
       await Promise.all(slots.map(async (slot, index) => { await slot.setModel(model.provider, model.id); await slot.prompt(`work-${index}`); }));
-      await vi.waitFor(() => expect(faux.state.callCount).toBe(128), { timeout: 10_000 });
+      await waitFor(() => faux.state.callCount === 128, "all 128 slots to reach the model");
       expect(registry.activeSessionIds()).toHaveLength(128);
       const expected = managers.map(manager => manager.getSessionId()).sort();
       for (let wave = 0; wave < 3; wave++) {
@@ -12007,12 +12007,12 @@ export default function (pi) {
       queued = await slot.prompt("SYNTHETIC_QUEUED_TASK", [], "followUp");
       releaseModel.resolve();
       await attentionEntered.promise;
-      await vi.waitFor(() => expect(invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt => receipt.operationId === queued.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "failed")).toBe(true), { timeout: 5_000, interval: 10 });
+      await waitFor(() => invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt => receipt.operationId === queued.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "failed"), "the failed receipt for the queued prompt");
     } finally {
       releaseModel.resolve();
       releaseAttention.resolve();
     }
-    await vi.waitFor(() => { expect(slot.isBusy).toBe(false); expect(slot.isDrainBusy).toBe(false); }, { timeout: 5_000, interval: 10 });
+    await waitFor(() => !slot.isBusy && !slot.isDrainBusy, "the slot to go idle after the failed operation");
     const terminals = invocationReceipts(slot.canonicalSessionEntries(), slot.id).filter(receipt => receipt.receiptKind === "terminal");
     const firstReceipt = terminals.find(receipt => receipt.operationId === initial.operationId);
     const nextReceipt = terminals.find(receipt => receipt.operationId === queued.operationId);
