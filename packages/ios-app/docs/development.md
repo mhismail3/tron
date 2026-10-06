@@ -1336,7 +1336,11 @@ cached/stale/live activity, ID-index integrity, and retention of existing dashbo
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
 wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
-the test's own work: a test must not need a fast machine to finish inside it. Walk long backoff
+the test's own work: a test must not need a fast machine to finish inside it. Hosted views await
+UIKit/SwiftUI callbacks (appearance, transition or animation completion, `TimelineView` ticks)
+only through `awaitHostedEvents` (`Tests/Support/HostedEvents.swift`), whose bound is a hang
+bound: hosted runners stall the main thread for seconds, and a stalled `TimelineView`
+coalesces missed ticks, so oracles assert outcomes, never callback latency or every tick. Walk long backoff
 curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
 `DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
 from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
