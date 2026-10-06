@@ -29,6 +29,36 @@ lock_owner="$repo_root/scripts/ios-test-lock.py"
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# The real-UI journeys `run-ui` owns. A selector that names anything else - a
+# class, a suite, or a UI test of another lane - would otherwise run here and be
+# reported as a real-UI journey with an evidence bundle, so the parse admits only
+# these. Each receives its own fresh fixture and pairing code, because a pairing
+# invitation is one-use.
+ui_owned_journeys=(
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
+)
+
+ui_journey_is_owned() {
+  local candidate="$1" owned
+  for owned in "${ui_owned_journeys[@]}"; do
+    [[ "$candidate" == "$owned" ]] && return 0
+  done
+  return 1
+}
+
+# The WebSocket connections the fixture Gateway's own log must show for a
+# journey, as "opened closed". A journey that backgrounds the app retires its
+# socket and reconnects when it returns: one connection is opened before that
+# and a second one after it, and the first is closed. A journey that never
+# connects requires none.
+ui_journey_connections() {
+  case "$1" in
+    *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 1" ;;
+    *) echo "0 0" ;;
+  esac
+}
+
 command="${1:-all}"
 lane=""
 if (($#)); then shift; fi
@@ -47,11 +77,13 @@ while (($#)); do
     --only-testing)
       (($# >= 2)) || die "--only-testing requires an owner"
       [[ -n "$2" && "$2" != -* ]] || die "invalid --only-testing owner: ${2:-missing}"
+      ui_journey_is_owned "$2" || die "$2 is not a real-UI journey this command owns (see '$0 help')"
       selectors+=("-only-testing:$2")
       shift 2
       ;;
     --only-testing:*)
       [[ "${1#--only-testing:}" != "" ]] || die "empty --only-testing owner"
+      ui_journey_is_owned "${1#--only-testing:}" || die "${1#--only-testing:} is not a real-UI journey this command owns (see '$0 help')"
       selectors+=("-only-testing:${1#--only-testing:}")
       shift
       ;;
@@ -100,12 +132,14 @@ ui_scheme="Tron UI Validation"
 ui_test_plan="UIValidation"
 ui_test_target="TronMobileUITests"
 ui_xctestrun_glob="Tron UI Validation_UIValidation_*.xctestrun"
-# The real-UI journeys `run-ui` owns. Each receives its own fresh fixture and
-# pairing code, because a pairing invitation is one-use.
-ui_journey_filters=(
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testPairsByLinkStreamsAndSurvivesBackground"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeReportsClearFailure"
-)
+# The lane's simulator and hosted app a real-UI command owns while it runs; both
+# stay empty for every other command, whose runs never pair the app.
+ui_simulator_id=""
+ui_app_state_owner=0
+# Whether this command's fixture must be stopped when it ends. A real-UI command
+# renews a fixture per journey and has nothing to iterate against, so it never
+# leaves one running; the unit lane keeps its fixture for iteration.
+stop_fixture_on_exit=0
 simulator_args=(
   --marker "$simulator_marker"
   --runtime "$TRON_CI_IOS_RUNTIME_VERSION"
@@ -139,7 +173,11 @@ Commands:
   run-ui    Build the UI-validation products in this worktree's DerivedData, then
             run the real-UI journeys, each against its own fresh fixture, and leave
             one evidence directory per journey (xcresult, Gateway log, proxy link
-            stats, report.json with every artifact's path and sha256).
+            stats, XCTest summary, report.json with every artifact's path, sha256,
+            the final status and the source revision). The journeys pair the hosted
+            app for real, so the command stops the fixture it renewed and returns
+            that app to its unpaired state on success, failure, deadline and signal
+            - a SIGKILL of this command cannot do either.
   iterate   Incremental build, then one focused test-without-building run.
   all       Prepare, build, and run. Leaves the fixture running for iteration.
   status    Print fixture/build status.
@@ -154,14 +192,15 @@ Typical edit loop:
 
 Real-UI journeys (one command from a clean worktree):
   scripts/ios-gateway-e2e-test run-ui
-  scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairsByLinkStreamsAndSurvivesBackground
+  scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
 
 Options:
   --lane NAME            The simulator lane, selected exactly as scripts/tron-ios-test selects it:
                          without one, a linked worktree uses its own lane and the primary
                          checkout the default lane; TRON_IOS_TEST_LANE is the environment form.
   --only-testing OWNER   Run only these real-UI journeys; repeat for several. `run-ui`
-                         runs the journeys it owns when none is named.
+                         runs the journeys it owns when none is named, and refuses any
+                         selector that is not one of them.
 
 Environment:
   TRON_IOS_TEST_LANE            the lane, as --lane
@@ -567,13 +606,7 @@ run_one_test_case() {
   if ((status == 0)); then
     # A missing fixture must not turn XCTest's conditional skip into a green
     # cross-layer qualification receipt.
-    if ! xcrun xcresulttool get test-results summary --path "$result_bundle" >"$attempt_dir/summary.json" \
-      || ! python3 - "$attempt_dir/summary.json" <<'PY'
-import json,sys
-with open(sys.argv[1]) as handle: result=json.load(handle)
-assert result.get('passedTests')==1 and result.get('failedTests')==0 and result.get('skippedTests')==0 and result.get('totalTestCount')==1, 'boundary case did not execute and pass exactly once'
-PY
-    then
+    if ! require_single_passing_case "$result_bundle" "$attempt_dir/summary.json" "boundary case"; then
       echo "error: isolated boundary test was skipped, missing, or failed ($test_filter)" >&2
       status=65
     fi
@@ -581,6 +614,19 @@ PY
   echo "Focused E2E case $test_filter completed in $((SECONDS - case_started))s (status $status); artifacts: $attempt_dir"
   report_result_bundle_failures "$result_bundle"
   return "$status"
+}
+
+# The one exactly-once XCTest check both lanes use: exactly one case executed and
+# passed, and nothing was skipped or missing. A missing fixture must not turn
+# XCTest's conditional skip into a green cross-layer qualification receipt.
+require_single_passing_case() {
+  local result_bundle="$1" summary_path="$2" description="$3"
+  xcrun xcresulttool get test-results summary --path "$result_bundle" >"$summary_path" || return 1
+  python3 - "$summary_path" "$description" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle: result = json.load(handle)
+assert result.get('passedTests') == 1 and result.get('failedTests') == 0 and result.get('skippedTests') == 0 and result.get('totalTestCount') == 1, f'{sys.argv[2]} did not execute and pass exactly once'
+PY
 }
 
 # The failure lines of a finished result bundle, when one exists. Optional
@@ -603,12 +649,17 @@ walk(document)' 2>/dev/null || true
 }
 
 # One directory per journey: the result bundle, the fixture Gateway's canonical
-# runtime log, the fault proxy's link statistics and report.json, which names
-# every artifact with the sha256 of its bytes (or, for the result bundle, of its
-# whole file tree). A reviewer can therefore re-derive each artifact without
-# trusting this run.
-collect_journey_evidence() {
-  local attempt_dir="$1" journey="$2" status="$3" duration="$4" failure=0
+# runtime log, the fault proxy's link statistics, the XCTest summary and
+# report.json, which names every artifact with the sha256 of its bytes (or, for
+# the result bundle, of its whole file tree) and records what the journey
+# asserted. A reviewer can therefore re-derive each artifact without trusting
+# this run.
+#
+# The two halves are separate because the report must carry the journey's FINAL
+# status: when an artifact cannot be captured, an otherwise passing journey has
+# produced no evidence, which is not a passing run.
+capture_journey_evidence() {
+  local attempt_dir="$1" failure=0
   # The Gateway's authoritative log is its runtime JSONL, not the fixture
   # process's stderr (which only carries Node's own warnings).
   if ! cp "$TRON_E2E_TRON_HOME/logs/gateway.jsonl" "$attempt_dir/gateway.jsonl"; then
@@ -622,15 +673,23 @@ collect_journey_evidence() {
     rm -f "$attempt_dir/proxy-link-stats.json"
     failure=1
   fi
+  return "$failure"
+}
+
+write_journey_report() {
+  local attempt_dir="$1" journey="$2" final_status="$3" duration="$4" opened="$5" closed="$6" evidence_complete="$7"
   TRON_E2E_REPORT_DIR="$attempt_dir" TRON_E2E_JOURNEY="$journey" \
-    TRON_E2E_JOURNEY_STATUS="$status" TRON_E2E_JOURNEY_SECONDS="$duration" \
+    TRON_E2E_JOURNEY_STATUS="$final_status" TRON_E2E_JOURNEY_SECONDS="$duration" \
+    TRON_E2E_CONNECTIONS_OPENED="$opened" TRON_E2E_CONNECTIONS_CLOSED="$closed" \
+    TRON_E2E_EVIDENCE_COMPLETE="$evidence_complete" \
     TRON_E2E_RUN_ROOT="$run_root" TRON_E2E_DERIVED_DATA="$derived_data" \
-    python3 - <<'PY' || failure=1
+    TRON_E2E_SOURCE="$(python3 "$identity_owner" show --worktree "$repo_root")" \
+    python3 - <<'PY'
 import hashlib, json, os
 from pathlib import Path
 
 report_dir = Path(os.environ["TRON_E2E_REPORT_DIR"])
-artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json"]
+artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json"]
 
 
 def file_sha256(path):
@@ -660,11 +719,22 @@ for name in artifacts:
                        "bytes": path.stat().st_size})
     else:
         listed.append({"path": name, "kind": "missing"})
+source = json.loads(os.environ["TRON_E2E_SOURCE"])
 report = {
     "schema": "tron.ios-e2e-ui-journey.v1",
     "journey": os.environ["TRON_E2E_JOURNEY"],
     "journey_status": int(os.environ["TRON_E2E_JOURNEY_STATUS"]),
     "journey_seconds": int(os.environ["TRON_E2E_JOURNEY_SECONDS"]),
+    "evidence_complete": os.environ["TRON_E2E_EVIDENCE_COMPLETE"] == "1",
+    "gateway_connections": {
+        "opened": int(os.environ["TRON_E2E_CONNECTIONS_OPENED"]),
+        "closed": int(os.environ["TRON_E2E_CONNECTIONS_CLOSED"]),
+    },
+    "source": {
+        "revision": source.get("revision"),
+        "dirty": bool(source.get("dirty")),
+        "worktree_key": source.get("worktree_key"),
+    },
     "command": "scripts/ios-gateway-e2e-test run-ui --only-testing " + os.environ["TRON_E2E_JOURNEY"],
     "fixture": os.environ["TRON_E2E_RUN_ROOT"],
     "derived_data": os.environ["TRON_E2E_DERIVED_DATA"],
@@ -676,7 +746,32 @@ digest = file_sha256(path)
 (report_dir / "report.sha256").write_text(f"{digest}  report.json\n")
 print(f"evidence report: {path} (sha256 {digest})")
 PY
-  return "$failure"
+}
+
+# What the fixture Gateway's own log says about this device's connections. The
+# journey that backgrounds the app must leave a second opened connection and a
+# closed one behind it; the Gateway's log is canonical truth for both.
+gateway_connection_counts() {
+  python3 - "$TRON_E2E_TRON_HOME/logs/gateway.jsonl" <<'PY'
+import json, sys
+opened = closed = 0
+try:
+    with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if '"connection.' not in line:
+                continue
+            try:
+                event = json.loads(line).get("event")
+            except ValueError:
+                continue
+            if event == "connection.opened":
+                opened += 1
+            elif event == "connection.closed":
+                closed += 1
+except OSError:
+    pass
+print(f"{opened} {closed}")
+PY
 }
 
 run_ui_journey() {
@@ -709,48 +804,63 @@ run_ui_journey() {
   if ((status == 0)); then
     # A journey that cannot reach the fixture skips, and a skip is not a passing
     # real-UI journey: exactly one journey must have executed and passed.
-    if ! xcrun xcresulttool get test-results summary --path "$result_bundle" >"$attempt_dir/summary.json" \
-      || ! python3 - "$attempt_dir/summary.json" <<'PY'
-import json,sys
-with open(sys.argv[1]) as handle: result=json.load(handle)
-assert result.get('passedTests')==1 and result.get('failedTests')==0 and result.get('skippedTests')==0 and result.get('totalTestCount')==1, 'journey did not execute and pass exactly once'
-PY
-    then
+    if ! require_single_passing_case "$result_bundle" "$attempt_dir/summary.json" "journey"; then
       echo "error: real-UI journey was skipped, missing, or failed ($journey)" >&2
       status=65
     fi
   fi
-  if ! collect_journey_evidence "$attempt_dir" "$journey" "$status" "$((SECONDS - case_started))"; then
-    # An incomplete evidence directory is not evidence, so it cannot be a
-    # passing run; a failed journey keeps its own status and reports the gap.
-    ((status == 0)) && status=1
+  # The Gateway's own log is the record of what the app did with its socket. A
+  # journey that backgrounds the app must leave a retired connection and a new
+  # one behind it; a journey that never connects requires none.
+  local opened=0 closed=0 required_opened=0 required_closed=0
+  read -r opened closed <<<"$(gateway_connection_counts)"
+  read -r required_opened required_closed <<<"$(ui_journey_connections "$journey")"
+  if ((status == 0)) && ((opened < required_opened || closed < required_closed)); then
+    echo "error: the Gateway logged $opened opened and $closed closed connections; this journey must leave at least $required_opened opened and $required_closed closed ($journey)" >&2
+    status=65
   fi
-  echo "Real-UI journey $journey completed in $((SECONDS - case_started))s (status $status); evidence: $attempt_dir"
+  local evidence_failure=0
+  capture_journey_evidence "$attempt_dir" || evidence_failure=1
+  # An incomplete evidence directory is not evidence, so it cannot be a passing
+  # run; a failed journey keeps its own status and reports the gap.
+  local final_status="$status"
+  if ((final_status == 0 && evidence_failure != 0)); then
+    final_status=1
+  fi
+  if ! write_journey_report "$attempt_dir" "$journey" "$final_status" "$((SECONDS - case_started))" \
+    "$opened" "$closed" "$((evidence_failure == 0 ? 1 : 0))"; then
+    ((final_status == 0)) && final_status=1
+  fi
+  echo "Real-UI journey $journey completed in $((SECONDS - case_started))s (status $final_status); evidence: $attempt_dir"
   report_result_bundle_failures "$result_bundle"
-  return "$status"
+  return "$final_status"
 }
 
 run_ui() {
   # Journey code and the fixture that drives it are one source state, exactly as
   # the unit lane: prove the products before renewing any Gateway state.
-  local started=$SECONDS simulator_id xctestrun journey
+  local started=$SECONDS xctestrun journey
   local -a journeys
   xctestrun="$(find_xctestrun "$ui_xctestrun_glob")"
   [[ -f "$xctestrun" ]] || die "UI test products are not built; run '$0 run-ui'"
   python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" \
     || die "build the UI test products in this worktree before running the journeys"
-  simulator_id="$(provision_test_simulator)"
-  destination="platform=iOS Simulator,id=$simulator_id"
+  ui_simulator_id="$(provision_test_simulator)"
+  destination="platform=iOS Simulator,id=$ui_simulator_id"
+  ui_app_state_owner=1
+  stop_fixture_on_exit=1
   if ((${#selectors[@]})); then
     journeys=("${selectors[@]/#-only-testing:/}")
   else
-    journeys=("${ui_journey_filters[@]}")
+    journeys=("${ui_owned_journeys[@]}")
   fi
-  trap cleanup_failed_e2e_run EXIT
+  # The trap stays installed on success too: it is what stops the fixture this
+  # command renewed and returns the lane's hosted app to the unpaired state the
+  # unit lane expects.
+  trap finish_e2e_run EXIT
   for journey in "${journeys[@]}"; do
     run_ui_journey "$journey" "$xctestrun"
   done
-  trap - EXIT
   echo "Real-UI journeys completed in $((SECONDS - started))s (status 0); evidence: $run_root/results"
 }
 
@@ -767,7 +877,7 @@ run_test() {
   simulator_id="$(provision_test_simulator)"
   destination="platform=iOS Simulator,id=$simulator_id"
   mkdir -p "$run_root/results"
-  trap cleanup_failed_e2e_run EXIT
+  trap finish_e2e_run EXIT
   for test_filter in "${e2e_test_filters[@]}"; do
     run_one_test_case "$test_filter"
   done
@@ -775,10 +885,54 @@ run_test() {
   echo "Focused E2E run completed in $((SECONDS - started))s (status 0); artifacts: $run_root/results"
 }
 
-cleanup_failed_e2e_run() {
+# The built hosted app's bundle identifier, read from the product the lane just
+# built rather than hardcoded, for the two commands that own its persisted state.
+hosted_app_bundle_id() {
+  local app_plist
+  app_plist="$(ls "$derived_data"/Build/Products/*/TronMobile.app/Info.plist 2>/dev/null | head -1)"
+  [[ -n "$app_plist" ]] || return 1
+  python3 - "$app_plist" <<'PY'
+import plistlib, sys
+try:
+    value = plistlib.load(open(sys.argv[1], "rb")).get("CFBundleIdentifier")
+except (OSError, ValueError):
+    value = None
+if not isinstance(value, str) or not value:
+    raise SystemExit(1)
+print(value)
+PY
+}
+
+# A journey is handed its invitation link by the system, so the app is launched
+# by the journey itself with the same launch arguments a hosted UI test uses.
+
+# The hosted test app persists whatever a real-UI journey pairs or configures,
+# and the hosted unit lane launches that same app in this worktree's lane. Only
+# the command can guarantee it is left unpaired: a deadline, a signal or a crash
+# ends the journey before its own teardown runs. The reset is the app's own
+# HOSTED_TEST hook (`--tron-reset-ui-test-state`), launched through simctl while
+# this command still holds the lane's booted simulator. A SIGKILL of this command
+# cannot run it, which is the documented residual.
+reset_hosted_app_state() {
+  ((ui_app_state_owner)) || return 0
+  [[ -n "$ui_simulator_id" ]] || return 0
+  local bundle_id
+  bundle_id="$(hosted_app_bundle_id)" \
+    || { echo "warning: no built TronMobile.app to reset the lane's hosted app state" >&2; return 0; }
+  if ! xcrun simctl launch "$ui_simulator_id" "$bundle_id" --tron-reset-ui-test-state >/dev/null 2>&1; then
+    echo "warning: could not reset the lane's hosted app state ($bundle_id)" >&2
+    return 0
+  fi
+  xcrun simctl terminate "$ui_simulator_id" "$bundle_id" >/dev/null 2>&1 || true
+}
+
+finish_e2e_run() {
   local status=$?
   trap - EXIT
-  if ((status != 0)); then
+  reset_hosted_app_state
+  # A real-UI command owns the fixture it renewed for its journeys: it stops it on
+  # success too, so no run leaves a Gateway and its fault proxy behind.
+  if ((status != 0 || stop_fixture_on_exit)); then
     stop_gateway
   fi
   exit "$status"
@@ -861,6 +1015,9 @@ esac
 handle_signal() {
   local signal_number="$1"
   trap - INT TERM HUP
+  # A signal ends a real-UI command before its tests finish: the hosted app is
+  # still paired, and the unit lane shares it.
+  reset_hosted_app_state
   stop_gateway
   exit $((128 + signal_number))
 }

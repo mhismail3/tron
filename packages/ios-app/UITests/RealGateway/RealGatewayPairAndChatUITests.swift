@@ -3,35 +3,36 @@ import XCTest
 
 /// Real-UI journeys against the real Gateway fixture.
 ///
-/// The app under test is launched with no fixture argument, so the production
-/// scene runs with a real `AppModel` and `GatewayClient`; the pairing address is
-/// the fixture's fault-proxy port, so every byte of the journey crosses the
-/// harness proxy. `scripts/ios-gateway-e2e-test run-ui` patches `TRON_E2E_*` into
-/// this UI-test runner and refuses to report a journey green unless exactly one
-/// case executed and passed.
+/// The app under test is launched with no fixture argument, so the hosted app's
+/// no-fixture arm renders `ProductionSceneRoot`: the production scene, its
+/// lifecycle modifiers and a real `AppModel` with a real `GatewayClient`. The
+/// invitation link points at the fixture's fault-proxy port, so every byte of
+/// the journey crosses the harness proxy. `scripts/ios-gateway-e2e-test run-ui`
+/// patches `TRON_E2E_*` into this UI-test runner and refuses to report a journey
+/// green unless exactly one case executed and passed.
 ///
 /// Failure modes these journeys target, written before the code:
 ///
-/// 1. The production pairing form accepts a code the Gateway rejects, so the
+/// 1. The production pairing path accepts a code the Gateway rejects, so the
 ///    negative control would pass too and prove nothing.
 /// 2. The scene renders a placeholder instead of the fixture's reply; the faux
 ///    provider's unique text makes that observable from the real interface.
-/// 3. A background/foreground round trip loses the conversation the Gateway owns.
-/// 4. The journey cannot reach the fixture at all and skips, which the harness
+/// 3. The scene's background transition does not retire the device's socket, or
+///    the foreground does not reconnect: the harness asserts the Gateway's own
+///    log shows a second connection for the journey that backgrounds the app.
+/// 4. A background/foreground round trip loses the conversation the Gateway owns.
+/// 5. The journey cannot reach the fixture at all and skips, which the harness
 ///    must not accept as a passing cross-layer receipt.
 ///
-/// Pairing uses the onboarding form rather than `XCUIApplication.open(tron://pair…)`:
-/// the deep-link handler is attached to the production scene only (the `#else`
-/// arm of `TronMobileApp`), and the hosted app this lane builds has none, so
-/// `open` would deliver the URL nowhere. Adding a handler there would be a
-/// test-only production hook (AGENTS rule 6). Entering the Mac's host, port and
-/// one-time code is the production path for a user without a QR code, and it
-/// drives the same `AppModel.pair` invitation the link does.
+/// Pairing uses the production invitation link (`tron://pair?…`) through
+/// `XCUIApplication.open`, the path a QR code or a shared link takes. The link is
+/// handled by the shared production scene, so it is available with or without a
+/// fixture argument.
 final class RealGatewayPairAndChatUITests: XCTestCase {
     /// The prompt this journey sends; its text is asserted from the transcript.
     private let prompt = "Fixture journey: verify the real Gateway round trip"
-    /// The first tokens the faux provider streams, so the reply is observable
-    /// while it is still incomplete.
+    /// The first tokens the faux provider streams, so the reply is readable while
+    /// the fixture is still delivering it.
     private let replyPrefix = "Streaming response starts now"
     /// The last tokens of the fixture's first faux response.
     private let replyCompletion = "Detached response complete"
@@ -48,17 +49,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    func testPairsByLinkStreamsAndSurvivesBackground() throws {
+    func testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp(fixture)
+        let app = launchApp()
         defer { app.terminate() }
-        pair(app, host: fixture.host, port: String(fixture.port), code: fixture.code)
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
         XCTAssertTrue(
-            app.buttons["dashboard.menu"].waitForExistence(timeout: 90),
-            "pairing did not reach the production scene: \(app.debugDescription)"
+            waitForHittable(app.buttons["dashboard.menu"], timeout: 90),
+            "the invitation link and setup did not reach the dashboard: \(app.debugDescription)"
         )
-        createSession(app, defaultWorkspace: fixture.workspace)
+        createSession(app, inWorkspace: fixture.workspace)
 
         let composer = app.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
@@ -75,10 +77,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(sent.waitForExistence(timeout: 60), "the sent prompt is not in the transcript: \(app.debugDescription)")
 
         // The fixture streams a few tokens a second, so the reply is read while
-        // it is still incomplete and again when it completes. The transcript's
-        // partial label is not a stable XCUI observation - one poll can land only
-        // on the completed row - so the trace is retained as evidence instead of
-        // being asserted, and the reply the fixture streamed must be rendered.
+        // the fixture is still delivering it and again when it completes. The
+        // transcript's partial label is not a stable XCUI observation - one poll
+        // can land only on the completed row - so the trace is retained as
+        // evidence instead of being asserted, and the reply the fixture sent must
+        // be rendered.
         var observations: [String] = []
         let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
@@ -99,117 +102,180 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         keepScreenshot(app, name: "424-real-ui-pair-prompt-streamed-reply")
 
-        // Background and foreground are the real system transitions the phone
-        // performs, so the conversation must survive them intact.
+        // A real background and foreground, the transitions a phone performs.
+        // The app must reach a background session before it is activated again,
+        // which is what retires the socket and reconnects (the harness asserts
+        // that second connection from the Gateway's own log).
         XCUIDevice.shared.press(.home)
+        XCTAssertTrue(
+            waitForBackground(app, timeout: 60),
+            "the app never reached a background session: \(app.state.rawValue)"
+        )
         app.activate()
+        XCTAssertTrue(
+            waitForForeground(app, timeout: 90),
+            "the app never returned to the foreground: \(app.state.rawValue)"
+        )
         XCTAssertTrue(
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")).firstMatch
                 .waitForExistence(timeout: 90),
             "the prompt left the transcript across background/foreground: \(app.debugDescription)"
         )
-        let restored = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
         XCTAssertTrue(
-            restored.waitForExistence(timeout: 90),
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+                .waitForExistence(timeout: 90),
             "the reply left the transcript across background/foreground: \(app.debugDescription)"
         )
         keepScreenshot(app, name: "424-real-ui-conversation-after-background")
     }
 
     @MainActor
-    func testWrongPairingCodeReportsClearFailure() throws {
+    func testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        // A first-run device, as in the journey above: the pairing sheet owns the
-        // error while an attempt is in flight, so the refusal is announced and
-        // stays presented exactly as the user sees it. A device that has already
-        // finished setup re-presents that sheet as the attempt starts, which
-        // retires the announcement with the sheet that owned it.
-        let app = launchApp(fixture, setupComplete: false)
-        defer { app.terminate() }
         // A code of the right shape the Gateway can still refuse: its enrollment
         // alphabet has no `0`, so this can never be the fixture's own code.
-        pair(app, host: fixture.host, port: String(fixture.port), code: String(repeating: "0", count: fixture.code.count))
+        let wrongCode = String(repeating: "0", count: fixture.code.count)
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink(code: wrongCode))
         // The refusal is a transient card, so it is read as it appears; the
-        // assertion then names what the app actually told the user.
+        // assertion then names what the app actually told the user. The card is
+        // the app's own report of a refused pairing, and only a refused pairing
+        // produces it: an accepted code would pair instead and never show it.
         let refusal = firstNoticeLabel(app, timeout: 60)
         XCTAssertEqual(
             refusal, "Pairing code is invalid",
-            "the rejected pairing must report the Gateway's own failure"
+            "the rejected invitation must report the Gateway's own failure"
         )
-        XCTAssertFalse(app.buttons["Next"].exists, "a refused code must not advance setup: \(app.debugDescription)")
-        XCTAssertTrue(app.buttons["Connect to Mac"].isEnabled, "a refused code must leave the form usable: \(app.debugDescription)")
         keepScreenshot(app, name: "424-real-ui-wrong-pairing-code")
 
-        // The same form, address and port with the fixture's own code must then
-        // pair, so the refused code is the only difference this control drives:
-        // without this the control could be a broken address instead.
-        replaceText(app.secureTextFields["One-time code"], with: fixture.code)
-        let connect = app.buttons["Connect to Mac"]
-        XCTAssertTrue(waitForEnabled(connect, timeout: 30), app.debugDescription)
-        connect.tap()
+        // The same link and address with the fixture's own code must then pair,
+        // so the control cannot pass by being a broken address: a paired device
+        // that has not finished setup leaves the pairing step for its workspace
+        // step, which only a connected Gateway reaches.
+        open(fixture.invitationLink())
         XCTAssertTrue(
-            connect.waitForNonExistence(timeout: 90),
-            "the fixture's own code must leave the pairing page: \(app.debugDescription)"
+            app.buttons["Choose workspace"].waitForExistence(timeout: 90),
+            "the fixture's own code must pair through the same link: \(app.debugDescription)"
         )
-        XCTAssertTrue(
-            app.buttons["Next"].waitForExistence(timeout: 30),
-            "the fixture's own code must advance setup: \(app.debugDescription)"
-        )
-        keepScreenshot(app, name: "424-real-ui-accepted-code-advances-setup")
+        keepScreenshot(app, name: "424-real-ui-accepted-code-pairs")
     }
 
     // MARK: - The production path
 
-    private func launchApp(_ fixture: RealGatewayUIFixture, setupComplete: Bool = true) -> XCUIApplication {        let app = XCUIApplication()
-        // The hosted test app is unpaired after `--tron-reset-ui-test-state`
-        // (HOSTED_TEST only). A completed setup plus the fixture workspace puts
-        // the device in the state of a user who already finished first-run setup
-        // and is pairing this Mac, so the journey reaches the conversation rather
-        // than the setup pages. With `setupComplete` off the app is a first-run
-        // device instead, which is where the pairing sheet owns an attempt's
-        // error while it is in flight.
+    /// Launches the hosted app with no fixture argument and no setup: the state
+    /// a user's first launch has, which the journey then drives through the
+    /// production scene.
+    @MainActor
+    private func launchApp() -> XCUIApplication {
+        let app = XCUIApplication()
         app.launchArguments = [
             "--tron-reset-ui-test-state",
-            "-ApplePersistenceIgnoreState", "YES",
-            "-tronSetupComplete.v1", setupComplete ? "YES" : "NO",
-            "-defaultWorkspace.v1", fixture.workspace,
+            "-ApplePersistenceIgnoreState",
+            "YES",
         ]
         app.launch()
         return app
     }
 
-    /// Walks the real onboarding sheet to its manual pairing form and connects.
-    private func pair(_ app: XCUIApplication, host: String, port: String, code: String) {
-        let next = app.buttons["Next"]
-        XCTAssertTrue(next.waitForExistence(timeout: 90), "the first-run pairing sheet never presented: \(app.debugDescription)")
-        for step in 0..<3 {
-            XCTAssertTrue(next.waitForExistence(timeout: 30), "onboarding step \(step) lost its Next action: \(app.debugDescription)")
+    /// First-run setup, driven the way a user drives it: the invitation link has
+    /// already paired the Mac, so the setup sheet stands on its workspace step,
+    /// where the fixture's own folder is chosen from the Mac through the sheet's
+    /// browser. That choice is what teaches the app the workspace a new session
+    /// starts in, so the journey never depends on when a read lands.
+    @MainActor
+    private func completeFirstRunSetup(_ app: XCUIApplication, inWorkspace workspace: String) {
+        let choose = app.buttons["Choose workspace"]
+        XCTAssertTrue(
+            choose.waitForExistence(timeout: 90),
+            "the setup sheet never reached its workspace step: \(app.debugDescription)"
+        )
+        choose.tap()
+        let folderName = workspace.split(separator: "/").last.map(String.init) ?? workspace
+        let folder = app.buttons.matching(NSPredicate(format: "label == %@", folderName)).firstMatch
+        XCTAssertTrue(
+            folder.waitForExistence(timeout: 60),
+            "the folder browser never listed \(workspace): \(app.debugDescription)"
+        )
+        folder.tap()
+        let useCurrentFolder = app.buttons["Use current folder"]
+        XCTAssertTrue(
+            waitForEnabled(useCurrentFolder, timeout: 60),
+            "the folder browser never admitted \(workspace): \(app.debugDescription)"
+        )
+        useCurrentFolder.tap()
+        XCTAssertTrue(
+            app.buttons["Change workspace"].waitForExistence(timeout: 30),
+            "the setup sheet did not take the chosen workspace: \(app.debugDescription)"
+        )
+        // The fixture workspace holds project resources, so the Gateway asks for
+        // a trust decision; declining keeps project resources out of the journey.
+        if app.buttons["Open Without Resources"].waitForExistence(timeout: 10) {
+            app.buttons["Open Without Resources"].tap()
+        }
+        advanceSetup(app)
+        let finish = app.buttons["Finish setup"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 60), "setup never reached its model step: \(app.debugDescription)")
+        XCTAssertTrue(waitForEnabled(finish, timeout: 90), "the model step never selected a model: \(app.debugDescription)")
+        finish.tap()
+    }
+
+    /// The four setup pages between the workspace step and the model step (the
+    /// workspace step itself, Anthropic, OpenAI and other providers). Each one
+    /// only has to become complete; the fixture has no provider credentials to add.
+    @MainActor
+    private func advanceSetup(_ app: XCUIApplication) {
+        for step in 0..<4 {
+            let next = app.buttons["Next"]
+            XCTAssertTrue(
+                waitForEnabled(next, timeout: 60),
+                "setup page \(step + 1) after the workspace never became complete: \(app.debugDescription)"
+            )
             next.tap()
         }
-        let manual = app.buttons["Enter Manually"]
-        XCTAssertTrue(manual.waitForExistence(timeout: 30), app.debugDescription)
-        manual.tap()
-        replaceText(app.textFields["Tailscale host"], with: host)
-        replaceText(app.textFields["Port"], with: port)
-        let codeField = app.secureTextFields["One-time code"]
-        XCTAssertTrue(codeField.waitForExistence(timeout: 30), app.debugDescription)
-        codeField.tap()
-        codeField.typeText(code)
-        // A secure field reports its own masked length, so a truncated entry is
-        // named here instead of surfacing as the form's generic refusal.
-        XCTAssertEqual(
-            (codeField.value as? String)?.count, code.count,
-            "the pairing form did not receive the whole one-time code: \(app.debugDescription)"
+    }
+
+    /// Hands the running app a link the way the system does, which is the path a
+    /// QR code or a shared invitation takes. Opening it through the system rather
+    /// than `XCUIApplication.open` keeps this launch's arguments, so the state
+    /// above survives the link.
+    @MainActor
+    private func open(_ link: String) {
+        XCUIDevice.shared.system.open(URL(string: link)!)
+    }
+
+    /// A new session in the workspace first-run setup chose, as the dashboard
+    /// offers it. The setup step assigned that workspace to the model, so the
+    /// sheet starts from it without waiting for any read.
+    @MainActor
+    private func createSession(_ app: XCUIApplication, inWorkspace workspace: String) {
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(waitForEnabled(menu, timeout: 90), "the dashboard menu never became usable: \(app.debugDescription)")
+        menu.tap()
+        let newSession = app.buttons["New Session"]
+        XCTAssertTrue(newSession.waitForExistence(timeout: 30), app.debugDescription)
+        newSession.tap()
+        let card = app.buttons["new-session-card.Workspace"]
+        XCTAssertTrue(card.waitForExistence(timeout: 60), app.debugDescription)
+        let expected = workspace.split(separator: "/").suffix(2).joined(separator: "/")
+        let showsWorkspace = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", expected), object: card
         )
-        let connect = app.buttons["Connect to Mac"]
-        XCTAssertTrue(waitForEnabled(connect, timeout: 30), "the pairing form never became submittable: \(app.debugDescription)")
-        connect.tap()
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [showsWorkspace], timeout: 90), .completed,
+            "the new session must start in the workspace setup chose (\(workspace)): \(card.label)"
+        )
+        let create = app.buttons["Create"]
+        XCTAssertTrue(create.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(waitForEnabled(create, timeout: 90), "session creation never became ready: \(app.debugDescription)")
+        create.tap()
     }
 
     /// The first announced notice text, read while the card is still presented.
     /// Notices auto-dismiss, so a snapshot taken after a bounded wait can no
     /// longer see them.
+    @MainActor
     private func firstNoticeLabel(_ app: XCUIApplication, timeout: TimeInterval) -> String? {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -220,34 +286,31 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return nil
     }
 
-    /// A new session on the fixture's own workspace, as the dashboard offers it.
-    private func createSession(_ app: XCUIApplication, defaultWorkspace: String) {
-        let menu = app.buttons["dashboard.menu"]
-        XCTAssertTrue(waitForEnabled(menu, timeout: 90), "the dashboard menu never became usable: \(app.debugDescription)")
-        menu.tap()
-        let newSession = app.buttons["New Session"]
-        XCTAssertTrue(newSession.waitForExistence(timeout: 30), app.debugDescription)
-        newSession.tap()
-        let workspace = app.buttons["new-session-card.Workspace"]
-        XCTAssertTrue(workspace.waitForExistence(timeout: 60), app.debugDescription)
-        let expected = defaultWorkspace.split(separator: "/").suffix(2).joined(separator: "/")
-        XCTAssertTrue(
-            workspace.label.contains(expected),
-            "the new session must default to the fixture workspace \(defaultWorkspace): \(workspace.label)"
+    /// Waits for the app to leave the foreground: the system must report a
+    /// background session, not merely an inactive scene, because only the
+    /// background transition retires the device's socket. The state is passively
+    /// monitored, so this waits through an expectation: polling it from here
+    /// would starve the session that reports it.
+    @MainActor
+    private func waitForBackground(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let background = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "state == %d OR state == %d",
+                XCUIApplication.State.runningBackground.rawValue,
+                XCUIApplication.State.runningBackgroundSuspended.rawValue
+            ),
+            object: app
         )
-        let create = app.buttons["Create"]
-        XCTAssertTrue(create.waitForExistence(timeout: 60), app.debugDescription)
-        XCTAssertTrue(waitForEnabled(create, timeout: 90), "session creation never became ready: \(app.debugDescription)")
-        create.tap()
+        return XCTWaiter().wait(for: [background], timeout: timeout) == .completed
     }
 
-    private func replaceText(_ field: XCUIElement, with text: String) {
-        XCTAssertTrue(field.waitForExistence(timeout: 30), "the pairing form did not present \(field)")
-        field.tap()
-        if let current = field.value as? String, !current.isEmpty {
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
-        }
-        field.typeText(text)
+    @MainActor
+    private func waitForForeground(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let foreground = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "state == %d", XCUIApplication.State.runningForeground.rawValue),
+            object: app
+        )
+        return XCTWaiter().wait(for: [foreground], timeout: timeout) == .completed
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -255,6 +318,16 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return XCTWaiter().wait(for: [enabled], timeout: timeout) == .completed
     }
 
+    /// Waits for an element the user can actually touch. A dashboard control is
+    /// present while a sheet covers it, so this is what separates the paired
+    /// scene from a sheet that is still asking to pair.
+    @MainActor
+    private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
+        return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
+    }
+
+    @MainActor
     private func keepScreenshot(_ app: XCUIApplication, name: String) {
         let capture = XCTAttachment(screenshot: app.screenshot())
         capture.name = name
@@ -277,8 +350,8 @@ private enum RealGatewayUIHost {
 }
 
 /// The real Gateway fixture `scripts/ios-gateway-e2e-test run-ui` provides to
-/// this runner. The app under test receives a launch argument for the workspace
-/// only; the fixture's port and one-time code are the journey's inputs.
+/// this runner. The runner receives the fixture's port and one-time code, and the
+/// harness seeds the app's own state before the journey starts.
 private struct RealGatewayUIFixture {
     let host = "127.0.0.1"
     let port: Int
@@ -293,5 +366,11 @@ private struct RealGatewayUIFixture {
             throw XCTSkip("Run through scripts/ios-gateway-e2e-test run-ui to provide the real Gateway fixture.")
         }
         return RealGatewayUIFixture(port: port, code: code, workspace: workspace)
+    }
+
+    /// The production invitation link, addressed at the fixture's fault proxy so
+    /// every byte of the pairing and of the session crosses it.
+    func invitationLink(code: String? = nil) -> String {
+        "tron://pair?host=\(host)&port=\(port)&code=\(code ?? self.code)"
     }
 }

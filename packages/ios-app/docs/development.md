@@ -1298,9 +1298,13 @@ ownership marker, and only this worktree's and lane's runs are removed by
   log, enforces overall and no-output deadlines, captures bounded process and
   partial-result evidence, then terminates only that owned group. Product
   failures are never converted into infrastructure retries.
-- The `HOSTED_TEST` app entry remains inert: it starts no Gateway, push,
-  dashboard, artifact-pruning, or other ambient production owner. Tests create
-  only the exact model or presentation boundary they exercise.
+- The `HOSTED_TEST` app entry starts no ambient production owner except the
+  production scene itself: a hosted launch with no fixture argument renders
+  `ProductionSceneRoot` (`Sources/App/ProductionSceneRoot.swift`), the same scene
+  and lifecycle modifiers the shipping app renders, which is what the real-UI
+  lane drives against a real Gateway. Every fixture arm stays inert (no Gateway,
+  push, dashboard or artifact-pruning owner) and tests create only the exact model
+  or presentation boundary they exercise.
 - CI uses the same runner core, uploads complete or partial logs, metadata,
   metrics, results, and timeout evidence unconditionally, and deletes only its
   exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
@@ -2215,38 +2219,59 @@ only the `TronMobileUITests` target with the same `TRON_E2E_*` environment, and 
 the journeys under `packages/ios-app/UITests/RealGateway/` — each against its own
 freshly owned fixture and pairing code while the lane stays leased, so a consumed
 pairing invitation is never reused. `run-ui [--only-testing OWNER …]` selects
-journeys; with none it runs the journeys it owns. `status` reports the UI products
-beside the unit ones, and a journey the fixture never reached skips, which the
-harness refuses to report green (it requires exactly one executed, passing case).
+journeys; with none it runs the journeys it owns, and any other selector is refused
+before a build, fixture or lease is taken. `status` reports the UI products beside the
+unit ones. A journey the fixture never reached skips, which the harness refuses to
+report green: it requires exactly one executed, passing case, and a journey that
+cannot leave its evidence behind fails even when its XCTest run passed.
 
-`RealGatewayPairAndChatUITests` declares the failure modes it protects. It launches
-the app with no fixture argument, so the production scene runs with a real `AppModel`
-and `GatewayClient`, and pairs against the fault proxy's port through the test app's
-onboarding manual pairing form — the production host, port and one-time-code entry a
-user without a QR code takes. It deliberately does not use `XCUIApplication.open(tron://pair…)`:
-the deep-link handler is attached only to the scene outside `HOSTED_TEST`, so the link
-would be delivered nowhere in this lane and a handler added for it would be a test-only
-production hook. The journey then creates a session in the fixture's workspace, sends
-one prompt, observes the fixture's reply while it is still incomplete and again when it
-completes, backgrounds and foregrounds the app, and requires the conversation intact.
-The wrong-code control asserts the app's own `Pairing code is invalid` refusal, that a
-refused code advances nothing, and then that the same form and address pair with the
-fixture's code — so the control cannot pass by being a broken address. Both journeys
-retain screenshots, and the journey retains the transcript text it observed for the
-reply as a trace. Teardown returns the hosted app to its unpaired launch state through
-the same `HOSTED_TEST` reset every hosted UI test starts from: this lane pairs for real,
-and the lane's app container is shared with the hosted unit lane in the same worktree, so
-a pairing left behind made that lane's mounted-view tests time out (measured A/B/A on the
-lane).
+`RealGatewayPairAndChatUITests` declares the failure modes it protects. The app is
+launched with no fixture argument, so the hosted app's no-fixture arm renders the
+shared `ProductionSceneRoot` — the production scene, the same lifecycle modifiers in
+the same order, and a real `AppModel` with a real `GatewayClient` — and pairs through
+the production invitation link (`tron://pair?…`, handed to the running app with
+`XCUIDevice.shared.system.open`), which is the path a QR code or a shared link takes.
+Pairing a device that has not finished setup leaves the setup sheet on its workspace
+step, so the journey then finishes first-run setup the way a user does: it chooses the
+fixture's own folder from the Mac through the sheet's browser, declines the project
+trust prompt, and advances the provider pages to `Finish setup`. That choice — not a
+seed, and not whichever read lands first — is what gives the new session its workspace.
+The journey then creates a session there, sends one prompt, reads the fixture's reply
+while the fixture is still delivering it and again when it completes (the observations
+are retained as a trace, not asserted: a transcript poll can land only on the completed
+row), then presses Home and waits for the system to report a background session before
+activating again. That transition is what retires the device's socket and reconnects:
+the harness requires the Gateway's own log to show a second opened connection and a
+closed one for that journey, and the journey requires the conversation intact after it.
+The wrong-code control uses the same link with a code the Gateway refuses: it asserts
+the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
+pairs through the same address — the setup sheet reaching its workspace step is what
+only a connected Gateway shows — so the control cannot pass by being a broken address.
+Both journeys retain screenshots.
+
+This lane pairs the hosted app for real, and the lane's app container is shared with the
+hosted unit lane of the same worktree; a pairing left behind made that lane's
+mounted-view tests time out (measured A/B/A on the lane, including the profile's own
+bytes written back into the app's preferences to reproduce it). Two owners now prevent
+it: the suite's teardown returns the hosted app to its unpaired launch state through the
+same `HOSTED_TEST` `--tron-reset-ui-test-state` hook every hosted UI test starts from,
+and `run-ui` repeats that reset itself on success, failure, deadline and signal, so a run
+that ends before its teardown cannot poison the unit lane. `run-ui` likewise stops the
+fixture it renewed on success as well as on failure, because it renews one per journey
+and has nothing to iterate against: no run leaves a Gateway and its fault proxy behind.
+A `SIGKILL` of the harness still leaves the pairing behind, because nothing executes
+after it; the unit lane's own isolation from a stale app container remains a follow-up.
 
 Each journey leaves one evidence directory under this worktree's fixture
 (`results/<utc>-ui.XXXXXX`) holding the `.xcresult`, the Gateway's canonical runtime
-log (`gateway.jsonl`), the fault proxy's `link-stats` JSON, and `report.json`, which
-names every artifact with the sha256 of its bytes (a result bundle's digest covers its
-sorted file tree) and is itself described by `report.sha256`. That directory stays
-local; a pull request cites the digests. iOS work verification routes this journey file
-to the same harness (`run-ui`) instead of the ordinary hosted runner, and stops the
-fixture afterwards.
+log (`gateway.jsonl`), the fault proxy's `link-stats` JSON, the XCTest `summary.json`
+and `report.json`: every artifact's path and sha256 (a result bundle's digest covers its
+sorted file tree), the journey's final status including the incomplete-evidence
+override, whether the evidence is complete, the Gateway connection counts the journey
+was held to, the source revision and dirty flag it ran from, plus `report.sha256` for the
+report itself. That directory stays local; a pull request cites the digests. iOS work
+verification routes this journey file to the same harness (`run-ui`) instead of the
+ordinary hosted runner.
 
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,
