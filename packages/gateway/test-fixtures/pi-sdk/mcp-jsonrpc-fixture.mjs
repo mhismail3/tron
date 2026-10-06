@@ -56,9 +56,14 @@ if (transport === "stdio") {
     reply.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fixture-session", "mcp-protocol-version": "2025-03-26" });
     reply.end(JSON.stringify(result));
   });
-  server.listen(Number(process.env.MCP_FIXTURE_PORT ?? 0), "127.0.0.1", () => {
+  server.listen(Number(process.env.MCP_FIXTURE_PORT ?? 0), "127.0.0.1", async () => {
     const address = server.address();
-    import("node:fs/promises").then(({ writeFile }) => writeFile(pidPath, String(address.port)));
+    // Published by rename: the port file exists only once it holds the port.
+    // A plain write is visible empty first, and a reader polling for the file
+    // then read port 0 under load (#406).
+    const { rename, writeFile } = await import("node:fs/promises");
+    await writeFile(`${pidPath}.tmp`, String(address.port));
+    await rename(`${pidPath}.tmp`, pidPath);
   });
   process.on("SIGTERM", () => server.close(() => process.exit(0)));
 } else {

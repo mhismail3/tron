@@ -352,6 +352,7 @@
           "config/ci-toolchain.env",
           "scripts/generate-xcode-project",
           "scripts/tron-ios-test",
+          "scripts/ios-gateway-fault-proxy.mjs",
           "scripts/ios_verify_test_selection.py",
           "scripts/test-ios-verify-test-selection.py",
           "scripts/ios-test-*.py",

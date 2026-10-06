@@ -1353,7 +1353,12 @@ cached/stale/live activity, ID-index integrity, and retention of existing dashbo
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
 wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
-the test's own work: a test must not need a fast machine to finish inside it. Walk long backoff
+the test's own work: a test must not need a fast machine to finish inside it. Hosted views await
+UIKit/SwiftUI callbacks (appearance, transition or animation completion, `TimelineView` ticks)
+only through `awaitHostedEvents` or `awaitHostedCondition`
+(`Tests/Support/HostedEvents.swift`), whose bound is a hang bound: hosted runners stall the main
+thread for seconds, and a stalled `TimelineView`
+coalesces missed ticks, so oracles assert outcomes, never callback latency or every tick. Walk long backoff
 curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
 `DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
 from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
@@ -2143,7 +2148,14 @@ pong deadline remains. HTTP header lengths come from Node's parsed
 request/response headers; WebSocket message sizes are decoded payload lengths
 plus estimated uncompressed frame overhead because `ws` hides compressed wire
 lengths. Thus this synthetic schedule is a reproducible shared application
-payload control, not a cellular capacity guarantee. A separate common-proxy
+payload control, not a cellular capacity guarantee. Because the proxy paces
+how fast it reads a shaped body, its listener bounds measure client inactivity
+rather than that pacing: no whole-request deadline, and the idle bound is
+disarmed while a body part waits in the shared schedule and re-armed once it is
+forwarded, so a stalled client is still retired. Each such retirement writes a
+`proxy.client-idle-timeout` line to `proxy.log`, which CI retains; its
+`idleTimeoutMs` is the bound armed on that socket, so Node's 5 s keep-alive
+expiry of an idle connection (5000) is distinct from a stalled client (10000). A separate common-proxy
 blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
 `system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
 fixture counters increment once at the proxy forwarding transition, rather
@@ -2174,7 +2186,10 @@ scripts/ios-gateway-e2e-test iterate
 `run-lan` renews that same fixture with the Gateway's pinned LAN lane on
 (`TRON_GATEWAY_LAN_ENDPOINT=on`, kept across the proxy's private restart) and
 then runs `testRacesLanAndTailscaleLanes` — the E-3c two-lane case — instead of
-the boundary test. It needs the Mac to hold a private IPv4/IPv6 address, because
+the boundary test. Its first connect holds the saved lane's hello, so the LAN
+win it asserts does not depend on the host finishing the LAN TLS handshake
+inside the 250 ms stagger; the scripted `GatewayClientLanLaneTests` suite owns the
+stagger preference. It needs the Mac to hold a private IPv4/IPv6 address, because
 the lane binds that address (the main listener's port on it) and the case fails
 at the pairing response's missing `lanEndpoints` without one; the case drives
 the app's own path fact, so it runs on this Mac's wired path as a Wi-Fi phone:
@@ -2188,7 +2203,8 @@ scripts/ios-gateway-e2e-test run-lan
 and proves the reconnect case plus the shared-link case; the third
 `testRacesLanAndTailscaleLanes` is registered only by `run-lan`, requires the
 private-address fixture above, and is not implied by a green `run`. iOS work
-verification detects this fixture-only test owner and dispatches it through the
+verification detects this fixture-only test owner, and the fault proxy that
+shapes its cases, and dispatches either through the
 canonical `ios-gateway-e2e-test all` (prepare/build/run) owner instead of the
 ordinary XCTest runner, where every case would correctly skip. Verification
 then calls that same owner to stop the fixture while preserving its result

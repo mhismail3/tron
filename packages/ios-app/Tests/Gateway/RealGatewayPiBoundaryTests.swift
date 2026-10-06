@@ -727,11 +727,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         // wired path, so the phone's own path fact is an input of this leg: the
         // subject is the race's behavior on Wi-Fi, not this host's uplink.
         let onWifi: @Sendable () -> String? = { "wifi,other" }
-        try await control("pass", port: port, token: proxyToken)
 
-        // (1) A phone on Wi-Fi reaches its Mac over the LAN lane.
+        // (1) A phone on Wi-Fi reaches its Mac over the LAN lane. The saved
+        // lane's hello is held so the race is decided by which lane can
+        // answer, not by whether this host completes the LAN TLS handshake
+        // inside the 250 ms stagger. The stagger preference itself is owned
+        // by the scripted GatewayClientLanLaneTests suite.
+        try await control("hold-hello", port: port, token: proxyToken)
         let lanClient = makeClient(networkPath: onWifi)
         _ = try await lanClient.connect(profile: paired, token: token)
+        try await control("pass", port: port, token: proxyToken)
         let lanHandshakes = await successfulHandshakes(of: lanClient)
         XCTAssertEqual(lanHandshakes.count, 1)
         XCTAssertEqual(lanHandshakes.first?.handshake?.transport, "lan")
