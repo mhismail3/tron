@@ -39,6 +39,11 @@ export interface EpisodicLimits {
    * memory is visible state and `resume()` restarts it, so the retries are
    * bounded. */
   maxRetries: number;
+  /** Bound on one compactor call before it is abandoned as transient. A call
+   * that never returns would hold its build slot forever: the pump would neither
+   * block nor retry, and every turn waiting on that node would wait for the life
+   * of the process. 0 disables the bound (tests that drive the pump by hand). */
+  compactorTimeoutMs: number;
   /** One canonical JSONL line larger than this refuses the read. */
   maxSourceLineBytes: number;
   /** One stored JSONL record larger than this refuses the store. */
@@ -58,6 +63,11 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   recordCapChars: 128 * 1_024,
   retryMs: 10_000,
   maxRetries: 3,
+  // The recipe has no such bound: its compactor retries forever because its next
+  // turn waits on the summary and it never gives up. Here a blocked memory is
+  // visible state with an operator resume, so a call that is simply gone has to
+  // become a block instead of an unbounded wait.
+  compactorTimeoutMs: 120_000,
   maxSourceLineBytes: 16 * 1_024 * 1_024,
   maxStoreLineBytes: 1_024 * 1_024,
 };

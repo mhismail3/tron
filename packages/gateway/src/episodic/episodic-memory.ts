@@ -2,12 +2,12 @@ import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
-  EpisodicMemoryError, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
+  EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
   EPISODIC_PLACEHOLDER, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
-  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicSummarizer,
-  type EpisodicTokenBudget, type EpisodicViewPartStatus,
+  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState,
+  type EpisodicSummarizer, type EpisodicTokenBudget, type EpisodicViewPartStatus,
 } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
@@ -47,6 +47,15 @@ class EpisodicBlockedSignal extends Error {
   }
 }
 
+/** One compactor call that overran its bound. Its own class, so the retry loop
+ * classifies it as transient without reading its message. */
+class EpisodicCallTimeout extends Error {
+  constructor(readonly boundMs: number) {
+    super(`the compactor call exceeded its ${boundMs}ms bound`);
+    this.name = "EpisodicCallTimeout";
+  }
+}
+
 /** The owner is closing; in-flight work ends without blocking. */
 class EpisodicClosedSignal extends Error {
   constructor() { super("Episodic memory is closing"); this.name = "EpisodicClosedSignal"; }
@@ -67,6 +76,26 @@ interface BuildStamp {
   inputs: Array<{ address: string; revision: number }>;
   messageIndex?: number;
   messageRevision?: number;
+}
+
+/**
+ * The persisted state of one session's memory without opening it: the blocked
+ * state and the spend a later open would restore. `home.status` reports both
+ * while no activation has opened the store yet, and a session with no store at
+ * all reads as undefined.
+ */
+export async function readEpisodicState(options: {
+  workspace: import("../workspace/tron-workspace.js").TronWorkspace;
+  sessionId: string;
+  maxStoreLineBytes?: number;
+}): Promise<EpisodicStoreState | undefined> {
+  const store = new EpisodicStore(
+    options.workspace,
+    options.sessionId,
+    options.maxStoreLineBytes ?? EPISODIC_DEFAULTS.maxStoreLineBytes,
+  );
+  const snapshot = await store.read();
+  return snapshot.state ?? undefined;
 }
 
 export class EpisodicMemory {
@@ -261,9 +290,22 @@ export class EpisodicMemory {
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
   }
 
-  /** Clear the blocked state and restart the pump (departure 5). The cause must
-   * have been fixed by the caller: a larger budget, a reachable source. */
+  /** Clear the blocked state, re-read the source and restart the pump
+   * (departure 5). The cause must have been fixed by the caller: a larger budget,
+   * a different model, a reachable source. */
   async resume(): Promise<void> {
+    await this.resumeIngested();
+    await this.drain();
+  }
+
+  /**
+   * The same, WITHOUT waiting for the pump: the block is cleared and the source
+   * re-read under the lock, and the pump is started, not awaited. An operator
+   * command (a raised budget, `home.resumeMemory`) must return once the memory is
+   * unblocked, not after the whole summary backlog; a caller that needs the lines
+   * it will send waits on `whenReady` as a turn does.
+   */
+  async resumeIngested(): Promise<void> {
     this.assertOpen();
     await this.mutex.run(async () => {
       if (this.blocked) {
@@ -272,7 +314,7 @@ export class EpisodicMemory {
         await this.ingest();
       }
     });
-    await this.drain();
+    void this.drain().catch(() => {});
   }
 
   status(): EpisodicMemoryStatus {
@@ -739,11 +781,13 @@ export class EpisodicMemory {
       }
       let message: AssistantMessage;
       try {
-        message = await this.summarizer(request);
+        message = await this.summarizerWithinBound(request);
       } catch (error) {
         this.budget.settle(estimate, 0);
         if (this.closed || error instanceof EpisodicClosedSignal) throw new EpisodicClosedSignal();
-        const verdict = classifyThrown(error);
+        // A call that overran its bound answered too late to be used, so it is a
+        // transient failure and its reservation was released above.
+        const verdict = error instanceof EpisodicCallTimeout ? "transient" : classifyThrown(error);
         const detail = error instanceof Error ? error.message : "the compactor call failed";
         if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
         if (attempt >= this.limits.maxRetries) throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail });
@@ -762,6 +806,35 @@ export class EpisodicMemory {
         throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: message.errorMessage ?? "the compactor call kept failing" });
       }
       await this.wait(this.limits.retryMs);
+    }
+  }
+
+  /**
+   * One compactor call under its own bound, injectable through the limits. The
+   * call's signal is aborted at the bound so a real provider stops reading, the
+   * late promise is neutralized (its rejection must not surface unhandled and its
+   * answer is never used), and the caller sees a transient failure.
+   */
+  private async summarizerWithinBound(request: EpisodicCompactorRequest): Promise<AssistantMessage> {
+    const bound = this.limits.compactorTimeoutMs;
+    if (bound <= 0) return await this.summarizer(request);
+    const controller = new AbortController();
+    const forward = () => controller.abort();
+    this.abort.signal.addEventListener("abort", forward, { once: true });
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => { controller.abort(); resolve("timeout"); }, bound);
+      timer.unref();
+    });
+    const call = this.summarizer({ ...request, signal: controller.signal });
+    call.catch(() => {});
+    try {
+      const settled = await Promise.race([call.then(value => ({ message: value }) as const), expired]);
+      if (settled === "timeout") throw new EpisodicCallTimeout(bound);
+      return settled.message;
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.abort.signal.removeEventListener("abort", forward);
     }
   }
 
@@ -840,14 +913,21 @@ export class EpisodicMemory {
     this.settleWaiters();
   }
 
-  private async saveState(): Promise<void> {
-    await this.store.saveState({
+  /**
+   * Persist the memory's state, chained behind every earlier append and state
+   * write and with its snapshot taken *inside* that step. Two concurrent savers
+   * would otherwise both be in flight with snapshots taken at call time, and the
+   * older one could land last: spend would go backwards, and a block written by
+   * one path could be overwritten by another path's earlier, unblocked state.
+   */
+  private saveState(): Promise<void> {
+    return this.enqueueAppend(() => this.store.saveState({
       version: EPISODIC_STORE_VERSION,
       generation: this.generation,
       cursor: this.sourceCursor,
       blocked: this.blocked,
       spend: this.budget.snapshot().used,
-    });
+    }));
   }
 
   /** Every append is chained, so the durable order equals the request order and
