@@ -101,12 +101,35 @@ describe.sequential("Home's chat runtime", () => {
     expect(second?.stopReason).toBe("stop");
     expect(f.gateway.getModel(PACKAGE.provider, PACKAGE.id)).toBeDefined();
 
-    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    expect(sessionOf(await f.registry.acquire(status.sessionId!)).modelRuntime).toBe(f.gateway);
     // An ordinary session keeps a runtime of its own.
     const ordinary = await f.registry.create(f.root);
     expect(sessionOf(ordinary).modelRuntime).not.toBe(f.gateway);
     expect(sessionOf(ordinary).modelRuntime.getModel(PACKAGE.provider, PACKAGE.id)).toBeUndefined();
+  });
+
+  // A5 (review): Home's session-local context-window override must stay session-local.
+  // SessionContextWindowPolicy replaces `getModel` on the runtime it is given, so a
+  // shared runtime would leak the override into Gateway-wide lookups and stack each
+  // replaced runtime's lookup under the next.
+  it("keeps a Home context-window override out of the shared runtime, across runtime replacement", async () => {
+    const f = await fixture({ shareGatewayRuntime: true });
+    const catalogWindow = f.gateway.getModel(PACKAGE.provider, PACKAGE.id)!.contextWindow;
+    await f.service.invoke(client, "home.designate", { commandId: "window-designate", model: PACKAGE });
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const home = await f.registry.acquire(status.sessionId!);
+    const before = home.snapshot();
+    await home.setContextWindow(PACKAGE.provider, PACKAGE.id, 60_000, before.revision, before.runtimeGeneration);
+    expect(sessionOf(home).model?.contextWindow).toBe(60_000);
+    expect(f.gateway.getModel(PACKAGE.provider, PACKAGE.id)!.contextWindow).toBe(catalogWindow);
+
+    await f.service.invoke(client, "home.disable", { commandId: "window-disable" });
+    await f.service.invoke(client, "home.designate", { commandId: "window-redesignate", model: PACKAGE });
+    const replaced = await f.registry.acquire(status.sessionId!);
+    expect(sessionOf(replaced).model?.contextWindow).toBe(60_000);
+    const current = replaced.snapshot();
+    await replaced.setContextWindow(PACKAGE.provider, PACKAGE.id, null, current.revision, current.runtimeGeneration);
+    expect(sessionOf(replaced).model?.contextWindow).toBe(catalogWindow);
+    expect(f.gateway.getModel(PACKAGE.provider, PACKAGE.id)!.contextWindow).toBe(catalogWindow);
   });
 
   // A1's negative control: the same Home on a runtime without the package provider cannot reach it.

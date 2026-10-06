@@ -415,8 +415,9 @@ export interface RuntimeSlotDependencies {
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
-  /** The one runtime every Home session's chat uses: the Gateway-wide runtime,
-   * so the model `home.designate` admitted resolves through the same providers. */
+  /** A Home session's chat runtime: a session-local view of the Gateway-wide
+   * runtime, so the model `home.designate` admitted resolves through the same
+   * providers, while the session's own lookup projections stay with it. */
   homeModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
