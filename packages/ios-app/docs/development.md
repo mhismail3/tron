@@ -791,6 +791,23 @@ scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
 ```
 
+Session configuration feedback is exercised through the real Stop, Manage Session,
+Models and Thinking consumers with explicitly held synthetic receipts:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing \
+  --only-testing TronMobileTests/ModelPickerPresentationTests
+```
+
+The runner retains `TestResults.xcresult` with light/dark lock, standard explanation,
+and applying captures. The journey verifies touch-accessible explanation, disabled
+model choices with live search/Done, and superseded-receipt unlock without reopening.
+The fixture's settlement buttons are test-only, not product UI. These captures and
+accessibility-value assertions do not certify physical-device VoiceOver, large-text
+layout, or live Gateway settlement; those remain native-device acceptance checks.
+
 Multiple `-only-testing:` arguments may select adjacent owners. After source
 changes, rerun the incremental `build-for-testing` (normally seconds), then
 continue with `test-without-building`. Run the complete unit target only after
@@ -1336,7 +1353,12 @@ cached/stale/live activity, ID-index integrity, and retention of existing dashbo
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
 wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
-the test's own work: a test must not need a fast machine to finish inside it. Walk long backoff
+the test's own work: a test must not need a fast machine to finish inside it. Hosted views await
+UIKit/SwiftUI callbacks (appearance, transition or animation completion, `TimelineView` ticks)
+only through `awaitHostedEvents` or `awaitHostedCondition`
+(`Tests/Support/HostedEvents.swift`), whose bound is a hang bound: hosted runners stall the main
+thread for seconds, and a stalled `TimelineView`
+coalesces missed ticks, so oracles assert outcomes, never callback latency or every tick. Walk long backoff
 curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
 `DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
 from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
@@ -2480,8 +2502,14 @@ images; the existing 10-file/25-MiB draft limits still apply. Oversized selectio
 are reported instead of silently losing images. Preparation is scoped to the exact
 chat and cancelled on retirement/coverage; after admission, uploads belong to the
 draft coordinator. Repeated pastes append rather than cancelling previous uploads.
+Pasted and Select Photos images upload only in formats every model provider
+accepts inline (`ProviderImageFormat`: JPEG, PNG, GIF, WebP). A paste uses an
+accepted clipboard representation when one is offered. Otherwise (an iPhone photo
+copies as HEIC) the device re-encodes the image as full-resolution JPEG with its
+orientation applied, and bytes that cannot be decoded are reported, never uploaded.
 
-`ComposerPastedImagesTests` covers provider loading, byte limits, image ordering,
+`ComposerPastedImagesTests` covers provider loading, byte limits, accepted-format
+preference, JPEG re-encoding and undecodable input, image ordering,
 unchanged text/selection, overflow, stale editor scope, and late cancellation.
 `ChatViewScrollHarnessTests.pastedImagesUsePhotoAttachmentFlow` mounts the real
 composer, proves batch chips appear before transport completes, captures a simulator

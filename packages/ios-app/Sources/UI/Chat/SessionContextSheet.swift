@@ -536,16 +536,10 @@ struct SessionContextSheet: View {
         return SessionModelSummaryCard(
             selection: selection,
             catalog: catalog,
-            // The Gateway rejects model changes during session work.
-            selectionLockedReason: lockedReason ?? ((pendingThinking != nil || settingContextWindow || pendingModelSelection != nil) ? "Applying configuration…" : nil),
+            selectionAvailability: (pendingThinking != nil || settingContextWindow || pendingModelSelection != nil)
+                ? .applying : lockedReason.map(ModelSelectionAvailability.blocked) ?? .ready,
             automaticCompactionEnabled: snapshot.automaticCompactionEnabled
         ) {
-            if let reason = snapshot.configurationLockedReason {
-                Label(reason, systemImage: "clock")
-                    .font(.caption)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .padding(14)
-            }
             TronThinkingSelectionRow(
                 selection: Binding(
                     get: { displayedThinking },

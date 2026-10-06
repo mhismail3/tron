@@ -192,7 +192,11 @@ final class ModelPickerPresentationTests: XCTestCase {
             detents: nil
         ) { controller in
             XCTAssertTrue(probe.contains("picker.card.openai/gpt-5"))
-            try await Task.sleep(for: .milliseconds(500))
+            // The detent applies after the picker publishes its measurement;
+            // await that settled height, then assert it below.
+            try await awaitHostedCondition("Sheet settled at the published fit height") {
+                ModelPickerSheetFixture<EmptyView>.publishedFitHeight.map { abs(controller.view.bounds.height - $0) <= 2 } ?? false
+            }
             let fit = try XCTUnwrap(ModelPickerSheetFixture<EmptyView>.publishedFitHeight,
                                     "the picker never published a fit height")
             // The published value is the visible sheet height the rails need.
@@ -262,7 +266,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         try await withPicker(
             selection: Binding(get: { selection }, set: { selection = $0 }),
             probe: probe,
-            selectionLockedReason: "Model changes are available when the session is idle."
+            selectionAvailability: .blocked("Model changes are available when the session is idle.")
         ) { _ in
             try await self.settle()
             _ = probe.activate("picker.card.openai/gpt-5")
@@ -322,7 +326,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         models: [ModelSummary] = ModelPickerPresentationTests.catalog,
         recents: [RecentModelRef] = ModelPickerPresentationTests.recents,
         detents: Set<PresentationDetent>? = [.large],
-        selectionLockedReason: String? = nil,
+        selectionAvailability: ModelSelectionAvailability = .ready,
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let suiteName = "model-picker-presentation.\(UUID().uuidString)"
@@ -348,7 +352,7 @@ final class ModelPickerPresentationTests: XCTestCase {
                 initial: selection.wrappedValue,
                 sink: { selection.wrappedValue = $0 },
                 models: models,
-                selectionLockedReason: selectionLockedReason
+                selectionAvailability: selectionAvailability
             )
         }
         .tronNavigationTitle("Models", accent: .tronPurple)
@@ -388,13 +392,12 @@ final class ModelPickerPresentationTests: XCTestCase {
             window.rootViewController = nil
             previous?.makeKeyAndVisible()
         }
-        let appearance = await XCTWaiter.fulfillment(of: [appeared], timeout: 3)
-        XCTAssertEqual(appearance, .completed)
+        try await awaitHostedEvents([appeared])
         let presented = try XCTUnwrap(host.presentedViewController)
         if let transition = presented.transitionCoordinator {
             let completed = expectation(description: "Sheet transition completed")
             if transition.animate(alongsideTransition: nil, completion: { _ in completed.fulfill() }) {
-                _ = await XCTWaiter.fulfillment(of: [completed], timeout: 3)
+                try await awaitHostedEvents([completed])
             }
         }
         presented.view.layoutIfNeeded()
@@ -486,17 +489,17 @@ private struct ModelPickerSelectionOwner: View {
     @State private var selection: ModelRef?
     let sink: (ModelRef?) -> Void
     let models: [ModelSummary]
-    let selectionLockedReason: String?
+    let selectionAvailability: ModelSelectionAvailability
 
-    init(initial: ModelRef?, sink: @escaping (ModelRef?) -> Void, models: [ModelSummary], selectionLockedReason: String?) {
+    init(initial: ModelRef?, sink: @escaping (ModelRef?) -> Void, models: [ModelSummary], selectionAvailability: ModelSelectionAvailability) {
         _selection = State(initialValue: initial)
         self.sink = sink
         self.models = models
-        self.selectionLockedReason = selectionLockedReason
+        self.selectionAvailability = selectionAvailability
     }
 
     var body: some View {
-        ModelPicker(selection: $selection, models: models, selectionLockedReason: selectionLockedReason)
+        ModelPicker(selection: $selection, models: models, selectionAvailability: selectionAvailability)
             .onChange(of: selection) { _, value in sink(value) }
     }
 }

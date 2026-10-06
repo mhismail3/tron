@@ -90,6 +90,20 @@ describe("UploadStore", () => {
     await expect(store.materialize([image.id], "session")).rejects.toMatchObject({ code: "not_found" });
   });
 
+  // Failure mode (#407): Pi does not normalize images queued as steers, and no
+  // provider accepts image/heic. An inline HEIC block entered canonical history
+  // and every later request in that session was rejected with HTTP 400.
+  it("delivers image types providers reject as file attachments, never inline image content", async () => {
+    const store = new UploadStore(await root(), 1024);
+    const heic = await store.save("photo.heic", "image/heic", Buffer.from("heic"));
+    const jpeg = await store.save("photo.jpg", "image/jpeg", Buffer.from("jpeg"));
+    const materialized = await store.materialize([heic.id, jpeg.id], "session");
+    expect(materialized.images.map((image) => image.mimeType)).toEqual(["image/jpeg"]);
+    expect(materialized.photoCount).toBe(1);
+    expect(materialized.fileAttachmentCount).toBe(1);
+    expect(materialized.envelope).toContain('name="photo.heic" mime-type="image/heic"');
+  });
+
   it("streams request chunks into atomic owned files without retaining a body buffer", async () => {
     const home = await root();
     const store = new UploadStore(home, 8, { maximumStagingBytes: 16 });
