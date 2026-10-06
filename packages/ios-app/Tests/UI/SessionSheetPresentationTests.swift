@@ -1162,14 +1162,12 @@ final class SessionSheetPresentationTests: XCTestCase {
             window.rootViewController = nil
             previous?.makeKeyAndVisible()
         }
-        let appearance = await XCTWaiter.fulfillment(of: [appeared], timeout: 3)
-        XCTAssertEqual(appearance, .completed)
+        try await awaitHostedEvents([appeared])
         let presented = try XCTUnwrap(host.presentedViewController)
         if let transition = presented.transitionCoordinator {
             let completed = expectation(description: "Sheet transition completed")
             if transition.animate(alongsideTransition: nil, completion: { _ in completed.fulfill() }) {
-                let result = await XCTWaiter.fulfillment(of: [completed], timeout: 3)
-                XCTAssertEqual(result, .completed)
+                try await awaitHostedEvents([completed])
             }
         }
         presented.view.layoutIfNeeded()

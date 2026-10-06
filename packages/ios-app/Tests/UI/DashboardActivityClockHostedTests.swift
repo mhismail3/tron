@@ -7,14 +7,18 @@ import XCTest
 ///
 /// Failure modes: SwiftUI keeps iterating the previous clock after a row's
 /// `updatedAt` changes, so a refreshed row stops ticking or keeps an hourly
-/// cadence; or a settled row still renders on a fixed cadence. The schedule's
-/// exact instants are owned by `PresentationLabelChangeTests`.
+/// cadence; or a row renders without its label changing. The schedule's
+/// exact instants are owned by `PresentationLabelChangeTests`. Ticks are
+/// awaited as events: a stalled host legitimately coalesces missed ticks into
+/// the latest due one (#402), so the oracle never requires every second.
 @MainActor
 final class DashboardActivityClockHostedTests: XCTestCase {
     func testMountedClockRendersOnlyWhenTheLabelChangesAndFollowsNewTimestamps() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
         let model = DashboardClockFixtureModel(updatedAt: Date.now.addingTimeInterval(-7_200))
+        let mounted = expectation(description: "Clock row rendered")
+        model.onRender = { mounted.fulfill() }
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 200, height: 100)
         window.rootViewController = UIHostingController(rootView: DashboardClockFixture(model: model))
@@ -25,32 +29,39 @@ final class DashboardActivityClockHostedTests: XCTestCase {
             previousKeyWindow?.makeKeyAndVisible()
         }
 
-        // A two-hour-old row renders once on mount, then stays idle.
-        try await waitUntil { !model.renders.isEmpty }
+        // A two-hour-old row renders once on mount, then stays idle: its label
+        // cannot change for an hour. A slow host can only hide extra renders.
+        try await awaitHostedEvents([mounted])
+        model.onRender = nil
         try await Task.sleep(for: .seconds(2.2))
         XCTAssertEqual(model.renders.count, 1, "\(model.renders)")
 
         // A newer timestamp replaces the clock: the row renders at once, then
-        // ages every second while the label counts seconds.
+        // follows the new timestamp's whole-second change instants.
+        let ticked = expectation(description: "Refreshed row rendered and ticked twice")
+        ticked.expectedFulfillmentCount = 3
+        ticked.assertForOverFulfill = false
+        model.onRender = { ticked.fulfill() }
         model.updatedAt = .now.addingTimeInterval(-3.5)
         // The instant the row parses from the millisecond Gateway timestamp.
         let refreshed = try XCTUnwrap(DashboardActivityClock(updatedAt: model.timestamp).updatedAt)
-        try await Task.sleep(for: .seconds(2.2))
-        let labels = model.renders.dropFirst().map(\.label)
-        let expected = (3...5).map { GatewayTimestamp.relativeDescription(refreshed, relativeTo: refreshed.addingTimeInterval(Double($0))) }
-        XCTAssertEqual(Array(labels.prefix(3)), expected, "\(model.renders)")
-        for render in model.renders.dropFirst(2) {
-            // Each tick lands on its change instant: whole seconds after the timestamp.
+        try await awaitHostedEvents([ticked])
+        model.onRender = nil
+
+        let refreshedRenders = Array(model.renders.dropFirst())
+        let secondsLabels = (3...59).map { GatewayTimestamp.relativeDescription(refreshed, relativeTo: refreshed.addingTimeInterval(Double($0))) }
+        XCTAssertTrue(secondsLabels.contains(refreshedRenders[0].label), "\(model.renders)")
+        var previous = refreshedRenders[0]
+        for render in refreshedRenders.dropFirst() {
+            // Each tick lands on a change instant: whole seconds after the new
+            // timestamp, later than the last, with the label for that instant.
             let age = render.date.timeIntervalSince(refreshed)
             XCTAssertEqual(age, age.rounded(), accuracy: 0.000_1, "\(model.renders)")
+            XCTAssertGreaterThan(render.date, previous.date, "\(model.renders)")
+            XCTAssertEqual(render.label, GatewayTimestamp.relativeDescription(refreshed, relativeTo: render.date), "\(model.renders)")
+            XCTAssertNotEqual(render.label, previous.label, "A render without a label change: \(model.renders)")
+            previous = render
         }
-    }
-
-    private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        XCTAssertTrue(condition())
     }
 }
 
@@ -64,6 +75,7 @@ private final class DashboardClockFixtureModel {
 
     var updatedAt: Date
     @ObservationIgnored var renders: [Render] = []
+    @ObservationIgnored var onRender: (() -> Void)?
 
     var timestamp: String { GatewayTimestamp.preciseString(from: updatedAt) }
 
@@ -82,6 +94,7 @@ private struct DashboardClockFixture: View {
             let date = max(timeline.date, .now)
             let label = clock.label(relativeTo: date)
             let _ = model.renders.append(.init(date: timeline.date, label: label))
+            let _ = model.onRender?()
             Text(label)
         }
     }

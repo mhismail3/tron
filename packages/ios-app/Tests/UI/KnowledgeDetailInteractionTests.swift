@@ -215,8 +215,7 @@ final class KnowledgeDetailInteractionTests: XCTestCase {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        let appearance = await XCTWaiter.fulfillment(of: [appeared], timeout: 3)
-        XCTAssertEqual(appearance, .completed)
+        try await awaitHostedEvents([appeared])
         let controller = try XCTUnwrap(host.presentedViewController)
         controller.view.layoutIfNeeded()
         var failure: Error?

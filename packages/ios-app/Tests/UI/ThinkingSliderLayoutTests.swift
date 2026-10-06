@@ -57,7 +57,7 @@ final class ThinkingSliderLayoutTests: XCTestCase {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        await fulfillment(of: [appeared], timeout: 2)
+        try await awaitHostedEvents([appeared])
         try await Task.sleep(for: .milliseconds(400)) // Native opening animation, not model I/O.
         host.view.layoutIfNeeded()
         try await check(host)

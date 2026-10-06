@@ -444,7 +444,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKeyAndVisible() }
-        await fulfillment(of: [appeared], timeout: 2)
+        try await awaitHostedEvents([appeared])
         host.view.layoutIfNeeded()
         try await check(host)
     }
