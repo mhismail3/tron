@@ -216,6 +216,11 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         openXSetupThroughDashboardSettings(app)
         app.textFields.element(boundBy: 0).tap(); app.textFields.element(boundBy: 0).typeText("fixture-public-client")
         app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+        // The presentation's own identity is the stable handle on the form. A teardown samples
+        // the destination after the switch that retires the form, so that sample cannot name
+        // the destination the form appeared for (#442).
+        let setupViewID = xSetupStateID(app)
+        XCTAssertFalse(setupViewID.isEmpty, presentationTrace(app))
         app.buttons["Authorize X"].tap()
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), app.debugDescription)
@@ -228,9 +233,17 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         waitForExpectations(timeout: 15)
         XCTAssertFalse(app.staticTexts["Set up X"].exists, "A replacement Gateway must not inherit the old PKCE form")
         let trace = presentationTrace(app)
-        XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"), trace)
         XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g1 new=replacement-integration-fixture:g1 setupOpen=false"), trace)
-        XCTAssertTrue(trace.contains("xsetup.disappear dest=integration-fixture:g1"), trace)
+        XCTAssertTrue(trace.contains("xsetup.appear dest=integration-fixture:g0 view=\(setupViewID)"), trace)
+        let events = trace.split(separator: "|").map(String.init)
+        // The form that appeared for the original destination is the one that disappears, and
+        // it disappears with the transition that retires it. A focus re-identity retires the
+        // same presentation earlier, so the ordered disappearance is the retirement.
+        guard let retiring = events.firstIndex(of: "integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"),
+              let disappearing = events.lastIndex(where: { $0.hasPrefix("xsetup.disappear ") && $0.hasSuffix(" view=\(setupViewID)") }) else {
+            return XCTFail("The trace must record the destination transition that retires the form and the disappearance of the form that appeared for it: \(trace)")
+        }
+        XCTAssertGreaterThan(disappearing, retiring, "The form retires with the transition that retires it, never before it: \(trace)")
         XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), app.debugDescription)
         XCTAssertTrue(xSetupLogContains(app, "xsetup.destination-retired"), productionXLogs(app))
         XCTAssertTrue(xSetupLogContains(app, "reason=destination-changed"), productionXLogs(app))
