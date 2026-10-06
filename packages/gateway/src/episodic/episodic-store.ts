@@ -6,7 +6,7 @@ import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
   EpisodicMemoryError, EPISODIC_STORE_VERSION,
-  type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState,
+  type EpisodicContextRun, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState,
 } from "./episodic-contract.js";
 import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
 
@@ -324,10 +324,17 @@ function isNodeLogRecord(value: Record<string, unknown>): boolean {
       && value.part < value.parts && value.nodes.split(" ").every(code => code === "" || decodeNodeCode(code) !== undefined);
   }
   const childRevisions = value.childRevisions;
-  return isRevision(value.revision) && isRevision(value.level) && isRevision(value.index)
+  const shape = isRevision(value.revision) && isRevision(value.level) && isRevision(value.index)
     && (value.kind === "free" || value.kind === "summary") && typeof value.text === "string"
     && isContextRuns(value.contextRuns) && typeof value.textDigest === "string" && typeof value.sourceDigest === "string"
     && (childRevisions === undefined || (Array.isArray(childRevisions) && childRevisions.length === 2 && childRevisions.every(isRevision)));
+  if (!shape) return false;
+  // A free node made no call and holds no context; a summary's runs must cover
+  // exactly the messages before its end, or the dependents it implies are wrong.
+  const runs = value.contextRuns as EpisodicContextRun[];
+  if (value.kind === "free") return runs.length === 0;
+  const end = (value.level as number) === 0 ? value.index as number : ((value.index as number) + 1) * 2 ** (value.level as number);
+  return runs.reduce((total, run) => total + run[1] * 2 ** run[0], 0) === end;
 }
 
 function parseRecord<T>(line: string, isRecord: (value: Record<string, unknown>) => boolean): T {
