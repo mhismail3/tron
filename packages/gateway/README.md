@@ -340,9 +340,10 @@ this file is macOS. Tron-owned prompt text (Tron's tool snippets, rule lines and
 operating context) is part of what the model is sent, so it is part of the
 golden: a Tron change to those surfaces updates this golden in the same pull
 request, and the diff names exactly which text moved. Masking it was rejected
-because the SDK's own tool-declaration wording sits in the same field: the 1.0.4
-trial rewrites the codemode declaration of Tron's own tools as well, and masking
-those descriptions would hide those hunks.
+because the SDK's own tool-declaration wording sits in the same field: four of
+the 1.0.4 trial's 42 hunks rewrite the codemode declaration of Tron's own
+`display`, `computer`, `ask_user` and `jev` tools, and masking those descriptions
+would hide them.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
