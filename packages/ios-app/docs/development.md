@@ -2232,7 +2232,12 @@ completes, backgrounds and foregrounds the app, and requires the conversation in
 The wrong-code control asserts the app's own `Pairing code is invalid` refusal, that a
 refused code advances nothing, and then that the same form and address pair with the
 fixture's code — so the control cannot pass by being a broken address. Both journeys
-retain screenshots.
+retain screenshots, and the journey retains the transcript text it observed for the
+reply as a trace. Teardown returns the hosted app to its unpaired launch state through
+the same `HOSTED_TEST` reset every hosted UI test starts from: this lane pairs for real,
+and the lane's app container is shared with the hosted unit lane in the same worktree, so
+a pairing left behind made that lane's mounted-view tests time out (measured A/B/A on the
+lane).
 
 Each journey leaves one evidence directory under this worktree's fixture
 (`results/<utc>-ui.XXXXXX`) holding the `.xcresult`, the Gateway's canonical runtime
