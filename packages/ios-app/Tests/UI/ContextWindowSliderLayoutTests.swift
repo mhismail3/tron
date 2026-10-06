@@ -91,7 +91,7 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        await fulfillment(of: [appeared], timeout: 2)
+        try await awaitHostedEvents([appeared])
         // Only the visual preview waits for its known opening spring; static
         // intermediate-frame assertions join UIKit appearance directly.
         if let settling { try await Task.sleep(for: settling) }

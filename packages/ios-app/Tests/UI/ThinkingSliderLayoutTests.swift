@@ -25,10 +25,10 @@ final class ThinkingSliderLayoutTests: XCTestCase {
             let session = try XCTUnwrap(presentation.session)
             XCTAssertTrue(presentation.beginClosing(session))
             registry.retire(token)
-            // Beyond the known 280ms closing duration; no production timer.
-            try await Task.sleep(for: .milliseconds(450))
+            // The closing animation's completion releases the session; a
+            // retired surface must cancel there rather than commit.
+            try await awaitHostedCondition("The retired editor must release its host") { presentation.session == nil }
             XCTAssertEqual(completions, 0)
-            XCTAssertNil(presentation.session, "The retired editor must release its host")
         }
         XCTAssertEqual(registry.mountedSurfaceCount, 0)
     }
@@ -57,7 +57,7 @@ final class ThinkingSliderLayoutTests: XCTestCase {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        await fulfillment(of: [appeared], timeout: 2)
+        try await awaitHostedEvents([appeared])
         try await Task.sleep(for: .milliseconds(400)) // Native opening animation, not model I/O.
         host.view.layoutIfNeeded()
         try await check(host)
