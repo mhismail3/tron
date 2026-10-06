@@ -65,6 +65,12 @@ afterAll(async () => {
 
 const client = { id: "terminal", identity: "device:home-designation", isLocal: false } as ClientContext;
 
+/** Home has no memory defaults (decision D4): a Home session serves requests only
+ * once its memory is configured. Cases that need a Home run configure it here. */
+async function configureHomeMemory(f: Fixture): Promise<void> {
+  await f.registry.homeOwner().configureMemory({ model: MODEL, tokenBudget: 1_000_000 });
+}
+
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (!predicate()) {
@@ -107,6 +113,10 @@ function openRegistry(f: {
     // fixture offers its owner and the curated Home list is exercised in full.
     notifications: { enqueue: async () => "queued" } as unknown as NotificationService,
     homeDiagnostic: (diagnostic) => f.diagnostics.push(diagnostic),
+    // Home's memory compactor runs on the Gateway's ModelRuntime. These cases
+    // inject its summarizer so no model is ever reached for it, exactly as the
+    // Gateway injects the Knowledge model for its own calls.
+    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("HOME-MEMORY-LINE") }),
   });
   registries.push(registry);
   const service = new GatewayService({
@@ -250,7 +260,10 @@ describe.sequential("Tron Home designation", () => {
     expect(extensionNames(ordinaryContext)).toEqual(extensionNames(controlContext));
     expect(registeredTools(ordinaryContext)).toEqual(registeredTools(controlContext));
 
-    expect(await homeStatus(f)).toEqual({ available: true, enabled: false, live: false, sessionPresent: false });
+    expect(await homeStatus(f)).toEqual({
+      available: true, enabled: false, live: false, sessionPresent: false,
+      memory: { configured: false, open: false },
+    });
 
     // The default-model branch: no model named means this Gateway's default.
     const designation = await designate(f, "home-designate-1", null);
@@ -279,6 +292,9 @@ describe.sequential("Tron Home designation", () => {
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
+      // Home has no memory defaults (decision D4): until `home.configureMemory`,
+      // the projection says so and every activation refuses.
+      memory: { configured: false, open: false },
     });
 
     // Idempotent, and a replayed command id returns the same result.
@@ -305,7 +321,10 @@ describe.sequential("Tron Home designation", () => {
     await expect(home.setModel(PROVIDER, VIRTUAL_MODEL_ID)).rejects.toMatchObject({ code: "invalid_request" });
     expect(await homeStatus(f)).toMatchObject({ model: MODEL });
 
-    // Forking the Home session yields an ordinary session.
+    // Forking the Home session yields an ordinary session. Home's memory is
+    // configured first, so the prompt below is a real Home turn rather than a
+    // fail-closed refusal.
+    await configureHomeMemory(f);
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
     await home.prompt("hello home");
     await waitUntil(() => !home.isBusy);
@@ -361,6 +380,7 @@ describe.sequential("Tron Home designation", () => {
     }]);
 
     const designation = await designate(f, "home-designate-busy");
+    await configureHomeMemory(f);
     const home = await f.registry.acquire(designation.sessionId);
     await home.prompt("hold the run open");
     await waitUntil(() => home.isBusy);
@@ -519,6 +539,7 @@ describe.sequential("Tron Home designation", () => {
     };
 
     const designation = await designate(f, "home-designate-warming");
+    await configureHomeMemory(f);
     const home = await f.registry.acquire(designation.sessionId);
     const homeSession = (home as unknown as { runtime: { session: AgentSession } }).runtime.session;
     // The first prompt records the usage the warm decision prices; the second is

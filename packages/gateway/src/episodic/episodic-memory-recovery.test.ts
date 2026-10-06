@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants, readFileSync } from "node:fs";
-import { appendFile, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,8 +8,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { createEpisodicTokenBudget, EpisodicMemoryError, type EpisodicDiagnostic, type EpisodicSummarizer } from "./episodic-contract.js";
-import { EpisodicMemory } from "./episodic-memory.js";
+import {
+  createEpisodicTokenBudget, EpisodicMemoryError,
+  type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
+} from "./episodic-contract.js";
+import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
 
 /*
  * Crash and store recovery: a child process is SIGKILLed while it is writing
@@ -39,6 +42,13 @@ const stubSummarizer: EpisodicSummarizer = async (request) => {
   const last = request.turns.at(-1)!;
   return fauxAssistantMessage(last.text.replace(/\s+/gu, " ").trim().slice(-200));
 };
+
+/** The same, reporting usage: spend is the state a restart must not hand back. */
+const SPEND_USAGE = {
+  input: 64, output: 16, cacheRead: 0, cacheWrite: 0, totalTokens: 80,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+const chargedSummarizer: EpisodicSummarizer = async (request) => ({ ...await stubSummarizer(request), usage: SPEND_USAGE });
 
 interface RecoveryFixture {
   root: string;
@@ -78,14 +88,19 @@ async function fixture(label: string, messages: number): Promise<RecoveryFixture
   };
 }
 
-async function openMemory(fx: RecoveryFixture): Promise<EpisodicMemory> {
+async function openMemory(
+  fx: RecoveryFixture,
+  summarizer: EpisodicSummarizer = stubSummarizer,
+  budget = createEpisodicTokenBudget(2_000_000_000),
+  limits: Partial<EpisodicLimits> = {},
+): Promise<EpisodicMemory> {
   return EpisodicMemory.open({
     workspace: fx.workspace,
     sessionId: fx.sessionId,
     sessionFile: fx.sessionFile,
-    budget: createEpisodicTokenBudget(2_000_000_000),
-    summarizer: stubSummarizer,
-    limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
+    budget,
+    summarizer,
+    limits: { viewBytes: 4_096, jobs: 4, retryMs: 1, ...limits },
     diagnostic: record => fx.diagnostics.push(record),
     sleep: async () => {},
   });
@@ -166,6 +181,26 @@ async function writeChildProgram(fx: RecoveryFixture, readyMarker: string): Prom
   return { program, hook };
 }
 
+/** Polls a predicate on real timers. The bound is the test's: nothing here owns
+ * a wall-clock deadline. */
+async function waitUntil(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (;;) {
+    if (await predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 2));
+  }
+}
+
+/** Waits for the child's output to contain a line, without a deadline of its own:
+ * the test's own timeout is the bound, and a child that exits first fails the
+ * wait instead of hanging it. */
+async function waitForChildLine(child: ReturnType<typeof spawn>, text: string, output: () => string): Promise<void> {
+  for (;;) {
+    if (output().includes(text)) return;
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`child exited before printing ${text}: ${output()}`);
+    await new Promise(resolve => setTimeout(resolve, 2));
+  }
+}
+
 async function waitForFileGrowth(path: string, lines: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -176,6 +211,222 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 }
 
 describe("episodic memory crash recovery", () => {
+  it("refuses a waiter instead of stranding it when the pump dies unexpectedly", async () => {
+    // The pump classifies every failure it can name, but an unexpected one (a
+    // store write the filesystem refuses, say) escapes it. Without the owner's
+    // own settlement the pump would be dead, the memory unblocked and every
+    // waiter waiting for a node that can never come — and a turn loop only waits
+    // on `whenReady`, so that is a Home turn that hangs until the user stops it.
+    const fx = await fixture("pump-death", 4);
+    const memory = await openMemory(fx);
+    let fail!: (error: unknown) => void;
+    const dying = new Promise<void>((_resolve, reject) => { fail = reject; });
+    // The one failure the owner cannot classify. Reached here by injecting it at
+    // the pump boundary rather than by breaking a real filesystem, because every
+    // store boundary this module owns classifies its own failures by design.
+    (memory as unknown as { pump: () => Promise<void> }).pump = () => dying;
+    await memory.entriesIngested(fx.sessionId);
+    const cut = memory.status().messages;
+    expect(cut).toBeGreaterThan(0);
+    const waiting = memory.whenReady(cut).then(() => "resolved", (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`);
+    fail(new Error("store write failed"));
+    expect(await waiting).toContain("rejected");
+    expect(memory.status().blocked?.reason).toBe("permanent-failure");
+    await memory.dispose();
+  }, 120_000);
+
+  it("keeps the token spend a killed child had already recorded", async () => {
+    // Spend is the one piece of a memory that no restart may hand back: a budget
+    // bounded in name is unbounded in practice if a crash resets it. The child is
+    // killed mid-pump, and the parent's reopen must both restore the spend and
+    // charge it against the same budget.
+    const fx = await fixture("spend-crash", 12);
+    const hook = join(fx.root, "hook.mjs");
+    const program = join(fx.root, "spend-child.mjs");
+    await writeFile(hook, `import { registerHooks } from "node:module";\nimport { pathToFileURL } from "node:url";\nregisterHooks({\n  resolve(specifier, context, nextResolve) {\n    try { return nextResolve(specifier, context); }\n    catch (error) {\n      if (specifier.endsWith(".js")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n      throw error;\n    }\n  },\n});\nawait import(pathToFileURL(process.argv[1]).href);\n`, "utf8");
+    await writeFile(program, `import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { createEpisodicTokenBudget } from ${JSON.stringify(CONTRACT_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId] = process.argv.slice(2);\nconst usage = { input: 80, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 100, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  budget: createEpisodicTokenBudget(100000),\n  limits: { viewBytes: 4096, jobs: 1, retryMs: 1 },\n  summarizer: async (request) => ({\n    role: "assistant", content: [{ type: "text", text: \`spend line \${request.turns.length}\` }],\n    api: "faux", provider: "faux", model: "child", usage, stopReason: "stop", timestamp: Date.now(),\n  }),\n  sleep: async () => {},\n});\nprocess.stdout.write("opened\\n");\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write(\`spent \${memory.status().tokens.used}\\n\`);\nfor (;;) await new Promise(resolve => setTimeout(resolve, 5));\n`, "utf8");
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId], { stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    const statePath = join(fx.storeRoot, "state.json");
+    const spendOf = async (): Promise<number> => {
+      try {
+        const state = JSON.parse(await readFile(statePath, "utf8")) as { spend?: number };
+        return state.spend ?? 0;
+      } catch { return 0; }
+    };
+    const deadline = Date.now() + 30_000;
+    while ((await spendOf()) <= 0) {
+      if (Date.now() > deadline) throw new Error(`child recorded no spend; output: ${output}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const durableSpend = await spendOf();
+    child.kill("SIGKILL");
+    await new Promise(resolve => child.once("exit", resolve));
+    const lock = join(fx.home, "gateway", "workspace-state.lock");
+    const past = new Date(Date.now() - 120_000);
+    await utimes(lock, past, past);
+
+    // Reopened with the same budget, the memory starts from what the child spent.
+    const reopened = await EpisodicMemory.open({
+      workspace: fx.workspace,
+      sessionId: fx.sessionId,
+      sessionFile: fx.sessionFile,
+      budget: createEpisodicTokenBudget(100_000),
+      summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
+      sleep: async () => {},
+    });
+    const reopenedUsed = reopened.status().tokens.used;
+    expect(durableSpend).toBeGreaterThanOrEqual(100);
+    expect(reopenedUsed).toBeGreaterThanOrEqual(durableSpend);
+    await reopened.dispose();
+
+    // The restored spend is charged: a budget that is already spent is blocked
+    // rather than handed a fresh ceiling.
+    const exhausted = await EpisodicMemory.open({
+      workspace: fx.workspace,
+      sessionId: fx.sessionId,
+      sessionFile: fx.sessionFile,
+      budget: createEpisodicTokenBudget(reopenedUsed),
+      summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
+      sleep: async () => {},
+    });
+    expect(exhausted.status().tokens.used).toBe(reopenedUsed);
+    expect(exhausted.status().tokens.limit).toBe(reopenedUsed);
+    await exhausted.dispose();
+  }, 120_000);
+
+  it("serializes state writes and snapshots them inside the serialized step", async () => {
+    // The store document must describe the memory as it is now. An un-serialized
+    // `saveState` takes its snapshot when it is *called* and awaits an atomic
+    // rename, so two concurrent callers can both be in flight and the older
+    // snapshot can land last: spend goes backwards, or a block written by one
+    // path is overwritten by another path's earlier, unblocked state. Reached
+    // here by holding the first write inside the store, which is the only
+    // observation point a test can own: the assertion is that the owner does not
+    // even *ask* the store for the second write while the first is unfinished.
+    const fx = await fixture("state-order", 12);
+    const memory = await openMemory(fx, chargedSummarizer);
+    await memory.entriesCommitted(fx.sessionId);
+    const store = (memory as unknown as { store: { saveState: (state: unknown) => Promise<void> } }).store;
+    const write = store.saveState.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const writes: number[] = [];
+    store.saveState = async (state: unknown) => {
+      const index = writes.length;
+      writes.push(index);
+      if (index === 0) await held;
+      await write(state);
+    };
+    const owner = memory as unknown as { saveState: () => Promise<void> };
+    const first = owner.saveState();
+    const second = owner.saveState();
+    // The first write is inside the store and held there; the second has not
+    // reached it, because the owner chains it behind the first and snapshots
+    // then, not now.
+    await waitUntil(() => writes.length >= 1);
+    expect(writes.length).toBe(1);
+    release();
+    await Promise.all([first, second]);
+    expect(writes.length).toBe(2);
+    const durable = JSON.parse(await readFile(join(fx.storeRoot, "state.json"), "utf8")) as { spend?: number; blocked?: unknown };
+    expect(durable.spend).toBe(memory.status().tokens.used);
+    expect(durable.blocked).toEqual(memory.status().blocked);
+    await memory.dispose();
+  }, 120_000);
+
+  it("keeps the persisted state equal to the live state while concurrent jobs settle", async () => {
+    // `saveState` takes its snapshot when it is called. Concurrent jobs settle at
+    // once, so an un-serialized save lets an older snapshot land last: spend goes
+    // backwards, or a block written by one path is overwritten by another path's
+    // earlier, unblocked state. The store document is the only durable record of
+    // both, so a restart reads whichever write landed last.
+    const fx = await fixture("state-order", 40);
+    const memory = await openMemory(fx, chargedSummarizer);
+    const statePath = join(fx.storeRoot, "state.json");
+    const persisted = async (): Promise<{ spend?: number; blocked?: unknown }> => JSON.parse(await readFile(statePath, "utf8")) as { spend?: number; blocked?: unknown };
+    for (let round = 0; round < 25; round += 1) {
+      fx.manager.appendMessage({ role: "user", content: `round ${round} ${"w".repeat(700)}`, timestamp: Date.now() });
+      await memory.entriesCommitted(fx.sessionId);
+      const live = memory.status();
+      const durable = await persisted();
+      expect(live.tokens.used).toBeGreaterThan(0);
+      expect(durable.spend).toBe(live.tokens.used);
+      expect(durable.blocked).toEqual(live.blocked);
+    }
+    await memory.dispose();
+  }, 120_000);
+
+  it("resumes without waiting for the pump backlog", async () => {
+    // Raising a budget or clearing a block is an operator command: it must return
+    // once the memory is unblocked and re-read, not after the whole summary
+    // catch-up, or the RPC holds the Home mutex for the entire pump.
+    const fx = await fixture("resume-ingested", 12);
+    let calls = 0;
+    let release!: () => void;
+    const parked = new Promise<void>((resolve) => { release = resolve; });
+    const summarizer: EpisodicSummarizer = async (request) => {
+      calls += 1;
+      // The first node's bounded retries fail, which blocks the memory; the
+      // pump after the resume then parks, so an awaited drain would hang here.
+      if (calls <= 4) return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" });
+      await parked;
+      return await stubSummarizer(request);
+    };
+    const memory = await openMemory(fx, summarizer, createEpisodicTokenBudget(2_000_000_000), { maxRetries: 3 });
+    await memory.entriesCommitted(fx.sessionId);
+    expect(memory.status().blocked?.reason).toBe("retries-exhausted");
+
+    await memory.resumeIngested();
+    expect(memory.status().blocked).toBeNull();
+    expect(memory.status().view.unbuilt).toBeGreaterThan(0);
+    release();
+    await memory.dispose();
+  }, 120_000);
+
+  it("bounds one compactor call by a timeout, classified transient", async () => {
+    // A compactor call that never returns holds its build slot forever: the pump
+    // neither blocks nor retries, and every turn that waits on that node waits
+    // for the life of the process. The bound is injectable so a test never waits
+    // out the production one.
+    const fx = await fixture("call-timeout", 2);
+    const slow: EpisodicSummarizer = async (request) => {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return await stubSummarizer(request);
+    };
+    const memory = await openMemory(fx, slow, createEpisodicTokenBudget(2_000_000_000), { compactorTimeoutMs: 20, maxRetries: 1 });
+    await memory.entriesCommitted(fx.sessionId);
+    expect(memory.status().blocked?.reason).toBe("retries-exhausted");
+    await memory.dispose();
+  }, 120_000);
+
+  it("reads the persisted blocked state and spend without opening the memory", async () => {
+    // `home.status` has to report what a restart would restore before any
+    // activation opens the store: the spend a budget is charged for, and the
+    // block that refuses every activation.
+    const fx = await fixture("state-peek", 6);
+    const memory = await openMemory(fx, chargedSummarizer);
+    await memory.entriesCommitted(fx.sessionId);
+    const used = memory.status().tokens.used;
+    expect(used).toBeGreaterThan(0);
+    await memory.dispose();
+
+    const peeked = await readEpisodicState({ workspace: fx.workspace, sessionId: fx.sessionId });
+    expect(peeked?.spend).toBe(used);
+    expect(peeked?.blocked).toBeNull();
+    // A workspace that never initialized its episodic state has nothing to
+    // report; a namespace that was initialized and is now missing is a store
+    // refusal the reader sees, not an empty answer.
+    const fresh = new TronWorkspace(join(fx.root, "never-opened"));
+    owners.push(fresh);
+    expect(await readEpisodicState({ workspace: fresh, sessionId: "session-with-no-store" })).toBeUndefined();
+  }, 120_000);
+
   it("reopens a store a killed child was writing, proves it consistent, and refolds a valid view", async () => {
     const fx = await fixture("sigkill", 60);
     const marker = join(fx.root, "commit-marker");
@@ -240,43 +491,66 @@ describe("episodic memory crash recovery", () => {
 
   it("repairs a catalog revision whose invalidation a crash lost", async () => {
     // Enough nodes that the window between the catalog append and the
-    // invalidation is comfortably wider than the parent's poll interval.
+    // invalidation is comfortably wider than the parent's poll interval, and a
+    // tree this test builds itself: the child's start-up commit is then a no-op
+    // read, so the ONLY work it does is the edit's invalidation and `ready` means
+    // ready rather than "the whole tree is finally built".
     const fx = await fixture("window", 600);
+    const prebuild = new TronWorkspace(fx.home);
+    owners.push(prebuild);
+    const prebuilt = await EpisodicMemory.open({
+      workspace: prebuild,
+      sessionId: fx.sessionId,
+      sessionFile: fx.sessionFile,
+      budget: createEpisodicTokenBudget(2_000_000_000),
+      summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
+      sleep: async () => {},
+    });
+    await prebuilt.entriesCommitted(fx.sessionId);
+    expect(prebuilt.status().view.unbuilt).toBe(0);
+    await prebuilt.dispose();
+    // Release the workspace lock the pre-build took: the child owns this
+    // installation while it runs.
+    await prebuild.dispose();
+
     const marker = join(fx.root, "commit-marker");
     const { program, hook } = await writeChildProgram(fx, marker);
-    const target = fx.manager.getBranch().filter(entry => entry.type === "message")[2]!;
-    const editedText = "edited in the crash window";
+    let editedText = "";
     let hit = false;
-
+    // Each attempt owns its edit, its child and its marker: a missed window
+    // leaves nothing behind for the next attempt to trip over.
     for (let attempt = 0; attempt < 3 && !hit; attempt += 1) {
+      const text = `edited in the crash window ${attempt}`;
+      const target = fx.manager.getBranch().filter(entry => entry.type === "message")[2 + attempt]!;
       const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId, marker], { stdio: ["ignore", "pipe", "pipe"] });
       children.push(child);
       let output = "";
       child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
       child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-      const deadline = Date.now() + 60_000;
-      while (!output.includes("ready")) {
-        if (Date.now() > deadline) throw new Error(`child never became ready: ${output}`);
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
-      if (attempt === 0) fx.manager.appendContextEdit(target.id, { content: editedText });
+      await waitForChildLine(child, "ready", () => output);
+      fx.manager.appendContextEdit(target.id, { content: text });
       await writeFile(marker, "go", "utf8");
       // Kill exactly inside the window: the catalog holds the new text and no
-      // invalidation record exists yet.
-      while (Date.now() < deadline) {
-        const catalog = readFileSync(fx.catalogPath, "utf8");
-        const nodes = readFileSync(fx.nodesPath, "utf8");
-        if (catalog.includes(editedText) && !nodes.includes("\"nodes\":")) {
+      // invalidation record exists yet. No wall-clock deadline of its own — the
+      // test's own timeout is the bound, and a child that dies first fails here.
+      for (;;) {
+        if (readFileSync(fx.catalogPath, "utf8").includes(text) && !readFileSync(fx.nodesPath, "utf8").includes("\"nodes\":")) {
           child.kill("SIGKILL");
           await new Promise(resolve => child.once("exit", resolve));
           hit = !readFileSync(fx.nodesPath, "utf8").includes("\"nodes\":");
+          if (hit) editedText = text;
           break;
         }
+        if (child.exitCode !== null) throw new Error(`child exited before the window: ${output}`);
         await new Promise(resolve => setTimeout(resolve, 1));
       }
       if (!hit) {
-        child.kill("SIGKILL");
-        await new Promise(resolve => child.once("exit", resolve));
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+          await new Promise(resolve => child.once("exit", resolve));
+        }
+        await rm(marker, { force: true });
       }
     }
     expect(hit, "the child was never killed inside the catalog/invalidation window").toBe(true);

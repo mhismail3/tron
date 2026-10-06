@@ -646,9 +646,21 @@ Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns the bounded projection
 `{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
-  sessionPresent }`, `home.designate` and `home.disable` are
-command-id-receipted mutations, and `home.v1` is advertised in
-`hello`/`system.info`. Home runs in the neutral
+  sessionPresent, memory }`, where `memory` is
+`{ configured, open, model?, tokenBudget?, spentTokens?, episodic?, blocked?,
+  reason? }`, `episodic` is the memory owner's own bounded status and
+`spentTokens` is the persisted spend (present whenever a store exists, open or
+not, because a restart restores it and charges it against the budget). `home.designate`,
+`home.disable`, `home.configureMemory` and `home.resumeMemory` are
+command-id-receipted mutations,
+`home.context` (a read) returns the bounded request context of Home's current or
+last activation — its start entry id, whether it is open, its view line and byte
+counts, effective tokens, model window and its own refusal reason (the sizes are
+absent when it was refused before it prepared a request), and never a message
+body — and
+`home.v1` is advertised in `hello`/`system.info`. There are no memory defaults:
+Home refuses its activations until `home.configureMemory` records a physical
+model and a token budget. Home runs in the neutral
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
@@ -656,7 +668,11 @@ agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
 disabled, a fixed physical model, and zero cache-warming requests), and its
 designation is keyed by session id, so a fork is ordinary. A profile change
 replaces the live runtime in place inside the session's own lane, and a record
-whose session is gone is given a fresh one. Ordinary sessions are byte-for-byte
+whose session is gone is given a fresh one. Every activation (one admitted input
+and its whole tool loop) sends the model only the system messages that precede
+it, ONE frozen memory view and its own messages: prior activations are never
+re-sent, the view is never persisted, and a request waits for the lines it will
+send (abortably) before it is made. Ordinary sessions are byte-for-byte
 unaffected. The record, the profile, the RPCs, fork and loadout semantics and
 what is not built yet are owned by [`docs/home.md`](docs/home.md).
 
