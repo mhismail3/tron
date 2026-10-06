@@ -209,6 +209,7 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
+  gatewayModelRuntime: modelRuntime,
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,

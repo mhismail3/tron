@@ -747,6 +747,11 @@ export class RuntimeRegistry {
        * model for its own calls: from the Gateway's ModelRuntime, never a
        * session's runtime. Absent means no Home memory can be configured. */
       homeMemorySummarizer?: (model: { provider: string; id: string }) => HomeMemoryModelResolution;
+      /** The Gateway-wide user-scope runtime, where user provider packages (for
+       * example CortexKit's `anthropic` override) are registered. Home's chat runs
+       * on it (#480). Only a registry without a Gateway, as in tests, omits it;
+       * Home then gets a runtime of its own, as an ordinary session does. */
+      gatewayModelRuntime?: ModelRuntime;
       /** Where Home's memory reports its bounded records. */
       homeMemoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
       /** Where Home's request seam reports one record per activation and per
@@ -1614,6 +1619,7 @@ export class RuntimeRegistry {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
+      homeModelRuntime: async () => sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime()),
       createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),
@@ -4625,4 +4631,28 @@ export class RuntimeRegistry {
       return this.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
     }, signal), lease => lease.release());
   }
+}
+
+/** One Home runtime's own view of the shared Gateway model runtime (#480). Session
+ * code may replace a method on the runtime it is given: `SessionContextWindowPolicy`
+ * replaces `getModel` to project the session's context-window budget. On this view
+ * such a write stays with that one runtime, so it neither changes Gateway-wide
+ * lookups nor stacks under the next replacement runtime. Every other read and
+ * call reaches the shared runtime, bound to it, so provider packages registered
+ * there stay visible. No write through the view can reach the shared runtime. */
+function sessionRuntimeView(shared: ModelRuntime): ModelRuntime {
+  const own = new Map<PropertyKey, unknown>();
+  return new Proxy(shared, {
+    get: (target, property) => {
+      if (own.has(property)) return own.get(property);
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    set: (_target, property, value) => {
+      own.set(property, value);
+      return true;
+    },
+    defineProperty: () => false,
+    deleteProperty: () => false,
+  });
 }

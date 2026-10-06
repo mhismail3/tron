@@ -71,10 +71,25 @@ sense on its own. Tag each item with its source kind ("user: ...; echo:
 never make anything look further along than it was. Output only the line;
 non-ASCII characters cost 2-4 bytes.`;
 
-/** A compactor reply is one line; 2,048 tokens leaves room for the overshoot
- * the size loop then trims, without letting a runaway reply be unbounded. It is
- * also what a call reserves for its output. */
-export const COMPACTOR_MAX_TOKENS = 2_048;
+/** A compactor reply is one line, but a reasoning model spends output tokens
+ * thinking before it writes it: a 2,048-token ceiling let DeepSeek on OpenCode
+ * Go reason through the whole budget and write nothing (#480). 8,192 leaves room
+ * for bounded reasoning, the line and the overshoot the size loop trims, while
+ * a runaway reply stays bounded. It is also what a call reserves for its output. */
+export const COMPACTOR_MAX_TOKENS = 8_192;
+
+/** The effort asked of a reasoning model. The recipe used a mid effort; low keeps
+ * the readiness wait short, and pi-ai clamps it to what each model supports. */
+export const COMPACTOR_REASONING = "low";
+
+/** Why a reply wrote no line: a reasoning model that stopped on the output
+ * ceiling with only reasoning gets a reason that names it. */
+export function emptyReplyDetail(message: AssistantMessage): string {
+  const reasoned = message.content.some((part) => part.type === "thinking");
+  return message.stopReason === "length" && reasoned
+    ? `the model spent its whole ${COMPACTOR_MAX_TOKENS}-token output on reasoning and wrote no line`
+    : "the compactor returned no line";
+}
 
 /** A realistic, dense, multi-item summary line (gist §4.2 `SCALE`): models
  * cannot count bytes, so one real example of exactly `NODE` bytes shows them
@@ -156,6 +171,8 @@ export function createModelRuntimeSummarizer(runtime: ModelRuntime, model: Model
     return runtime.completeSimple(model, { systemPrompt: request.system, messages }, {
       signal: request.signal,
       maxTokens: COMPACTOR_MAX_TOKENS,
+      // Only a reasoning model is asked for an effort (#480); pi-ai clamps it.
+      ...(model.reasoning ? { reasoning: COMPACTOR_REASONING } : {}),
       sessionId: request.cacheKey,
       onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
         ? markAnthropicPieces(payload, 0, pieces.length - 1) : undefined,
