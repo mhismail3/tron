@@ -57,6 +57,25 @@ describe("canonical Session History pages", () => {
     expect(page.nodes.map(n => n.kind)).toEqual(expect.arrayContaining(["message", "customEntry", "label", "branchSummary", "thinkingChange", "modelChange", "compaction", "sessionInfo", "customMessage"]));
   });
 
+  it("keeps Pi model-attributed usage out of the history feed", () => {
+    // Pi's cache warmer appends a `usage` entry on the active branch. It has no
+    // authored content, so the feed must skip it rather than publish a node kind
+    // outside `SessionTreeNode["kind"]`.
+    const manager = SessionManager.inMemory("/fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Warm the cache", timestamp: 0 });
+    const usage = manager.appendUsage("cache_warm", "anthropic", "claude", {
+      input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    }).id;
+    const page = historyPage(manager, "runtime");
+    expect(page.nodes.map(node => node.id)).toEqual([prompt]);
+    expect(page.nodes.map(node => node.kind)).toEqual(["message"]);
+    // Cursors stay anchored to canonical append order, so the hidden entry is
+    // still counted even though it publishes no preview.
+    expect(page.totalEntries).toBe(2);
+    expect(page.nodes.some(node => node.id === usage)).toBe(false);
+  });
+
   it("preserves model-context edits as explicit history evidence", () => {
     const manager = SessionManager.inMemory("/fixture");
     const target = manager.appendMessage({ role: "user", content: "Original request", timestamp: 0 });

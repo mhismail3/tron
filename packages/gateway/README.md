@@ -292,13 +292,13 @@ Every Pi union Tron switches over or maps is classified at compile time, so a
 candidate that adds a member cannot ship it silently ignored. The extension seam
 is inventoried in `src/extensions/compatibility-manifest.ts`; the session seam is
 classified in `src/sessions/projection.ts` (canonical entry types, message roles
-and content blocks), `src/sessions/history.ts` (entry-to-node-kind) and
-`src/sessions/runtime-slot.ts` (`AgentSessionEvent`). Each member is classified
-as a projected row, hidden, or n/a. The switch owners carry a `never` check and
-the validator owners a `satisfies Record<…>` inventory, so a new member fails
-`npm run build` and names the owner and the member. To prove the gate, add a
-synthetic member to the union declaration in the installed SDK's typings and run
-the build.
+and content blocks, including which entries become chat rows and which become
+outline nodes), `src/sessions/history.ts` (the published entry set and its node
+kind) and `src/sessions/runtime-slot.ts` (`AgentSessionEvent`). Every one of those
+switches ends in a `never` default and the node-kind map is a `satisfies
+Record<…>` over declared kinds, so a new member fails `npm run build` and names
+the owner and the member. To prove the gate, add a synthetic member to the union
+declaration in the installed SDK's typings and run the build.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
@@ -2288,7 +2288,9 @@ is explicitly marked with `<field>Truncated`; content paging does not discard au
 identified without turning base64 into message text. Pi 0.87 context-edit entries are retained as
 `contextEdit` history evidence (target and replacement) but do not fabricate a chat row; system-message
 entries are retained as `systemMessage` history evidence and likewise stay out of the chat transcript.
-The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
+Pi's model-attributed `usage` entries (cache warming) stay canonical JSONL without a chat row, an outline
+node or a history preview: they carry no authored content, so all three projections skip them, while the
+history feed's cursor ordinals keep counting them. The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
 Complete raw producer metadata/media remain in the canonical JSONL export. `history.test.ts`, `gateway-history.test.ts`, and the focused runtime registry
 integration case protect beyond-cap traversal, ordering, text/wire bounds, Unicode, subscription admission
 and runtime fencing. Using these APIs requires a user-initiated Mac Gateway update; source validation never

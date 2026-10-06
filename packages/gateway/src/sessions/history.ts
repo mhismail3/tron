@@ -14,14 +14,24 @@ export interface HistoryPage {
   totalEntries: number;
 }
 
-/** Node kind per canonical entry type. `satisfies Record<…>` fails the build
- * when the pinned SDK adds or removes an entry type, so a new type must be
- * classified here instead of publishing its raw name as a node kind (#470). */
+/** Canonical entries the history feed publishes. Pi's model-attributed usage
+ * record (cache warming) carries no authored content, so it stays canonical JSONL
+ * without a preview row or tree node (#470). */
+type PublishedHistoryEntry = Exclude<SessionEntry, { type: "usage" }>;
+
+function isPublishedHistoryEntry(entry: SessionEntry): entry is PublishedHistoryEntry {
+  return entry.type !== "usage";
+}
+
+/** Node kind per canonical entry type. `satisfies Record<…>` fails the build when
+ * the pinned SDK adds or removes an entry type, so a new type must be classified
+ * here instead of publishing its raw name as a node kind, and it types every
+ * value as a declared `SessionTreeNode` kind. */
 const kindNames = {
-  message: "message", label: "label", compaction: "compaction", usage: "usage",
+  message: "message", label: "label", compaction: "compaction",
   thinking_level_change: "thinkingChange", model_change: "modelChange", branch_summary: "branchSummary",
   custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo", context_edit: "contextEdit",
-} satisfies Record<SessionEntry["type"], string>;
+} satisfies Record<PublishedHistoryEntry["type"], SessionTreeNode["kind"]>;
 
 /** One content block as it appears in canonical JSONL: Pi's own block shapes,
  * plus the tolerated `text` an older or foreign writer may have persisted on a
@@ -134,7 +144,7 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
   let end = cursor ? cursor.direction === "older" ? cursor.ordinal : Math.min(entries.length, cursor.ordinal + 1 + HISTORY_PAGE_SIZE) : entries.length;
   const start = cursor?.direction === "newer" ? cursor.ordinal + 1 : Math.max(0, end - HISTORY_PAGE_SIZE);
   end = Math.max(start, end);
-  const selected = entries.slice(start, end);
+  const selected = entries.slice(start, end).filter(isPublishedHistoryEntry);
   const wanted = new Set(selected.map(e => e.id));
   const childCounts = new Map<string, number>();
   // Metadata only: no getTree() recursion, body flattening or durable index.
@@ -155,7 +165,9 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
     return { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp,
       kind: entry.type === "message" && entry.message.role === "bashExecution" ? "bash"
         : entry.type === "message" && entry.message.role === "system" ? "systemMessage"
-        : (kindNames[entry.type] ?? entry.type) as SessionTreeNode["kind"],
+        // A foreign entry type from a newer writer has no declared kind; keep its
+        // raw name visible rather than mislabelling it as session metadata.
+        : (kindNames[entry.type] ?? entry.type),
       ...(role ? { role } : {}), ...(label ? { label } : {}),
       ...(bookmarkTargetId ? { bookmarkTargetId } : {}), preview: entryPreview(entry),
       depth: 0, childCount: childCounts.get(entry.id) ?? 0, isCurrentPath: path.has(entry.id) };
