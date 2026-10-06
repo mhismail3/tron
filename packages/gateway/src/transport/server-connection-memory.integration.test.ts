@@ -189,7 +189,7 @@ describe("host memory in connection records", () => {
 
     harness.sample(AFTER_CLEANUP);
     await vi.advanceTimersByTimeAsync(GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs);
-    await vi.waitFor(() => expect(harness.probe).toHaveBeenCalledTimes(2));
+    await waitFor(() => harness.probe.mock.calls.length === 2, "the second host probe after the heartbeat");
 
     const after = await harness.connect(harness.pairedToken);
     const opened = harness.records("connection.opened").at(-1)!;
