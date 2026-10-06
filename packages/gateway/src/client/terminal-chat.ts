@@ -164,7 +164,58 @@ export async function listSessions(
 function usage(): never {
   process.stderr.write(`Usage: tron-chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]\n\n`);
   process.stderr.write(`Attaches to the Gateway-owned canonical runtime. It never opens Pi JSONL directly.\n`);
+  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /abort, /quit\n`);
   process.exit(64);
+}
+
+/** `home.status`: the same bounded projection the RPC returns. */
+export interface HomeStatusEnvelope {
+  available: boolean;
+  reason?: string;
+  enabled: boolean;
+  homeId?: string;
+  sessionId?: string;
+  generation?: number;
+  model?: { provider: string; id: string };
+  live: boolean;
+}
+
+interface HomeDesignationEnvelope { homeId: string; sessionId: string; generation: number }
+
+export function describeHomeStatus(status: HomeStatusEnvelope): string {
+  if (!status.available) return `Home unavailable: ${status.reason ?? "the stored record could not be used"}`;
+  if (!status.enabled) return "Home is not designated.";
+  const model = status.model ? `, model ${status.model.provider}/${status.model.id}` : "";
+  return `Home is designated: session ${status.sessionId}, generation ${status.generation}${model}, ${status.live ? "runtime live" : "runtime not loaded"}.`;
+}
+
+export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+  return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
+}
+
+/** `provider/id`, the same spelling the model picker uses. */
+export function parseHomeModelArgument(argument: string): { provider: string; id: string } {
+  const separator = argument.indexOf("/");
+  const provider = separator > 0 ? argument.slice(0, separator) : "";
+  const id = separator > 0 ? argument.slice(separator + 1) : "";
+  if (!provider || !id) throw new Error("Name the model as provider/id, for example anthropic/claude-sonnet-4-5");
+  return { provider, id };
+}
+
+export async function designateHome(
+  client: Pick<GatewayProtocolClient, "request">,
+  model?: { provider: string; id: string },
+): Promise<string> {
+  const result = await client.request("home.designate", {
+    commandId: randomUUID(),
+    ...(model ? { model } : {}),
+  }) as unknown as HomeDesignationEnvelope;
+  return `Home designated: session ${result.sessionId}, generation ${result.generation}.`;
+}
+
+export async function disableHome(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+  const result = await client.request("home.disable", { commandId: randomUUID() }) as unknown as HomeDesignationEnvelope;
+  return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
 }
 
 function operationNeedsSettlement(
@@ -346,6 +397,21 @@ async function runTerminalChat(): Promise<void> {
       if (prompt === "/quit" || prompt === "/exit") break;
       if (prompt === "/abort") {
         await client.request("session.abort", { sessionId, kind: "agent", commandId: randomUUID() });
+        continue;
+      }
+      // Home commands are Gateway-wide, not session-scoped, so they work before
+      // or without an attached session's runtime being the Home one.
+      if (prompt === "/home" || prompt === "/home status") {
+        process.stdout.write(`${await homeStatusCommand(client)}\n`);
+        continue;
+      }
+      if (prompt === "/home disable") {
+        process.stdout.write(`${await disableHome(client)}\n`);
+        continue;
+      }
+      if (prompt === "/home designate" || prompt.startsWith("/home designate ")) {
+        const argument = prompt.slice("/home designate".length).trim();
+        process.stdout.write(`${await designateHome(client, argument ? parseHomeModelArgument(argument) : undefined)}\n`);
         continue;
       }
       const commandId = randomUUID();

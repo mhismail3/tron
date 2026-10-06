@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
 import { GatewayClientError } from "./gateway-client.js";
-import { connectResilient, listSessions, synchronizeTerminalSession } from "./terminal-chat.js";
+import { connectResilient, designateHome, disableHome, describeHomeStatus, homeStatusCommand, listSessions, parseHomeModelArgument, synchronizeTerminalSession } from "./terminal-chat.js";
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return { id, cwd: "/workspace", firstMessage: id, ...extra };
@@ -130,5 +130,50 @@ describe("terminal chat session catalog", () => {
       sessions: [session("one"), session("two")], listRevision: 1,
     }]);
     await expect(listSessions(overlong, { pageSize: 1 })).rejects.toThrow(/malformed/);
+  });
+});
+
+describe("terminal chat Home commands", () => {
+  it("reports unavailable, disabled and live Home states distinctly", () => {
+    expect(describeHomeStatus({ available: false, reason: "The Home record could not be read", enabled: false, live: false }))
+      .toBe("Home unavailable: The Home record could not be read");
+    expect(describeHomeStatus({ available: true, enabled: false, live: false })).toBe("Home is not designated.");
+    expect(describeHomeStatus({
+      available: true, enabled: true, homeId: "home", sessionId: "session", generation: 2,
+      model: { provider: "anthropic", id: "claude-sonnet-4-5" }, live: true,
+    })).toBe("Home is designated: session session, generation 2, model anthropic/claude-sonnet-4-5, runtime live.");
+    expect(describeHomeStatus({ available: true, enabled: true, sessionId: "session", generation: 1, live: false }))
+      .toContain("runtime not loaded");
+  });
+
+  it("names the model as provider/id and refuses a malformed argument", () => {
+    expect(parseHomeModelArgument("anthropic/claude-sonnet-4-5")).toEqual({ provider: "anthropic", id: "claude-sonnet-4-5" });
+    expect(() => parseHomeModelArgument("anthropic")).toThrow(/provider\/id/);
+    expect(() => parseHomeModelArgument("/model")).toThrow(/provider\/id/);
+  });
+
+  it("reads status and sends the two mutations with a command id", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "home.status") {
+        return { available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true };
+      }
+      return { homeId: "home", sessionId: "session", generation: 2 };
+    });
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+
+    await expect(homeStatusCommand(client)).resolves.toContain("Home is designated: session session, generation 1");
+    await expect(designateHome(client, { provider: "anthropic", id: "claude-sonnet-4-5" }))
+      .resolves.toBe("Home designated: session session, generation 2.");
+    await expect(designateHome(client)).resolves.toBe("Home designated: session session, generation 2.");
+    await expect(disableHome(client)).resolves.toContain("It is an ordinary session now.");
+
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "home.status", "home.designate", "home.designate", "home.disable",
+    ]);
+    expect(request.mock.calls[1]![1]).toMatchObject({ model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+    expect(request.mock.calls[2]![1]).not.toHaveProperty("model");
+    for (const [, params] of request.mock.calls.slice(1)) {
+      expect((params as { commandId: string }).commandId).toBeTypeOf("string");
+    }
   });
 });
