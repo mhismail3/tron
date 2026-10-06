@@ -645,16 +645,20 @@ future managed-state contract are owned by
 Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns the bounded projection
-`{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live }`,
-`home.designate` and `home.disable` are command-id-receipted mutations, and
-`home.v1` is advertised in `hello`/`system.info`. Home runs in the neutral
+`{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
+  sessionPresent }`, `home.designate` and `home.disable` are
+command-id-receipted mutations, and `home.v1` is advertised in
+`hello`/`system.info`. Home runs in the neutral
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
-curated runtime profile (no agent-directory or project discovery, no Pi
-built-ins, an `ask_user`/`display`/`notify` executable allowlist, per-session
-compaction disabled, a fixed physical model, and zero cache-warming requests),
-and its designation is keyed by session id, so a fork is ordinary. Ordinary
-sessions are byte-for-byte unaffected. The record, the profile, the RPCs, fork
-semantics and what is not built yet are owned by [`docs/home.md`](docs/home.md).
+curated runtime profile (no agent-directory or project discovery — including the
+agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
+`ask_user`/`display`/`notify` executable allowlist, per-session compaction
+disabled, a fixed physical model, and zero cache-warming requests), and its
+designation is keyed by session id, so a fork is ordinary. A profile change
+replaces the live runtime in place inside the session's own lane, and a record
+whose session is gone is given a fresh one. Ordinary sessions are byte-for-byte
+unaffected. The record, the profile, the RPCs, fork and loadout semantics and
+what is not built yet are owned by [`docs/home.md`](docs/home.md).
 
 ## Runtime and state
 

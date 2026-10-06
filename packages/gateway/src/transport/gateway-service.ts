@@ -207,7 +207,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -465,13 +465,18 @@ export class GatewayService {
         return this.info();
       case "home.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
-        return safeJson(this.requireHome().status());
+        return safeJson(await this.requireHome().status());
       }
       case "home.designate":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "model"], method);
-          const model = this.resolveHomeModel(params.model);
-          return safeJson(await this.requireHome().designate(model));
+          const model = this.admitNamedHomeModel(params.model);
+          // The owner falls back to the recorded model when re-enabling an
+          // existing Home, and only a fresh session uses the default.
+          return safeJson(await this.requireHome().designate(
+            model ? { model } : {},
+            () => this.defaultHomeModel(),
+          ));
         });
       case "home.disable":
         return this.mutation(client, method, params, async () => {
@@ -2166,20 +2171,23 @@ export class GatewayService {
     return this.dependencies.home;
   }
 
-  /** Resolve the Home model once, at designation: the requested physical model,
-   * or this Gateway's default for new sessions. A virtual model is refused here
-   * because Home must not route on the canonical transcript. */
-  private resolveHomeModel(input: unknown): ModelRef {
-    if (input !== undefined && input !== null) {
-      const model = object(input, "model");
-      if (Object.keys(model).some((key) => key !== "provider" && key !== "id")) {
-        throw new GatewayError("invalid_request", "model accepts only provider and id");
-      }
-      return this.admitHomeModel(
-        string(model.provider, "model.provider", { max: 120 }),
-        string(model.id, "model.id", { max: 300 }),
-      );
+  /** Admit the model a request named, or undefined when it named none. A
+   * virtual model is refused here because Home must not route on the canonical
+   * transcript. */
+  private admitNamedHomeModel(input: unknown): ModelRef | undefined {
+    if (input === undefined || input === null) return undefined;
+    const model = object(input, "model");
+    if (Object.keys(model).some((key) => key !== "provider" && key !== "id")) {
+      throw new GatewayError("invalid_request", "model accepts only provider and id");
     }
+    return this.admitHomeModel(
+      string(model.provider, "model.provider", { max: 120 }),
+      string(model.id, "model.id", { max: 300 }),
+    );
+  }
+
+  /** This Gateway's default model for a new session, admitted the same way. */
+  private defaultHomeModel(): ModelRef {
     const defaults = this.dependencies.settings.get(this.dependencies.config.tronHome, false) as {
       effective?: { defaultModel?: ModelRef | null };
     };

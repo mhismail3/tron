@@ -19,15 +19,19 @@ record per installation:
 | `homeId` | Stable identity of this installation's Home, generated once |
 | `sessionId` | The session that is Home; designation is keyed by this id |
 | `generation` | Advances on every profile change (designate, re-enable, disable) |
-| `policyRevision` | The curated-profile revision the record was written against |
+| `policyRevision` | The curated-profile revision in force; a re-enable writes this build's |
 | `enabled` | Whether Home is currently designated |
-| `model` | The fixed physical model Home runs on |
+| `model` | The model applied at the last designation, updated when the Home session's model changes |
 | `createdAt` / `updatedAt` | ISO-8601 instants |
 
-A corrupt, unreadable, or unknown-version record is **preserved and reported as
-unavailable** (`home.status` returns `available: false` with a `reason`) and
-`home.designate` refuses with a conflict. It is never overwritten or migrated:
-an unrecognized record is not evidence that the user has no Home.
+The file is read with the Gateway's owner-only JSON boundary: a missing file
+means no designation, while a **malformed, empty, symlinked, oversized or
+group/world-readable** one is **preserved and reported as unavailable**
+(`home.status` returns `available: false` with a `reason`) and `home.designate`
+refuses with a conflict. Only `version` gates admission, so a record written
+against a newer `policyRevision` is still read, preserved and re-enabled. A
+record is never overwritten or migrated: an unusable one is not evidence that
+the user has no Home.
 
 ## The neutral working directory
 
@@ -41,15 +45,18 @@ is the second, independent guard.
 ## The curated runtime profile
 
 The profile is decided at runtime creation, once per runtime, from the Home
-owner's current answer for that session id. A new Home's *first* runtime is
-already the Home profile: `RuntimeRegistry.create(cwd, "home")` carries the
-profile explicitly, because the record cannot name a session that does not exist
-yet.
+owner's answer for that session id: `home` when the enabled record names it,
+`ordinary` when a disabled record names it, and `unnamed` when the record names
+another session. A new Home's *first* runtime is already the Home profile:
+`RuntimeRegistry.create(cwd, "home")` carries an explicit creation profile,
+which applies only to that session and only while the record does not name it —
+so a fork or a reset, which produce a new session id, is never Home.
 
 | | Home | Ordinary |
 | --- | --- | --- |
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles` | agent directory and trusted project resources |
+| System prompt | the agent directory's `SYSTEM.md` and `APPEND_SYSTEM.md` are dropped through `systemPromptOverride`/`appendSystemPromptOverride` | loaded |
 | Executable tool allowlist | `ask_user`, `display`, `notify` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
@@ -79,11 +86,17 @@ canonical settings at every idle admission; ordinary sessions and global
 settings are untouched. `session.compact` is refused for Home at admission with a
 typed conflict, rather than late by the SDK.
 
-The model is resolved once, at designation: the model named in the request, or
-this Gateway's default for new sessions. A virtual (routed) model is refused,
-because routing runs on the canonical transcript, which the Home profile does
-not own. `session.setModel` refuses a virtual model for a Home session too, and
-the model is recorded in the record.
+The model is resolved at designation: the model named in the request, or — only
+for a fresh session — this Gateway's default for new sessions. Re-enabling a
+disabled Home resolves the request's model, else the one the record was last
+designated with, and applies it to the live session through the normal
+`session.setModel` path when the live model differs. A virtual (routed) model is
+refused at every one of those points, because routing runs on the canonical
+transcript, which the Home profile does not own. `session.setModel` refuses a
+virtual model for a Home session too, and any model applied to the *enabled* Home
+is written back to the record, which is the single source of truth for the model
+a re-enable restores. A model applied while Home is disabled is an ordinary
+session's change and does not touch the record.
 
 ## RPCs and capability
 
@@ -91,30 +104,48 @@ the model is recorded in the record.
 owner.
 
 - `home.status` is a read with no inference: `{ available, reason?, enabled,
-  homeId?, sessionId?, generation?, model?, live }`. `live` reports whether the
-  session currently holds a live runtime.
+  homeId?, sessionId?, generation?, model?, live, sessionPresent }`. `live`
+  reports whether the session currently holds a live runtime; `sessionPresent`
+  reports whether it exists at all — live, or still a canonical session in the
+  catalog. A Gateway whose first catalog cut has not completed reports
+  `sessionPresent: true`, because an unread catalog cannot prove absence.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
-  and returns `{ homeId, sessionId, generation }`. An enabled record is
-  idempotent. A disabled record re-enables the same session with
-  `generation + 1`.
+  and returns `{ homeId, sessionId, generation }`. An enabled record whose
+  session still exists is idempotent. A disabled record re-enables the same
+  session with `generation + 1`. A record whose session is **gone** (a session
+  that was never written, or was deleted) is kept and given a fresh session with
+  `generation + 1`, whether it was enabled or disabled: the record is the only
+  evidence of the designation, and the dangling id must not be re-enabled.
 - `home.disable` is a mutation. It sets `enabled: false` with `generation + 1`;
-  the session stays an ordinary session afterwards.
+  the session stays an ordinary session afterwards. A record whose session is
+  gone is only marked disabled.
 
 A profile change must take effect before the session's next prompt, so the live
-runtime is retired through the registry's idle-eviction path. If the session is
-not idle the mutation is refused with a retryable `busy` error and nothing
-changes.
+runtime is **replaced in place** inside the slot's own serialized lane: the idle
+check, the durable record write and the rebuild are one critical section, and
+prompt admission uses the same lane. The session identity, its subscribers, its
+presentation and its (possibly never-persisted) in-memory session manager all
+survive. If the session is not idle the mutation is refused with a retryable
+`busy` error and nothing changes. A session with no live runtime needs no
+rebuild: the next runtime creation reads the record.
 
-## Fork
+## Fork and disable both keep the transcript's tool loadout
 
 Designation is keyed by session id, so forking the Home session yields an
 ordinary session: it registers the ordinary extensions and tools, uses the
-canonical compaction budget, and is not cache-warming excluded. Pi replays the
-canonical transcript's declared tool loadout, so the fork starts with the Home
-tool set *active* until it is changed — the same per-chat loadout behavior every
-session has (`runtime-tool-loadout.integration.test.ts`).
+canonical compaction budget, and is not cache-warming excluded.
+
+A profile change does not rewrite the chat's tool loadout, because Pi replays
+the *declared* loadout from the canonical transcript at every runtime creation.
+So both a fork of Home and a disabled Home start with the Home tool set
+**active** while the ordinary tools are merely registered, exactly as every
+other session keeps the loadout its chat declared
+(`runtime-tool-loadout.integration.test.ts`). The user restores the ordinary
+tools with `session.setTools`, which is the same control every session has; the
+integration suite asserts the active set across a disable and that `setTools`
+restores it.
 
 ## Diagnostics
 

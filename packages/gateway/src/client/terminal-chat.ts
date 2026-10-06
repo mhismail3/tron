@@ -178,16 +178,41 @@ export interface HomeStatusEnvelope {
   generation?: number;
   model?: { provider: string; id: string };
   live: boolean;
+  sessionPresent: boolean;
 }
 
 interface HomeDesignationEnvelope { homeId: string; sessionId: string; generation: number }
+
+/** One `/home` line, resolved without touching the Gateway. */
+export type HomeCommand =
+  | { kind: "status" }
+  | { kind: "designate"; model?: { provider: string; id: string } }
+  | { kind: "disable" }
+  | { kind: "usage" };
+
+/** Returns undefined for any line that is not a `/home` command, so it continues
+ * to the model. An unknown subcommand prints usage instead of reaching the
+ * model, and a malformed model argument throws for the caller to report. */
+export function parseHomeCommand(input: string): HomeCommand | undefined {
+  if (input !== "/home" && !input.startsWith("/home ")) return undefined;
+  if (input === "/home" || input === "/home status") return { kind: "status" };
+  if (input === "/home disable") return { kind: "disable" };
+  if (input === "/home designate") return { kind: "designate" };
+  if (input.startsWith("/home designate ")) {
+    return { kind: "designate", model: parseHomeModelArgument(input.slice("/home designate ".length).trim()) };
+  }
+  return { kind: "usage" };
+}
 
 export function describeHomeStatus(status: HomeStatusEnvelope): string {
   if (!status.available) return `Home unavailable: ${status.reason ?? "the stored record could not be used"}`;
   if (!status.enabled) return "Home is not designated.";
   const model = status.model ? `, model ${status.model.provider}/${status.model.id}` : "";
-  return `Home is designated: session ${status.sessionId}, generation ${status.generation}${model}, ${status.live ? "runtime live" : "runtime not loaded"}.`;
+  const session = status.sessionPresent ? "" : ", its session is missing (designate creates a new one)";
+  return `Home is designated: session ${status.sessionId}, generation ${status.generation}${model}, ${status.live ? "runtime live" : "runtime not loaded"}${session}.`;
 }
+
+const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable\n";
 
 export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
@@ -216,6 +241,22 @@ export async function designateHome(
 export async function disableHome(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   const result = await client.request("home.disable", { commandId: randomUUID() }) as unknown as HomeDesignationEnvelope;
   return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
+}
+
+/** Run one `/home` command, reporting its outcome on stdout and any failure on
+ * stderr so the chat continues. */
+export async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
+  if (command.kind === "usage") {
+    process.stderr.write(HOME_USAGE);
+    return;
+  }
+  try {
+    if (command.kind === "status") process.stdout.write(`${await homeStatusCommand(client)}\n`);
+    else if (command.kind === "designate") process.stdout.write(`${await designateHome(client, command.model)}\n`);
+    else process.stdout.write(`${await disableHome(client)}\n`);
+  } catch (error) {
+    process.stderr.write(`home: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
 }
 
 function operationNeedsSettlement(
@@ -401,17 +442,9 @@ async function runTerminalChat(): Promise<void> {
       }
       // Home commands are Gateway-wide, not session-scoped, so they work before
       // or without an attached session's runtime being the Home one.
-      if (prompt === "/home" || prompt === "/home status") {
-        process.stdout.write(`${await homeStatusCommand(client)}\n`);
-        continue;
-      }
-      if (prompt === "/home disable") {
-        process.stdout.write(`${await disableHome(client)}\n`);
-        continue;
-      }
-      if (prompt === "/home designate" || prompt.startsWith("/home designate ")) {
-        const argument = prompt.slice("/home designate".length).trim();
-        process.stdout.write(`${await designateHome(client, argument ? parseHomeModelArgument(argument) : undefined)}\n`);
+      const homeCommand = parseHomeCommand(prompt);
+      if (homeCommand) {
+        await runHomeCommand(client, homeCommand);
         continue;
       }
       const commandId = randomUUID();
