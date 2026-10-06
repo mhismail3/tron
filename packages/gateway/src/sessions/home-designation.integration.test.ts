@@ -238,7 +238,9 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 const HOME_EXTENSIONS = [
   "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-notify",
 ];
-const HOME_TOOLS = ["ask_user", "display", "notify"];
+/** The curated Home profile's executable tool set: the allowlist, sorted the way
+ * the assertions read it. */
+const HOME_TOOLS = ["ask_user", "date", "display", "memory_search", "notify", "zoom"];
 
 describe.sequential("Tron Home designation", () => {
   homeCase("gives a new Home the curated first runtime and leaves ordinary sessions unchanged", async () => {
@@ -338,10 +340,13 @@ describe.sequential("Tron Home designation", () => {
     // what the control registry's ordinary session registers, and compaction is
     // back to the canonical budget. Its *active* set is the Home loadout the
     // canonical transcript declares, which Pi replays for every chat (documented
-    // in docs/home.md); `session.setTools` is how a user changes it.
+    // in docs/home.md), minus the tools this profile cannot register: the memory
+    // tools come from the Home-only module, so a fork can never read Home's
+    // memory. `session.setTools` is how a user changes the loadout.
     expect(registeredTools(forkedContext)).toEqual(registeredTools(controlContext));
     expect(extensionNames(forkedContext)).toEqual(extensionNames(controlContext));
-    expect(activeTools(forkedContext)).toEqual(HOME_TOOLS);
+    expect(activeTools(forkedContext)).toEqual(HOME_TOOLS.filter((name) => registeredTools(forkedContext).includes(name)));
+    expect(activeTools(forkedContext)).not.toContain("zoom");
     expect(forkedSlot.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
     await forkedSlot.setTools(activeTools(controlContext));
     expect(activeTools(await contextOf(forkedSlot))).toEqual(activeTools(controlContext));
@@ -461,7 +466,11 @@ describe.sequential("Tron Home designation", () => {
 
     await f.service.invoke(client, "home.disable", { commandId: "home-disable-loadout" });
     const context = await contextOf(home);
-    expect(activeTools(context)).toEqual(HOME_TOOLS);
+    // An ordinary profile registers the ordinary tools, so the declared Home
+    // loadout activates only that part of it; the memory tools are gone with the
+    // Home-only module.
+    expect(activeTools(context)).toEqual(HOME_TOOLS.filter((name) => registeredTools(context).includes(name)));
+    expect(activeTools(context)).not.toContain("zoom");
     expect(registeredTools(context)).toEqual(registeredTools(await contextOf(ordinary)));
     await home.setTools(ordinaryActive);
     expect(activeTools(await contextOf(home))).toEqual(ordinaryActive);

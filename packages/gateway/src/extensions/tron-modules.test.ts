@@ -7,7 +7,7 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
-import { TRON_MODULES, tronModuleFactories, type TronModuleHost } from "./tron-modules.js";
+import { HOME_TOOL_NAMES, TRON_HOME_MODULE, TRON_MODULES, tronModuleFactories, type TronModuleHost } from "./tron-modules.js";
 
 /** Records what one factory run registers without a session or a live runtime. */
 function registrationSurface() {
@@ -45,6 +45,7 @@ function tronModuleHost(options: { optionalOwners?: boolean } = {}): TronModuleH
       scheduleToolOperations: {} as ScheduleToolOperations,
       machineId: "machine-a",
     } : {}),
+    homeMemoryTools: () => undefined,
   };
 }
 
@@ -60,6 +61,21 @@ describe("Tron module definition", () => {
       expect({ name: tronModule.name, tools: [...surface.tools].sort(), commands: [...surface.commands].sort() })
         .toEqual({ name: tronModule.name, tools: [...tronModule.tools].sort(), commands: [...tronModule.commands].sort() });
     }
+  });
+
+  it("declares exactly the tools the Home-only module registers", () => {
+    // `TRON_HOME_MODULE` is not in `TRON_MODULES`: only a Home runtime loads it.
+    // Its declared tools are still a promise, and this is where it is kept. A
+    // session that is not the enabled Home gets no memory from the accessor, so
+    // the tools are registered and answer a typed unavailable result.
+    const factory = TRON_HOME_MODULE.factory(tronModuleHost());
+    expect(factory).toBeTypeOf("function");
+    const surface = registrationSurface();
+    factory!(surface.pi as never);
+    expect([...surface.tools].sort()).toEqual([...TRON_HOME_MODULE.tools].sort());
+    // Every registered name must be inside the executable allowlist, or the
+    // registration is a tool Home can never call.
+    for (const name of surface.tools) expect(HOME_TOOL_NAMES).toContain(name);
   });
 
   it("keeps declared names unique and non-empty so a registration cannot silently collide", () => {

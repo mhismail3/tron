@@ -618,6 +618,33 @@ describe("episodic memory crash recovery", () => {
     expect(fx.diagnostics.some(record => record.event === "episodic.store-refused")).toBe(true);
   }, 120_000);
 
+  it("waits for an ingest that is still writing before it releases the store", async () => {
+    // A commit's ingest holds the memory's mutex while it appends and fsyncs one
+    // catalog record per message. A reconfiguration closes that store, so dispose
+    // must not release the opener until the ingest has finished: a second opener
+    // over a store that is still being written is the one thing it cannot survive,
+    // and a closed store must never be written after it was closed.
+    const fx = await fixture("dispose-ingest", 0);
+    const memory = await openMemory(fx);
+    for (let index = 0; index < 300; index += 1) {
+      fx.manager.appendMessage({ role: "user", content: `pending ${index}`, timestamp: Date.now() } satisfies Message);
+    }
+    // Not awaited: the ingest is inside the mutex when dispose runs.
+    const ingest = memory.entriesIngested(fx.sessionId);
+    await memory.dispose();
+    const atDispose = (await readRecords(fx.catalogPath)).length;
+    await ingest.catch(() => {});
+    // Nothing was appended after the store was closed...
+    expect((await readRecords(fx.catalogPath)).length).toBe(atDispose);
+    // ...because the ingest it owed had already finished when dispose returned.
+    expect(atDispose).toBe(300);
+    // The opener is released, so the next owner reads the store it closed.
+    const reopened = await openMemory(fx);
+    await reopened.entriesCommitted(fx.sessionId);
+    expect(reopened.status().messages).toBe(300);
+    await reopened.dispose();
+  }, 180_000);
+
   it("refuses a deleted namespace, an unknown version and a second opener, and keeps every store path owner-only", async () => {
     const fx = await fixture("version", 2);
     const memory = await openMemory(fx);

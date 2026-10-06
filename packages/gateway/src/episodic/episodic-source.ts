@@ -211,30 +211,7 @@ export async function readCanonicalSession(options: {
       }
     }
 
-    const batch = await readLines(handle, 0, options.maxLineBytes);
-    if (batch.lines.length === 0) throw new EpisodicMemoryError("source", "Canonical session file is empty");
-    let header: Record<string, unknown>;
-    try {
-      header = asRecord(JSON.parse(batch.lines[0]!)) ?? {};
-    } catch {
-      throw new EpisodicMemoryError("source", "Canonical session header is not JSON");
-    }
-    if (header.type !== "session") throw new EpisodicMemoryError("source", "Canonical session header is not a session header");
-    if (header.id !== options.sessionId) throw new EpisodicMemoryError("source", "Canonical session header names a different session");
-    if (typeof header.version === "number" && header.version > SUPPORTED_SESSION_VERSION) {
-      throw new EpisodicMemoryError("source", `Canonical session version ${header.version} is newer than this Gateway supports`);
-    }
-
-    const entries: EpisodicCanonicalEntry[] = [];
-    const byId = new Map<string, EpisodicCanonicalEntry>();
-    for (let index = 1; index < batch.lines.length; index += 1) {
-      const line = batch.lines[index]!;
-      if (line.trim() === "") continue;
-      const entry = parseEntry(line);
-      if (byId.has(entry.id)) throw new EpisodicMemoryError("source", `Canonical session repeats entry id ${entry.id}`);
-      entries.push(entry);
-      byId.set(entry.id, entry);
-    }
+    const { batch, entries, byId } = await readWholeFile(handle, options);
     const leaf = entries.at(-1);
     const branch: EpisodicCanonicalEntry[] = [];
     const seen = new Set<string>();
@@ -265,10 +242,79 @@ export async function readCanonicalSession(options: {
   }
 }
 
+interface WholeFile {
+  batch: LineBatch;
+  /** Every complete entry, in file order. */
+  entries: EpisodicCanonicalEntry[];
+  byId: Map<string, EpisodicCanonicalEntry>;
+}
+
+/**
+ * Read every complete entry of one canonical file, after checking the header this
+ * reader supports. Both the branch walk and the by-id instant read prove the file
+ * the same way, so neither can accept a file the other would refuse.
+ */
+async function readWholeFile(
+  handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> },
+  options: { path: string; sessionId: string; maxLineBytes: number },
+): Promise<WholeFile> {
+  const batch = await readLines(handle, 0, options.maxLineBytes);
+  if (batch.lines.length === 0) throw new EpisodicMemoryError("source", "Canonical session file is empty");
+  let header: Record<string, unknown>;
+  try {
+    header = asRecord(JSON.parse(batch.lines[0]!)) ?? {};
+  } catch {
+    throw new EpisodicMemoryError("source", "Canonical session header is not JSON");
+  }
+  if (header.type !== "session") throw new EpisodicMemoryError("source", "Canonical session header is not a session header");
+  if (header.id !== options.sessionId) throw new EpisodicMemoryError("source", "Canonical session header names a different session");
+  if (typeof header.version === "number" && header.version > SUPPORTED_SESSION_VERSION) {
+    throw new EpisodicMemoryError("source", `Canonical session version ${header.version} is newer than this Gateway supports`);
+  }
+  const entries: EpisodicCanonicalEntry[] = [];
+  const byId = new Map<string, EpisodicCanonicalEntry>();
+  for (let index = 1; index < batch.lines.length; index += 1) {
+    const line = batch.lines[index]!;
+    if (line.trim() === "") continue;
+    const entry = parseEntry(line);
+    if (byId.has(entry.id)) throw new EpisodicMemoryError("source", `Canonical session repeats entry id ${entry.id}`);
+    entries.push(entry);
+    byId.set(entry.id, entry);
+  }
+  return { batch, entries, byId };
+}
+
+/**
+ * The instant of every entry the file holds, keyed by entry id: every parsed entry,
+ * not only the branch the last entry follows, because an entry that has left the
+ * branch is still an entry the source can date. Bounded per line, one read, and it
+ * never repairs or migrates the file.
+ */
+export async function readCanonicalEntryInstants(options: {
+  path: string;
+  sessionId: string;
+  maxLineBytes: number;
+}): Promise<Map<string, string>> {
+  const handle = await open(options.path, constants.O_RDONLY).catch((error: NodeJS.ErrnoException) => {
+    throw new EpisodicMemoryError("source", `Canonical session ${options.path} cannot be read: ${error.code ?? error.message}`);
+  });
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
+    const { entries } = await readWholeFile(handle, options);
+    return new Map(entries.map(entry => [entry.id, entry.timestamp]));
+  } finally {
+    await handle.close();
+  }
+}
+
 export interface EpisodicProjectedMessage {
   entryId: string;
   kind: EpisodicMessageKind;
   text: string;
+  /** The canonical entry's instant, carried so the catalog can answer a
+   * message's date without reading the source again. */
+  timestamp: string;
   sourceDigest: string;
   projectedDigest: string;
   omissions: string[];
@@ -422,6 +468,7 @@ export function projectBranch(cut: EpisodicCanonicalCut, limits: EpisodicLimits)
       entryId: entry.id,
       kind,
       text: credentials,
+      timestamp: entry.timestamp,
       sourceDigest: digest(entry.line),
       projectedDigest: digest(credentials),
       omissions: [...new Set(omissions)],
