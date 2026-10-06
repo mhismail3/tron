@@ -2218,12 +2218,24 @@ and record its matching private-address result. This routing does not claim all
 three cases were qualified by the shared-link run.
 
 The Gateway uses a fixture-owned home, state directory, agent directory,
-delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
-bound to that fixture on initial startup and restart so a caller's store cannot
-become a migration input. Use `logs`, `status`, `stop`, and `clean` to inspect
-or manage those resources. The fixture directory and the focused DerivedData
-belong to one worktree: by default they are
-`$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
+delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly bound
+to that fixture on initial startup and restart so a caller's store cannot become a
+migration input. The fixture Gateway and its fault proxy also run under the same
+minimal allow-listed environment `scripts/tron dev` re-executes itself with (without
+the user's SSH agent, which a fixture never needs), never the calling shell's: an
+agent shell spawned by Stable or the Debug Gateway carries that Gateway's PATH, its
+`TRON_GATEWAY_*` values (runtime epoch, channel, supervision, payload identity) and
+its `PI_*` store paths, and none of them may reach the fixture (the fault proxy would
+otherwise hand its own PATH to the Gateway it restarts privately). The harness runs
+the fixture with the repository-pinned Node it resolves itself - `TRON_NODE_BIN`,
+else the pinned `~/.nvm` directory, else Homebrew, and only then the caller's PATH -
+and proves that Node against the installed node-pty native module, both right after
+installing the Gateway's dependencies and before every fixture start, printing the
+loader's own error; node-pty alone reports only its last attempt ("Failed to load
+native module"), which hides a bundled runtime whose Team ID cannot load the ad
+hoc-signed prebuild. Use `logs`, `status`, `stop`, and `clean` to inspect or manage
+those resources. The fixture directory and the focused DerivedData belong to one
+worktree: by default they are `$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
 `$TMPDIR/tron-ios-gateway-e2e-derived-<uid>-<worktree key>`, with the key
 `scripts/ios-test-build-identity.py worktree-key` gives the per-worktree test
 products (`TRON_IOS_E2E_STATE_DIR` and `TRON_IOS_E2E_DERIVED_DATA` override

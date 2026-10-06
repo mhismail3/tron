@@ -36,6 +36,7 @@ XCTESTRUN_FIXTURE_KEYS = [
     "TRON_E2E_WORKSPACE",
 ]
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
+NODE_VERSION = (ROOT / ".node-version").read_text().strip()
 XCODEGEN_VERSION = re.search(
     r"^TRON_CI_XCODEGEN_VERSION=(\S+)$", (ROOT / "config/ci-toolchain.env").read_text(), re.M,
 ).group(1)
@@ -3407,6 +3408,23 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
     21. `run-ui` leaves the lane's simulator booted, leaves the Gateway fixture it
         failed with running, or leaves the hosted app paired for the unit lane
         that shares this worktree's app.
+
+    #445: the fixture and its fault proxy are not the parent Gateway's children.
+
+    22. A shell spawned by the Stable or Debug Gateway carries that Gateway's
+        environment, and the harness passes it to the fixture Gateway, which
+        then runs with a foreign `TRON_GATEWAY_*` value (runtime epoch, channel,
+        supervision, payload identity) or a foreign `PI_*` store path.
+    23. The fault proxy inherits the same environment and hands its own `PATH`
+        to the Gateway it restarts privately, so a leak survives the restart.
+    24. The harness takes the fixture's Node from the caller's `PATH`, where a
+        Gateway-spawned shell finds the parent's bundled runtime. That runtime
+        has the pinned version and a sibling npm, so a version check accepts it,
+        and its Team ID cannot dlopen the ad hoc-signed node-pty prebuild.
+    25. The incompatible Node is only discovered when node-pty fails inside the
+        fixture (`Failed to load native module`, which hides the dlopen cause),
+        so the toolchain failure is attributed to the fixture and no signal
+        names the real error.
     """
 
     def setUp(self) -> None:
@@ -3437,96 +3455,165 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         Gateway artifacts merely to test runner failure propagation. The one bin
         directory also carries `npm`, which the harness requires beside `node`
         before it installs the fixture Gateway.
+
+        The wrapper is that complete pinned toolchain (`TRON_NODE_BIN` with a
+        sibling `npm`) and carries its real Node, its sources, its records and its
+        knobs itself: a fixture process starts under the harness's minimal
+        environment (#445) and never sees this process's variables.
         """
-        real_node = shutil.which("node", path=environment["PATH"])
-        self.assertIsNotNone(real_node, "the pinned Node runtime is required by the E2E runner")
+        real_node = self.pinned_host_node(environment)
         binary = self.root / "fixture-node"
         binary.mkdir(exist_ok=True)
+        gateway_source = binary / "fixture-gateway.cjs"
+        gateway_source.write_text(f'''const fs = require("node:fs");
+const http = require("node:http");
+process.title = `node ${{process.env.FAKE_E2E_NODE_ENTRY}}`;
+const logs = `${{process.env.TRON_DATA_DIR}}/logs`;
+fs.mkdirSync(logs, {{ recursive: true }});
+fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "gateway.started" }}) + "\\n");
+// The Gateway's own record of the device connections a journey left behind, in the
+// order the real Gateway writes them: each connection opens and closes under its
+// own id, so a backgrounded journey's retire-then-reconnect is visible as a close
+// before a different connection's open. The counts come from the case's knob file
+// because a fixture process inherits no case environment (#445).
+const knob = "{self.fixture_knob("connection-counts")}";
+const connections = (fs.existsSync(knob) ? fs.readFileSync(knob, "utf8") : "2 1").trim().split(/\\s+/).map(Number);
+for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {{
+  const connectionId = `fixture-connection-${{index + 1}}`;
+  if (index < connections[0]) {{
+    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.opened", connectionId }}) + "\\n");
+  }}
+  if (index < connections[1]) {{
+    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.closed", connectionId }}) + "\\n");
+  }}
+}}
+const enrollment = `${{process.env.TRON_DATA_DIR}}/gateway/enrollment.json`;
+fs.writeFileSync(enrollment, JSON.stringify({{ code: "fixture-pairing-code" }}), {{ mode: 0o600 }});
+const server = http.createServer((request, response) => {{
+  response.writeHead(request.url === "/health" ? 200 : 404);
+  response.end();
+}});
+server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''')
+        proxy_source = binary / "fixture-proxy.cjs"
+        proxy_source.write_text(f'''const fs = require("node:fs");
+const http = require("node:http");
+process.title = `node ${{process.env.FAKE_E2E_NODE_ENTRY}}`;
+const controlFailure = "{self.fixture_knob("proxy-control-failure")}";
+const server = http.createServer((request, response) => {{
+  if (request.url === "/_fixture/control") {{
+    // The harness reads the owned proxy's link statistics as journey evidence.
+    if (fs.existsSync(controlFailure) && fs.readFileSync(controlFailure, "utf8").trim() === "1") {{
+      response.writeHead(500); response.end(); return;
+    }}
+    response.writeHead(200, {{ "content-type": "application/json" }});
+    response.end(JSON.stringify({{ schedule: "unshaped" }}));
+    return;
+  }}
+  response.writeHead(404); response.end();
+}});
+server.listen(0, "127.0.0.1", () => {{
+  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({{ port: server.address().port, pid: process.pid }}), {{ mode: 0o600 }});
+}});
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''')
+        record = binary / "record"
+        record.mkdir(exist_ok=True)
         node = binary / "node"
-        node.write_text("""#!/usr/bin/env bash
+        node.write_text(f'''#!/usr/bin/env bash
 set -euo pipefail
-case "${1:-}" in
+case "${{1:-}}" in
   */packages/gateway/dist/index.js)
+    /usr/bin/env >"{record}/gateway.env"
     export FAKE_E2E_NODE_ENTRY="$1"
-    exec "$FAKE_E2E_REAL_NODE" -e "$FAKE_E2E_GATEWAY_SOURCE"
+    exec "{real_node}" "{gateway_source}"
     ;;
   */ios-gateway-fault-proxy.mjs)
+    /usr/bin/env >"{record}/proxy.env"
     export FAKE_E2E_NODE_ENTRY="$1"
-    exec "$FAKE_E2E_REAL_NODE" -e "$FAKE_E2E_PROXY_SOURCE"
+    exec "{real_node}" "{proxy_source}"
     ;;
   */packages/gateway/*|*/ios-gateway-*.mjs|*.js|*.mjs|*.cjs)
     echo "unexpected Node fixture command: $*" >&2
     exit 70
     ;;
 esac
-exec "$FAKE_E2E_REAL_NODE" "$@"
-""")
+exec "{real_node}" "$@"
+''')
         node.chmod(0o755)
         # `npm` only has to satisfy the harness's same-bin-directory check and
         # the fixture install it performs; no case builds production Gateway
         # artifacts, and the checks under test stop before that build's output.
         npm = binary / "npm"
-        npm.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-exit 0
-""")
+        npm.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n")
         npm.chmod(0o755)
         result = dict(environment)
         result["PATH"] = f"{binary}:{environment['PATH']}"
-        result.update({
-            "FAKE_E2E_REAL_NODE": str(real_node),
-            "FAKE_E2E_GATEWAY_SOURCE": '''const fs = require("node:fs");
-const http = require("node:http");
-process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
-const logs = `${process.env.TRON_DATA_DIR}/logs`;
-fs.mkdirSync(logs, { recursive: true });
-fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "gateway.started" }) + "\\n");
-// The Gateway's own record of the device connections a journey left behind, in the
-// order the real Gateway writes them: each connection opens and closes under its
-// own id, so a backgrounded journey's retire-then-reconnect is visible as a close
-// before a different connection's open.
-const connections = (process.env.FAKE_E2E_GATEWAY_CONNECTIONS || "2 1").split(/\\s+/).map(Number);
-for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {
-  const connectionId = `fixture-connection-${index + 1}`;
-  if (index < connections[0]) {
-    fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "connection.opened", connectionId }) + "\\n");
-  }
-  if (index < connections[1]) {
-    fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "connection.closed", connectionId }) + "\\n");
-  }
-}
-const enrollment = `${process.env.TRON_DATA_DIR}/gateway/enrollment.json`;
-fs.writeFileSync(enrollment, JSON.stringify({ code: "fixture-pairing-code" }), { mode: 0o600 });
-const server = http.createServer((request, response) => {
-  response.writeHead(request.url === "/health" ? 200 : 404);
-  response.end();
-});
-server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
-process.once("SIGTERM", () => server.close(() => process.exit(0)));
-process.once("SIGINT", () => server.close(() => process.exit(0)));
-''',
-            "FAKE_E2E_PROXY_SOURCE": '''const fs = require("node:fs");
-const http = require("node:http");
-process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
-const server = http.createServer((request, response) => {
-  if (request.url === "/_fixture/control") {
-    if (process.env.FAKE_E2E_PROXY_CONTROL_FAILURE === "1") {
-      // The harness reads the owned proxy's link statistics as journey evidence.
-      response.writeHead(500); response.end(); return;
-    }
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ schedule: "unshaped" }));
-    return;
-  }
-  response.writeHead(404); response.end();
-});
-server.listen(0, "127.0.0.1", () => {
-  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({ port: server.address().port, pid: process.pid }), { mode: 0o600 });
-});
-process.once("SIGTERM", () => server.close(() => process.exit(0)));
-process.once("SIGINT", () => server.close(() => process.exit(0)));
-''',
-        })
+        result["TRON_NODE_BIN"] = str(node)
+        return result
+
+    def fixture_knob(self, name: str) -> Path:
+        """A file a fake fixture process reads its own configuration from.
+
+        A fixture process starts under the harness's minimal environment (#445),
+        so a case that steers the synthetic Gateway or proxy writes this knob
+        before the harness starts it instead of exporting a variable.
+        """
+        path = self.root / "fixture-node/knobs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def fixture_environment_record(self, environment: dict[str, str], name: str) -> dict[str, str]:
+        """The environment one fixture process was handed, as `readiness_node_environment` records it."""
+        path = Path(environment["TRON_NODE_BIN"]).parent / "record" / name
+        self.assertTrue(path.is_file(), f"the fixture Node wrapper recorded no {name}")
+        assignments = {}
+        for line in path.read_text().splitlines():
+            variable, _, value = line.partition("=")
+            if variable:
+                assignments[variable] = value
+        return assignments
+
+    def pinned_host_node(self, environment: dict[str, str]) -> str:
+        """The real Node the synthetic fixture toolchain forwards to.
+
+        A test process started from a Gateway-spawned shell has that Gateway's
+        bundled runtime first on `PATH`: the very runtime #445 keeps out of a
+        fixture, and one that cannot load this checkout's node-pty prebuild. So
+        prefer the candidates the harness itself prefers, and use the first PATH
+        entry only on a machine that has neither (hosted CI's setup-node).
+        """
+        candidates = [
+            Path(os.environ.get("NVM_DIR", Path.home() / ".nvm")) / f"versions/node/v{NODE_VERSION}/bin/node",
+            Path("/opt/homebrew/bin/node"),
+            Path("/usr/local/bin/node"),
+        ]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if subprocess.run(
+                [str(candidate), "--version"], env=environment,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            ).stdout.strip() == f"v{NODE_VERSION}":
+                return str(candidate)
+        found = shutil.which("node", path=environment["PATH"])
+        self.assertIsNotNone(found, "the pinned Node runtime is required by the E2E runner")
+        return found
+
+    def nvm_pinned_environment(self, environment: dict[str, str]) -> dict[str, str]:
+        """The fixture toolchain selected the way a machine without TRON_NODE_BIN
+        selects it: the pinned Node in nvm's own layout, and no TRON_NODE_BIN.
+        """
+        result = self.readiness_node_environment(environment)
+        wrapper = Path(result.pop("TRON_NODE_BIN"))
+        pinned = self.root / f"nvm/versions/node/v{NODE_VERSION}/bin"
+        pinned.mkdir(parents=True)
+        for name in ("node", "npm"):
+            (pinned / name).symlink_to(wrapper.parent / name)
+        result["NVM_DIR"] = str(self.root / "nvm")
         return result
 
     def default_roots_environment(self) -> dict[str, str]:
@@ -3542,6 +3629,7 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
+        shutil.copy2(ROOT / ".node-version", other / ".node-version")
         return other
 
     def reported(self, output: str, label: str) -> Path:
@@ -3616,6 +3704,12 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
             "FAKE_XCODEBUILD_CALLS": str(self.root / "ui-calls.txt"),
             "FAKE_XCODEBUILD_LOG": str(self.root / "ui-xcodebuild.jsonl"),
         })
+        # A fixture process inherits no case environment (#445): the two knobs its
+        # fakes read become the files the generated sources read.
+        for variable, knob in (("FAKE_E2E_GATEWAY_CONNECTIONS", "connection-counts"),
+                               ("FAKE_E2E_PROXY_CONTROL_FAILURE", "proxy-control-failure")):
+            if variable in extra:
+                self.fixture_knob(knob).write_text(extra.pop(variable) + "\n")
         environment.update(extra)
         return environment
 
@@ -3902,9 +3996,19 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
+        # The canonical Node pin is part of a checkout: the harness resolves the
+        # fixture's Node from it.
+        shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
+        # Installed dependencies are not source: the checkout ignores them the
+        # way the repository does, so a case can install a node-pty tree without
+        # changing this worktree's build identity.
+        (worktree / ".gitignore").write_text("node_modules/\n")
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
-        subprocess.run(["git", "add", "scripts", "config", "packages/gateway"], cwd=worktree, env=self.environment, check=True)
+        subprocess.run(
+            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway"],
+            cwd=worktree, env=self.environment, check=True,
+        )
         subprocess.run([
             "git", "-c", "user.name=E2E fixture", "-c", "user.email=e2e-fixture@invalid",
             "commit", "--quiet", "-m", "runner fixture",
@@ -4018,6 +4122,133 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             ])
         finally:
             self.e2e("stop", harness=harness, environment=environment)
+
+    def test_fixture_gateway_and_fault_proxy_never_inherit_the_callers_gateway_environment(self) -> None:
+        """Failure modes 22 and 23: the parent Gateway's environment stops at the harness."""
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        environment = self.readiness_node_environment(self.environment)
+        environment.update({
+            "TRON_GATEWAY_RUNTIME_EPOCH": "stable-epoch-sentinel",
+            "TRON_GATEWAY_CHANNEL": "stable",
+            "TRON_GATEWAY_SUPERVISED": "1",
+            "TRON_GATEWAY_PAYLOAD_ROOT": "/Users/someone/.tron/gateway/payloads/stable",
+            "PI_SESSION_ID": "stable-session-sentinel",
+        })
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+        for name in ("gateway.env", "proxy.env"):
+            recorded = self.fixture_environment_record(environment, name)
+            for inherited in ("TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_CHANNEL", "TRON_GATEWAY_SUPERVISED",
+                              "TRON_GATEWAY_PAYLOAD_ROOT", "PI_SESSION_ID"):
+                self.assertNotIn(inherited, recorded, f"{name} inherited {inherited} from the caller")
+        # The fixture's own binding survives the scrub, on both processes: it is
+        # what the Gateway needs to own its home, state, agent directory and
+        # listener, and what the proxy uses to restart it privately. Its `PATH` is
+        # the resolved Node directory plus the system directories and nothing else
+        # - not this shell's, and not this shell's PATH appended to it.
+        gateway = self.fixture_environment_record(environment, "gateway.env")
+        fixture_root = self.root / "e2e-state"
+        fixture_path = f"{Path(environment['TRON_NODE_BIN']).parent}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+        self.assertEqual(gateway.get("PATH"), fixture_path)
+        self.assertEqual(gateway.get("TRON_GATEWAY_HOST"), "127.0.0.1")
+        self.assertEqual(gateway.get("TRON_GATEWAY_LAN_ENDPOINT"), "off")
+        self.assertEqual(gateway.get("TRON_MACHINE_GROUP_ID"), "tron-ios-e2e")
+        self.assertRegex(gateway.get("TRON_GATEWAY_PORT", ""), r"^[1-9][0-9]*$")
+        self.assertEqual(os.path.realpath(gateway["TRON_DATA_DIR"]), os.path.realpath(fixture_root / "tron"))
+        self.assertEqual(os.path.realpath(gateway["HOME"]), os.path.realpath(fixture_root / "home"))
+        self.assertEqual(os.path.realpath(gateway["PI_CODING_AGENT_DIR"]), os.path.realpath(fixture_root / "agent"))
+        self.assertTrue(gateway["PI_SUBAGENTS_TEMP_ROOT"].startswith(str(gateway["HOME"])))
+        # The fixture never needs the user's SSH agent either.
+        self.assertNotIn("SSH_AUTH_SOCK", gateway)
+        proxy = self.fixture_environment_record(environment, "proxy.env")
+        self.assertEqual(proxy.get("PATH"), fixture_path)
+        self.assertEqual(proxy.get("TRON_E2E_GATEWAY_ENTRY"), str(worktree / "packages/gateway/dist/index.js"))
+
+    def test_the_first_node_on_the_callers_path_never_runs_the_fixture(self) -> None:
+        """Failure mode 24: an inherited `PATH` cannot choose the fixture's Node.
+
+        The wrapper below is the parent Gateway's bundled runtime in miniature:
+        it answers the repository's pinned version and owns a sibling npm, so a
+        version check alone would accept it, and it cannot run the fixture. The
+        fixture's own Node is the pinned Node in nvm's layout, which is how a
+        machine without `TRON_NODE_BIN` reaches it, so only a resolver that
+        prefers the caller's `PATH` over the pinned toolchain would use it.
+        """
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        environment = self.nvm_pinned_environment(self.environment)
+        bundled = self.root / "bundled-runtime"
+        bundled.mkdir()
+        invoked = self.root / "bundled-runtime-invocations"
+        for name, body in (("node", f'''#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"{invoked}"
+if [[ "${{1:-}}" == "--version" ]]; then echo "v{NODE_VERSION}"; exit 0; fi
+echo "Failed to load native module: pty.node, checked: build/Release, build/Debug, prebuilds/darwin-arm64" >&2
+exit 1
+'''), ("npm", "#!/bin/sh\nexit 0\n")):
+            (bundled / name).write_text(body)
+            (bundled / name).chmod(0o755)
+        environment["PATH"] = f"{bundled}:{environment['PATH']}"
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            if invoked.exists():
+                self.fail("the fixture ran under the first node on the caller's PATH: " + invoked.read_text())
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_a_node_that_cannot_load_the_gateways_native_modules_is_refused_by_name(self) -> None:
+        """Failure mode 25: the toolchain failure is named before the fixture starts.
+
+        The Gateway's Node must load the installed node-pty prebuild. The prebuild
+        here is not a native module, so the load fails the way the bundled
+        runtime's Team ID fails it; the harness must report the loader's own error
+        and start nothing.
+        """
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        prebuild = worktree / "packages/gateway/node_modules/node-pty/build/Release/pty.node"
+        prebuild.parent.mkdir(parents=True)
+        prebuild.write_text("not a native module\n")
+        environment = self.readiness_node_environment(self.environment)
+        # The platform's own loader text (`dlopen` on macOS, `invalid ELF header`
+        # on Linux), produced by the same Node and the same file.
+        loader = subprocess.run(
+            [environment["TRON_NODE_BIN"], "-e",
+             "try { require(process.argv[1]); } catch (error) { process.stdout.write(String(error.message)); }",
+             str(prebuild)],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertTrue(
+            loader.stdout.strip(),
+            f"the fixture Node reported no loader error for {prebuild}: {loader.stderr}",
+        )
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("cannot load the Gateway's node-pty native module", result.stderr)
+            self.assertIn(environment["TRON_NODE_BIN"], result.stderr)
+            self.assertIn(str(prebuild), result.stderr)
+            self.assertIn(loader.stdout.strip(), result.stderr, "the loader's own error is not what the harness reported")
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+        self.assertFalse((self.root / "e2e-state/gateway.pid").exists(), "the refused run started a fixture")
+        self.assertFalse(
+            (Path(environment["TRON_NODE_BIN"]).parent / "record/gateway.env").exists(),
+            "the refusal still started the fixture Gateway",
+        )
 
     def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
         """Failure mode 10: every unproven product set is refused before the
