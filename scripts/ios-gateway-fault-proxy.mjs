@@ -93,7 +93,13 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     for (const response of waiters) answer(response, 200, { intercepted: true });
     waiters.clear();
   };
-  const server = createServer({ requestTimeout: 5_000, headersTimeout: 5_000 }, async (request, response) => {
+  // Once shaped, this proxy, not the client, paces how fast a request body is
+  // read, so its listener bounds must measure client inactivity rather than
+  // the fixture's own pacing: there is no whole-request deadline, and the
+  // socket's idle bound (`server.timeout`) is disarmed while a body part waits
+  // in the shared schedule and re-armed once it is forwarded. Headers are read
+  // unpaced and keep their own deadline.
+  const server = createServer({ requestTimeout: 0, headersTimeout: 5_000 }, async (request, response) => {
     if (request.url === "/_fixture/control") {
       if (request.headers["x-tron-fixture-token"] !== token) { answer(response, 403, {}); return; }
       try {
@@ -254,7 +260,9 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           }
           for (let offset = 0; offset < bytes.length; offset += 16_384) {
             const part = bytes.subarray(offset, Math.min(offset + 16_384, bytes.length));
+            request.socket.setTimeout(0);
             await schedule("http-request-body", part.length, () => upstream.write(part));
+            request.socket.setTimeout(server.timeout);
           }
         }
         if (uploadTransfer?.startMs !== null && uploadTransfer?.startMs !== undefined) {
@@ -267,6 +275,14 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     }).catch(() => { response.destroy(); });
   });
   server.timeout = 10_000;
+  // Name the fixture's own idle retirement in proxy.log, which CI retains, so a
+  // reset client is attributed in one step. The socket's armed bound tells a
+  // keep-alive expiry (5 s) from a stalled client (10 s). A listener replaces
+  // Node's implicit destroy, so it destroys the socket itself.
+  server.on("timeout", socket => {
+    console.log(JSON.stringify({ event: "proxy.client-idle-timeout", elapsedMs: elapsedMilliseconds(), idleTimeoutMs: socket.timeout, shaped: Boolean(shaper) }));
+    socket.destroy();
+  });
   server.on("connection", socket => {
     if (closing || sockets.size >= 12) { socket.destroy(); return; }
     sockets.add(socket); socket.once("close", () => sockets.delete(socket));

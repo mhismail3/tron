@@ -26,7 +26,7 @@ final class ContextWindowSliderMotionTests: XCTestCase {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        await fulfillment(of: [appeared], timeout: 2)
+        try await awaitHostedEvents([appeared])
         print("CONTEXT_SURFACE_PROFILE_PID=\(getpid())")
         var results: [[String: Double]] = []
         for cycle in 0..<8 {
@@ -40,7 +40,7 @@ final class ContextWindowSliderMotionTests: XCTestCase {
                 withAnimation(.easeInOut(duration: 0.28), completionCriteria: .logicallyComplete) {
                     driver.fraction = target
                 } completion: { finished.fulfill() }
-                await fulfillment(of: [finished], timeout: 2)
+                try await awaitHostedEvents([finished])
             }
             let cpu = cpuSeconds() - startCPU
             let wall = CACurrentMediaTime() - startWall

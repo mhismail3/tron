@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { GatewayError } from "../errors.js";
@@ -648,7 +648,12 @@ export class KnowledgeStore {
       if (!(error instanceof KnowledgeStoreError) || !error.message.includes("unavailable")) throw error;
       present = false;
       fresh = !(await this.workspace.featureInitialized("knowledge"));
-      if (create) { await safeDirectory(root, true); present = true; }
+      if (create) {
+        // A namespace that was initialized once and is gone now is lost state,
+        // never permission to create an empty corpus in its place.
+        if (!fresh) throw new KnowledgeStoreError("invalid", "Initialized knowledge state is missing");
+        return await this.initializeNamespace(stateRoot, root);
+      }
     }
     const paths = { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), present, fresh };
     if (!present) return paths;
@@ -656,13 +661,37 @@ export class KnowledgeStore {
     const markerRead = await readSecureJson<unknown>(marker, 128);
     if (!markerRead.present) {
       if (!create) throw new KnowledgeStoreError("invalid", "Knowledge namespace exists without initialization evidence");
-      // A namespace created by this owner is marked before its first state commit.
+      // Only a namespace this owner never published (foreign or damaged) reaches
+      // here: initialization publishes the marker with the whole namespace, so a
+      // writer that can already see a state manifest restores its evidence.
       await safeDirectory(paths.objects, true); await safeDirectory(paths.records, true);
       await durableAtomicWriteJson(marker, { version: 1 }, 0o600);
       await this.workspace.markFeatureInitialized("knowledge");
     } else if (JSON.stringify(markerRead.value) !== JSON.stringify({ version: 1 })) throw new KnowledgeStoreError("invalid", "Invalid knowledge initialization record");
     await safeDirectory(paths.objects, false); await safeDirectory(paths.records, false);
     return { ...paths, fresh };
+  }
+
+  /** Publish one fresh namespace atomically: build it beside its final name and
+   * rename it into place. Reads project state without the store mutex, so a
+   * namespace that became visible before its own evidence did is
+   * indistinguishable from a damaged corpus, and `paths(false)` refuses exactly
+   * that. Nothing is published until the whole namespace is durable, so a failure
+   * while building it leaves no namespace and the next deliberate mutation can
+   * initialize one. */
+  private async initializeNamespace(stateRoot: string, root: string): Promise<StorePaths> {
+    const staging = `${root}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+    const staged: StorePaths = { root: staging, state: join(staging, "state.json"), objects: join(staging, "objects"), records: join(staging, "records"), present: true, fresh: true };
+    try {
+      await safeDirectory(staged.objects, true); await safeDirectory(staged.records, true);
+      await durableAtomicWriteJson(join(staging, "initialized.json"), { version: 1 }, 0o600);
+      await this.createCatalog(staged, emptyState());
+      await rename(staging, root);
+    } catch (error) { await rm(staging, { recursive: true, force: true }).catch(() => {}); throw error; }
+    const stateDirectory = await open(stateRoot, "r");
+    try { await syncDurably(stateDirectory); } finally { await stateDirectory.close(); }
+    await this.workspace.markFeatureInitialized("knowledge");
+    return { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), present: true, fresh: true };
   }
   private async load(paths: StorePaths, writable: boolean): Promise<{ state: KnowledgeState; present: boolean }> {
     let read;

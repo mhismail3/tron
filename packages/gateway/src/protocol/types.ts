@@ -1021,3 +1021,30 @@ export interface PackageProvides {
 /** `hooks.list`: exactly the hook fields `session.resources` returns, for one
  * scope and without a session. */
 export type HooksProjection = HookRegistrationProjection;
+
+/** The capability string `hello`/`system.info` advertise for Tron Home. */
+export const HOME_CAPABILITY = "home.v1";
+
+/** `home.status`: the one bounded Home projection. It is a read and performs no
+ * inference. `available` is false only when a stored record exists but cannot be
+ * used, which `reason` explains; the preserved record is never overwritten.
+ * `live` is whether the session holds a runtime right now; `sessionPresent` is
+ * whether it exists at all, live or still on disk. */
+export interface HomeStatus {
+  available: boolean;
+  reason?: string;
+  enabled: boolean;
+  homeId?: string;
+  sessionId?: string;
+  generation?: number;
+  model?: ModelRef;
+  live: boolean;
+  sessionPresent: boolean;
+}
+
+/** `home.designate`/`home.disable` result: the exact admitted identity. */
+export interface HomeDesignation {
+  homeId: string;
+  sessionId: string;
+  generation: number;
+}

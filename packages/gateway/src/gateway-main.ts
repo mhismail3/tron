@@ -276,6 +276,14 @@ const sessions = new RuntimeRegistry({
     `Codemode execution ${diagnostic.outcome}`,
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
+  // Home's designation is a rare explicit user action. `unavailable` and
+  // `refused` are the two outcomes that need attention: the preserved record
+  // could not be used, or a running session blocked the profile change.
+  homeDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused" ? "warning" : "info",
+    `Tron Home designation ${diagnostic.outcome}`,
+    { event: `home.${diagnostic.outcome}`, source: "home", ...(diagnostic.reason ? { reason: diagnostic.reason } : {}) },
+  ),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -647,6 +655,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   connections,
+  home: sessions.homeOwner(),
   mcpAdmin: new McpAdminService(
     config.agentDir,
     join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),

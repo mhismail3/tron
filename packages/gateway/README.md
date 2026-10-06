@@ -640,6 +640,26 @@ fail-local recovery, backup, prompt coverage, internal-file display, and the
 future managed-state contract are owned by
 [`docs/internal-workspace.md`](docs/internal-workspace.md).
 
+## Tron Home
+
+Tron Home is one opt-in persistent conversation per Gateway installation. It is
+created only by an explicit `home.designate`; until then every session is
+ordinary. `home.status` (a read) returns the bounded projection
+`{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
+  sessionPresent }`, `home.designate` and `home.disable` are
+command-id-receipted mutations, and `home.v1` is advertised in
+`hello`/`system.info`. Home runs in the neutral
+`<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
+curated runtime profile (no agent-directory or project discovery — including the
+agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
+`ask_user`/`display`/`notify` executable allowlist, per-session compaction
+disabled, a fixed physical model, and zero cache-warming requests), and its
+designation is keyed by session id, so a fork is ordinary. A profile change
+replaces the live runtime in place inside the session's own lane, and a record
+whose session is gone is given a fresh one. Ordinary sessions are byte-for-byte
+unaffected. The record, the profile, the RPCs, fork and loadout semantics and
+what is not built yet are owned by [`docs/home.md`](docs/home.md).
+
 ## Runtime and state
 
 The launcher executes `dist/index.js`, a small entrypoint that imports the
@@ -2778,6 +2798,13 @@ test's deadline before its owned work can finish. This is a test-runner resource
 bound, not a change to test selection, per-test concurrency assertions, or the
 15-second default timeout. Production scheduling is unchanged. Keep focused
 owners narrow while iterating and use the full configured suite for checkpoints.
+
+Tests own every remote boundary through injected fetchers, resolvers and HTTP
+stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
+connection opened by an in-process socket in the Vitest worker and fails the
+current test (or the file, for async work that outlives its test), so an unstubbed in-process fetch cannot pass or
+hang depending on the host's network. It does not cover child processes or DNS
+lookups.
 
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 

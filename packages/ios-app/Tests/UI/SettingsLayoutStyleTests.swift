@@ -27,7 +27,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
                 }
                 probe.pending = KnowledgeMutation(identity: model.knowledgeDestinationIdentity, task: accepted)
                 try await withHost(KnowledgeMutationFixture(probe: probe).environment(model), size: CGSize(width: 320, height: 120)) { _ in
-                    await fulfillment(of: [started], timeout: 2)
+                    try await awaitHostedEvents([started])
                     probe.active = false
                     await model.enteredBackground().value
                     try await Task.sleep(for: .milliseconds(40))
@@ -444,7 +444,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKeyAndVisible() }
-        await fulfillment(of: [appeared], timeout: 2)
+        try await awaitHostedEvents([appeared])
         host.view.layoutIfNeeded()
         try await check(host)
     }
