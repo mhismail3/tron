@@ -1,6 +1,7 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { HomeMemoryToolAccess } from "./home-memory.js";
 import { homeMemoryTools } from "./home-memory-tools.js";
+import { markHomeMemoryCache } from "./home-request-policy.js";
 
 /**
  * Tron Home's operating context. Home is designated, and every activation runs on
@@ -23,8 +24,9 @@ export const HOME_OPERATING_CONTEXT = [
 
 /**
  * The one first-party module only a Home runtime loads. It contributes Home's
- * operating context, registers the memory tools, and is the single answer to the
- * SDK's per-session cache warming decision.
+ * operating context, registers the memory tools, places the view's cache
+ * breakpoints, and is the single answer to the SDK's per-session cache warming
+ * decision.
  *
  * `memoryTools` resolves the memory for the session the tools run in, at every
  * tool call: it answers `undefined` for a session that is not the enabled Home,
@@ -45,5 +47,11 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
       systemPrompt: `${event.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}`,
     }));
     pi.on("cache_warming_decision", () => ({ action: "stop" }));
+    // The recipe's view breakpoints (gist §8). Anthropic caches only where a
+    // request marks it; OpenAI and DeepSeek reuse the view's shared prefix on
+    // their own. A failure here leaves pi-ai's own payload, which is still a
+    // valid request, only without the view marks.
+    pi.on("before_provider_request", (event, ctx) =>
+      ctx.model?.api === "anthropic-messages" ? markHomeMemoryCache(event.payload) : undefined);
   };
 }

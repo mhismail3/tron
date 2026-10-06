@@ -3,6 +3,7 @@ import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 import { cutBytes } from "./episodic-tree.js";
+import { cachePieces, markAnthropicPieces } from "./cache-layout.js";
 
 /*
  * The compactor (gist §4): one call per node, no tools, a cheap model. Its
@@ -132,12 +133,34 @@ function turnToMessage(turn: EpisodicCompactorRequest["turns"][number], model: M
 }
 
 /** The default summarizer: one `completeSimple` call per compactor turn through
- * the pinned model runtime, exactly as knowledge's model adapters do. */
+ * the pinned model runtime, exactly as knowledge's model adapters do.
+ *
+ * The shared context leads the first turn, cut into the recipe's cache pieces
+ * (gist §8), so consecutive calls re-read it from a provider's cache. Anthropic
+ * needs the pieces marked; other providers reuse the prefix on their own, and
+ * the memory's cache key keeps its calls on one cache. */
 export function createModelRuntimeSummarizer(runtime: ModelRuntime, model: Model<Api>): EpisodicSummarizer {
-  return async (request) => runtime.completeSimple(model, {
-    systemPrompt: request.system,
-    messages: request.turns.map(turn => turnToMessage(turn, model)),
-  }, { signal: request.signal, maxTokens: COMPACTOR_MAX_TOKENS });
+  return async (request) => {
+    const [first, ...rest] = request.turns;
+    const pieces = first && first.role === "user" && first.text.startsWith(request.cachePrefix)
+      ? cachePieces(request.cachePrefix) : [];
+    const messages: Message[] = [
+      ...(first && pieces.length > 0
+        ? [{ role: "user" as const, timestamp: 0, content: [
+          ...pieces.map((text) => ({ type: "text" as const, text })),
+          { type: "text" as const, text: first.text.slice(request.cachePrefix.length) },
+        ] }]
+        : first ? [turnToMessage(first, model)] : []),
+      ...rest.map(turn => turnToMessage(turn, model)),
+    ];
+    return runtime.completeSimple(model, { systemPrompt: request.system, messages }, {
+      signal: request.signal,
+      maxTokens: COMPACTOR_MAX_TOKENS,
+      sessionId: request.cacheKey,
+      onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
+        ? markAnthropicPieces(payload, 0, pieces.length - 1) : undefined,
+    });
+  };
 }
 
 /** The reply's text, trimmed; thinking and tool calls are never part of it. */
@@ -189,14 +212,12 @@ export function classifyThrown(error: unknown): EpisodicReplyClass {
   return isRetryableAssistantError(synthetic) ? "transient" : "permanent";
 }
 
-export function compactorRequest(system: string, context: string, step: string, signal: AbortSignal): EpisodicCompactorRequest {
-  return {
-    system,
-    // Two text blocks, context first (gist §4.2): the prefix is the same across
-    // calls, so a provider can cache it.
-    turns: [{ role: "user", text: `${context}\n\n${step}` }],
-    signal,
-  };
+export function compactorRequest(system: string, context: string, step: string, signal: AbortSignal,
+  cacheKey: string): EpisodicCompactorRequest {
+  // Context first, then the step (gist §4.2): the context is what consecutive
+  // calls share, so it is the cacheable prefix (gist §8).
+  const cachePrefix = `${context}\n\n`;
+  return { system, turns: [{ role: "user", text: `${cachePrefix}${step}` }], signal, cachePrefix, cacheKey };
 }
 
 /** A request the size loop continues: the same conversation, one more turn. */

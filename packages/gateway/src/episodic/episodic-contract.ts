@@ -251,8 +251,17 @@ export interface EpisodicMemoryStatus {
   coverage: { admitted: number; summarized: number };
   pump: { busy: number };
   blocked: EpisodicBlocked | null;
-  tokens: { limit: number; reserved: number; used: number };
+  tokens: {
+    limit: number;
+    reserved: number;
+    used: number;
+    /** What the provider reported since this memory opened, so caching can be
+     * checked from its own usage fields (gist §8); not persisted. */
+    sinceOpen: EpisodicUsage;
+  };
 }
+
+export interface EpisodicUsage { input: number; output: number; cacheRead: number; cacheWrite: number }
 
 /** The bounded view-part list status returns; more parts than this are counted
  * but not listed. A production view holds ~250 parts, so this is headroom. */
@@ -265,6 +274,11 @@ export interface EpisodicCompactorRequest {
   /** Alternating turns: the step, the reply, the size feedback, the reply. */
   turns: Array<{ role: "user" | "assistant"; text: string }>;
   signal: AbortSignal;
+  /** The start of the first turn that consecutive calls share: the context
+   * block (gist §8, "the compactor calls share their <chat> prefix"). */
+  cachePrefix: string;
+  /** Stable for one memory, so a provider routes its calls to one cache. */
+  cacheKey: string;
 }
 
 /** Runs one compactor conversation on the injected model. The default

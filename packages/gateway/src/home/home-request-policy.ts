@@ -6,6 +6,7 @@ import {
   type AgentSession,
   type SessionProjection,
 } from "@earendil-works/pi-coding-agent";
+import { cachePieces, markAnthropicPieces } from "../episodic/cache-layout.js";
 
 /*
  * Tron Home's request seam (gist §7).
@@ -674,10 +675,16 @@ export class HomeRequestPolicy {
         else excludedMessages += 1;
       }
     });
+    // The view first, cut at the recipe's cache marks, and the per-activation
+    // nonce last: anything that changes every activation must follow the view,
+    // or no request could re-read the view from a provider's cache (gist §8).
     const memory: AgentMessage = {
       role: "custom",
       customType: HOME_MEMORY_CUSTOM_TYPE,
-      content: `${HOME_NONCE_MARKER}${activation.nonce}\n${memoryView.text}`,
+      content: [
+        ...cachePieces(memoryView.text).map((text) => ({ type: "text" as const, text })),
+        { type: "text" as const, text: `${HOME_NONCE_MARKER}${activation.nonce}` },
+      ],
       display: false,
       details: undefined,
       timestamp: Date.now(),
@@ -756,6 +763,29 @@ export function digestLlmMessages(messages: unknown): string {
 }
 
 /** Occurrences of the activation nonce anywhere in one request's messages. */
+/**
+ * Place the recipe's cache breakpoints on the memory message of an Anthropic
+ * Messages payload (gist §8): a mark at the end of every view piece except the
+ * last, and none on the nonce. It runs as Home's `before_provider_request`
+ * handler, after this seam validated the request, and changes only
+ * `cache_control` fields (cache-layout.ts).
+ */
+export function markHomeMemoryCache(payload: unknown): unknown {
+  const messages = (payload as { messages?: unknown } | null)?.messages;
+  if (!Array.isArray(messages)) return payload;
+  // The memory message is the first whose last block is the nonce this seam
+  // appended (`cut`); it always precedes the activation's own messages.
+  const index = messages.findIndex((message) => {
+    const content = (message as { content?: unknown } | null)?.content;
+    const last = Array.isArray(content) ? content.at(-1) as { type?: unknown; text?: unknown } | undefined : undefined;
+    return last?.type === "text" && typeof last.text === "string" && last.text.startsWith(HOME_NONCE_MARKER);
+  });
+  if (index < 0) return payload;
+  const blocks = (messages[index] as { content: unknown[] }).content;
+  // Every view piece but the last ends at a cut; the final block is the nonce.
+  return markAnthropicPieces(payload, index, blocks.length - 2);
+}
+
 function countNonce(messages: readonly unknown[], nonce: string): number {
   return JSON.stringify(messages).split(nonce).length - 1;
 }

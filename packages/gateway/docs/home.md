@@ -229,6 +229,27 @@ and the refusal is a canonical assistant error entry the user can read):
 Only a runtime whose profile is Home's gets them. A fork of the Home session is a
 different session id, hence an ordinary session with no seam and no activation.
 
+### Prompt caching
+
+Requests follow the recipe's caching layout (gist §8), so each one re-reads from
+the provider's cache everything a recent request sent:
+
+- The system prompt and tool list are constant, with no dates or per-turn state.
+- The memory message is the view cut into pieces at the last line end before
+  50,000, 80,000 and 100,000 characters (`episodic/cache-layout.ts`), followed by
+  the activation's nonce as its own last block. Anything that changes every
+  activation follows the view, so consecutive activations send the same bytes up
+  to the first cut their views differ at.
+- OpenAI and DeepSeek reuse that shared prefix on their own. For the
+  `anthropic-messages` API, tron-home's `before_provider_request` handler marks the
+  end of every view piece but the last. It keeps pi-ai's request-end mark, and
+  stays within Anthropic's four marks by dropping the tool mark first, then the
+  system mark.
+- The handler runs after the seam validated the request, and changes only
+  `cache_control`. If it fails, pi-ai's own payload is sent unmarked.
+
+Ordinary sessions are not affected: the handler belongs to the Home profile.
+
 ## Memory and readiness
 
 Home owns ONE `EpisodicMemory` ([episodic-memory.md](episodic-memory.md)) over the
