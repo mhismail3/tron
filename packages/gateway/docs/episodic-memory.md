@@ -342,8 +342,15 @@ why that control was removed rather than kept as a permanent test.
 - An **empty reply, a refusal, or any other permanent error** blocks at once
   with `permanent-failure`. A reasoning model can spend its whole output on
   reasoning; that block's detail says so. To make it rare, each call asks a
-  reasoning model for a `low` effort, and the output ceiling (8,192 tokens) leaves
-  room for bounded reasoning plus the line (#480). A store record the append cannot write (an oversized
+  reasoning model for reasoning `off`, clamped by pi-ai's `clampThinkingLevel` to
+  the least the model supports, so a model that cannot turn reasoning off runs at
+  its lowest level. Leaving the level out is pi-ai's off: it sends the model's
+  off value wherever the API can express one, but none to GitHub Copilot, where
+  the provider default applies. The output ceiling (8,192 tokens) leaves room
+  for that reasoning plus the line
+  (#480, #485). Prefer a memory model that can turn reasoning off: one that cannot
+  (DeepSeek v4.1 Flash on OpenCode Go) reasoned through the whole ceiling on long
+  messages (#467). A store record the append cannot write (an oversized
   line) blocks the same way rather than stalling the cursor silently.
 - A **token budget** is injected. Each call reserves the prompt estimate **plus
   its whole output ceiling** before it runs, and settles with the actual usage
