@@ -659,7 +659,9 @@ export class SessionCatalog {
           // folder: only the rows published at or under it can be affected, so
           // they are re-read and dropped like any other absent path (#406).
           const code = (error as NodeJS.ErrnoException).code;
-          if (code !== "ENOENT" && code !== "ENOTDIR") return undefined;
+          // A folder replaced by a file (ENOTDIR) keeps the whole-folder pass, which
+          // drops its rows; refreshPath treats only ENOENT as missing.
+          if (code !== "ENOENT") return undefined;
           transcripts.push(...this.indexedBeneath(candidate));
           continue;
         }
