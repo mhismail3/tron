@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { redactCredentials } from "../util/credential-redaction.js";
 import { basename } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
@@ -58,13 +57,11 @@ function processHash(namespace: string, ...parts: string[]): string {
 
 /** Process presentation is not an alternate secret store. Canonical JSONL is
  * left untouched; bounded wire previews fail closed for common shell, header,
- * structured, provider-token, and high-entropy credential shapes. The
- * credential-only shapes themselves live in `redactCredentials`, so the
- * episodic projection redacts exactly the same secrets. */
+ * structured, provider-token, and high-entropy credential shapes. */
 export function redactProcessText(value: string): string {
   const secretName = "(?:api[_-]?key|access[_-]?key|access[_-]?token|auth(?:orization)?[_-]?token|token|password|passwd|secret|client[_-]?secret|private[_-]?key|session[_-]?key|cookie)";
   const quotedOrToken = "(?:\"[^\"]*\"|'[^']*'|[^\\s]+)";
-  const named = value
+  let redacted = value
     // Environment assignments are intentionally all masked: arbitrary names
     // can carry credentials and the process surface does not need their value.
     .replace(/(\b[A-Za-z_][A-Za-z0-9_]*\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s]+)/gu, "$1[REDACTED]")
@@ -79,12 +76,16 @@ export function redactProcessText(value: string): string {
     })
     .replace(/((?:-b|--cookie|--cookie-jar|-u|--user|-p|--password)\s+)(?:"[^"]*"|'[^']*'|[^\s]+)/giu, "$1[REDACTED]")
     .replace(/([?&](?:api[_-]?key|access[_-]?token|token|password|secret|signature)=)[^&#\s]+/giu, "$1[REDACTED]")
-    .replace(/:\/\/([^\s/:@]+):([^\s/@]+)@/gu, "://$1:[REDACTED]@");
-  const credentials = redactCredentials(named);
+    .replace(/:\/\/([^\s/:@]+):([^\s/@]+)@/gu, "://$1:[REDACTED]@")
+    .replace(/-----BEGIN [^-\r\n]{1,80}-----[\s\S]*?-----END [^-\r\n]{1,80}-----/gu, "[REDACTED PRIVATE KEY]")
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu, "[REDACTED]")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/gu, "[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, "[REDACTED]");
   // Provider-neutral high-entropy fallback. Preserve ordinary hashes/IDs only
   // when they are not mixed alphabetic+numeric bearer-like tokens.
-  return credentials.replace(/\b[A-Za-z0-9_+/=-]{32,}\b/gu, (token) =>
+  redacted = redacted.replace(/\b[A-Za-z0-9_+/=-]{32,}\b/gu, (token) =>
     /[A-Za-z]/u.test(token) && /\d/u.test(token) ? "[REDACTED]" : token);
+  return redacted;
 }
 
 function subagentProcessId(sessionId: string, toolCallId: string, childId: string): string {
