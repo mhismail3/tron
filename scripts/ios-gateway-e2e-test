@@ -913,17 +913,25 @@ PY
 # HOSTED_TEST hook (`--tron-reset-ui-test-state`), launched through simctl while
 # this command still holds the lane's booted simulator. A SIGKILL of this command
 # cannot run it, which is the documented residual.
+#
+# The reset removes the hosted test app with its container rather than launching
+# it with the app's own reset hook: that hook only runs once the app has launched
+# and built its model, and a deadline or a signal ends the run before that.
 reset_hosted_app_state() {
   ((ui_app_state_owner)) || return 0
   [[ -n "$ui_simulator_id" ]] || return 0
   local bundle_id
   bundle_id="$(hosted_app_bundle_id)" \
     || { echo "warning: no built TronMobile.app to reset the lane's hosted app state" >&2; return 0; }
-  if ! xcrun simctl launch "$ui_simulator_id" "$bundle_id" --tron-reset-ui-test-state >/dev/null 2>&1; then
+  # `simctl uninstall` removes the app with its data container, which is the one
+  # reset this command can guarantee: the app's own HOSTED_TEST reset needs the
+  # app to launch and finish building its model, and a deadline or a signal can
+  # cut that short - the pairing would survive, which is the poisoning this reset
+  # exists to prevent. The next run installs the app under test again.
+  if ! xcrun simctl uninstall "$ui_simulator_id" "$bundle_id" >/dev/null 2>&1; then
     echo "warning: could not reset the lane's hosted app state ($bundle_id)" >&2
     return 0
   fi
-  xcrun simctl terminate "$ui_simulator_id" "$bundle_id" >/dev/null 2>&1 || true
 }
 
 finish_e2e_run() {

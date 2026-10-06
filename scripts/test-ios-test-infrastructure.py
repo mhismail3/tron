@@ -1887,6 +1887,8 @@ if command == 'terminate':
     raise SystemExit(0)
 if command == 'launch':
     print('4242'); raise SystemExit(0)
+if command == 'uninstall':
+    raise SystemExit(0)
 if command == 'get_app_container':
     print('no such app container', file=sys.stderr); raise SystemExit(2)
 if command in ('boot', 'shutdown'):
@@ -3632,13 +3634,13 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
             "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
         ]
 
-    def hosted_app_launches(self) -> list[str]:
+    def hosted_app_resets(self) -> list[str]:
         """The simctl calls that reset the lane's hosted app state."""
         try:
             lines = self.log_path.read_text().splitlines()
         except FileNotFoundError:
             return []
-        return [line for line in lines if line.startswith("launch ")]
+        return [line for line in lines if line.startswith("uninstall ")]
 
     def test_run_ui_builds_the_ui_plan_and_patches_the_ui_target(self) -> None:
         """Failure modes 17 and 18: the UI runner, not the hosted unit runner,
@@ -3754,8 +3756,8 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         self.assertEqual(len(products), 1, status.stdout)
         self.assertIn("built from this worktree's current source state", products[0])
         self.assertEqual(
-            self.hosted_app_launches(),
-            [f"launch {marker['udid']} com.tron.mobile.testhost --tron-reset-ui-test-state"],
+            self.hosted_app_resets(),
+            [f"uninstall {marker['udid']} com.tron.mobile.testhost"],
             "the command must return the lane's hosted app to its unpaired state",
         )
 
@@ -3787,7 +3789,7 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         self.assertEqual(status.returncode, 0, status.stderr)
         self.assertIn("Gateway: stopped", status.stdout)
         self.assertIn("Fault proxy: stopped", status.stdout)
-        self.assertEqual(len(self.hosted_app_launches()), 1, "a failed run must still reset the hosted app")
+        self.assertEqual(len(self.hosted_app_resets()), 1, "a failed run must still reset the hosted app")
 
     def test_only_testing_refuses_a_selector_run_ui_does_not_own(self) -> None:
         """The journeys are `run-ui`'s alone — a selector for anything else, a
