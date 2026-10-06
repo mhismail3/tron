@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,12 +16,15 @@ import { RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-fixture";
 const MODEL_ID = "home-model";
+const OTHER_MODEL_ID = "home-model-2";
 const VIRTUAL_MODEL_ID = "home-router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 /** Long enough that a faux stream is still running when the cache warmer fires
  * (the SDK's minimum warm delay is one second). */
 const SLOW_RESPONSE = "streaming reply ".repeat(400);
 const LARGE_PROMPT = "context ".repeat(1_000);
+const SYSTEM_SENTINEL = "HOME-SYSTEM-SENTINEL";
+const APPEND_SENTINEL = "HOME-APPEND-SENTINEL";
 
 /** Retained, regenerable evidence for this suite. */
 const report: { suite: string; cases: Array<{ name: string; outcome: "passed" | "failed"; detail?: string }> } = {
@@ -78,6 +82,43 @@ interface Fixture {
   registry: RuntimeRegistry;
   service: GatewayService;
   diagnostics: Array<{ outcome: string; reason?: string }>;
+  events: Array<{ sessionId: string; topic: string }>;
+}
+
+function openRegistry(f: {
+  agentDir: string;
+  tronHome: string;
+  cwd: string;
+  runtime: ModelRuntime;
+  faux: FauxProviderHandle;
+  diagnostics: Fixture["diagnostics"];
+  events: Fixture["events"];
+}): { registry: RuntimeRegistry; service: GatewayService } {
+  const registry = new RuntimeRegistry({
+    agentDir: f.agentDir,
+    tronHome: f.tronHome,
+    idleRuntimeMs: 60_000,
+    modelRuntimeFactory: async () => f.runtime,
+    trust: new TrustService(f.agentDir),
+    broadcast: (sessionId, topic) => { f.events.push({ sessionId, topic }); },
+    sessionSummaryChanged: () => {},
+    sessionListChanged: () => {},
+    // The notify module is host-owner conditional for every profile, so the
+    // fixture offers its owner and the curated Home list is exercised in full.
+    notifications: { enqueue: async () => "queued" } as unknown as NotificationService,
+    homeDiagnostic: (diagnostic) => f.diagnostics.push(diagnostic),
+  });
+  registries.push(registry);
+  const service = new GatewayService({
+    config: { tronHome: f.tronHome } as unknown as GatewayConfig,
+    modelRuntime: f.runtime,
+    sessions: registry,
+    home: registry.homeOwner(),
+    receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
+    settings: new SettingsService(f.agentDir, f.runtime),
+    trust: new TrustService(f.agentDir),
+  } as unknown as GatewayServiceDependencies);
+  return { registry, service };
 }
 
 async function fixture(label: string, options: { cacheWarming?: boolean; virtualModel?: boolean } = {}): Promise<Fixture> {
@@ -94,7 +135,10 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
   }));
   const faux = fauxProvider({
     provider: PROVIDER,
-    models: [{ id: MODEL_ID, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 300 } }],
+    models: [
+      { id: MODEL_ID, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 300 } },
+      { id: OTHER_MODEL_ID, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 300 } },
+    ],
     // Slow enough that a long response keeps its run live across the SDK's
     // one-second minimum cache-warm delay.
     tokensPerSecond: 300,
@@ -112,32 +156,36 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
   const trust = new TrustService(agentDir);
   await trust.set(cwd, true);
   const diagnostics: Fixture["diagnostics"] = [];
-  const registry = new RuntimeRegistry({
-    agentDir,
-    tronHome,
-    idleRuntimeMs: 60_000,
-    modelRuntimeFactory: async () => runtime,
-    trust,
-    broadcast: () => {},
-    sessionSummaryChanged: () => {},
-    sessionListChanged: () => {},
-    // The notify module is host-owner conditional for every profile, so the
-    // fixture offers its owner and the curated Home list is exercised in full.
-    notifications: { enqueue: async () => "queued" } as unknown as NotificationService,
-    homeDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
-  });
-  registries.push(registry);
-  await registry.initialize();
-  const service = new GatewayService({
-    config: { tronHome } as unknown as GatewayConfig,
-    modelRuntime: runtime,
-    sessions: registry,
-    home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(root, "receipts")),
-    settings: new SettingsService(agentDir, runtime),
-    trust,
-  } as unknown as GatewayServiceDependencies);
-  return { agentDir, cwd, tronHome, faux, runtime, registry, service, diagnostics };
+  const events: Fixture["events"] = [];
+  const f: Fixture = { agentDir, cwd, tronHome, faux, runtime, diagnostics, events, registry: undefined!, service: undefined! };
+  const opened = openRegistry(f);
+  f.registry = opened.registry;
+  f.service = opened.service;
+  await f.registry.initialize();
+  return f;
+}
+
+/** Dispose the Gateway and open a new one over the same installation: the same
+ * thing a Gateway restart does. */
+/** Wait for the restarted Gateway's first catalog cut, so membership reads are
+ * proven rather than merely unavailable. */
+async function waitForCatalog(f: Fixture): Promise<void> {
+  const deadline = performance.now() + 15_000;
+  const cut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+  while (!cut()) {
+    if (performance.now() >= deadline) throw new Error("catalog cut timed out");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await f.registry.catalog("all");
+}
+
+async function reopen(f: Fixture): Promise<void> {
+  await f.registry.dispose();
+  registries.splice(registries.indexOf(f.registry), 1);
+  const opened = openRegistry(f);
+  f.registry = opened.registry;
+  f.service = opened.service;
+  await f.registry.initialize();
 }
 
 interface ContextEnvelope {
@@ -145,6 +193,8 @@ interface ContextEnvelope {
   availableTools: Array<{ name: string }>;
   extensions: Array<{ name: string }>;
   skills: { skills: unknown[] };
+  systemPrompt: string;
+  instructions: { text: string };
 }
 
 async function contextOf(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>): Promise<ContextEnvelope> {
@@ -164,8 +214,11 @@ function registeredTools(context: ContextEnvelope): string[] {
   return context.availableTools.map((tool) => tool.name).sort();
 }
 
-async function designate(f: Fixture, commandId: string): Promise<HomeDesignation> {
-  return await f.service.invoke(client, "home.designate", { commandId, model: MODEL }) as unknown as HomeDesignation;
+async function designate(f: Fixture, commandId: string, model: { provider: string; id: string } | null = MODEL): Promise<HomeDesignation> {
+  return await f.service.invoke(client, "home.designate", {
+    commandId,
+    ...(model ? { model } : {}),
+  }) as unknown as HomeDesignation;
 }
 
 async function homeStatus(f: Fixture): Promise<HomeStatus> {
@@ -197,10 +250,12 @@ describe.sequential("Tron Home designation", () => {
     expect(extensionNames(ordinaryContext)).toEqual(extensionNames(controlContext));
     expect(registeredTools(ordinaryContext)).toEqual(registeredTools(controlContext));
 
-    expect(await homeStatus(f)).toEqual({ available: true, enabled: false, live: false });
+    expect(await homeStatus(f)).toEqual({ available: true, enabled: false, live: false, sessionPresent: false });
 
-    const designation = await designate(f, "home-designate-1");
+    // The default-model branch: no model named means this Gateway's default.
+    const designation = await designate(f, "home-designate-1", null);
     expect(designation.generation).toBe(1);
+    expect((await homeStatus(f)).model).toEqual(MODEL);
 
     // The first runtime of the new Home is already the Home profile, read from
     // the live session rather than from the record.
@@ -223,7 +278,7 @@ describe.sequential("Tron Home designation", () => {
 
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: true, homeId: designation.homeId,
-      sessionId: designation.sessionId, generation: 1, model: MODEL, live: true,
+      sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
     });
 
     // Idempotent, and a replayed command id returns the same result.
@@ -257,55 +312,193 @@ describe.sequential("Tron Home designation", () => {
     const leaf = (home as unknown as { sessionManager: { getLeafId(): string | null } }).sessionManager.getLeafId();
     expect(leaf).toBeTypeOf("string");
     const forked = await home.fork(leaf!);
-    expect(f.registry.homeOwner().isEnabledHome(forked.sessionId)).toBe(false);
+    expect(f.registry.homeOwner().profileFor(forked.sessionId)).not.toBe("home");
     const forkedSlot = await f.registry.acquire(forked.sessionId);
     const forkedContext = await contextOf(forkedSlot);
     // The curated profile is keyed by session id, so the fork registers exactly
     // what the control registry's ordinary session registers, and compaction is
     // back to the canonical budget. Its *active* set is the Home loadout the
-    // canonical transcript declares, which Pi replays for every chat.
+    // canonical transcript declares, which Pi replays for every chat (documented
+    // in docs/home.md); `session.setTools` is how a user changes it.
     expect(registeredTools(forkedContext)).toEqual(registeredTools(controlContext));
     expect(extensionNames(forkedContext)).toEqual(extensionNames(controlContext));
     expect(activeTools(forkedContext)).toEqual(HOME_TOOLS);
     expect(forkedSlot.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
+    await forkedSlot.setTools(activeTools(controlContext));
+    expect(activeTools(await contextOf(forkedSlot))).toEqual(activeTools(controlContext));
   });
 
-  homeCase("disables and re-enables the same session, rebuilding the live runtime each time", async () => {
-    // Failure modes 18, 20.
+  homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from Home", async () => {
+    // P3-6: the curated profile drops the agent-directory system prompt files
+    // too, and an ordinary session in the same installation still loads them.
+    const f = await fixture("systemprompt");
+    await writeFile(join(f.agentDir, "SYSTEM.md"), `${SYSTEM_SENTINEL}\n`);
+    await writeFile(join(f.agentDir, "APPEND_SYSTEM.md"), `${APPEND_SENTINEL}\n`);
+
+    const ordinary = await f.registry.create(f.cwd);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const ordinaryContext = await contextOf(ordinary);
+    expect(ordinaryContext.instructions.text).toContain(SYSTEM_SENTINEL);
+    expect(ordinaryContext.instructions.text).toContain(APPEND_SENTINEL);
+
+    const designation = await designate(f, "home-designate-systemprompt");
+    const homeContext = await contextOf(await f.registry.acquire(designation.sessionId));
+    expect(homeContext.systemPrompt).not.toContain(SYSTEM_SENTINEL);
+    expect(homeContext.systemPrompt).not.toContain(APPEND_SENTINEL);
+    expect(homeContext.instructions.text).not.toContain(SYSTEM_SENTINEL);
+    expect(homeContext.instructions.text).not.toContain(APPEND_SENTINEL);
+  });
+
+  homeCase("refuses a profile change while the session is running, deterministically", async () => {
+    // P3-2: the run is held open by a response that waits for this test, so the
+    // refusal is not a race with a timed-out stream.
+    const f = await fixture("busy");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    f.faux.setResponses([async () => {
+      await held;
+      return fauxAssistantMessage("released");
+    }]);
+
+    const designation = await designate(f, "home-designate-busy");
+    const home = await f.registry.acquire(designation.sessionId);
+    await home.prompt("hold the run open");
+    await waitUntil(() => home.isBusy);
+
+    await expect(f.service.invoke(client, "home.disable", { commandId: "home-disable-busy" }))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(await homeStatus(f)).toMatchObject({ enabled: true, generation: 1, sessionId: designation.sessionId });
+
+    release();
+    await waitUntil(() => !home.isBusy, 20_000);
+    const disabled = await f.service.invoke(client, "home.disable", { commandId: "home-disable-after-busy" }) as unknown as HomeDesignation;
+    expect(disabled).toEqual({ ...designation, generation: 2 });
+    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "refused", "disabled"]);
+  });
+
+  homeCase("replaces the live runtime in place, keeping the slot, its subscribers and the session", async () => {
+    // P2-1/P2-5: a profile change never retires the slot, so the session (which
+    // may never have been written) and its subscribers survive.
     const f = await fixture("lifecycle");
-    f.faux.setResponses([fauxAssistantMessage("home reply")]);
     const designation = await designate(f, "home-designate-lifecycle");
     const home = await f.registry.acquire(designation.sessionId);
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
+    // Never prompted, so nothing has been written for it yet.
+    expect(home.sessionFile).toBeTypeOf("string");
+    expect(existsSync(home.sessionFile!)).toBe(false);
 
-    // Busy: refused retryably, and nothing changed.
-    await home.prompt("keep the runtime busy");
-    expect(home.isBusy).toBe(true);
-    await expect(f.service.invoke(client, "home.disable", { commandId: "home-disable-busy" }))
-      .rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(await homeStatus(f)).toMatchObject({ enabled: true, generation: 1 });
-    await waitUntil(() => !home.isBusy);
+    f.registry.subscribe("test-audience", designation.sessionId);
+    const before = home.snapshot();
 
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "home-disable-1" }) as unknown as HomeDesignation;
     expect(disabled).toEqual({ ...designation, generation: 2 });
     expect(await f.service.invoke(client, "home.disable", { commandId: "home-disable-2" }) as unknown as HomeDesignation)
       .toEqual(disabled);
-    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "refused", "disabled"]);
 
-    // The live runtime was retired, so the next one is ordinary.
-    const ordinary = await f.registry.acquire(designation.sessionId);
-    const ordinaryContext = await contextOf(ordinary);
+    // The same slot object, still live, still unpersisted, and now ordinary.
+    expect(await f.registry.acquire(designation.sessionId)).toBe(home);
+    // The never-written session is still here: the replacement reused it rather
+    // than retiring the slot.
+    expect(existsSync(home.sessionFile!)).toBe(false);
+    expect(home.snapshot().revision).toBeGreaterThan(before.revision);
+    const ordinaryContext = await contextOf(home);
     expect(registeredTools(ordinaryContext)).toContain("write");
     expect(extensionNames(ordinaryContext)).toContain("tron-core");
-    expect(ordinary.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
+    expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
+    expect(await homeStatus(f)).toMatchObject({ enabled: false, live: true, sessionPresent: true });
+    // The replacement published to the session's subscribers, which the slot
+    // never dropped: it reuses the same session identity.
+    const published = f.events.filter((event) => event.sessionId === designation.sessionId).map((event) => event.topic);
+    expect(published).toContain("session.resourcesChanged");
+    expect(published).toContain("session.snapshot");
+    f.registry.unsubscribe("test-audience", designation.sessionId);
+
+    // A command id replayed after the disable still returns its original result.
+    expect(await designate(f, "home-designate-lifecycle")).toEqual(designation);
 
     const reenabled = await f.service.invoke(client, "home.designate", {
       commandId: "home-designate-3", model: MODEL,
     }) as unknown as HomeDesignation;
     expect(reenabled).toEqual({ ...designation, generation: 3 });
-    const homeAgain = await f.registry.acquire(designation.sessionId);
-    expect(activeTools(await contextOf(homeAgain))).toEqual(HOME_TOOLS);
-    expect(homeAgain.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: false });
+    expect(await f.registry.acquire(designation.sessionId)).toBe(home);
+    expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
+    expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: false });
+  });
+
+  homeCase("keeps the transcript's declared loadout across a profile change, and setTools restores the tools", async () => {
+    // P2-4: the disable does not rewrite the chat's declared loadout, so the
+    // ACTIVE set stays Home's until the user changes it.
+    const f = await fixture("loadout");
+    f.faux.setResponses([fauxAssistantMessage("home reply")]);
+    const designation = await designate(f, "home-designate-loadout");
+    const home = await f.registry.acquire(designation.sessionId);
+    await home.prompt("record the loadout");
+    await waitUntil(() => !home.isBusy);
+
+    const ordinary = await f.registry.create(f.cwd);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const ordinaryActive = activeTools(await contextOf(ordinary));
+
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-loadout" });
+    const context = await contextOf(home);
+    expect(activeTools(context)).toEqual(HOME_TOOLS);
+    expect(registeredTools(context)).toEqual(registeredTools(await contextOf(ordinary)));
+    await home.setTools(ordinaryActive);
+    expect(activeTools(await contextOf(home))).toEqual(ordinaryActive);
+  });
+
+  homeCase("mints a fresh Home session when the recorded session is gone", async () => {
+    // P1: designate and disable before any prompt, then restart the Gateway. The
+    // never-written session is gone from the catalog, so the record is dangling.
+    const f = await fixture("dangling");
+    const designation = await designate(f, "home-designate-dangling");
+    expect(f.registry.homeOwner().profileFor(designation.sessionId)).toBe("home");
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-dangling" });
+    await reopen(f);
+    // Let the restarted Gateway finish its first catalog cut, so membership is
+    // proven rather than merely unavailable.
+    await waitForCatalog(f);
+
+    expect(await homeStatus(f)).toMatchObject({
+      available: true, enabled: false, sessionId: designation.sessionId, generation: 2,
+      live: false, sessionPresent: false,
+    });
+
+    const fresh = await designate(f, "home-designate-fresh");
+    expect(fresh).toEqual({ homeId: designation.homeId, sessionId: expect.any(String), generation: 3 });
+    expect(fresh.sessionId).not.toBe(designation.sessionId);
+    const home = await f.registry.acquire(fresh.sessionId);
+    expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
+    expect(await homeStatus(f)).toMatchObject({ enabled: true, sessionId: fresh.sessionId, live: true, sessionPresent: true });
+  });
+
+  homeCase("applies the recorded physical model when re-enabling a Home whose session moved on", async () => {
+    // P2-2: the model is resolved at re-enable (the request's, else the
+    // record's), and the live session is brought back to it.
+    const f = await fixture("model", { virtualModel: true });
+    const designation = await designate(f, "home-designate-model");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-model" });
+
+    // An ordinary session may take a virtual model; Home must not.
+    await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
+    expect(home.snapshot().model).toMatchObject({ id: VIRTUAL_MODEL_ID });
+    expect((await homeStatus(f)).model).toEqual(MODEL);
+
+    const reenabled = await designate(f, "home-designate-model-again");
+    expect(reenabled.generation).toBe(3);
+    expect(await f.registry.acquire(designation.sessionId)).toBe(home);
+    expect(home.snapshot().model).toMatchObject({ id: MODEL_ID });
+    expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
+    expect((await homeStatus(f)).model).toEqual(MODEL);
+
+    // A model applied to the enabled Home is the record's model from then on.
+    await home.setModel(PROVIDER, OTHER_MODEL_ID);
+    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: OTHER_MODEL_ID });
+    await expect(f.service.invoke(client, "home.designate", {
+      commandId: "home-designate-model-virtual",
+      model: { provider: PROVIDER, id: VIRTUAL_MODEL_ID },
+    })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   homeCase("sends zero cache-warming requests for Home while an ordinary session still warms", async () => {
