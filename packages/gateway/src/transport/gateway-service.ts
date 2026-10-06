@@ -496,6 +496,13 @@ export class GatewayService {
             tokenBudget: integer(params.tokenBudget, "tokenBudget", 1, MAXIMUM_MEMORY_TOKEN_BUDGET),
           }));
         });
+      case "home.resumeMemory":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          // A budget block is refused here: its cause is the configured ceiling,
+          // so the answer is home.configureMemory with a raised budget.
+          return safeJson(await this.requireHome().resumeMemory());
+        });
       case "home.context": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home context accepts no parameters");
         return safeJson(this.requireHome().contextStatus());

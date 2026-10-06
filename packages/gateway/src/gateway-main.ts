@@ -248,11 +248,21 @@ const sessions = new RuntimeRegistry({
     if (isVirtualModel(resolved)) return { refusal: "virtual-model" as const };
     return { summarizer: createModelRuntimeSummarizer(modelRuntime, resolved) };
   },
-  homeMemoryDiagnostic: (record) => logger.log(record.level, "Tron Home memory diagnostic", {
-    event: record.event, source: "home",
-    ...(record.reason === undefined ? {} : { reason: record.reason }),
-    ...(record.counts === undefined ? {} : { counts: record.counts }),
-  }),
+  homeMemoryDiagnostic: (record) => {
+    if (record.event === "home.memory-ingest") {
+      // A code, never the failure's own message: an episodic ingest failure can
+      // name the canonical session path.
+      logger.log("warning", "Home memory could not ingest committed entries", {
+        event: "home.memory-ingest", source: "home", reason: record.reason,
+      });
+      return;
+    }
+    logger.log(record.level, "Tron Home memory diagnostic", {
+      event: record.event, source: "home",
+      ...(record.reason === undefined ? {} : { reason: record.reason }),
+      ...(record.counts === undefined ? {} : { counts: record.counts }),
+    });
+  },
   // Home is used deliberately, one turn at a time, so one line per activation is
   // both affordable and the only place a turn's effective size and the readiness
   // wait it took are visible. No message text, entry id or nonce is included.

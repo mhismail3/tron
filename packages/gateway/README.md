@@ -647,12 +647,17 @@ created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns the bounded projection
 `{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
   sessionPresent, memory }`, where `memory` is
-`{ configured, open, model?, tokenBudget?, episodic?, blocked?, reason? }` and
-`episodic` is the memory owner's own bounded status. `home.designate`,
-`home.disable` and `home.configureMemory` are command-id-receipted mutations,
+`{ configured, open, model?, tokenBudget?, spentTokens?, episodic?, blocked?,
+  reason? }`, `episodic` is the memory owner's own bounded status and
+`spentTokens` is the persisted spend (present whenever a store exists, open or
+not, because a restart restores it and charges it against the budget). `home.designate`,
+`home.disable`, `home.configureMemory` and `home.resumeMemory` are
+command-id-receipted mutations,
 `home.context` (a read) returns the bounded request context of Home's current or
-last activation — its start entry id, view line and byte counts, effective
-tokens, model window and last refusal reason, and never a message body — and
+last activation — its start entry id, whether it is open, its view line and byte
+counts, effective tokens, model window and its own refusal reason (the sizes are
+absent when it was refused before it prepared a request), and never a message
+body — and
 `home.v1` is advertised in `hello`/`system.info`. There are no memory defaults:
 Home refuses its activations until `home.configureMemory` records a physical
 model and a token budget. Home runs in the neutral

@@ -102,14 +102,13 @@ import {
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
-import type { HomeMemoryModelResolution } from "../home/home-memory.js";
+import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
 import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
 import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
-import type { EpisodicDiagnostic } from "../episodic/episodic-contract.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -749,7 +748,7 @@ export class RuntimeRegistry {
        * session's runtime. Absent means no Home memory can be configured. */
       homeMemorySummarizer?: (model: { provider: string; id: string }) => HomeMemoryModelResolution;
       /** Where Home's memory reports its bounded records. */
-      homeMemoryDiagnostic?: (record: EpisodicDiagnostic) => void;
+      homeMemoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
       /** Where Home's request seam reports one record per activation and per
        * refusal. */
       homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
@@ -4267,10 +4266,6 @@ export class RuntimeRegistry {
     }
   }
 
-  /** Whether Home's recorded session still exists: a live runtime, or a
-   * canonical session the catalog still holds. A catalog read that cannot
-   * complete is not proof of absence, so the recorded session is kept rather
-   * than replaced. */
   /** The canonical file behind one session id: the live runtime's when it has
    * one, else the catalog's exact path. Home's memory must open across an idle
    * eviction, so a live runtime is not required. */
@@ -4284,6 +4279,10 @@ export class RuntimeRegistry {
     }
   }
 
+  /** Whether Home's recorded session still exists: a live runtime, or a
+   * canonical session the catalog still holds. A catalog read that cannot
+   * complete is not proof of absence, so the recorded session is kept rather
+   * than replaced. */
   private async homeSessionPresent(sessionId: string): Promise<boolean> {
     if (this.slots.has(sessionId)) return true;
     try {

@@ -1,9 +1,10 @@
 import { stat } from "node:fs/promises";
 import {
-  createEpisodicTokenBudget, EpisodicMemoryError,
+  createEpisodicTokenBudget, EpisodicMemoryError, EPISODIC_DEFAULTS,
   type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
 } from "../episodic/episodic-contract.js";
-import { EpisodicMemory } from "../episodic/episodic-memory.js";
+import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 import type { HomeMemoryStatus, ModelRef } from "../protocol/types.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView } from "./home-request-policy.js";
@@ -39,6 +40,25 @@ export interface HomeMemoryConfig {
   tokenBudget: number;
 }
 
+/**
+ * Why Home's memory could not ingest committed entries. A code, never a message:
+ * this reaches the Gateway log, and an episodic failure's own message can carry
+ * the canonical session path.
+ */
+export type HomeMemoryIngestFailure =
+  | "source-unavailable"
+  | "store-refused"
+  | "blocked"
+  | "invalid-request"
+  | "already-open"
+  | "unknown";
+
+/** What the Gateway log receives from Home's memory: the module's own bounded
+ * records, and Home's coded ingest failure. */
+export type HomeMemoryDiagnostic =
+  | { event: "home.memory-ingest"; level: "warning"; reason: HomeMemoryIngestFailure }
+  | EpisodicDiagnostic;
+
 /** How the configured model can back the memory's compactor calls. */
 export type HomeMemoryModelResolution =
   | { summarizer: EpisodicSummarizer }
@@ -55,7 +75,7 @@ export interface HomeMemoryOptions {
   /** Resolves the compactor's model the way Knowledge resolves the model for its
    * own model calls: from the Gateway's ModelRuntime, never a session's. */
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
-  diagnostic?: (record: EpisodicDiagnostic) => void;
+  diagnostic?: (record: HomeMemoryDiagnostic) => void;
   limits?: Partial<EpisodicLimits>;
 }
 
@@ -79,7 +99,15 @@ export class HomeMemory {
   private config: HomeMemoryConfig | undefined;
   private summarizer: EpisodicSummarizer | undefined;
   private binding: MemoryBinding | undefined;
-  private failure: string | undefined;
+  private failure: HomeMemoryIngestFailure | undefined;
+  /**
+   * One lock over every open and close. #415's store allows one opener per
+   * process, so an un-serialized `configureMemory` racing an activation's first
+   * step could open the same store twice (`already-open`) or close a store the
+   * other is reading. The lock is held for the open itself and never across a
+   * wait: an activation's readiness wait happens outside it.
+   */
+  private readonly mutex = new AsyncMutex();
 
   constructor(private readonly options: HomeMemoryOptions) {}
 
@@ -95,21 +123,52 @@ export class HomeMemory {
    */
   async configure(config: HomeMemoryConfig, options: { previousTokenBudget?: number } = {}): Promise<void> {
     const summarizer = this.resolve(config);
-    const current = this.config;
-    const same = current !== undefined
-      && current.model.provider === config.model.provider
-      && current.model.id === config.model.id
-      && current.tokenBudget === config.tokenBudget;
-    if (same && this.binding) return;
-    const previous = options.previousTokenBudget ?? current?.tokenBudget;
-    const raised = previous !== undefined && config.tokenBudget > previous;
-    await this.close();
-    this.config = { model: { ...config.model }, tokenBudget: config.tokenBudget };
-    this.summarizer = summarizer;
-    this.failure = undefined;
-    const sessionFile = await this.existingSessionFile();
-    if (!sessionFile) return;
-    await this.openStore(sessionFile, raised);
+    return await this.mutex.run(async () => {
+      const current = this.config;
+      const modelChanged = current !== undefined
+        && (current.model.provider !== config.model.provider || current.model.id !== config.model.id);
+      const same = current !== undefined && !modelChanged && current.tokenBudget === config.tokenBudget;
+      if (same && this.binding) return;
+      const previous = options.previousTokenBudget ?? current?.tokenBudget;
+      const raised = previous !== undefined && config.tokenBudget > previous;
+      await this.closeLocked();
+      this.config = { model: { ...config.model }, tokenBudget: config.tokenBudget };
+      this.summarizer = summarizer;
+      this.failure = undefined;
+      const sessionFile = await this.existingSessionFile();
+      if (!sessionFile) return;
+      await this.openStore(sessionFile, raised, modelChanged);
+    });
+  }
+
+  /**
+   * Clear a block the caller has addressed with an operator action:
+   * `home.resumeMemory`. A budget block is not that: its cause is the configured
+   * ceiling, so it is refused here and the caller raises the budget instead.
+   * The re-read and the pump start happen under the lock; the drain does not.
+   */
+  async resumeBlock(): Promise<void> {
+    const binding = await this.mutex.run(() => this.bindingForViewLocked());
+    const blocked = binding.memory.status().blocked;
+    if (!blocked) return;
+    if (blocked.reason === "budget-exhausted") {
+      throw new HomeMemoryRefusal(
+        "memory-blocked",
+        "Home memory is blocked by its token budget: raise tokenBudget with home.configureMemory",
+      );
+    }
+    await binding.memory.resumeIngested();
+  }
+
+  /** The persisted state of this memory's store, without opening it: the spend a
+   * budget is charged for and the block that refuses every activation. */
+  async persistedState(): Promise<{ spend: number; blocked: EpisodicBlocked | null } | undefined> {
+    const state = await readEpisodicState({
+      workspace: this.options.workspace,
+      sessionId: this.options.sessionId,
+      maxStoreLineBytes: this.options.limits?.maxStoreLineBytes ?? EPISODIC_DEFAULTS.maxStoreLineBytes,
+    });
+    return state ? { spend: state.spend, blocked: state.blocked } : undefined;
   }
 
   /** Whether the store is open and serving. */
@@ -125,12 +184,15 @@ export class HomeMemory {
   noteEntriesCommitted(): void {
     const binding = this.binding;
     if (!binding) return;
-    void binding.memory.entriesCommitted(this.options.sessionId).catch((error: unknown) => {
-      this.failure = messageOf(error);
-      this.options.diagnostic?.({
-        event: "episodic.store-refused", level: "warning",
-        message: "Home memory could not ingest committed entries", reason: this.failure,
-      });
+    void binding.memory.entriesCommitted(this.options.sessionId).then(() => {
+      this.failure = undefined;
+    }, (error: unknown) => {
+      const reason = homeMemoryIngestFailure(error);
+      // A store closed by a reconfiguration is not a failure: the next commit
+      // reads the store the configuration opened.
+      if (reason === undefined) return;
+      this.failure = reason;
+      this.options.diagnostic?.({ event: "home.memory-ingest", level: "warning", reason });
     });
   }
 
@@ -144,7 +206,7 @@ export class HomeMemory {
    * the log, unanswered.
    */
   async activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
-    const binding = await this.bindingForView();
+    const binding = await this.mutex.run(() => this.bindingForViewLocked());
     try {
       // Ingest only: the wait below is for the lines this activation will send,
       // never for summaries of the messages it is about to add.
@@ -155,7 +217,17 @@ export class HomeMemory {
     // A blocked memory stopped its pump, so it can never cover this activation.
     // Naming the block first is the actionable answer: its cause (a budget, an
     // unreachable model) is what the user fixes.
-    const blocked = binding.memory.status().blocked;
+    let blocked = binding.memory.status().blocked;
+    if (blocked?.reason === "retries-exhausted") {
+      // The one block a transient outage leaves behind, and the only one this
+      // activation re-arms by itself: resumeIngested clears it, re-reads the
+      // source and restarts the pump with the bounded retries re-armed, and the
+      // wait below then behaves as usual. A block that recurs during that wait is
+      // refused by the wait's own error path. Permanent, source and budget blocks
+      // are never resumed here: their causes are not time.
+      await binding.memory.resumeIngested();
+      blocked = binding.memory.status().blocked;
+    }
     if (blocked) throw this.blockedRefusal(blocked);
     const cut = binding.memory.cutAtEntry(activation.boundaryEntryId);
     if (cut === undefined) {
@@ -180,8 +252,8 @@ export class HomeMemory {
   /** The bounded memory status, for `home.status` and for the seam's evidence. */
   status(): HomeMemoryStatus {
     const config = this.config;
-    if (!config) return { configured: false, open: false, ...(this.failure ? { reason: this.failure } : {}) };
     const binding = this.binding;
+    if (!config) return { configured: false, open: false, ...(this.failure ? { reason: this.failure } : {}) };
     if (!binding) return { configured: true, open: false, model: { ...config.model }, tokenBudget: config.tokenBudget };
     const memory = binding.memory.status();
     return {
@@ -190,13 +262,17 @@ export class HomeMemory {
       model: { ...config.model },
       tokenBudget: config.tokenBudget,
       episodic: memory,
+      spentTokens: memory.tokens.used,
       ...(memory.blocked ? { blocked: memory.blocked.reason } : {}),
+      // The last ingest failure while the store is serving: the memory keeps
+      // serving, so this is why it is degraded rather than why it is stopped.
+      ...(this.failure ? { reason: this.failure } : {}),
     };
   }
 
   /** Release the store, so another Gateway authority may open it again. */
   async dispose(): Promise<void> {
-    await this.close();
+    await this.mutex.run(() => this.closeLocked());
     this.config = undefined;
     this.summarizer = undefined;
   }
@@ -221,7 +297,9 @@ export class HomeMemory {
     return resolution.summarizer;
   }
 
-  private async bindingForView(): Promise<MemoryBinding> {
+  /** The open binding, opening the store first when this is the first use.
+   * Callers hold the lock. */
+  private async bindingForViewLocked(): Promise<MemoryBinding> {
     const binding = this.binding;
     if (binding) return binding;
     if (!this.config || !this.summarizer) {
@@ -231,7 +309,7 @@ export class HomeMemory {
     if (!sessionFile) {
       throw new HomeMemoryRefusal("memory-unavailable", "the Home session has no canonical file to read yet");
     }
-    return await this.openStore(sessionFile, false);
+    return await this.openStore(sessionFile, false, false);
   }
 
   /** The canonical file, when the session already has one. A session exists
@@ -244,7 +322,7 @@ export class HomeMemory {
     return info?.isFile() ? path : undefined;
   }
 
-  private async openStore(sessionFile: string, raised: boolean): Promise<MemoryBinding> {
+  private async openStore(sessionFile: string, raised: boolean, modelChanged: boolean): Promise<MemoryBinding> {
     const summarizer = this.summarizer;
     const config = this.config;
     if (!summarizer || !config) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
@@ -266,14 +344,21 @@ export class HomeMemory {
       throw error;
     }
     this.binding = { memory };
-    // A stored `budget-exhausted` state outlives the process that block was
-    // written in, so a raise clears it here rather than waiting for the next
-    // commit to be refused. Nodes are durable: re-opening re-spends nothing.
-    if (raised && memory.status().blocked?.reason === "budget-exhausted") await memory.resume();
+    // A stored block outlives the process that wrote it, so a change that
+    // addresses its cause clears it here rather than waiting for the next commit
+    // to be refused: a raised budget for a budget block, and a different model
+    // for every other block (an unreachable or refusing model is the one a new
+    // model replaces). Nodes are durable, so re-opening re-spends nothing, and
+    // the resume does not wait for the pump: the caller is an operator command.
+    const blocked = memory.status().blocked;
+    const addressed = blocked !== null
+      && ((raised && blocked.reason === "budget-exhausted") || (modelChanged && blocked.reason !== "budget-exhausted"));
+    if (addressed) await memory.resumeIngested();
     return this.binding;
   }
 
-  private async close(): Promise<void> {
+  /** Close the store. Callers hold the lock. */
+  private async closeLocked(): Promise<void> {
     const binding = this.binding;
     this.binding = undefined;
     await binding?.memory.dispose();
@@ -282,4 +367,21 @@ export class HomeMemory {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Why an ingest failed, as a code. Undefined for a store that a reconfiguration
+ * closed: that race is not a failure. Exported because the Gateway's log depends
+ * on it: the reason is the only part of an episodic failure that may be recorded
+ * (an episodic failure's own message can name the canonical session path).
+ */
+export function homeMemoryIngestFailure(error: unknown): HomeMemoryIngestFailure | undefined {
+  if (!(error instanceof EpisodicMemoryError)) return "unknown";
+  if (error.kind === "closed") return undefined;
+  if (error.kind === "source") return "source-unavailable";
+  if (error.kind === "invalid-store" || error.kind === "unsafe-store") return "store-refused";
+  if (error.kind === "blocked") return "blocked";
+  if (error.kind === "invalid-request") return "invalid-request";
+  if (error.kind === "already-open") return "already-open";
+  return "unknown";
 }

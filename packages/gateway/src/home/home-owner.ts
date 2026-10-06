@@ -10,7 +10,10 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
-import { HomeMemory, MAXIMUM_MEMORY_TOKEN_BUDGET, type HomeMemoryModelResolution } from "./home-memory.js";
+import {
+  HomeMemory, MAXIMUM_MEMORY_TOKEN_BUDGET,
+  type HomeMemoryDiagnostic, type HomeMemoryModelResolution,
+} from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 
 /** One Gateway installation keeps at most one Home. */
@@ -92,7 +95,7 @@ export interface HomeOwnerOptions {
    * own calls: from the Gateway's ModelRuntime, never a session's runtime. */
   memorySummarizer: (model: ModelRef) => HomeMemoryModelResolution;
   /** Where Home's memory reports its bounded records. */
-  memoryDiagnostic?: (record: EpisodicDiagnostic) => void;
+  memoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
   /** Where Home's request seam reports one record per activation and per
    * refusal: the effective size of a turn and the readiness wait it took. */
   requestDiagnostic?: (record: HomeRequestRecord) => void;
@@ -142,14 +145,15 @@ export class HomeOwner {
   }
 
   async status(): Promise<HomeStatus> {
+    const memory = await this.memoryStatus();
     if (this.unavailable) {
       return {
         available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false,
-        memory: this.memoryStatus(),
+        memory,
       };
     }
     const record = this.record;
-    if (!record) return { available: true, enabled: false, live: false, sessionPresent: false, memory: this.memoryStatus() };
+    if (!record) return { available: true, enabled: false, live: false, sessionPresent: false, memory };
     return {
       available: true,
       enabled: record.enabled,
@@ -159,7 +163,7 @@ export class HomeOwner {
       model: { ...record.model },
       live: this.options.sessions.hasLiveRuntime(record.sessionId),
       sessionPresent: await this.options.sessions.sessionPresent(record.sessionId),
-      memory: this.memoryStatus(),
+      memory,
     };
   }
 
@@ -225,6 +229,11 @@ export class HomeOwner {
       this.assertAvailable();
       const record = this.record;
       if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
+      if (!record.enabled) {
+        // A disabled Home runs no activations, so a memory configuration would
+        // name spending nothing can use. Designate it first.
+        throw new GatewayError("conflict", "Tron Home is disabled: designate it before configuring its memory");
+      }
       const memory = { model: { ...input.model }, tokenBudget: input.tokenBudget };
       const owner = this.ownerFor(record.sessionId);
       // The record's previous budget is what a raise is measured against, even
@@ -238,15 +247,58 @@ export class HomeOwner {
     });
   }
 
-  /** The bounded memory status `home.status` reports. */
-  memoryStatus(): HomeMemoryStatus {
+  /**
+   * `home.resumeMemory`: clear a block that is not about the budget, re-read the
+   * source and restart the pump. The operator's answer to a `permanent-failure`
+   * (a model that refused a whole batch), a `retries-exhausted` block or a
+   * `source-unavailable` one whose cause is gone. A `budget-exhausted` memory is
+   * refused here: its cause is the configured ceiling, so the answer is a raised
+   * budget through `home.configureMemory`.
+   */
+  async resumeMemory(): Promise<HomeMemoryStatus> {
+    return this.mutex.run(async () => {
+      this.assertAvailable();
+      const record = this.record;
+      if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
+      if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before resuming its memory");
+      if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: configure it with home.configureMemory");
+      const owner = this.ownerFor(record.sessionId);
+      await owner.configure(record.memory);
+      const blocked = owner.status().blocked;
+      if (!blocked) {
+        throw new GatewayError("conflict", "Home memory is not blocked");
+      }
+      try {
+        await owner.resumeBlock();
+      } catch (error) {
+        if (error instanceof HomeMemoryRefusal) throw new GatewayError("conflict", error.message);
+        throw error;
+      }
+      return owner.status();
+    });
+  }
+
+  /**
+   * The bounded memory status `home.status` reports. A memory whose store is not
+   * open yet still reports what a restart would restore — the spend a budget is
+   * charged for and the block that refuses every activation — read from the
+   * store's own state document without opening it.
+   */
+  async memoryStatus(): Promise<HomeMemoryStatus> {
     const record = this.record;
     if (!record) return { configured: false, open: false };
     const owner = this.memory?.sessionId === record.sessionId ? this.memory.owner : undefined;
-    if (owner && owner.open) return owner.status();
-    return record.memory
+    if (owner?.open) return owner.status();
+    const base: HomeMemoryStatus = record.memory
       ? { configured: true, open: false, model: { ...record.memory.model }, tokenBudget: record.memory.tokenBudget }
       : { configured: false, open: false };
+    const persisted = await (owner ?? this.ownerFor(record.sessionId)).persistedState().catch(() => undefined);
+    if (!persisted) return base;
+    return {
+      ...base,
+      spentTokens: persisted.spend,
+      ...(persisted.blocked ? { blocked: persisted.blocked.reason } : {}),
+    };
   }
 
   /**
@@ -257,19 +309,22 @@ export class HomeOwner {
   contextStatus(): HomeContextProjection {
     const record = this.record;
     if (!record) return { available: false };
-    const policy = this.policies.get(record.sessionId);
-    const step = policy?.requestLog().at(-1);
-    if (!policy || !step) return { available: false };
-    const refusal = policy.refusalLog().at(-1);
+    const evidence = this.policies.get(record.sessionId)?.contextEvidence();
+    if (!evidence) return { available: false };
+    const step = evidence.step;
     return {
       available: true,
-      activationStartEntryId: step.boundaryEntryId,
-      activationOpen: policy.currentOperationId() !== undefined,
-      viewLines: step.viewLines,
-      viewBytes: step.viewBytes,
-      effectiveTokens: step.effectiveTokens,
-      contextWindow: step.contextWindow,
-      ...(refusal ? { lastRefusalReason: refusal.reason, lastRefusalDetail: refusal.detail } : {}),
+      activationStartEntryId: evidence.activationStartEntryId,
+      activationOpen: evidence.activationOpen,
+      // Absent until the activation prepared a request: an activation refused
+      // before that has a start entry and a reason, and no sizes.
+      ...(step ? {
+        viewLines: step.viewLines,
+        viewBytes: step.viewBytes,
+        effectiveTokens: step.effectiveTokens,
+        contextWindow: step.contextWindow,
+      } : {}),
+      ...(evidence.refusal ? { lastRefusalReason: evidence.refusal.reason, lastRefusalDetail: evidence.refusal.detail } : {}),
     };
   }
 
@@ -388,6 +443,10 @@ export class HomeOwner {
           policyRevision: HOME_POLICY_REVISION,
           enabled: true,
           model: { ...model },
+          // The memory's configuration is the user's decision about *how* Home
+          // remembers, so a replacement session keeps it; the spend is the old
+          // session's, and a new store starts its own (docs/home.md).
+          ...(existing?.memory ? { memory: { model: { ...existing.memory.model }, tokenBudget: existing.memory.tokenBudget } } : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
@@ -416,10 +475,6 @@ export class HomeOwner {
         generation: existing.generation + 1,
         updatedAt: new Date().toISOString(),
       };
-      // A disabled Home has no Home memory to keep open: the session is ordinary
-      // again. Re-enabling re-opens it from the record, and the store keeps every
-      // node, so nothing is re-spent.
-      await this.releaseMemory();
       // A session that is gone needs no runtime work; a live one is rebuilt in
       // place, which is also where a running session is refused.
       if (await this.options.sessions.sessionPresent(next.sessionId)) {
@@ -427,6 +482,11 @@ export class HomeOwner {
       } else {
         await this.write(next);
       }
+      // Only once the change is committed: a refused (busy) disable must leave
+      // the memory and the activation waiting in it exactly as they were.
+      // Re-enabling re-opens the memory from the record and the store keeps every
+      // node, so nothing is re-spent.
+      await this.releaseMemory();
       this.options.diagnostic?.({ outcome: "disabled" });
       return designation(next);
     });

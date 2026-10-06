@@ -1058,6 +1058,10 @@ export interface HomeMemoryStatus {
   open: boolean;
   model?: ModelRef;
   tokenBudget?: number;
+  /** Tokens this memory has spent over its life, read from its persisted state;
+   * present whenever a store exists, open or not, because a restart restores it
+   * and charges it against the budget. */
+  spentTokens?: number;
   episodic?: {
     sourceSessionId: string;
     generation: number;
@@ -1097,10 +1101,14 @@ export type HomeContextProjection =
     activationStartEntryId: string | null;
     /** Whether that activation is still open (its run has not settled). */
     activationOpen: boolean;
-    viewLines: number;
-    viewBytes: number;
-    effectiveTokens: number;
-    contextWindow: number;
+    /** The sizes of the request that activation prepared. Absent when it was
+     * refused before it prepared one: the start entry and the refusal below are
+     * still this activation's, never another's. */
+    viewLines?: number;
+    viewBytes?: number;
+    effectiveTokens?: number;
+    contextWindow?: number;
+    /** This activation's own refusal, when it was refused. */
     lastRefusalReason?: string;
     lastRefusalDetail?: string;
   };

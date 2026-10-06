@@ -21,7 +21,7 @@ import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
-import { HOME_NONCE_MARKER } from "../home/home-request-policy.js";
+import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -46,13 +46,21 @@ const report: { generatedAt: string; cases: Array<Record<string, unknown>> } = {
 };
 
 const longInput = (marker: string): string => `${marker} ${FILLER}`;
-const client = { id: "terminal", identity: "device:home-activation", isLocal: false } as ClientContext;
+const client = {
+  id: "terminal",
+  identity: "device:home-activation",
+  isLocal: false,
+  unsubscribe: () => {},
+} as unknown as ClientContext;
 
 interface CompactorState {
   calls: number;
   entered: number;
   gate: Promise<void> | undefined;
   release: (() => void) | undefined;
+  /** Flipped by a case that needs the cause of a block to be gone (or present)
+   * before the next attempt. */
+  failing: boolean;
 }
 
 /** Provider usage a faux compactor reply reports, so Home's spend is measured
@@ -69,7 +77,17 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
     state.calls += 1;
     state.entered += 1;
     const text = request.turns.map((turn) => turn.text).join("\n");
-    if (request.turns.length === 1 && state.gate) await state.gate;
+    if (request.turns.length === 1 && state.gate) {
+      // A real compactor call honors the signal it was given, so a test that
+      // holds one must not be able to wedge a dispose (or a reconfiguration).
+      await Promise.race([
+        state.gate,
+        new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new Error("the compactor call was aborted")), { once: true })),
+      ]);
+    }
+    // A permanent provider refusal: the memory blocks rather than retrying, and
+    // the cause is the model, which a resume or a different model addresses.
+    if (state.failing) return fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_request_error: unsupported message" });
     const line = text.includes("must end where it is cut here")
       ? `${SUMMARY_MARKER} ${state.calls} shortened`
       : `${SUMMARY_MARKER} ${state.calls} ${"s".repeat(64)}`;
@@ -77,9 +95,9 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   };
 }
 
-async function waitUntil(predicate: () => boolean, timeoutMs = 15_000): Promise<void> {
+async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 15_000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (performance.now() >= deadline) throw new Error("condition timed out");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -128,6 +146,10 @@ interface Fixture {
   service: GatewayService;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
+  /** Every record the seam reported (activation sizes and refusals). */
+  requestRecords: HomeRequestRecord[];
+  /** Every record Home's memory reported. */
+  memoryDiagnostics: Array<{ event: string; reason?: string }>;
   openChatProvider: () => FauxProviderHandle;
 }
 
@@ -142,6 +164,8 @@ function openRegistry(f: Fixture): void {
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
     homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
+    homeRequestDiagnostic: (record) => f.requestRecords.push(record),
+    homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
   });
   registries.push(registry);
   const service = new GatewayService({
@@ -152,6 +176,8 @@ function openRegistry(f: Fixture): void {
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
     settings: new SettingsService(f.agentDir, f.runtime),
     trust: new TrustService(f.agentDir),
+    sessionDeleted: () => {},
+    uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   f.registry = registry;
   f.service = service;
@@ -182,10 +208,12 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
       route: () => ({ model: runtime.getModel(MEMORY_PROVIDER, MEMORY_MODEL_ID)!, thinkingLevel: "off" }),
     });
   }
-  const compactor: CompactorState = { calls: 0, entered: 0, gate: undefined, release: undefined };
+  const compactor: CompactorState = { calls: 0, entered: 0, gate: undefined, release: undefined, failing: false };
   const f: Fixture = {
     root, agentDir, tronHome, faux, runtime, compactor,
     summarizer: options.summarizer ?? deterministicSummarizer(compactor),
+    requestRecords: [],
+    memoryDiagnostics: [],
     registry: undefined!, service: undefined!,
     openChatProvider: () => faux,
   };
@@ -236,6 +264,24 @@ async function sessionJsonl(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>
   return slot.sessionFile ? await readFile(slot.sessionFile, "utf8").catch(() => "") : "";
 }
 
+/** The memory store's state document for one session, as the memory persists it
+ * (and as a restart restores it). */
+function memoryStatePath(f: Fixture, sessionId: string): string {
+  return join(f.tronHome, "workspace", "state", "episodic", sessionId, "state.json");
+}
+
+async function readMemoryState(f: Fixture, sessionId: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    return JSON.parse(await readFile(memoryStatePath(f, sessionId), "utf8")) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeMemoryState(f: Fixture, sessionId: string, state: Record<string, unknown>): Promise<void> {
+  await writeFile(memoryStatePath(f, sessionId), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
+
 async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>): Promise<Array<Record<string, unknown>>> {
   const jsonl = await sessionJsonl(slot);
   return jsonl.trimEnd().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as Record<string, never>)
@@ -256,7 +302,7 @@ describe.sequential("Tron Home activations end to end", () => {
     await slot.prompt(longInput("activation one input"));
     await waitUntil(() => !slot.isBusy);
     // Activation one's leaves are built before activation two starts.
-    await waitUntil(() => (f.registry.homeOwner().memoryStatus().episodic?.coverage.summarized ?? 0) >= 2);
+    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.coverage.summarized ?? 0) >= 2);
     f.faux.setResponses([
       async (context) => { requests.push(record(context)); return fauxAssistantMessage(fauxToolCall("read", { path: "note.txt" })); },
       async (context) => { requests.push(record(context)); return fauxAssistantMessage("after the tool"); },
@@ -328,16 +374,18 @@ describe.sequential("Tron Home activations end to end", () => {
     const second = slot.prompt(longInput("wait activation two"));
     await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
     const waiting = requests.length;
-    const unbuiltWhileWaiting = f.registry.homeOwner().memoryStatus().episodic?.view.unbuilt ?? 0;
+    const unbuiltWhileWaiting = (await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt ?? 0;
     f.compactor.release?.();
     await second;
     await waitUntil(() => !slot.isBusy);
+    const activations = f.requestRecords.filter((record) => record.event === "activation");
     const row = {
       requestsWhileWaiting: waiting,
       unbuiltWhileWaiting,
       providerRequests: requests.length,
       viewSummarized: requests[1]?.blob.includes(SUMMARY_MARKER) ?? false,
       viewExcludesPriorText: !(requests[1]?.blob.includes("wait activation one") ?? true),
+      activationWaitedMs: activations.map((record) => record.event === "activation" ? record.waitedMs : -1),
       refusalReasons: f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [],
     };
     report.cases.push({ case: "wait", ...row });
@@ -346,6 +394,10 @@ describe.sequential("Tron Home activations end to end", () => {
     expect(row.providerRequests).toBe(2);
     expect(row.viewSummarized).toBe(true);
     expect(row.viewExcludesPriorText).toBe(true);
+    // The wait is the activation's own record, in milliseconds: the first
+    // activation found nothing to wait for, the second waited for its lines.
+    expect(row.activationWaitedMs[0]).toBe(0);
+    expect(row.activationWaitedMs[1]).toBeGreaterThan(0);
   }, 60_000);
 
   it("treats a Stop during that wait as a refusal, with the input left unanswered", async () => {
@@ -425,11 +477,326 @@ describe.sequential("Tron Home activations end to end", () => {
     expect(row.unconfiguredMemory).toEqual({ configured: false, open: false });
     expect(row.providerRequestsWhileUnconfigured).toBe(0);
     expect(row.refusalReasons).toContain("memory-not-configured");
-    expect(context).toEqual({ available: false });
+    // The refusal is the activation's own evidence, even though it never
+    // prepared a request.
+    expect(context.available).toBe(true);
+    expect(context.available ? context.lastRefusalReason : undefined).toBe("memory-not-configured");
     expect(row.configuredProviderRequests).toBe(1);
     expect(row.configured.configured).toBe(true);
     expect(row.configured.open).toBe(true);
   }, 60_000);
+
+  it("resumes a retries-exhausted block once on the next activation", async () => {
+    // A transient outage leaves a `retries-exhausted` block behind. The cause is
+    // time, so the next activation re-arms the bounded retries by itself and is
+    // served; a block that recurs during its wait would be refused by the wait.
+    const f = await fixture("resume-transient");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-transient");
+    f.faux.setResponses([responsesOf(f, requests)(longInput("transient response one"))]);
+    await slot.prompt(longInput("transient activation one"));
+    await waitUntil(() => !slot.isBusy);
+
+    // The Gateway that a transient outage blocked: the memory's own durable state
+    // is exactly what a restart hands over.
+    await restart(f);
+    const state = await readMemoryState(f, slot.id);
+    expect(state).toBeDefined();
+    await writeMemoryState(f, slot.id, { ...state!, blocked: { reason: "retries-exhausted" } });
+
+    const reopened = await f.registry.acquire(slot.id);
+    f.faux.setResponses([responsesOf(f, requests)(longInput("transient response two"))]);
+    await reopened.prompt(longInput("transient activation two"));
+    await waitUntil(() => !reopened.isBusy);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
+    const row = {
+      providerRequests: requests.filter((request) => request.blob.includes("transient activation two")).length,
+      viewSummarized: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
+      refusedWithBlock: refusals.includes("memory-blocked"),
+      blockedAfter: status.memory.blocked,
+      open: status.memory.open,
+    };
+    report.cases.push({ case: "resume-transient", ...row });
+    expect(row.providerRequests).toBe(1);
+    expect(row.viewSummarized).toBe(true);
+    expect(row.refusedWithBlock).toBe(false);
+    expect(row.blockedAfter).toBeUndefined();
+  }, 90_000);
+
+  it("resumes a permanent failure through home.resumeMemory", async () => {
+    // A model that refused a whole batch stays the cause until it is fixed, so
+    // the operator states it and `home.resumeMemory` clears the block.
+    const f = await fixture("resume-memory");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-resume");
+    f.compactor.failing = true;
+    f.faux.setResponses([responsesOf(f, requests)(longInput("resume response one"))]);
+    await slot.prompt(longInput("resume activation one"));
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure");
+    const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
+
+    f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
+    await slot.prompt(longInput("resume activation two"));
+    await waitUntil(() => !slot.isBusy);
+    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
+
+    // The cause is gone; the operator says so.
+    f.compactor.failing = false;
+    const resumed = await f.service.invoke(client, "home.resumeMemory", { commandId: "e2e-resume-memory" })
+      .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
+    const afterResume = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const requestsBefore = requests.length;
+    f.faux.setResponses([responsesOf(f, requests)(longInput("resume response three"))]);
+    await slot.prompt(longInput("resume activation three"));
+    await waitUntil(() => !slot.isBusy);
+    const row = {
+      blockedBefore: blocked,
+      refusedWithBlock: refusals.includes("memory-blocked"),
+      resumed,
+      blockedAfterResume: afterResume.memory.blocked,
+      providerRequestsAfterResume: requests.length - requestsBefore,
+    };
+    report.cases.push({ case: "resume-memory", ...row });
+    expect(row.blockedBefore).toBe("permanent-failure");
+    expect(row.refusedWithBlock).toBe(true);
+    expect(row.resumed).toBe("accepted");
+    expect(row.blockedAfterResume).toBeUndefined();
+    expect(row.providerRequestsAfterResume).toBe(1);
+  }, 90_000);
+
+  it("keeps the memory configuration across disable, re-enable and a fresh-session designation", async () => {
+    // The configuration is the user's decision about *how* Home remembers, so it
+    // survives a disable, a re-enable and a replacement session. The spend does
+    // not: the store is keyed by session id, so a new session starts its own.
+    const f = await fixture("lifecycle");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-lifecycle", { tokenBudget: 500_000 });
+    f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply one"))]);
+    await slot.prompt(longInput("lifecycle activation one"));
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0) > 0);
+    const spentOnFirstSession = (await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0;
+
+    const disabled = await f.service.invoke(client, "home.disable", { commandId: "e2e-lifecycle-disable" });
+    const afterDisable = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const reEnabled = await f.service.invoke(client, "home.designate", { commandId: "e2e-lifecycle-enable", model: MODEL });
+    f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply two"))]);
+    const sameSession = await f.registry.acquire((reEnabled as unknown as { sessionId: string }).sessionId);
+    await sameSession.prompt(longInput("lifecycle activation two"));
+    await waitUntil(() => !sameSession.isBusy);
+    const afterEnable = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+
+    // A replacement session: the recorded one is deleted, so the next
+    // designation creates a fresh one.
+    await f.service.invoke(client, "session.delete", { commandId: "e2e-lifecycle-delete", sessionId: sameSession.id });
+    await waitUntil(async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).sessionPresent === false);
+    const reDesignated = await f.service.invoke(client, "home.designate", { commandId: "e2e-lifecycle-fresh", model: MODEL }) as unknown as { sessionId: string };
+    const fresh = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      disabled: (disabled as unknown as { generation: number }).generation,
+      configuredWhileDisabled: afterDisable.memory.configured,
+      spendWhileDisabled: afterDisable.memory.spentTokens,
+      spentOnFirstSession,
+      reEnabledSessionSame: reDesignated !== undefined && afterEnable.sessionId === sameSession.id,
+      budgetAfterEnable: afterEnable.memory.tokenBudget,
+      newSessionDiffers: reDesignated.sessionId !== sameSession.id,
+      configuredOnNewSession: fresh.memory.configured,
+      budgetOnNewSession: fresh.memory.tokenBudget,
+      spendOnNewSession: fresh.memory.spentTokens ?? 0,
+    };
+    report.cases.push({ case: "lifecycle", ...row });
+    expect(row.configuredWhileDisabled).toBe(true);
+    expect(row.spendWhileDisabled).toBeGreaterThanOrEqual(0);
+    expect(row.budgetAfterEnable).toBe(500_000);
+    expect(row.newSessionDiffers).toBe(true);
+    expect(row.configuredOnNewSession).toBe(true);
+    expect(row.budgetOnNewSession).toBe(500_000);
+    expect(row.spendOnNewSession).toBe(0);
+    expect(row.spentOnFirstSession).toBeGreaterThan(0);
+  }, 120_000);
+
+  it("refuses home.resumeMemory for a budget block and resumes on a raised budget", async () => {
+    const f = await fixture("budget-resume");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-budget", { tokenBudget: 1 });
+    f.faux.setResponses([responsesOf(f, requests)("first activation response"), responsesOf(f, requests)("second activation response")]);
+    await slot.prompt(longInput("budget activation one")).catch(() => undefined);
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "budget-exhausted");
+
+    const refused = await f.service.invoke(client, "home.resumeMemory", { commandId: "e2e-resume-budget" })
+      .then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
+
+    // Raising the budget is the answer, and it must return without waiting for
+    // the summary catch-up: the pump is parked for this assertion, so an awaited
+    // drain would never return.
+    f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
+    const raised = await f.service.invoke(client, "home.configureMemory", {
+      commandId: "e2e-raise-budget", model: MEMORY_MODEL, tokenBudget: 1_000_000,
+    }).then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
+    const during = await f.registry.homeOwner().memoryStatus();
+    f.compactor.release?.();
+    await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt === 0);
+    const after = await f.registry.homeOwner().memoryStatus();
+    const row = {
+      resumeRefusal: refused,
+      raised,
+      blockedDuringRaise: during.blocked,
+      unbuiltDuringRaise: during.episodic?.view.unbuilt ?? 0,
+      blockedAfterCatchUp: after.blocked,
+    };
+    report.cases.push({ case: "budget-resume", ...row });
+    expect(row.resumeRefusal).toContain("tokenBudget");
+    expect(row.raised).toBe("accepted");
+    expect(row.blockedDuringRaise).toBeUndefined();
+    expect(row.unbuiltDuringRaise).toBeGreaterThan(0);
+    expect(row.blockedAfterCatchUp).toBeUndefined();
+  }, 90_000);
+
+  it("refuses a disable while an activation waits, and that activation completes", async () => {
+    // Home's memory must survive a refused disable: the session keeps running and
+    // the activation waiting for its view is the thing being protected.
+    const f = await fixture("disable-wait");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-disable-wait");
+    f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
+    f.faux.setResponses([responsesOf(f, requests)(longInput("disable wait reply one"))]);
+    await slot.prompt(longInput("disable wait activation one"));
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => f.compactor.entered > 0);
+    f.faux.setResponses([responsesOf(f, requests)("disable wait reply two")]);
+    const second = slot.prompt(longInput("disable wait activation two"));
+    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    const disabled = await f.service.invoke(client, "home.disable", { commandId: "e2e-disable-busy" })
+      .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
+    f.compactor.release?.();
+    await second;
+    await waitUntil(() => !slot.isBusy);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      disableOutcome: disabled,
+      enabledAfter: status.enabled,
+      providerRequests: requests.length,
+      waitingActivationServed: requests.some((request) => request.blob.includes("disable wait activation two")),
+      waitingViewSummarized: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
+      refusals: f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [],
+    };
+    report.cases.push({ case: "disable-wait", ...row });
+    expect(row.disableOutcome).toBe("busy");
+    expect(row.enabledAfter).toBe(true);
+    expect(row.waitingActivationServed).toBe(true);
+    expect(row.waitingViewSummarized).toBe(true);
+    expect(row.refusals).not.toContain("memory-view-failed");
+  }, 90_000);
+
+  it("configures the memory while an activation waits without opening the store twice", async () => {
+    const f = await fixture("configure-race");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-race");
+    f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
+    f.faux.setResponses([responsesOf(f, requests)(longInput("race reply one"))]);
+    await slot.prompt(longInput("race activation one"));
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => f.compactor.entered > 0);
+    f.faux.setResponses([responsesOf(f, requests)("race reply two")]);
+    const second = slot.prompt(longInput("race activation two"));
+    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    // The operator's change lands while the activation is inside its first step.
+    const configured = await f.service.invoke(client, "home.configureMemory", {
+      commandId: "e2e-configure-race", model: MEMORY_MODEL, tokenBudget: 2_000_000,
+    }).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
+    f.compactor.release?.();
+    await second.catch(() => undefined);
+    await waitUntil(() => !slot.isBusy);
+    // Whatever that race did to the waiting activation, the memory is usable and
+    // open exactly once: the next activation is served with the new budget.
+    f.faux.setResponses([responsesOf(f, requests)(longInput("race reply three"))]);
+    await slot.prompt(longInput("race activation three"));
+    await waitUntil(() => !slot.isBusy);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog() ?? [];
+    const row = {
+      configured,
+      open: status.memory.open,
+      tokenBudget: status.memory.tokenBudget,
+      thirdActivationServed: requests.some((request) => request.blob.includes("race activation three")),
+      alreadyOpenRefusal: refusals.some((entry) => entry.reason === "memory-view-failed" && entry.detail.includes("already open")),
+      ingestRecords: f.memoryDiagnostics.filter((record) => record.event === "home.memory-ingest").length,
+    };
+    report.cases.push({ case: "configure-race", ...row });
+    expect(row.configured).toBe("accepted");
+    expect(row.open).toBe(true);
+    expect(row.tokenBudget).toBe(2_000_000);
+    expect(row.thirdActivationServed).toBe(true);
+    expect(row.alreadyOpenRefusal).toBe(false);
+    expect(row.ingestRecords).toBe(0);
+  }, 90_000);
+
+  it("reports a refusal through home.context before any request was prepared", async () => {
+    const f = await fixture("context-refusal");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-context", { configure: false });
+    f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
+    await slot.prompt(longInput("context refusal input"));
+    await waitUntil(() => !slot.isBusy);
+    const context = await f.service.invoke(client, "home.context", {}) as unknown as HomeContextProjection;
+    const row = { context };
+    report.cases.push({ case: "context-refusal", ...row });
+    expect(context.available).toBe(true);
+    if (context.available) {
+      // The activation's own start entry and refusal, and no sizes at all: it
+      // never prepared a request, so no other activation's sizes may appear.
+      expect(typeof context.activationStartEntryId).toBe("string");
+      expect(context.activationOpen).toBe(false);
+      expect(context.lastRefusalReason).toBe("memory-not-configured");
+      expect(context.viewLines).toBeUndefined();
+      expect(context.viewBytes).toBeUndefined();
+      expect(context.effectiveTokens).toBeUndefined();
+      expect(context.contextWindow).toBeUndefined();
+    }
+  }, 60_000);
+
+  it("reports the persisted block and spend while the store is closed", async () => {
+    const f = await fixture("status-persisted");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-status");
+    f.faux.setResponses([responsesOf(f, requests)(longInput("status reply"))]);
+    await slot.prompt(longInput("status activation"));
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.tokens.used ?? 0) > 0);
+
+    await restart(f);
+    // The store the restart closed: its own document is what the status must
+    // report, because the reopened memory has not opened it yet.
+    const persisted = await readMemoryState(f, slot.id);
+    expect(persisted).toBeDefined();
+    const closed = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    await writeMemoryState(f, slot.id, { ...persisted!, blocked: { reason: "source-unavailable", detail: "canonical session is unreadable" } });
+    const blocked = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      openWhenClosed: closed.memory.open,
+      spentTokensWhenClosed: closed.memory.spentTokens,
+      persistedSpend: persisted!.spend,
+      blockedWhenClosed: blocked.memory.blocked,
+      blockedReasonLeakedPath: JSON.stringify(blocked.memory).includes("/"),
+    };
+    report.cases.push({ case: "status-persisted", ...row });
+    expect(row.openWhenClosed).toBe(false);
+    expect(row.persistedSpend).toBeGreaterThan(0);
+    expect(row.spentTokensWhenClosed).toBe(row.persistedSpend);
+    expect(row.blockedWhenClosed).toBe("source-unavailable");
+    expect(row.blockedReasonLeakedPath).toBe(false);
+  }, 90_000);
 
   it("admits a memory configuration only for a physical model and a bounded budget", async () => {
     const f = await fixture("configure-validation", { virtualModel: true });
@@ -475,7 +842,7 @@ describe.sequential("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, requests)("first activation response")]);
     await slot.prompt(longInput("blocked activation one"));
     await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => f.registry.homeOwner().memoryStatus().blocked !== undefined);
+    await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked !== undefined);
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("blocked activation two"));
@@ -502,8 +869,8 @@ describe.sequential("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, requests)("first activation response")]);
     await slot.prompt(longInput("restart activation one"));
     await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => (f.registry.homeOwner().memoryStatus().episodic?.tokens.used ?? 0) > 0);
-    const before = f.registry.homeOwner().memoryStatus();
+    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.tokens.used ?? 0) > 0);
+    const before = await f.registry.homeOwner().memoryStatus();
     const beforeUsed = before.episodic?.tokens.used ?? 0;
     const callsBefore = f.compactor.calls;
 
@@ -514,10 +881,12 @@ describe.sequential("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, requests)("after restart response")]);
     await reopened.prompt(longInput("restart activation two"));
     await waitUntil(() => !reopened.isBusy);
-    const after = f.registry.homeOwner().memoryStatus();
+    const after = await f.registry.homeOwner().memoryStatus();
+    const persisted = await readMemoryState(f, slot.id);
     const row = {
       usedBeforeRestart: beforeUsed,
       usedAfterRestart: after.episodic?.tokens.used ?? 0,
+      persistedSpend: persisted?.spend ?? -1,
       compactorCallsBeforeRestart: callsBefore,
       summarySentAfterRestart: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
       // The restarted memory must not re-spend its budget rebuilding what it
@@ -525,7 +894,10 @@ describe.sequential("Tron Home activations end to end", () => {
       compactorCallsAfterRestart: f.compactor.calls - callsBefore,
     };
     report.cases.push({ case: "restart", ...row });
-    expect(row.usedAfterRestart).toBeGreaterThanOrEqual(row.usedBeforeRestart);
+    // Strictly greater: a reset-and-re-earn would also satisfy >=, and the
+    // persisted document is the value a future restart restores.
+    expect(row.usedAfterRestart).toBeGreaterThan(row.usedBeforeRestart);
+    expect(row.usedAfterRestart).toBe(row.persistedSpend);
     expect(row.summarySentAfterRestart).toBe(true);
     // Only the new message needed summarizing: the tree was durable, so the
     // restarted memory re-spent nothing on what it had already built.

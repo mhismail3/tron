@@ -20,6 +20,16 @@
  *    steering inserts entries after it, which is what makes the activation's
  *    captured leaf an exact boundary.
  *
+ * C16 exercises the context-handler mutation check through the policy's own
+ * `transformContext` wrapper rather than through a real `pi.on("context")`
+ * extension, because a Home runtime's extension factories are built inside
+ * `RuntimeSlot`'s factory (`homeModuleFactories`) and the pinned SDK's
+ * `ExtensionRunner` has no way to register a handler after construction: reaching
+ * one from a test would need a production injection point that exists only for
+ * the test. The wrapper is called with the exact array the SDK's context stage
+ * produces (cloned, plus one appended message), so it still refuses a mutated
+ * request and still makes zero provider requests.
+ *
  * Every case writes a row into `test-results/home-activation/seam-report.json`
  * and prints a one-line summary.
  *
@@ -72,9 +82,9 @@ interface CapturedRequest {
   blob: string;
 }
 
-async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 10_000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (performance.now() >= deadline) throw new Error("condition timed out");
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -212,7 +222,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     root, agentDir, cwd, tronHome, registry, slot, session, faux, requests, snapshots, diagnostics, compactor,
     homeSessionId,
     policy: () => homeSessionId === undefined ? undefined : registry.homeOwner().requestPolicyFor(homeSessionId),
-    memoryStatus: () => registry.homeOwner().memoryStatus(),
+    memoryStatus: async () => await registry.homeOwner().memoryStatus(),
     response,
     /** One more session in this registry, in its own directory under the
      * fixture, or in an existing one (`cwd`) so two sessions can share a working
@@ -298,7 +308,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const toolStepRequest = item.requests[2]!;
     const jsonl = await item.jsonl();
     const entries = await item.entries();
-    const memoryStatus = item.memoryStatus();
+    const memoryStatus = await item.memoryStatus();
     const leafBeforeFork = item.session.sessionManager.getLeafId()!;
     const fork = await item.slot.fork(leafBeforeFork);
     const forkedSession = (item.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
@@ -335,6 +345,11 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.forkProfile).not.toBe("home");
     expect(row.forkExcludesView).toBe(true);
     expect(row.forkHasNoSeam).toBe(true);
+    // The SDK's context stage clones every message, so the fidelity check's
+    // identity comparison is a fallback in practice: the header says so, and this
+    // is where the claim is observed rather than inferred.
+    expect(transformObservations.length).toBeGreaterThan(0);
+    expect(transformObservations.every((observation) => observation.identity === false)).toBe(true);
     // The memory covers the whole first activation by the time the second one runs.
     expect(row.memory.messages).toBeGreaterThanOrEqual(2);
   }, 30_000);
@@ -370,6 +385,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       earlierToolExchangePresent: finalRequest.roles.includes("toolResult") && finalRequest.blob.includes("\"toolCall\""),
       activationInputStillPresent: finalRequest.blob.includes("C3 second activation input"),
       previousActivationExcluded: !finalRequest.blob.includes("C3 first activation input"),
+      refusals: item.policy()?.refusalLog().map((entry) => `${entry.reason}: ${entry.detail}`) ?? [],
     };
     item.record("C3", row);
     expect(row.steeringIncluded).toBe(true);
@@ -511,7 +527,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.faux.setResponses([item.response("first activation response")]);
     await item.slot.prompt(longInput("C7 first activation input"));
     await waitUntil(() => !item.slot.isBusy);
-    await waitUntil(() => item.memoryStatus().blocked !== undefined);
+    await waitUntil(async () => (await item.memoryStatus()).blocked !== undefined);
     const requestsBefore = item.faux.state.callCount;
     const autoRetryStarts: Array<Record<string, unknown>> = [];
     item.session.subscribe((event) => {
@@ -526,7 +542,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const entries = await item.entries();
     const messages = entries.filter((entry) => (entry as { type?: string }).type === "message").map((entry) => (entry as { message?: Record<string, unknown> }).message!);
     const errorEntry = messages.find((message) => message.role === "assistant" && message.stopReason === "error");
-    const memoryStatus = item.memoryStatus();
+    const memoryStatus = await item.memoryStatus();
     const row = {
       providerRequests: item.faux.state.callCount,
       providerRequestsOfRefusedActivation: item.faux.state.callCount - requestsBefore,
@@ -568,7 +584,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
         .filter((entry) => (entry as { type?: string }).type === "message")
         .map((entry) => (entry as { message?: { stopReason?: string; errorMessage?: string } }).message?.errorMessage)
         .filter((value) => typeof value === "string"),
-      memoryStatus: item.memoryStatus(),
+      memoryStatus: await item.memoryStatus(),
     };
     item.record("C7b", row);
     expect(row.providerRequests).toBe(0);
@@ -585,7 +601,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.faux.setResponses([async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("must never be produced"); }]);
     await item.slot.prompt(longInput("C7c activation input"));
     await waitUntil(() => !item.slot.isBusy);
-    const row = { configureOutcome: outcome, providerRequests: item.faux.state.callCount, memoryStatus: item.memoryStatus() };
+    const row = { configureOutcome: outcome, providerRequests: item.faux.state.callCount, memoryStatus: await item.memoryStatus() };
     item.record("C7c", row);
     expect(outcome).toContain("virtual model");
     expect(row.providerRequests).toBe(0);
@@ -727,6 +743,10 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.samePolicyAfterReload).toBe(true);
   }, 30_000);
 
+  // See the file header: a real `pi.on("context")` extension cannot be registered
+  // into a Home runtime from a test without a production test hook, so the policy's
+  // outermost `transformContext` wrapper is driven with exactly what the SDK's
+  // context stage produces.
   it("C16 a context handler that appends a message is refused", async () => {
     const item = await open("c16", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
@@ -795,7 +815,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await waitUntil(() => item.compactor.entered > 0);
     item.record("C18-wait", {
       compactorEntered: item.compactor.entered,
-      viewUnbuilt: item.memoryStatus().episodic?.view.unbuilt ?? -1,
+      viewUnbuilt: (await item.memoryStatus()).episodic?.view.unbuilt ?? -1,
       requestsBefore: item.requests.length,
     });
     expect(item.requests.length).toBe(1);
@@ -803,7 +823,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     // The activation is admitted, and Pi is running it, but no request may be
     // sent while the lines it would carry are unbuilt.
     await waitUntil(() => item.policy()?.currentOperationId() !== undefined);
-    await waitUntil(() => (item.memoryStatus().episodic?.coverage.summarized ?? 0) === 0);
+    await waitUntil(async () => ((await item.memoryStatus()).episodic?.coverage.summarized ?? 0) === 0);
     const requestsWhileWaiting = item.requests.length;
     item.compactor.release?.();
     await second;
@@ -821,6 +841,42 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.sentContainsSummary).toBe(true);
     expect(row.sentExcludesPriorText).toBe(true);
   }, 30_000);
+
+  it("C19 refuses a request that is not the projection without spending the memory wait", async () => {
+    // The projection, and the proof that the request is exactly it, come before
+    // the memory wait: a request some other `prepareRequest` rewrite changed is a
+    // refusal, not something to spend a multi-second wait on. The discriminator is
+    // the wait itself — the compactor is parked, so a refusal that happened after
+    // the wait could never be observed here — and the record of whether the wait
+    // was even entered.
+    const item = await open("c19", { home: true, memory: true, heldSummarizer: true });
+    item.faux.setResponses([item.response("C19 prior reply")]);
+    await item.slot.prompt(longInput("C19 prior activation"));
+    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.compactor.entered > 0);
+    const enteredBefore = item.compactor.entered;
+
+    const policy = item.policy()!;
+    policy.admit("c19", item.session.sessionManager.getLeafId() ?? null);
+    const prepared = policy.wrapPrepareRequest(item.session, undefined);
+    const projection = item.session.sessionManager.buildSessionProjection();
+    const extra = { role: "user", content: "NOT-THE-PROJECTION", timestamp: 0 } as unknown as AgentMessage;
+    const outcome = await Promise.resolve(
+      prepared({ context: { messages: [...projection.messages, extra] }, model: item.faux.getModel(), thinkingLevel: "off" }, undefined),
+    ).then(() => "accepted", (error: unknown) => `refused: ${error instanceof Error ? error.message : String(error)}`);
+    const row = {
+      outcome,
+      refusalReason: policy.refusalLog().at(-1)?.reason ?? null,
+      enteredDuringRefusal: item.compactor.entered - enteredBefore,
+    };
+    policy.settle("c19");
+    item.compactor.release?.();
+    item.record("C19", row);
+    expect(row.outcome).toContain("refused");
+    expect(row.refusalReason).toBe("projection-mismatch");
+    // No wait was entered: the refusal is decided before it.
+    expect(row.enteredDuringRefusal).toBe(0);
+  }, 15_000);
 
   it("ordinary negative control: designating Home leaves an ordinary session byte-identical", async () => {
     const item = await open("negative-control", { home: false, memory: false });

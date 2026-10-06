@@ -154,8 +154,9 @@ The Gateway log carries one record per designation lifecycle outcome:
 `home.unavailable`, `home.refused` (warning). It also carries one
 `home.activation` record per activation (the effective size of the request and how
 long it waited for its view), a `home.activation-refused` record for every refusal
-with its reason, and the memory's own `episodic.*` records. `home.status` and
-`home.context` are the bounded projections. See
+with its reason, a `home.memory-ingest` record when the memory could not read
+committed entries (coded, never a path), and the memory's own `episodic.*`
+records. `home.status` and `home.context` are the bounded projections. See
 [observability.md](observability.md).
 
 ## Activations
@@ -210,13 +211,39 @@ stopped with `budget-exhausted`, and only the nodes it has not built cost
 anything, because the tree is durable. Token spend is persisted with the memory's
 state, so a Gateway restart never hands the budget back.
 
+A fresh-session designation keeps the memory configuration — the model and the
+budget are the user's decision about *how* Home remembers — but the replacement
+session gets a NEW memory store with its own spend, because the store is keyed by
+session id. Disabling Home and re-enabling it keeps the same session and store,
+so nothing is re-spent.
+
 A Home whose memory is unconfigured, blocked, or unable to place the activation's
 start entry refuses every activation with a readable reason and makes zero
 provider requests. `home.context` is the bounded read for the other side of that:
 for Home's current or last activation it returns the activation's start entry id,
 whether it is still open, the frozen view's line and byte counts, the effective
-token estimate the request was measured at, the model's window, and the last
-refusal reason and detail — never a message body and never the view text.
+token estimate the request was measured at, the model's window, and *that*
+activation's refusal reason and detail (the sizes are absent when it was refused
+before it prepared a request) — never a message body and never the view text.
+
+### Recovery
+
+A blocked memory is visible state with a deliberate way out. Which one applies is
+the block's reason:
+
+| block | what clears it |
+| --- | --- |
+| `retries-exhausted` | the next activation resumes it once by itself, re-arming the bounded retries; if it blocks again while that activation waits, the activation is refused with the reason |
+| `permanent-failure`, `source-unavailable` | `home.resumeMemory` (a command-id-receipted mutation) — the operator's statement that the cause is gone |
+| `budget-exhausted` | `home.configureMemory` with a raised `tokenBudget`; `home.resumeMemory` refuses it, because the cause is the configured ceiling |
+| any non-budget block | `home.configureMemory` with a *different model*, which resumes it as part of re-opening the store |
+
+None of these waits for the summary catch-up: the block is cleared, the canonical
+log is re-read and the pump restarts, while the activation that asked waits only
+for the lines it will send. Resuming a memory that is *not* blocked, or one whose
+block a budget raise would not address, is refused as a conflict with the reason,
+so the caller learns what is actually wrong rather than being told a no-op
+succeeded.
 
 An activation waits for the memory before it sends anything (the recipe's "wait,
 don't cut"): the wait covers the lines the view will carry, so an unbuilt line is

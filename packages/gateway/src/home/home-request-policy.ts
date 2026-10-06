@@ -180,6 +180,16 @@ export interface HomeRequestPolicyOptions {
   onRecord?: (record: HomeRequestRecord) => void;
 }
 
+/** The evidence of one activation, as `home.context` reports it. Only fields of
+ * that activation: its start entry, whether it is open, the last request it
+ * prepared, and its own refusal when it was refused. */
+export interface HomeActivationEvidence {
+  activationStartEntryId: string | null;
+  activationOpen: boolean;
+  step?: HomeRequestStep;
+  refusal?: HomeRefusal;
+}
+
 /** Raised for every refusal. Never retryable and never provider-visible. */
 export class HomeRequestPolicyError extends Error {
   constructor(
@@ -196,6 +206,10 @@ interface ActivationState extends HomeActivationIdentity {
   viewRefusal: HomeRequestPolicyError | undefined;
   /** True while this activation's first request has not been recorded yet. */
   unrecorded: boolean;
+  /** The last request this activation prepared. */
+  step: HomeRequestStep | undefined;
+  /** This activation's own last refusal, if it was refused. */
+  refusal: HomeRefusal | undefined;
 }
 
 interface RewrittenContext {
@@ -213,6 +227,9 @@ const MAXIMUM_RECORDED_TRANSFORMS = 64;
 
 export class HomeRequestPolicy {
   private activation: ActivationState | undefined;
+  /** The last settled activation's evidence, kept so `home.context` can report
+   * it after the run ends. Replaced whole, never merged field by field. */
+  private lastClosed: HomeActivationEvidence | undefined;
   private expectedDigest: string | undefined;
   /** The exact non-system request messages `prepareRequest` returned for the current request. */
   private expectedNonSystemMessages: AgentMessage[] | undefined;
@@ -255,6 +272,24 @@ export class HomeRequestPolicy {
   }
 
   /**
+   * The evidence of Home's current or last activation: the start entry `admit`
+   * captured, whether it is still open, the last request it prepared, and its own
+   * refusal. `undefined` before the first activation.
+   */
+  contextEvidence(): HomeActivationEvidence | undefined {
+    const activation = this.activation;
+    if (activation) {
+      return {
+        activationStartEntryId: activation.boundaryEntryId,
+        activationOpen: true,
+        ...(activation.step ? { step: activation.step } : {}),
+        ...(activation.refusal ? { refusal: activation.refusal } : {}),
+      };
+    }
+    return this.lastClosed;
+  }
+
+  /**
    * Fidelity of the last `transformContext` pass: `true` when the activation's
    * non-system messages survived by object identity, `false` when the SDK's
    * context stage replaced them with equal clones. Undefined before the first.
@@ -288,6 +323,8 @@ export class HomeRequestPolicy {
       view: undefined,
       viewRefusal: undefined,
       unrecorded: true,
+      step: undefined,
+      refusal: undefined,
     };
     this.expectedDigest = undefined;
     this.expectedNonSystemMessages = undefined;
@@ -297,7 +334,16 @@ export class HomeRequestPolicy {
   /** Closes the activation when Tron settles that exact operation. */
   settle(operationId: string | undefined): void {
     if (!operationId) return;
-    if (this.activation?.operationId !== operationId) return;
+    const activation = this.activation;
+    if (activation?.operationId !== operationId) return;
+    // The whole activation moves, so `home.context` can never report one
+    // activation's start entry with another's sizes.
+    this.lastClosed = {
+      activationStartEntryId: activation.boundaryEntryId,
+      activationOpen: false,
+      ...(activation.step ? { step: activation.step } : {}),
+      ...(activation.refusal ? { refusal: activation.refusal } : {}),
+    };
     this.activation = undefined;
     this.expectedDigest = undefined;
     this.expectedNonSystemMessages = undefined;
@@ -326,12 +372,31 @@ export class HomeRequestPolicy {
       const update = inner ? await inner(request, signal) : undefined;
       const context = update?.context ?? request.context;
       const activation = this.requireActivation();
+      // The projection, and the proof that the request is exactly it, come FIRST:
+      // a request some other `prepareRequest` rewrite changed is a refusal, not
+      // something to spend a multi-second memory wait on.
+      const projectionBefore = session.sessionManager.buildSessionProjection();
+      const identityEqual = this.assertProjectionFidelity(context.messages, projectionBefore, activation);
+      const boundaryBefore = this.boundaryIndex(projectionBefore, activation);
+      const excludedBefore = excludedMessages(projectionBefore, boundaryBefore);
       const memoryView = await this.memoryView(activation, signal);
+      // The wait can last seconds, so the projection the cut is computed from is
+      // read again afterwards. What must not have moved is the part this request
+      // does NOT send: the history up to and including the activation's start.
+      // Entries appended after the boundary during the wait are the activation's
+      // own — a steering message arrives at exactly this point, and the tail
+      // below picks it up — so they are expected, not a change.
       const projection = session.sessionManager.buildSessionProjection();
-      // The SDK's own projection is the only accepted input for the cut; a
-      // mismatch means some other `prepareRequest` rewrite changed the request.
-      const identityEqual = this.assertProjectionFidelity(context.messages, projection, activation);
       const boundaryIndex = this.boundaryIndex(projection, activation);
+      const excluded = excludedMessages(projection, boundaryIndex);
+      if (!messagesMatch(excludedBefore, excluded)) {
+        throw this.refuse(
+          "projection-mismatch",
+          `the history before this activation changed while it waited for its memory (`
+          + `${excludedBefore.length} to ${excluded.length} excluded messages)`,
+          activation,
+        );
+      }
       const rewritten = this.cut(projection, boundaryIndex, activation, memoryView, identityEqual);
       const model = update?.model ?? request.model;
       const effectiveTokens = rewritten.messages.reduce(
@@ -352,7 +417,7 @@ export class HomeRequestPolicy {
       this.expectedNonSystemMessages = rewritten.nonSystem;
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
-      this.recordStep({
+      activation.step = {
         operationId: activation.operationId,
         nonce: activation.nonce,
         boundaryEntryId: activation.boundaryEntryId,
@@ -364,7 +429,8 @@ export class HomeRequestPolicy {
         contextWindow,
         digest,
         identityEqual: rewritten.identityEqual,
-      });
+      };
+      this.recordStep(activation.step);
       // Once per activation, not once per request: a tool loop or a retry is the
       // same activation and its effective size and wait are already reported.
       if (activation.unrecorded) {
@@ -643,14 +709,37 @@ export class HomeRequestPolicy {
     sizes?: { effectiveTokens: number; contextWindow: number },
   ): HomeRequestPolicyError {
     const open = activation ?? this.activation;
-    this.recordRefusal({
+    const refusal: HomeRefusal = {
       reason,
       detail,
       ...(open ? { operationId: open.operationId, nonce: open.nonce } : {}),
-    });
+    };
+    if (open) open.refusal = refusal;
+    this.recordRefusal(refusal);
     this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
     return new HomeRequestPolicyError(reason, `Home request refused (${reason}): ${detail}`);
   }
+}
+
+/** The messages a request starting after `boundaryIndex` would NOT send: the
+ * canonical history up to and including the activation's start entry. */
+function excludedMessages(projection: SessionProjection, boundaryIndex: number): AgentMessage[] {
+  const messages: AgentMessage[] = [];
+  projection.entries.forEach((entry, index) => {
+    if (index <= boundaryIndex) messages.push(...entry.messages as AgentMessage[]);
+  });
+  return messages;
+}
+
+/** Identity first, then value, exactly as the request's own fidelity check does:
+ * the SDK allocates fresh objects for synthesized entries. */
+function messagesMatch(left: readonly AgentMessage[], right: readonly AgentMessage[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue;
+    if (JSON.stringify(left[index]) !== JSON.stringify(right[index])) return false;
+  }
+  return true;
 }
 
 function activationIdentity(activation: ActivationState): HomeActivationIdentity {
