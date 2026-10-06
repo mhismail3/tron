@@ -34,14 +34,14 @@
       "client_id": "corpus-mcp-fixture-client",
       "redirect_uris": []
     },
-    "oauthState": "3a5bd2a5c3a74544e678dd1097275aa306b9738ca939bff7c35fde54120d4486",
-    "codeVerifier": "k3lzrNL88UOirbw72SL9L_9tglMqMXhwoH2AEwRyMhw",
+    "oauthState": "2e3bcffb5be4d60320dcbef37c48dde13c1924553367fb70d36ba5fa72e78bc8",
+    "codeVerifier": "OxEBSZ0bDhvbx-fEXRTbEmkEwxcSveLnnSIg8Hh0Mb4",
     "tokens": {
       "access_token": "corpus-mcp-access-token",
       "token_type": "Bearer",
       "expires_in": 315360000,
       "refresh_token": "corpus-fixture-refresh-token"
     },
-    "tokensExpireAt": 2106677837868
+    "tokensExpireAt": 2106681433208
   }
 }

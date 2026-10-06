@@ -45,10 +45,13 @@ import {
   CORPUS_MCP_SERVERS,
   corpusFauxProvider,
   corpusModelRuntime,
+  corpusSessionEntries,
   corpusSessionFiles,
+  missingScenarioShapes,
   normalizeObservation,
   observeProviders,
   observeSessions,
+  scenarioShapes,
   stageCorpus,
   waitForRecordedServerTools,
   type CorpusObservation,
@@ -63,7 +66,11 @@ const MCP_OAUTH_FIXTURE = resolve(PACKAGE_ROOT, "test-support/mcp-oauth-fixture.
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 const servers: Array<ReturnType<typeof spawn>> = [];
+let priorAgentDir: string | undefined;
 afterEach(async () => {
+  if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+  priorAgentDir = undefined;
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   for (const server of servers.splice(0)) {
     if (server.exitCode !== null || server.signalCode !== null) continue;
@@ -102,6 +109,7 @@ async function stageWithServers(): Promise<StagedCorpusPaths> {
   await waitFor(() => existsSync(oauthPortFile), "the MCP OAuth fixture to bind a port");
   const mcpUrl = `http://127.0.0.1:${Number(await readFile(oauthPortFile, "utf8"))}/mcp`;
   const staged = await stageCorpus({ root, mcpUrl, mcpFixture: MCP_STDIO_FIXTURE, nodeExecutable: process.execPath });
+  if (priorAgentDir === undefined) priorAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = staged.agentDir;
   return staged;
 }
@@ -111,9 +119,10 @@ describe("persisted-state upgrade corpus", () => {
     const manifest = await readManifest();
     const staged = await stageWithServers();
     const observed = await observeProviders(await corpusModelRuntime(staged.agentDir, corpusFauxProvider()), manifest.providers);
-    // `azure-openai-responses` is the provider key 1.0.3 renames to `azure`; a
-    // renamed key is no longer in the credential store under the persisted id,
-    // and the model the settings and transcripts name stops resolving.
+    // `azure-openai-responses` is the provider key 1.0.3 renames to `azure`. The
+    // rename is detected by the model, which the settings and the transcripts
+    // name; the credential read catches a store that stops returning the
+    // persisted provider id at all (a re-key or a rewrite).
     expect(observed, "every saved provider key and model must still resolve").toEqual(manifest.providers);
   }, 30_000);
 
@@ -155,13 +164,19 @@ describe("persisted-state upgrade corpus", () => {
       const where = `session ${session.sessionId}`;
       expect.soft(session.model, `${where}: the persisted model must still resolve`).toEqual(recorded.model);
       expect.soft(session.thinkingLevel, `${where}: the persisted thinking level must still resolve`).toEqual(recorded.thinkingLevel);
-      expect.soft(session.declaredTools, `${where}: the transcript's tool selection must be readable`).toEqual(recorded.declaredTools);
-      expect.soft(session.resolvedTools, `${where}: every selected tool must resolve to the same tool and exposure`).toEqual(recorded.resolvedTools);
-      expect.soft(session.activeTools, `${where}: the chat's active tools must match its persisted selection`).toEqual(recorded.activeTools);
+      expect.soft(session.activeTools, `${where}: every tool the chat's persisted selection enables must resolve to the same name and exposure`)
+        .toEqual(recorded.activeTools);
       expect.soft(session.leafEntryId, `${where}: the session must reopen on the same branch leaf`).toEqual(recorded.leafEntryId);
       expect.soft(session.transcriptTotal, `${where}: the transcript must project the same number of rows`).toEqual(recorded.transcriptTotal);
       expect.soft(session.projection, `${where}: the projection must equal the recorded projection`).toEqual(recorded.projection);
     }
+    // The corpus's documented coverage is asserted against the committed JSONL,
+    // not against prose: a regeneration that silently loses a shape (a codemode
+    // call that parses as a subtraction, a tool search that loads nothing) fails
+    // here even though every reopen invariant would still hold.
+    const shapes = scenarioShapes(await corpusSessionEntries(sessionIds[0]!));
+    expect(missingScenarioShapes(shapes), "the committed corpus must cover every shape this layer claims")
+      .toEqual([]);
     expect.soft(observed.servers, "every configured MCP server must reconnect and expose its persisted tools")
       .toEqual(CORPUS_MCP_SERVERS.map((name) => ({
         name, tools: manifest.servers.find((server) => server.name === name)?.tools ?? [],

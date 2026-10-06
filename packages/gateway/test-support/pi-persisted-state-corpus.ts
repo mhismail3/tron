@@ -19,7 +19,7 @@
 import { cp, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCurrentTools, fauxProvider, type FauxProviderHandle, type FauxModelDefinition } from "@earendil-works/pi-ai";
+import { fauxProvider, type FauxProviderHandle, type FauxModelDefinition } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { waitFor } from "./wait-for.js";
 
@@ -118,6 +118,8 @@ export interface StagedCorpusPaths {
 export interface StageCorpusOptions {
   /** Disposable directory the corpus is copied into; it must already exist. */
   readonly root: string;
+  /** Corpus to stage. Defaults to the committed corpus; the recorder stages its candidate copy. */
+  readonly corpusDir?: string;
   /** Path of the MCP OAuth fixture's streamable-HTTP endpoint. */
   readonly mcpUrl: string;
   /** Absolute path of the stdio MCP fixture script. */
@@ -145,7 +147,7 @@ export async function stageCorpus(options: StageCorpusOptions): Promise<StagedCo
   const sessionDir = join(agentDir, CORPUS_SESSIONS_DIR_NAME);
   const cwd = join(root, "workspace");
   await mkdir(cwd, { recursive: true });
-  await cp(CORPUS_DIR, root, { recursive: true, force: true });
+  await cp(options.corpusDir ?? CORPUS_DIR, root, { recursive: true, force: true });
   const replacements: Array<readonly [string, string]> = [
     [CORPUS_TOKENS.root, root],
     [CORPUS_TOKENS.workspace, cwd],
@@ -187,30 +189,19 @@ export async function readSessionEntries(path: string): Promise<Array<Record<str
   return text.trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-/**
- * The per-chat tool selection Tron persists: the loadout the canonical
- * transcript declares, replayed exactly the way Pi replays it on resume
- * (`getCurrentTools`). This is what a chat's "Available Tools" choice becomes on
- * disk, and it outlives the runtime that wrote it (#327).
- */
-export function declaredToolNames(entries: ReadonlyArray<Record<string, unknown>>): string[] {
-  const messages = entries.flatMap((entry) => entry.type === "message" && entry.message
-    ? [entry.message as { role: string }]
-    : []);
-  return getCurrentTools(messages).map((tool) => tool.name).sort();
-}
-
 /** Recorded Tron-level observation of one reopened corpus session. */
 export interface CorpusSessionObservation {
   readonly sessionId: string;
   readonly model: { readonly provider: string; readonly id: string } | null;
   readonly thinkingLevel: string;
-  /** The loadout the transcript declares (Pi's `getCurrentTools` over the canonical file). */
-  readonly declaredTools: readonly string[];
-  /** The tools the reopened runtime resolves as active. */
-  readonly activeTools: readonly string[];
-  /** Each declared tool as the reopened runtime resolves it, or `null` when it no longer exists. */
-  readonly resolvedTools: ReadonlyArray<{ readonly name: string; readonly exposure: string | null }>;
+  /**
+   * The per-chat tool selection as the reopened runtime resolves it: the tools a
+   * chat has enabled, each with the exposure the runtime gives it. This is what
+   * `RuntimeSession.setTools` restored from the transcript (#327), so a renamed
+   * or unregistered tool shows up as a different name and a lost selection as a
+   * fallback to the defaults.
+   */
+  readonly activeTools: ReadonlyArray<{ readonly name: string; readonly exposure: string | null }>;
   readonly transcriptTotal: number;
   readonly leafEntryId: string | null;
   /** The transcript projection the mobile client pages. */
@@ -241,7 +232,7 @@ export interface CorpusObservation {
 
 /** The runtime surface the observation reads, so this module imports no Gateway code. */
 export interface ObservableSlot {
-  readonly sessionFile?: string;
+  readonly sessionFile?: string | undefined;
   snapshot(): {
     model?: { provider: string; id: string } | undefined;
     thinkingLevel: string;
@@ -307,6 +298,120 @@ export async function waitForRecordedServerTools(
 }
 
 /**
+ * Every entry shape the corpus claims to cover, in the order the README lists
+ * them. The recorder refuses to write a corpus that is missing one, and the test
+ * refuses to accept a committed corpus that is, so a claim about coverage cannot
+ * drift from the artifact (the reason the first recording shipped a codemode call
+ * that JavaScript parsed as a subtraction and a tool search that loaded nothing).
+ */
+export const CORPUS_SCENARIO_SHAPES = [
+  "session-header",
+  "model-change",
+  "thinking-level-change",
+  "invocation-receipt",
+  "system-loadout",
+  "user-image",
+  "assistant-tool-call",
+  "tool-result-direct-mcp",
+  "tool-result-codemode-nested",
+  "tool-search-loaded-tool",
+  "system-loadout-delta",
+  "tool-result-searched-mcp",
+  "context-edit",
+  "compaction",
+  "branch-sibling",
+] as const;
+
+export type CorpusScenarioShape = typeof CORPUS_SCENARIO_SHAPES[number];
+
+type Entry = Record<string, unknown>;
+
+function message(entry: Entry): Record<string, unknown> | undefined {
+  return entry.type === "message" ? entry.message as Record<string, unknown> | undefined : undefined;
+}
+
+function hasImage(entry: Entry): boolean {
+  const content = message(entry)?.content;
+  return Array.isArray(content) && content.some((part) => (part as { type?: string }).type === "image");
+}
+
+function hasToolCall(entry: Entry): boolean {
+  const content = message(entry)?.content;
+  return Array.isArray(content) && content.some((part) => (part as { type?: string }).type === "toolCall");
+}
+
+/** Successful nested calls the codemode result recorded; a failed script records none. */
+function successfulNestedCalls(entry: Entry): number {
+  const calls = (message(entry)?.nestedCalls as { calls?: Array<{ status?: string }> } | undefined)?.calls;
+  return Array.isArray(calls) ? calls.filter((call) => call.status === "ok").length : 0;
+}
+
+/** Tool names a `tool_search` result reports as loaded for the next call. */
+function loadedTools(entry: Entry): string[] {
+  const loaded = (message(entry)?.details as { loaded?: unknown } | undefined)?.loaded;
+  return Array.isArray(loaded) ? loaded.filter((name): name is string => typeof name === "string") : [];
+}
+
+/**
+ * Locate each scenario shape in one canonical session, by 1-based JSONL line, so
+ * a coverage claim names the exact line it rests on. `null` means the corpus does
+ * not cover that shape.
+ */
+export function scenarioShapes(entries: ReadonlyArray<Entry>): Record<CorpusScenarioShape, number | null> {
+  const line = (predicate: (entry: Entry) => boolean): number | null => {
+    const index = entries.findIndex(predicate);
+    return index < 0 ? null : index + 1;
+  };
+  const systemMessages = entries
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => message(entry)?.role === "system");
+  const deltaMessage = systemMessages.slice(1).find(({ entry }) =>
+    ((message(entry)?.toolsAdded as Array<{ name?: string }> | undefined) ?? [])
+      .some((tool) => typeof tool.name === "string" && tool.name.includes(CORPUS_MCP_SERVERS[1])));
+  const searchLoaded = entries.findIndex((entry) => message(entry)?.toolName === "tool_search"
+    && loadedTools(entry).length > 0);
+  const childrenPerParent = new Map<string, number>();
+  for (const entry of entries) {
+    const parent = entry.parentId;
+    if (typeof parent !== "string") continue;
+    childrenPerParent.set(parent, (childrenPerParent.get(parent) ?? 0) + 1);
+  }
+  const branchParent = [...childrenPerParent.entries()].find(([, children]) => children > 1)?.[0];
+  const branchSibling = branchParent === undefined ? null : line((entry) => entry.parentId === branchParent && entry.type === "message");
+  return {
+    "session-header": line((entry) => entry.type === "session"),
+    "model-change": line((entry) => entry.type === "model_change"),
+    "thinking-level-change": line((entry) => entry.type === "thinking_level_change"),
+    "invocation-receipt": line((entry) => entry.type === "custom" && entry.customType === "tron.chat-invocation.v1"),
+    "system-loadout": line((entry) => message(entry)?.role === "system"),
+    "user-image": line((entry) => message(entry)?.role === "user" && hasImage(entry)),
+    "assistant-tool-call": line((entry) => message(entry)?.role === "assistant" && hasToolCall(entry)),
+    "tool-result-direct-mcp": line((entry) => message(entry)?.toolName === `mcp__${CORPUS_MCP_SERVERS[0]}__echo`),
+    "tool-result-codemode-nested": line((entry) => message(entry)?.toolName === "codemode" && successfulNestedCalls(entry) > 0),
+    "tool-search-loaded-tool": searchLoaded < 0 ? null : searchLoaded + 1,
+    "system-loadout-delta": deltaMessage ? deltaMessage.index + 1 : null,
+    "tool-result-searched-mcp": line((entry) => message(entry)?.toolName === `mcp__${CORPUS_MCP_SERVERS[1]}__echo`),
+    "context-edit": line((entry) => entry.type === "context_edit"),
+    compaction: line((entry) => entry.type === "compaction"),
+    "branch-sibling": branchSibling,
+  };
+}
+
+/** Shapes the corpus does not cover, in the order {@link CORPUS_SCENARIO_SHAPES} lists them. */
+export function missingScenarioShapes(shapes: Record<CorpusScenarioShape, number | null>): CorpusScenarioShape[] {
+  return CORPUS_SCENARIO_SHAPES.filter((shape) => shapes[shape] === null);
+}
+
+/** One canonical corpus session's entries, found by the session id its header declares. */
+export async function corpusSessionEntries(sessionId: string): Promise<Array<Record<string, unknown>>> {
+  for (const path of await corpusSessionFiles()) {
+    const entries = await readSessionEntries(path);
+    if (entries.some((entry) => entry.type === "session" && entry.id === sessionId)) return entries;
+  }
+  throw new Error(`The corpus has no session ${sessionId}`);
+}
+
+/**
  * Observe every corpus session through Tron's own surfaces after reopening it.
  *
  * A declared tool that no longer exists is recorded as `null` rather than
@@ -326,14 +431,12 @@ export async function observeSessions(input: {
     const available = new Map((context.availableTools ?? []).map((tool) => [tool.name, tool]));
     const snapshot = slot.snapshot();
     if (!slot.sessionFile) throw new Error(`Reopened session ${sessionId} does not expose its canonical file`);
-    const declaredTools = declaredToolNames(await readSessionEntries(slot.sessionFile));
     sessions.push({
       sessionId,
       model: snapshot.model ? { provider: snapshot.model.provider, id: snapshot.model.id } : null,
       thinkingLevel: snapshot.thinkingLevel,
-      declaredTools,
-      activeTools: [...(context.activeTools ?? [])].sort(),
-      resolvedTools: declaredTools.map((name) => ({ name, exposure: exposureOf(available.get(name)) })),
+      activeTools: [...(context.activeTools ?? [])].sort()
+        .map((name) => ({ name, exposure: exposureOf(available.get(name)) })),
       transcriptTotal: snapshot.transcriptTotal,
       leafEntryId: snapshot.leafEntryId ?? null,
       projection: snapshot.transcript,

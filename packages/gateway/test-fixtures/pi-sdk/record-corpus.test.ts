@@ -8,15 +8,24 @@
  *
  * - `agent/` — the canonical Pi agent directory (settings, provider
  *   credentials, MCP configuration and MCP OAuth credentials) plus the sessions
- *   the Gateway wrote;
+ *   the Gateway wrote, covering every shape this layer claims;
  * - `manifest.json` — the Tron-level observation of that corpus reopened from a
  *   staged copy, which `pi-persisted-state-corpus.integration.test.ts` compares
  *   against.
  *
+ * The scenario is asserted against the recorded JSONL before anything is written
+ * (`missingScenarioShapes`), so a recording that quietly lost a shape — a
+ * codemode call JavaScript parses as a subtraction, a tool search that loads
+ * nothing — fails instead of committing a corpus whose documented coverage is
+ * false. The new corpus is built in a candidate directory and swapped into place
+ * only once the manifest exists, so a failed regeneration leaves the committed
+ * corpus untouched.
+ *
  * Record with the **outgoing** SDK before an upgrade, so the upgrade is tested
  * against state the previous SDK actually wrote. Absolute host paths, the Node
- * installation, the fixture paths and the live MCP port are stored as tokens
- * that staging rebinds; nothing else is rewritten.
+ * installation, the fixture paths, the live MCP port and the extension owner ids
+ * are stored as tokens; nothing else is rewritten, and the session files keep
+ * Pi's own names and header ids.
  *
  * Run with `npm run record:pi-corpus` (see `packages/gateway/README.md`,
  * "Pi SDK maintenance"). It is not part of the default test run because it
@@ -24,9 +33,9 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -56,10 +65,12 @@ import {
   CORPUS_TOKENS,
   corpusFauxProvider,
   corpusModelRuntime,
+  missingScenarioShapes,
   normalizeObservation,
   observeProviders,
   observeSessions,
   readSessionEntries,
+  scenarioShapes,
   waitForRecordedServerTools,
   stageCorpus,
   type CorpusObservation,
@@ -72,10 +83,6 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPOSITORY_ROOT = resolve(PACKAGE_ROOT, "../..");
 const MCP_STDIO_FIXTURE = resolve(PACKAGE_ROOT, "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
 const MCP_OAUTH_FIXTURE = resolve(PACKAGE_ROOT, "test-support/mcp-oauth-fixture.mjs");
-/** Stable canonical session file names, so the corpus does not churn on Pi's generated ids. */
-const RICH_SESSION_ID = "corpus-session-rich";
-const PROVIDER_KEY_SESSION_ID = "corpus-session-provider-key";
-
 /** The project extension that records a `context_edit` entry, which Tron never writes itself. */
 const CONTEXT_EDIT_EXTENSION = `
 export default function (pi) {
@@ -96,8 +103,20 @@ const CLIENT = {
   isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 } as never;
 
-function scrubReplacements(root: string, mcpUrl: string): Array<readonly [string, string]> {
-  return [
+/**
+ * Every value the committed corpus must not carry. `sessionTexts` supplies the
+ * extension owner ids: Tron derives them as a sha256 of an extension's source and
+ * resolved path (`owner-attribution.ts`), so each recording would otherwise embed
+ * a host-path fingerprint that nothing can reproduce or rebind.
+ */
+function scrubReplacements(root: string, mcpUrl: string, sessionTexts: readonly string[]): Array<readonly [string, string]> {
+  const owners = new Map<string, string>();
+  for (const text of sessionTexts) {
+    for (const match of text.matchAll(/extension:[A-Za-z0-9_-]{40,}/gu)) {
+      if (!owners.has(match[0])) owners.set(match[0], `extension:corpus-synthetic-owner-${owners.size + 1}`);
+    }
+  }
+  const replacements: Array<readonly [string, string]> = [
     [join(root, "workspace"), CORPUS_TOKENS.workspace],
     [join(root, "agent"), CORPUS_TOKENS.agent],
     [join(root, "sessions"), CORPUS_TOKENS.sessions],
@@ -109,7 +128,10 @@ function scrubReplacements(root: string, mcpUrl: string): Array<readonly [string
     [process.execPath, CORPUS_TOKENS.node],
     [REPOSITORY_ROOT, CORPUS_TOKENS.repo],
     [root, CORPUS_TOKENS.root],
-  ].sort((left, right) => right[0].length - left[0].length);
+  ];
+  for (const [from, to] of owners) replacements.push([from, to]);
+  // Longest first: a token must not eat a longer path that contains it.
+  return replacements.sort((left, right) => right[0].length - left[0].length);
 }
 
 function scrub(text: string, replacements: ReadonlyArray<readonly [string, string]>): string {
@@ -156,7 +178,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       const mcpUrl = `http://127.0.0.1:${Number(await readFile(oauthPortFile, "utf8"))}/mcp`;
       await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
         "corpus-mcp": { command: process.execPath, args: [MCP_STDIO_FIXTURE, "stdio", join(root, CORPUS_MCP_STATE_FILE)], exposure: "direct" },
-        "corpus-oauth": { url: mcpUrl, exposure: "direct" },
+        "corpus-oauth": { url: mcpUrl, exposure: "deferred" },
       } }, null, 2));
       process.env.PI_CODING_AGENT_DIR = agentDir;
       const trust = new TrustService(agentDir);
@@ -220,8 +242,9 @@ describe("persisted-state upgrade corpus recorder", () => {
 
       // Sign in to the OAuth-protected server through the real RPC route, so
       // Pi's own credential store records the credential the corpus reopens
-      // with. `corpus-oauth` is hyphenated, so a 0.99.2 rename also changes
-      // which stored credential this server resolves.
+      // with. `corpus-oauth` is hyphenated and its tool is deferred, so the
+      // recorded state covers the rename on a server reached through tool
+      // search rather than a directly declared one.
       faux.setResponses([fauxAssistantMessage("corpus MCP sign-in handled")]);
       await service.invoke(CLIENT, "mcp.auth.start", {
         sessionId: rich.id, server: CORPUS_MCP_SERVERS[1], commandId: "corpus-mcp-signin-0001",
@@ -236,32 +259,41 @@ describe("persisted-state upgrade corpus recorder", () => {
         query: callback.search.slice(1),
       });
       await waitFor(() => authEvents.some((event) => event.topic === "auth.completed"), "the MCP sign-in to complete");
-      await waitFor(async () => ((await rich.context()) as { activeTools: string[] }).activeTools.includes(oauthTool),
-        "the OAuth-protected MCP tool after sign-in");
+      // Deferred exposure means the tool is registered but not declared, so the
+      // sign-in is proven by the server answering `tools/list`, not by an active tool.
+      await waitFor(async () => ((await rich.context()) as { availableTools: Array<{ name: string }> }).availableTools
+        .some((tool) => tool.name === oauthTool), "the OAuth-protected MCP tool after sign-in");
 
-      // The per-chat tool selection: a default tool disabled, and MCP and
-      // codemode tools enabled. This is the loadout the transcript declares,
+      // The per-chat tool selection: a default tool disabled, and the directly
+      // declared MCP tool enabled. This is the loadout the transcript declares,
       // which is what a chat's "Available Tools" choice becomes on disk (#327).
+      // The deferred server's tool is deliberately not selected: the corpus
+      // records it arriving later, through tool search.
       const defaults = ((await rich.context()) as { activeTools: string[] }).activeTools;
       const chosen = [
         ...defaults.filter((name) => name !== "write" && !name.startsWith("mcp__")),
-        stdioTool, oauthTool,
+        stdioTool,
       ].sort();
       await rich.setTools(chosen);
       faux.setResponses([
         fauxAssistantMessage([
           fauxToolCall(stdioTool, { value: "direct" }, { id: "corpus-mcp-direct" }),
-          fauxToolCall("tool_search", { query: "Echo synthetic fixture input" }, { id: "corpus-tool-search" }),
-          fauxToolCall("codemode", { code: `return text(await tools.mcp__${CORPUS_MCP_SERVERS[0]}__echo({ value: "nested" }));` }, { id: "corpus-codemode" }),
-          fauxToolCall(oauthTool, { value: "authenticated" }, { id: "corpus-mcp-oauth" }),
+          // The deferred server's tool is not declared, so the model has to find
+          // it; loading it persists the tool-search loadout delta.
+          fauxToolCall("tool_search", { query: "OAuth-protected echo fixture" }, { id: "corpus-tool-search" }),
+          // Codemode exposes nested tools as normalized JavaScript identifiers,
+          // where `-` becomes `_`: `tools.mcp__corpus_mcp__echo`, not the tool's
+          // own name (which JavaScript would read as a subtraction).
+          fauxToolCall("codemode", { code: `return text(await tools.mcp__${CORPUS_MCP_SERVERS[0].replaceAll("-", "_")}__echo({ value: "nested" }));` }, { id: "corpus-codemode" }),
         ], { stopReason: "toolUse" }),
         fauxAssistantMessage("corpus turn one complete"),
+        fauxAssistantMessage([fauxToolCall(oauthTool, { value: "searched" }, { id: "corpus-mcp-oauth" })], { stopReason: "toolUse" }),
         fauxAssistantMessage("corpus turn two complete"),
         fauxAssistantMessage("corpus compaction summary"),
       ]);
       await rich.prompt("corpus turn one: MCP tools and an image", [SYNTHETIC_NATIVE_IMAGE]);
       await waitFor(() => !rich.isBusy, "the first corpus turn to settle");
-      await rich.prompt("corpus turn two: tool search");
+      await rich.prompt("corpus turn two: the tool that tool search loaded");
       await waitFor(() => !rich.isBusy, "the second corpus turn to settle");
       await rich.compact("Corpus compaction summary");
       await waitFor(() => rich.snapshot().phase === "idle", "the corpus compaction to settle");
@@ -279,6 +311,7 @@ describe("persisted-state upgrade corpus recorder", () => {
 
       const providerKey = await registry.create(cwd);
       await providerKey.setModel(CORPUS_FAUX_PROVIDER, CORPUS_FAUX_MODEL);
+      faux.setResponses([fauxAssistantMessage("corpus provider key turn complete")]);
       await providerKey.prompt("corpus turn: the saved provider key session");
       await waitFor(() => !providerKey.isBusy, "the provider key turn to settle");
       // Its last model change names the provider 1.0.3 renames, so reopening it
@@ -305,31 +338,45 @@ describe("persisted-state upgrade corpus recorder", () => {
         model: CORPUS_AZURE_MODEL,
       });
 
-      // Write the corpus: the agent-directory stores, the MCP configuration and
-      // credential, and the canonical session files, with every environment
-      // value tokenized.
-      const replacements = scrubReplacements(root, mcpUrl);
-      await rm(CORPUS_AGENT_DIR, { recursive: true, force: true });
-      await rm(CORPUS_MANIFEST_PATH, { force: true });
-      await mkdir(join(CORPUS_AGENT_DIR, CORPUS_SESSIONS_DIR_NAME), { recursive: true });
+      // The scenario is asserted before anything is written: a recording that
+      // quietly lost a shape (a codemode call that parsed as a subtraction, a
+      // tool search that loaded nothing) must fail here rather than commit a
+      // corpus whose documented coverage is false.
+      const richEntries = await readSessionEntries(richFile);
+      const missing = missingScenarioShapes(scenarioShapes(richEntries));
+      if (missing.length > 0) throw new Error(`the recorded scenario is missing: ${missing.join(", ")}`);
+
+      // Write a candidate corpus first: the agent-directory stores, the MCP
+      // configuration and credential, and the canonical session files, with
+      // every environment value tokenized. It is swapped into place only after
+      // the manifest is recorded, so a failed regeneration leaves the committed
+      // corpus untouched.
+      const candidateDir = join(root, "corpus-candidate");
+      const candidateAgentDir = join(candidateDir, "agent");
+      const sessionTexts = await Promise.all([richFile, providerKeyFile].map((file) => readFile(file, "utf8")));
+      const replacements = scrubReplacements(root, mcpUrl, sessionTexts);
+      await mkdir(join(candidateAgentDir, CORPUS_SESSIONS_DIR_NAME), { recursive: true });
       for (const name of ["settings.json", "auth.json", "mcp.json", "mcp-auth.json"]) {
         const contents = scrub(await readFile(join(agentDir, name), "utf8"), replacements);
-        await writeFile(join(CORPUS_AGENT_DIR, name), `${JSON.stringify(JSON.parse(contents), null, 2)}\n`);
+        await writeFile(join(candidateAgentDir, name), `${JSON.stringify(JSON.parse(contents), null, 2)}\n`);
       }
-      for (const [file, sessionId] of [[richFile, RICH_SESSION_ID], [providerKeyFile, PROVIDER_KEY_SESSION_ID]] as const) {
-        const contents = await readFile(file, "utf8");
-        const generatedId = canonicalSessionId(file, await readSessionEntries(file));
-        await writeFile(join(CORPUS_AGENT_DIR, CORPUS_SESSIONS_DIR_NAME, `${sessionId}.jsonl`),
-          scrub(contents, replacements).split(generatedId).join(sessionId));
+      // Pi's own session file name and header id are kept: the corpus must be
+      // the state the SDK wrote, not a renamed copy an SDK that validated
+      // identity shape would reject.
+      const sessionIds: string[] = [];
+      for (const file of [richFile, providerKeyFile]) {
+        const target = join(candidateAgentDir, CORPUS_SESSIONS_DIR_NAME, basename(file));
+        await writeFile(target, scrub(await readFile(file, "utf8"), replacements));
+        sessionIds.push(canonicalSessionId(target, await readSessionEntries(target)));
       }
-      expect((await readdir(CORPUS_AGENT_DIR)).sort())
+      expect((await readdir(candidateAgentDir)).sort())
         .toEqual(["auth.json", "mcp-auth.json", "mcp.json", "sessions", "settings.json"]);
 
       // Record the manifest from a staged copy, so the recorded values and the
       // values the test observes are produced by the same code over the same
       // corpus content.
       const staged = await stageCorpus({
-        root: stagedRoot, mcpUrl, mcpFixture: MCP_STDIO_FIXTURE, nodeExecutable: process.execPath,
+        root: stagedRoot, corpusDir: candidateDir, mcpUrl, mcpFixture: MCP_STDIO_FIXTURE, nodeExecutable: process.execPath,
       });
       const stagedTrust = new TrustService(staged.agentDir);
       await stagedTrust.set(staged.cwd, true);
@@ -342,7 +389,6 @@ describe("persisted-state upgrade corpus recorder", () => {
       await waitFor(() => (stagedRegistry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(),
         "the staged catalog's complete cut");
       await stagedRegistry.catalog("all");
-      const sessionIds = [RICH_SESSION_ID, PROVIDER_KEY_SESSION_ID];
       await waitForRecordedServerTools(stagedRegistry, sessionIds, servers);
       const sessions = await observeSessions({ registry: stagedRegistry, sessionIds, servers });
       // Only the saved provider key is observed: the faux provider is the
@@ -354,11 +400,17 @@ describe("persisted-state upgrade corpus recorder", () => {
         recordedWith: piSdkVersion(JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8"))),
         ...normalizeObservation({ ...sessions, providers }, staged),
       };
-      await writeFile(CORPUS_MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+      await writeFile(join(candidateDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
       await stagedRegistry.dispose();
       registries.splice(registries.indexOf(stagedRegistry), 1);
+      // Swap the candidate into the committed corpus only now that both halves
+      // of it exist.
+      await rm(CORPUS_AGENT_DIR, { recursive: true, force: true });
+      await rm(CORPUS_MANIFEST_PATH, { force: true });
+      await cp(candidateAgentDir, CORPUS_AGENT_DIR, { recursive: true });
+      await cp(join(candidateDir, "manifest.json"), CORPUS_MANIFEST_PATH);
       process.stdout.write(`\nRecorded the persisted-state corpus with Pi SDK ${manifest.recordedWith}\n`
-        + `  sessions: ${manifest.sessions.map((session) => `${session.sessionId} (${session.projection.length} items, ${session.model?.provider}/${session.model?.id}, ${session.declaredTools.length} selected tools)`).join("; ")}\n`
+        + `  sessions: ${manifest.sessions.map((session) => `${session.sessionId} (${session.projection.length} items, ${session.model?.provider}/${session.model?.id}, ${session.activeTools.length} active tools)`).join("; ")}\n`
         + `  servers: ${manifest.servers.map((server) => `${server.name} -> ${server.tools.join(", ") || "none"}`).join("; ")}\n`
         + `  providers: ${manifest.providers.map((provider) => `${provider.provider}${provider.storedCredential ? " (saved credential)" : " (no saved credential)"}`).join(", ")}\n`);
     } finally {

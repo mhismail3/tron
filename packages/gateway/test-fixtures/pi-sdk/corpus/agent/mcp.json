@@ -11,7 +11,7 @@
     },
     "corpus-oauth": {
       "url": "«corpus-mcp-url»",
-      "exposure": "direct"
+      "exposure": "deferred"
     }
   }
 }

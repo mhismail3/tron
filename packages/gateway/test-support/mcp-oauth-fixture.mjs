@@ -14,15 +14,20 @@
  * in the future so a corpus recorded once stays signed in across later runs;
  * `refresh_token` is still issued so a client that refreshes does not fail.
  *
- * Usage: node mcp-oauth-fixture.mjs <port-file> [token]
+ * It is a standalone process rather than an inline server because the corpus's
+ * `mcp.json` names a command Pi spawns; the inline OAuth servers in
+ * `mcp-auth.integration.test.ts` and `mcp-auth-session.integration.test.ts` are
+ * bound to their own tests' transports and cannot be configured as a server.
+ *
+ * Usage: node mcp-oauth-fixture.mjs <port-file>
  * Writes the bound port to <port-file> once listening; exits on SIGTERM.
  */
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 
-const [portPath, tokenArgument] = process.argv.slice(2);
-const TOKEN = tokenArgument ?? "corpus-mcp-access-token";
+const [portPath] = process.argv.slice(2);
+const TOKEN = "corpus-mcp-access-token";
 const CLIENT_ID = "corpus-mcp-fixture-client";
 const TOOLS = [{
   name: "echo",
@@ -32,7 +37,6 @@ const TOOLS = [{
 
 let origin = "";
 let authorizationQuery;
-let signIns = 0;
 
 function reply(response, status, payload) {
   response.writeHead(status, {
@@ -69,7 +73,6 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/register") return reply(response, 201, { client_id: CLIENT_ID });
   if (url.pathname === "/authorize") {
     authorizationQuery = url.searchParams;
-    signIns += 1;
     const callback = new URL(url.searchParams.get("redirect_uri"));
     callback.searchParams.set("code", "corpus-fixture-code");
     callback.searchParams.set("state", url.searchParams.get("state"));
@@ -120,7 +123,7 @@ const server = createServer(async (request, response) => {
   return reply(response, 200, { jsonrpc: "2.0", id: message.id, result });
 });
 
-server.listen(Number(process.env.MCP_OAUTH_FIXTURE_PORT ?? 0), "127.0.0.1", () => {
+server.listen(0, "127.0.0.1", () => {
   origin = `http://127.0.0.1:${server.address().port}`;
   if (portPath) writeFileSync(portPath, `${server.address().port}`);
 });
