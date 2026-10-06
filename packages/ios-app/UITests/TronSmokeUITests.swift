@@ -4,6 +4,63 @@ import Vision
 import XCTest
 
 final class TronSmokeUITests: XCTestCase {
+    // Failure modes: an unexplained disabled control; pending work mistaken for
+    // a lock; browsing/dismissal blocked; receipt settlement leaving controls stuck.
+    @MainActor
+    func testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            let thinking = app.buttons["thinking-level-control"]
+            XCTAssertTrue(thinking.waitForExistence(timeout: 5))
+            XCTAssertFalse(thinking.isEnabled)
+            keepScreenshot(named: "configuration-lock-\(appearance)")
+            let explanation = app.buttons["Why configuration is unavailable"]
+            XCTAssertTrue(explanation.waitForExistence(timeout: 3), "A disabled control needs a touch-accessible explanation")
+            explanation.tap()
+            XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
+            keepScreenshot(named: "configuration-lock-explanation-\(appearance)")
+            app.buttons["Done"].tap()
+            app.buttons["Release terminal settlement"].tap()
+            wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+            thinking.tap()
+            let slider = app.descendants(matching: .any)["thinking-level-slider"]
+            XCTAssertTrue(slider.waitForExistence(timeout: 3))
+            slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+            app.buttons["Done"].tap()
+            wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+            let switchModel = app.buttons["Switch Model"]
+            XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
+            XCTAssertEqual(switchModel.value as? String, "Applying configuration")
+            keepScreenshot(named: "configuration-applying-\(appearance)")
+            switchModel.tap()
+            let selected = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+            XCTAssertTrue(selected.waitForExistence(timeout: 3))
+            XCTAssertFalse(selected.isEnabled)
+            XCTAssertEqual(selected.value as? String, "Applying configuration")
+            keepScreenshot(named: "models-applying-\(appearance)")
+            app.buttons["Search models"].tap()
+            let search = app.textFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 3))
+            if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+            search.typeText("Alternative")
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch.waitForExistence(timeout: 3))
+            app.buttons["Close search"].tap()
+            app.buttons["Done"].tap()
+            app.buttons["Complete superseded thinking"].tap()
+            XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
+            wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+            XCTAssertEqual(thinking.value as? String, "Off")
+            XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
+            app.terminate()
+        }
+    }
+
     @MainActor
     func testSupersededThinkingReceiptReleasesMountedConfiguration() {
         continueAfterFailure = false
@@ -43,8 +100,12 @@ final class TronSmokeUITests: XCTestCase {
         let thinking = app.buttons["thinking-level-control"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5))
         XCTAssertFalse(thinking.isEnabled, "Foreground Stop alone must not make settling configuration editable")
-        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].exists)
+        let explanation = app.buttons["Why configuration is unavailable"]
+        XCTAssertTrue(explanation.exists)
+        explanation.tap()
+        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
         keepScreenshot(named: "post-stop-configuration-settling")
+        app.buttons["Done"].tap()
         app.buttons["Release terminal settlement"].tap()
         let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)
         wait(for: [enabled], timeout: 5)

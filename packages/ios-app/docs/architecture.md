@@ -1484,6 +1484,13 @@ interface style when resolved.
 Semantic SwiftUI font metadata and a Dynamic-Type-aware secure pairing field
 keep custom typography scalable.
 
+Every UI/UX change first inspects its neighboring surface owners and this shared
+presentation contract. Runtime correctness does not authorize a one-off visual
+pattern: availability explanations use existing information/navigation treatment,
+and actual in-flight work uses existing control/selection loading. Preserve touch
+and VoiceOver access, Dynamic Type, identity, focus, and native layout. Approved
+pattern changes update the shared component and this owning contract together.
+
 `TronPresentation.swift` is the app-wide presentation boundary. The app root
 installs the selected type family and emerald interaction tint; every app-owned
 Form/List uses the Tron collection surface; section headers, navigation titles,
@@ -1990,6 +1997,20 @@ collapsible provider sections reuse the dashboard's shared disclosure primitive,
 reuse the shared card rail, so section chrome has one owner. Rail cards are portrait and show
 context window and the Gateway-projected input/output price; the picker owns no price table. The model card scopes the same purple theme to
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
+`ModelSelectionAvailability` is a value-only projection of the existing session
+admission and pending-receipt owners, never a second lifecycle authority. Manage
+Session keeps model/provider identity and the Switch Model action while applying;
+its shared inline action shows the standard pulse. Models uses that pulse in the
+selected card's fixed checkmark slot and the selected provider row's fixed icon
+slot, with **Applying configuration** as the accessible value. It never inserts
+availability text into the measured rails, so state changes do not refit the
+opening detent or shift model content. A blocked state instead exposes a 44-point
+lock explanation affordance beside Switch Model and in Models' native leading
+toolbar group. Touch or VoiceOver opens the ordinary progressive Configuration
+sheet with `TronInfoCard` and the full authoritative reason; the same reason is
+its accessible value. Model choices stay disabled until the owning readiness or
+receipt state retires, while browse, provider expansion, search, and Done remain
+available. There is no status row below the model header or above Recent.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
 Both sliders keep ephemeral local drafts and commit at most once when an outside tap or

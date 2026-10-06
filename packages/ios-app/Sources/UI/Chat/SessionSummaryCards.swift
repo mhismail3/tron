@@ -68,8 +68,7 @@ struct SessionWorkspaceSummaryRow: View {
 struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
     @Binding var selection: ModelRef?
     let catalog: [ModelSummary]
-    /// Shown in the picker, which then declines picks the Gateway would reject.
-    var selectionLockedReason: String? = nil
+    var selectionAvailability: ModelSelectionAvailability = .ready
     let automaticCompactionEnabled: Bool?
     @ViewBuilder let controls: () -> Controls
     @ViewBuilder let compactAction: () -> CompactAction
@@ -94,21 +93,27 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                TronProgressiveSheetLink(
-                    accessibilityLabel: "Switch Model",
-                    accent: .tronPurple,
-                    detents: .contentFit
-                ) {
-                    ModelPicker(
-                        selection: $selection,
-                        models: catalog.filter(\.available),
-                        selectionLockedReason: selectionLockedReason
-                    )
-                        .tronNavigationTitle("Models", accent: .tronPurple)
-                        .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
-                        .controlSize(.regular)
-                } label: {
-                    TronInlineActionLabel("Switch Model")
+                HStack(spacing: 4) {
+                    if case .blocked(let reason) = selectionAvailability {
+                        ModelSelectionLockInfoLink(reason: reason)
+                    }
+                    TronProgressiveSheetLink(
+                        accessibilityLabel: "Switch Model",
+                        accent: .tronPurple,
+                        detents: .contentFit
+                    ) {
+                        ModelPicker(
+                            selection: $selection,
+                            models: catalog.filter(\.available),
+                            selectionAvailability: selectionAvailability
+                        )
+                            .tronNavigationTitle("Models", accent: .tronPurple)
+                            .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
+                            .controlSize(.regular)
+                    } label: {
+                        TronInlineActionLabel("Switch Model", isWorking: selectionAvailability.isApplying)
+                    }
+                    .accessibilityValue(selectionAvailability.accessibilityValue)
                 }
             }
             .padding(14)
