@@ -187,7 +187,8 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
       fauxToolCall("codemode", { code: CODEMODE_SCRIPT }, { id: "trace-codemode" }),
     ], { stopReason: "toolUse" });
   });
-  // Turn 1, step 2: a direct MCP tool and tool search for the deferred server.
+  // Turn 1, step 2: a direct MCP tool and a tool search for the tool the
+  // codemode exposure keeps out of the declared list.
   steps.push((context) => {
     recordRequest(context);
     return fauxAssistantMessage([
