@@ -679,7 +679,7 @@ work is committed. The `land` section of `.github/work.json` configures it.
    replace the wait in step 5; `land` does not rely on it.
 8. **After the merge.** Once GitHub reports the pull request as MERGED:
    - It cancels the merged pull request's own queued or in-progress runs for the
-     merged head, `pull_request` runs only, one reported line per run. The
+     merged head and branch, `pull_request` runs only, one reported line per run. The
      merged run is stale and its macOS jobs hold the queue later lands need.
      This is best effort: a failure to list or cancel the runs is printed as a
      warning and never fails a land that already merged.
@@ -815,10 +815,10 @@ Project state and records every call. The live E2E covers GitHub itself.
     validation text that contradicts the merged body are refused. A merge at
     an older head or from a fork is not a resume.
 66. **A merged pull request's own runs keep holding the queue.** After the
-    merge, and on a resume or a `steward --land` merge, `land` cancels the
-    merged head's queued or in-progress `pull_request` runs and reports one line
-    per run. Completed runs, another event's runs and another head's runs are
-    left alone. A refused run list or cancellation is a warning, and never fails
+    merge (a resumed `land` and `steward --land` share the same after-merge
+    step), `land` cancels the merged branch's queued or in-progress
+    `pull_request` runs at the merged head and reports one line per run.
+    Completed runs and runs of another event, head or branch are left alone. A refused run list or cancellation is a warning, and never fails
     a land that already merged.
 
 ## `cleanup`

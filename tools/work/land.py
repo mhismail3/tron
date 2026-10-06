@@ -288,24 +288,28 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
 # ------------------------------------------------------ merged PR CI runs
 
 
-def cancel_stale_runs(gh: Gh, repository: str, head: str) -> None:
+def cancel_stale_runs(gh: Gh, repository: str, head: str, branch: str) -> None:
     """Cancel the merged pull request's queued or in-progress runs for `head`.
 
     Once GitHub merged the pull request, its own runs cannot supersede the base
     push run's result and their macOS jobs hold the queue later lands need. Only
-    runs of the `pull_request` event at exactly the merged head may be touched.
+    runs of the `pull_request` event from the merged branch at exactly the merged
+    head may be touched.
     This is best effort: the merge already happened, so a listing or cancellation
     failure is reported and never raised.
     """
     try:
         listed = gh.rest("GET", f"repos/{repository}/actions/runs?head_sha={head}&event=pull_request&per_page=100")
-        runs = listed.get("workflow_runs") or []
-    except (GhError, ValueError, AttributeError) as error:
+        runs = listed.get("workflow_runs") if isinstance(listed, dict) else None
+        if not isinstance(runs, list):
+            raise ValueError("the response holds no workflow_runs list")
+    except (GhError, ValueError) as error:
         print(f"warning:  CI runs for {head[:12]} were not listed: {error}")
         return
     for run in runs:
         # The query filters both, and this refuses anything else the response holds.
-        if not isinstance(run, dict) or run.get("head_sha") != head or run.get("event") != "pull_request":
+        if (not isinstance(run, dict) or run.get("head_sha") != head or run.get("event") != "pull_request"
+                or run.get("head_branch") != branch):
             continue
         if run.get("status") == "completed":
             continue
@@ -314,7 +318,7 @@ def cancel_stale_runs(gh: Gh, repository: str, head: str) -> None:
         except (GhError, ValueError, KeyError) as error:
             print(f"warning:  CI run {run.get('id')} for {head[:12]} was not cancelled: {error}")
         else:
-            print(f"cancelled: CI run {run['id']} for {head[:12]}")
+            print(f"ci:       run {run['id']} for {head[:12]} cancelled")
 
 
 def after_merge(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_sha: str, head: str,
@@ -322,7 +326,7 @@ def after_merge(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_
     try:
         owner, name = _repository(gh)
         repository = f"{owner}/{name}"
-        cancel_stale_runs(gh, repository, head)
+        cancel_stale_runs(gh, repository, head, branch)
         _finish_issue(gh, root, config, repository, issue, pull, merge_sha, head, branch, action)
     except (GhError, LandError, claims.ClaimError) as error:
         # Only land, rerun from the merged head's worktree, resumes these steps; name them for everyone else.

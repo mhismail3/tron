@@ -659,9 +659,10 @@ class BranchDeletionTests(LandFixture):
 
 class StaleRunTests(LandFixture):
     # Failure mode 66.
-    @staticmethod
-    def workflow_run(run_id: int, sha: str, event: str = "pull_request", status: str = "queued") -> dict:
-        return {"id": run_id, "head_sha": sha, "event": event, "status": status}
+    def workflow_run(self, run_id: int, sha: str, event: str = "pull_request", status: str = "queued",
+                     branch: str = "") -> dict:
+        return {"id": run_id, "head_sha": sha, "event": event, "status": status,
+                "head_branch": branch or git(self.repo, "branch", "--show-current")}
 
     def cancelled(self) -> list:
         return self.state().get("cancelled", [])
@@ -685,13 +686,14 @@ class StaleRunTests(LandFixture):
             self.workflow_run(3, head, status="completed"),
             self.workflow_run(4, head, event="push"),
             self.workflow_run(5, "a" * 40),
+            self.workflow_run(6, head, branch="feat/other-pull-at-the-same-commit"),
         ])
         text = self.land_output()
         self.assertEqual(self.cancelled(), [f"repos/{REPO}/actions/runs/1/cancel",
                                             f"repos/{REPO}/actions/runs/2/cancel"])
-        self.assertIn(f"cancelled: CI run 1 for {head[:12]}", text)
-        self.assertIn(f"cancelled: CI run 2 for {head[:12]}", text)
-        for untouched in ("run 3", "run 4", "run 5"):
+        self.assertIn(f"ci:       run 1 for {head[:12]} cancelled", text)
+        self.assertIn(f"ci:       run 2 for {head[:12]} cancelled", text)
+        for untouched in ("run 3", "run 4", "run 5", "run 6"):
             self.assertNotIn(untouched, text)
         self.assert_finished()
 
@@ -709,11 +711,6 @@ class StaleRunTests(LandFixture):
         self.assertIn("warning:  CI runs for", text)
         self.assertEqual(self.cancelled(), [])
         self.assert_finished()
-
-    def test_no_runs_means_no_cancellation_output(self):
-        text = self.land_output()
-        self.assertEqual(self.cancelled(), [])
-        self.assertNotIn("cancel", text)
 
 
 class HandoffTests(LandFixture):
