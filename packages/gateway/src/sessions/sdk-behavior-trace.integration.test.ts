@@ -86,11 +86,13 @@ const roots: string[] = [];
 const fixtureProcessIds = new Set<number>();
 afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // Kill before removing the roots: a fixture that outlived its Gateway would
+  // otherwise keep watching a deleted state file.
   for (const pid of fixtureProcessIds) {
     try { process.kill(pid, "SIGKILL"); } catch { /* Already gone. */ }
   }
   fixtureProcessIds.clear();
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 /** Bounded in-process CPU load: 4 chained 4 ms bursts keep the event loop ~half busy. */

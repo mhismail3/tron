@@ -19,6 +19,9 @@ import { dirname } from "node:path";
 /** Set to `1` to rewrite the committed golden from a real run instead of comparing. */
 export const BEHAVIOR_TRACE_UPDATE_ENV = "TRON_UPDATE_SDK_BEHAVIOR_TRACE";
 
+/** A mismatch prints at most this many diff lines; the whole diff stays in the artifact. */
+const MAXIMUM_REPORTED_DIFF_LINES = 600;
+
 export type TraceValue = null | boolean | number | string | TraceValue[] | { [key: string]: TraceValue };
 
 /** Per-run facts the trace must not carry: the disposable roots it ran in. */
@@ -103,7 +106,7 @@ const TRANSIENT_EVENT_PATHS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
 const NO_TRANSIENT_PATHS: ReadonlySet<string> = new Set<string>();
 
 /** Replace per-run values in one string, keeping every stable structural cue. */
-export function normalizeTraceString(value: string, normalization: TraceNormalization): string {
+function normalizeTraceString(value: string, normalization: TraceNormalization): string {
   // Whole-value identities first: the generic replacements below would hide the
   // pattern that identifies them.
   if (FAUX_API.test(value)) return "<api>";
@@ -192,7 +195,7 @@ export function promptSectionHeadings(prompt: string): string[] {
  * value. Paths are deduplicated and sorted, so a payload's structure is compared
  * without its per-run ordering or repetition. `skip` prunes whole subtrees.
  */
-export function shapePaths(value: unknown, options: { readonly skip?: ReadonlySet<string> } = {}): string[] {
+function shapePaths(value: unknown, options: { readonly skip?: ReadonlySet<string> } = {}): string[] {
   const found = new Set<string>();
   collectShapePaths(value, "", found, options.skip ?? NO_TRANSIENT_PATHS);
   return [...found].sort();
@@ -233,7 +236,7 @@ export function clientEventTrace(events: Iterable<{ topic: string; paths: readon
 }
 
 /** The canonical rendering both the golden and the retained artifact use. */
-export function renderTrace(trace: BehaviorTrace): string {
+function renderTrace(trace: BehaviorTrace): string {
   return `${JSON.stringify(trace, null, 2)}\n`;
 }
 
@@ -249,7 +252,7 @@ type Edit = { readonly op: "keep" | "delete" | "insert"; readonly text: string }
  * with no unique line is reported as its own replacement instead of a
  * line-by-line cascade.
  */
-export function diffLines(before: string, after: string): Edit[] {
+function diffLines(before: string, after: string): Edit[] {
   const a = before.split("\n");
   const b = after.split("\n");
   const out: Edit[] = [];
@@ -329,7 +332,7 @@ function longestIncreasing(candidates: Array<{ a: number; b: number }>): Array<{
 }
 
 /** A unified diff (3 lines of context) between two golden renderings; `""` when equal. */
-export function renderUnifiedDiff(before: string, after: string, contextLines = 3): string {
+function renderUnifiedDiff(before: string, after: string, contextLines = 3): string {
   const edits = diffLines(before, after);
   // The A/B line each edit starts at (1-based), so hunk headers never depend on
   // how the hunk boundaries were chosen.
@@ -413,5 +416,3 @@ export async function compareWithGolden(comparison: GoldenComparison): Promise<{
     ...(lines.length > shown.length ? [`… ${lines.length - shown.length} more diff lines in ${comparison.actualPath}`] : []),
   ].join("\n"));
 }
-
-const MAXIMUM_REPORTED_DIFF_LINES = 600;
