@@ -146,14 +146,37 @@ def set_status(gh: Gh, item: dict, status: str) -> None:
     )
 
 
-def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]) -> int:
+def check_base(gh: Gh, cwd: Path, owner: str, name: str, rules: dict, project_title: str,
+               base: str, number: int) -> None:
+    """Refuse a base other than the configured one unless it is an open issue's claim branch.
+
+    A held branch is always some open issue's claim, so no agent can start work on
+    a branch nobody tracks (README.md, failure mode 76).
+    """
+    remote, default_base = rules["remote"], rules["baseBranch"]
+    base_issue = claims.claimed_issue(base)
+    if base_issue is None:
+        raise claims.ClaimError(f"--base {base}: a base is {default_base} or another open issue's claim branch")
+    if base_issue == number:
+        raise claims.ClaimError(f"--base {base}: a claim cannot start from its own issue's branch")
+    found = [c for c in claims.existing_claims(cwd, remote, default_base, base_issue) if c.branch == base]
+    if not found:
+        raise claims.ClaimError(f"--base {base}: no such branch on {remote}")
+    if found[0].session is None:
+        raise claims.ClaimError(f"--base {base}: it has no claim commit, so no issue owns it")
+    if load_issue(gh, owner, name, base_issue, rules, project_title)["state"] != "OPEN":
+        raise claims.ClaimError(f"--base {base}: #{base_issue} is closed")
+
+
+def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str],
+        base_arg: Optional[str] = None) -> int:
     rules = config["claim"]
-    remote, base = rules["remote"], rules["baseBranch"]
+    remote, default_base = rules["remote"], rules["baseBranch"]
     session = session_of(session_arg)
     owner, name = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
     issue = load_issue(gh, owner, name, number, rules, config["project"]["title"])
 
-    existing = claims.existing_claims(cwd, remote, base, number)
+    existing = claims.existing_claims(cwd, remote, default_base, number)
     mine = [c for c in existing if c.session == session]
     others = [c for c in existing if c.session != session]
     if others and not mine:
@@ -164,6 +187,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     root = (primary / rules["worktreeRoot"]).resolve()
     if mine:
         branch = mine[0].branch
+        # A claim's base is fixed for its life: its work lands where it started.
+        base = mine[0].base or default_base
+        if base_arg and base_arg != base:
+            raise claims.ClaimError(f"{branch} starts from {base}; a claim's base cannot change")
         print(f"resuming the claim on {branch}")
         if issue["state"] != "OPEN":
             raise claims.ClaimError(f"#{number} is closed")
@@ -171,6 +198,9 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
         reasons = claims.ineligibility(issue, rules)
         if reasons:
             raise claims.ClaimError(f"#{number} cannot be claimed: " + "; ".join(reasons))
+        base = base_arg or default_base
+        if base != default_base:
+            check_base(gh, cwd, owner, name, rules, config["project"]["title"], base, number)
         slug = claims.slugify(issue["title"])
         branch = claims.branch_name(claims.branch_type(issue["labels"], rules), number, slug)
     worktree = root / branch.split("/", 1)[1]
@@ -180,8 +210,8 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
 
     if not mine:
         result = claims.create_claim(cwd, remote, base, branch, number, session)
-        if not result.won or not claims.resolve_race(cwd, remote, base, number, session):
-            winner = claims.existing_claims(cwd, remote, base, number)
+        if not result.won or not claims.resolve_race(cwd, remote, default_base, number, session):
+            winner = claims.existing_claims(cwd, remote, default_base, number)
             raise claims.ClaimError(
                 f"#{number} was claimed by another session first: "
                 + ", ".join(f"{c.branch} (session {c.session})" for c in winner)
@@ -199,9 +229,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     published = os.path.relpath(worktree, primary.parent)
     marker = f"<!-- work:claim session={session} branch={branch} -->"
     if not any(marker in body for body in issue["comments"]):
+        _git(cwd, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
         base_sha = _git(cwd, "rev-parse", f"{remote}/{base}")
         gh.run("issue", "comment", str(number), "--body-file", "-",
-               stdin=claims.claim_comment(session, branch, published, base_sha))
+               stdin=claims.claim_comment(session, branch, published, base, base_sha))
 
     if at_path != branch:
         _git(cwd, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")

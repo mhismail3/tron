@@ -1,0 +1,1152 @@
+{
+  "recordedWith": "0.99.1",
+  "sessions": [
+    {
+      "sessionId": "01a11313-e3d9-7179-b687-4d43bb173784",
+      "model": {
+        "provider": "azure-openai-responses",
+        "id": "gpt-5"
+      },
+      "thinkingLevel": "high",
+      "activeTools": [
+        {
+          "name": "ask_user",
+          "exposure": "direct"
+        },
+        {
+          "name": "bash",
+          "exposure": "direct"
+        },
+        {
+          "name": "codemode",
+          "exposure": "model-only"
+        },
+        {
+          "name": "computer",
+          "exposure": "direct"
+        },
+        {
+          "name": "display",
+          "exposure": "direct"
+        },
+        {
+          "name": "edit",
+          "exposure": "direct"
+        },
+        {
+          "name": "jev",
+          "exposure": "direct"
+        },
+        {
+          "name": "list_mcp_resource_templates",
+          "exposure": "direct"
+        },
+        {
+          "name": "list_mcp_resources",
+          "exposure": "direct"
+        },
+        {
+          "name": "mcp__corpus-mcp__echo",
+          "exposure": "direct"
+        },
+        {
+          "name": "read",
+          "exposure": "direct"
+        },
+        {
+          "name": "read_mcp_resource",
+          "exposure": "direct"
+        },
+        {
+          "name": "tool_search",
+          "exposure": "model-only"
+        }
+      ],
+      "transcriptTotal": 22,
+      "leafEntryId": "a60d0724",
+      "projection": [
+        {
+          "id": "e1672ddb",
+          "parentId": null,
+          "timestamp": "2026-10-06T21:17:13.134Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "azure-openai-responses",
+            "id": "gpt-5"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "e1fcfa3e",
+          "parentId": "e1672ddb",
+          "timestamp": "2026-10-06T21:17:13.134Z",
+          "kind": "thinkingChange",
+          "level": "medium",
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "d148bfb2",
+          "parentId": "e1fcfa3e",
+          "timestamp": "2026-10-06T21:17:13.145Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "tron-corpus",
+            "id": "corpus-model-alt"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "84d32bd3",
+          "parentId": "d148bfb2",
+          "timestamp": "2026-10-06T21:17:13.145Z",
+          "kind": "thinkingChange",
+          "level": "off",
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "2ab00606",
+          "parentId": "84d32bd3",
+          "timestamp": "2026-10-06T21:17:13.146Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "tron-corpus",
+            "id": "corpus-model"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "a5a77945",
+          "parentId": "2ab00606",
+          "timestamp": "2026-10-06T21:17:13.146Z",
+          "kind": "thinkingChange",
+          "level": "medium",
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "1585bd8d",
+          "parentId": "a5a77945",
+          "timestamp": "2026-10-06T21:17:13.146Z",
+          "kind": "thinkingChange",
+          "level": "high",
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "1ef5aefd",
+          "parentId": "1585bd8d",
+          "timestamp": "2026-10-06T21:17:13.167Z",
+          "kind": "customEntry",
+          "customType": "tron.extension-notification.v1",
+          "data": {
+            "version": 1,
+            "receiptId": "notification:5af91a03-42da-46dc-9156-315f58505c97",
+            "sessionId": "01a11313-e3d9-7179-b687-4d43bb173784",
+            "message": "MCP servers need attention:\n  corpus-oauth: needs sign-in\nRun /mcp to fix.",
+            "tone": "warning",
+            "origin": {
+              "kind": "extension",
+              "ownerId": "extension:corpus-synthetic-owner-1",
+              "title": "Builtin Mcp",
+              "confidence": "receipt"
+            },
+            "sequence": 8,
+            "createdAt": "2026-10-06T21:17:13.167Z",
+            "writer": "gateway"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "extension",
+              "ownerId": "extension:corpus-synthetic-owner-1",
+              "title": "Builtin Mcp",
+              "confidence": "receipt"
+            },
+            "sequence": 8
+          }
+        },
+        {
+          "id": "2cf62e3e",
+          "parentId": "1ef5aefd",
+          "timestamp": "2026-10-06T21:17:13.178Z",
+          "kind": "customEntry",
+          "customType": "tron.chat-invocation.v1",
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "command",
+            "origin": {
+              "kind": "extension",
+              "ownerId": "extension:corpus-synthetic-owner-1",
+              "title": "Builtin Mcp",
+              "confidence": "adapter"
+            },
+            "invocationId": "637a1688-30bc-47af-88b3-695dd93a0554",
+            "operationId": "f794efcd-5aad-4047-a4a5-a2f004c7ede9",
+            "lifecycle": "completed",
+            "resourceInvocation": {
+              "source": "extension",
+              "name": "mcp",
+              "arguments": ""
+            },
+            "sequence": 8
+          }
+        },
+        {
+          "id": "97ba0143",
+          "parentId": "207ed641",
+          "timestamp": "2026-10-06T21:17:13.241Z",
+          "kind": "message",
+          "role": "user",
+          "presentationId": "97ba0143",
+          "content": [
+            {
+              "id": "97ba0143:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus turn one: MCP tools and an image"
+            },
+            {
+              "id": "97ba0143:1",
+              "ordinal": 1,
+              "type": "image",
+              "mimeType": "image/png",
+              "blobId": "s3RrDk2qSciznxP_kYik6t-CXbQ3_G4Ipu5r41X-4f8"
+            }
+          ],
+          "semantic": {
+            "version": 1,
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "resourcePrompt",
+            "origin": {
+              "kind": "user",
+              "confidence": "boundary"
+            },
+            "sequence": 0,
+            "invocationId": "7d1fd3a5-3e8d-4a46-abf6-3d6e6f9780bb",
+            "operationId": "a9d5b1e6-077f-483a-995b-64fef68d4aef",
+            "submittedText": "corpus turn one: MCP tools and an image",
+            "lifecycle": "completed"
+          }
+        },
+        {
+          "id": "95079350",
+          "parentId": "8003f5ce",
+          "timestamp": "2026-10-06T21:17:13.257Z",
+          "kind": "message",
+          "role": "assistant",
+          "presentationId": "95079350",
+          "content": [
+            {
+              "id": "95079350:0",
+              "ordinal": 0,
+              "type": "toolCall",
+              "toolCallId": "corpus-mcp-direct",
+              "name": "mcp__corpus-mcp__echo",
+              "label": "corpus-mcp/echo",
+              "arguments": {
+                "value": "direct"
+              },
+              "toolSegmentId": "tool-segment:\"97ba0143\"",
+              "groupId": "tool-group:[\"95079350\",0]",
+              "groupIndex": 0,
+              "groupCount": 3,
+              "groupFinalized": true
+            },
+            {
+              "id": "95079350:1",
+              "ordinal": 1,
+              "type": "toolCall",
+              "toolCallId": "corpus-tool-search",
+              "name": "tool_search",
+              "label": "tool_search",
+              "arguments": {
+                "query": "OAuth-protected echo fixture"
+              },
+              "toolSegmentId": "tool-segment:\"97ba0143\"",
+              "groupId": "tool-group:[\"95079350\",0]",
+              "groupIndex": 1,
+              "groupCount": 3,
+              "groupFinalized": true
+            },
+            {
+              "id": "95079350:2",
+              "ordinal": 2,
+              "type": "toolCall",
+              "toolCallId": "corpus-codemode",
+              "name": "codemode",
+              "label": "codemode",
+              "arguments": {
+                "code": "return text(await tools.mcp__corpus_mcp__echo({ value: \"nested\" }));"
+              },
+              "toolSegmentId": "tool-segment:\"97ba0143\"",
+              "groupId": "tool-group:[\"95079350\",0]",
+              "groupIndex": 2,
+              "groupCount": 3,
+              "groupFinalized": true
+            }
+          ],
+          "provider": "tron-corpus",
+          "modelId": "corpus-model",
+          "thinkingLevel": "high",
+          "stopReason": "toolUse",
+          "usage": {
+            "input": 7837,
+            "output": 46,
+            "cacheRead": 0,
+            "cacheWrite": 7837,
+            "totalTokens": 15720,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentOutput",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "prompt",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "6fe95c84",
+          "parentId": "95079350",
+          "timestamp": "2026-10-06T21:17:13.289Z",
+          "kind": "message",
+          "role": "toolResult",
+          "presentationId": "6fe95c84",
+          "content": [
+            {
+              "id": "6fe95c84:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "fixture:echo:{\"value\":\"direct\"}"
+            }
+          ],
+          "toolCallId": "corpus-mcp-direct",
+          "toolName": "mcp__corpus-mcp__echo",
+          "toolLabel": "corpus-mcp/echo",
+          "isError": false,
+          "details": {
+            "server": "corpus-mcp",
+            "tool": "echo"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentInvocation",
+            "contextEffect": "toolResult",
+            "delivery": "toolResult",
+            "visibility": "visible",
+            "kind": "tool",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          },
+          "completedAt": "2026-10-06T21:17:13.289Z"
+        },
+        {
+          "id": "3ae74fd6",
+          "parentId": "6fe95c84",
+          "timestamp": "2026-10-06T21:17:13.289Z",
+          "kind": "message",
+          "role": "toolResult",
+          "presentationId": "3ae74fd6",
+          "content": [
+            {
+              "id": "3ae74fd6:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "Loaded 1 tool. They are available from your next call:\n- mcp__corpus-oauth__echo: Echo synthetic fixture input through the OAuth-protected server"
+            }
+          ],
+          "toolCallId": "corpus-tool-search",
+          "toolName": "tool_search",
+          "toolLabel": "tool_search",
+          "isError": false,
+          "details": {
+            "loaded": [
+              "mcp__corpus-oauth__echo"
+            ]
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentInvocation",
+            "contextEffect": "toolResult",
+            "delivery": "toolResult",
+            "visibility": "visible",
+            "kind": "tool",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          },
+          "completedAt": "2026-10-06T21:17:13.289Z"
+        },
+        {
+          "id": "6c81489c",
+          "parentId": "3ae74fd6",
+          "timestamp": "2026-10-06T21:17:13.289Z",
+          "kind": "message",
+          "role": "toolResult",
+          "presentationId": "6c81489c",
+          "content": [
+            {
+              "id": "6c81489c:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "Script completed\nWall time 0.0 seconds\nOutput:\n"
+            },
+            {
+              "id": "6c81489c:1",
+              "ordinal": 1,
+              "type": "text",
+              "text": "{\"content\":[{\"type\":\"text\",\"text\":\"fixture:echo:{\\\"value\\\":\\\"nested\\\"}\"}]}"
+            }
+          ],
+          "toolCallId": "corpus-codemode",
+          "toolName": "codemode",
+          "toolLabel": "codemode",
+          "isError": false,
+          "details": {
+            "calls": [
+              {
+                "id": "corpus-codemode/1",
+                "name": "mcp__corpus-mcp__echo",
+                "args": "{\"value\":\"nested\"}",
+                "status": "ok",
+                "durationMs": 0.9459580000000187
+              }
+            ]
+          },
+          "nestedCalls": {
+            "calls": [
+              {
+                "id": "corpus-codemode/1",
+                "parentToolCallId": "corpus-codemode",
+                "toolName": "mcp__corpus-mcp__echo",
+                "status": "completed",
+                "arguments": {
+                  "value": "nested"
+                },
+                "durationMs": 1
+              }
+            ],
+            "complete": true
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentInvocation",
+            "contextEffect": "toolResult",
+            "delivery": "toolResult",
+            "visibility": "visible",
+            "kind": "tool",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          },
+          "completedAt": "2026-10-06T21:17:13.289Z"
+        },
+        {
+          "id": "63b977e8",
+          "parentId": "20e5539d",
+          "timestamp": "2026-10-06T21:17:13.294Z",
+          "kind": "message",
+          "role": "assistant",
+          "presentationId": "63b977e8",
+          "content": [
+            {
+              "id": "63b977e8:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus turn one complete"
+            }
+          ],
+          "provider": "tron-corpus",
+          "modelId": "corpus-model",
+          "thinkingLevel": "high",
+          "stopReason": "stop",
+          "usage": {
+            "input": 241,
+            "output": 6,
+            "cacheRead": 7821,
+            "cacheWrite": 242,
+            "totalTokens": 8310,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentOutput",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "prompt",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "3e2e3b94",
+          "parentId": "3bc83e65",
+          "timestamp": "2026-10-06T21:17:13.321Z",
+          "kind": "message",
+          "role": "user",
+          "presentationId": "3e2e3b94",
+          "content": [
+            {
+              "id": "3e2e3b94:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus turn two: the tool that tool search loaded"
+            }
+          ],
+          "semantic": {
+            "version": 1,
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "resourcePrompt",
+            "origin": {
+              "kind": "user",
+              "confidence": "boundary"
+            },
+            "sequence": 0,
+            "invocationId": "86327241-ac57-4615-829a-046aa42c46ef",
+            "operationId": "65d4b7a4-6a61-4707-8719-6408a7098583",
+            "lifecycle": "completed"
+          }
+        },
+        {
+          "id": "a5a7a412",
+          "parentId": "f757b61a",
+          "timestamp": "2026-10-06T21:17:13.324Z",
+          "kind": "message",
+          "role": "assistant",
+          "presentationId": "a5a7a412",
+          "content": [
+            {
+              "id": "a5a7a412:0",
+              "ordinal": 0,
+              "type": "toolCall",
+              "toolCallId": "corpus-mcp-oauth",
+              "name": "mcp__corpus-oauth__echo",
+              "label": "corpus-oauth/echo",
+              "arguments": {
+                "value": "searched"
+              },
+              "toolSegmentId": "tool-segment:\"3e2e3b94\"",
+              "groupId": "tool-group:[\"a5a7a412\",0]",
+              "groupIndex": 0,
+              "groupCount": 1,
+              "groupFinalized": true
+            }
+          ],
+          "provider": "tron-corpus",
+          "modelId": "corpus-model",
+          "thinkingLevel": "high",
+          "stopReason": "toolUse",
+          "usage": {
+            "input": 23,
+            "output": 11,
+            "cacheRead": 8062,
+            "cacheWrite": 23,
+            "totalTokens": 8119,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentOutput",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "prompt",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "eec55ff6",
+          "parentId": "a5a7a412",
+          "timestamp": "2026-10-06T21:17:13.331Z",
+          "kind": "message",
+          "role": "toolResult",
+          "presentationId": "eec55ff6",
+          "content": [
+            {
+              "id": "eec55ff6:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "fixture:echo:{\"value\":\"searched\"}"
+            }
+          ],
+          "toolCallId": "corpus-mcp-oauth",
+          "toolName": "mcp__corpus-oauth__echo",
+          "toolLabel": "corpus-oauth/echo",
+          "isError": false,
+          "details": {
+            "server": "corpus-oauth",
+            "tool": "echo"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentInvocation",
+            "contextEffect": "toolResult",
+            "delivery": "toolResult",
+            "visibility": "visible",
+            "kind": "tool",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          },
+          "completedAt": "2026-10-06T21:17:13.331Z"
+        },
+        {
+          "id": "c9aa1ba0",
+          "parentId": "0c7974cd",
+          "timestamp": "2026-10-06T21:17:13.339Z",
+          "kind": "message",
+          "role": "assistant",
+          "presentationId": "c9aa1ba0",
+          "content": [
+            {
+              "id": "c9aa1ba0:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus turn two complete"
+            }
+          ],
+          "provider": "tron-corpus",
+          "modelId": "corpus-model",
+          "thinkingLevel": "high",
+          "stopReason": "stop",
+          "usage": {
+            "input": 32,
+            "output": 6,
+            "cacheRead": 8085,
+            "cacheWrite": 32,
+            "totalTokens": 8155,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentOutput",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "prompt",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "191f0007",
+          "parentId": "fa428693",
+          "timestamp": "2026-10-06T21:17:13.369Z",
+          "kind": "compaction",
+          "summary": "No prior history.\n\n---\n\n**Turn Context (split turn):**\n\ncorpus compaction summary",
+          "tokensBefore": 7483,
+          "details": {
+            "readFiles": [],
+            "modifiedFiles": []
+          },
+          "usage": {
+            "input": 402,
+            "output": 7,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 409,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "fromHook": false,
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "1c1b8455",
+          "parentId": "191f0007",
+          "timestamp": "2026-10-06T21:17:13.373Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "azure-openai-responses",
+            "id": "gpt-5"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "a60d0724",
+          "parentId": "1c1b8455",
+          "timestamp": "2026-10-06T21:17:13.966Z",
+          "kind": "message",
+          "role": "assistant",
+          "presentationId": "a60d0724",
+          "content": [
+            {
+              "id": "a60d0724:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus branch answer"
+            }
+          ],
+          "provider": "azure-openai-responses",
+          "modelId": "gpt-5",
+          "stopReason": "stop",
+          "usage": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 0,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentOutput",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "prompt",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        }
+      ]
+    },
+    {
+      "sessionId": "01a11313-e51e-7179-b687-4d46033b474b",
+      "model": {
+        "provider": "azure-openai-responses",
+        "id": "gpt-5"
+      },
+      "thinkingLevel": "medium",
+      "activeTools": [
+        {
+          "name": "ask_user",
+          "exposure": "direct"
+        },
+        {
+          "name": "bash",
+          "exposure": "direct"
+        },
+        {
+          "name": "codemode",
+          "exposure": "model-only"
+        },
+        {
+          "name": "computer",
+          "exposure": "direct"
+        },
+        {
+          "name": "display",
+          "exposure": "direct"
+        },
+        {
+          "name": "edit",
+          "exposure": "direct"
+        },
+        {
+          "name": "jev",
+          "exposure": "direct"
+        },
+        {
+          "name": "list_mcp_resource_templates",
+          "exposure": "direct"
+        },
+        {
+          "name": "list_mcp_resources",
+          "exposure": "direct"
+        },
+        {
+          "name": "mcp__corpus-mcp__echo",
+          "exposure": "direct"
+        },
+        {
+          "name": "read",
+          "exposure": "direct"
+        },
+        {
+          "name": "read_mcp_resource",
+          "exposure": "direct"
+        },
+        {
+          "name": "tool_search",
+          "exposure": "model-only"
+        },
+        {
+          "name": "write",
+          "exposure": "direct"
+        }
+      ],
+      "transcriptTotal": 6,
+      "leafEntryId": "54c21d47",
+      "projection": [
+        {
+          "id": "7d127c93",
+          "parentId": null,
+          "timestamp": "2026-10-06T21:17:13.380Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "azure-openai-responses",
+            "id": "gpt-5"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "c37ecbfc",
+          "parentId": "7d127c93",
+          "timestamp": "2026-10-06T21:17:13.380Z",
+          "kind": "thinkingChange",
+          "level": "medium",
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "623a67a6",
+          "parentId": "c37ecbfc",
+          "timestamp": "2026-10-06T21:17:13.382Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "tron-corpus",
+            "id": "corpus-model"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "3bfd5879",
+          "parentId": "4c6080c2",
+          "timestamp": "2026-10-06T21:17:13.408Z",
+          "kind": "message",
+          "role": "user",
+          "presentationId": "3bfd5879",
+          "content": [
+            {
+              "id": "3bfd5879:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus turn: the saved provider key session"
+            }
+          ],
+          "semantic": {
+            "version": 1,
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "resourcePrompt",
+            "origin": {
+              "kind": "user",
+              "confidence": "boundary"
+            },
+            "sequence": 0,
+            "invocationId": "2fcf89bf-c6de-4326-b3b6-7c2f84c93697",
+            "operationId": "66281dd4-729f-47e5-9335-7189e99e0254",
+            "lifecycle": "completed"
+          }
+        },
+        {
+          "id": "59d2619e",
+          "parentId": "13ec7816",
+          "timestamp": "2026-10-06T21:17:13.413Z",
+          "kind": "message",
+          "role": "assistant",
+          "presentationId": "59d2619e",
+          "content": [
+            {
+              "id": "59d2619e:0",
+              "ordinal": 0,
+              "type": "text",
+              "text": "corpus provider key turn complete"
+            }
+          ],
+          "provider": "tron-corpus",
+          "modelId": "corpus-model",
+          "thinkingLevel": "medium",
+          "stopReason": "stop",
+          "usage": {
+            "input": 8030,
+            "output": 9,
+            "cacheRead": 0,
+            "cacheWrite": 8030,
+            "totalTokens": 16069,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "agentOutput",
+            "contextEffect": "modelInput",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "prompt",
+            "origin": {
+              "kind": "assistant",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        },
+        {
+          "id": "54c21d47",
+          "parentId": "b71ed9f1",
+          "timestamp": "2026-10-06T21:17:13.451Z",
+          "kind": "modelChange",
+          "modelRef": {
+            "provider": "azure-openai-responses",
+            "id": "gpt-5"
+          },
+          "semantic": {
+            "version": 1,
+            "direction": "ambientStatus",
+            "contextEffect": "none",
+            "delivery": "stored",
+            "visibility": "visible",
+            "kind": "status",
+            "origin": {
+              "kind": "gateway",
+              "confidence": "boundary"
+            },
+            "sequence": 0
+          }
+        }
+      ]
+    }
+  ],
+  "servers": [
+    {
+      "name": "corpus-mcp",
+      "tools": [
+        "mcp__corpus-mcp__echo"
+      ]
+    },
+    {
+      "name": "corpus-oauth",
+      "tools": [
+        "mcp__corpus-oauth__echo"
+      ]
+    }
+  ],
+  "providers": [
+    {
+      "provider": "azure-openai-responses",
+      "storedCredential": true,
+      "model": {
+        "provider": "azure-openai-responses",
+        "id": "gpt-5"
+      }
+    }
+  ]
+}
