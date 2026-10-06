@@ -457,10 +457,14 @@ export interface RuntimeSlotDependencies {
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
   archivedAt: (sessionId: string) => string | undefined;
-  /** Whether this session id is the enabled Tron Home. Read once per runtime
+  /** What the Home record says about this session id. Read once per runtime
    * creation, so a profile change is never cached past the runtime it applies
-   * to. */
-  isHomeSession?: (sessionId: string) => boolean;
+   * to. `unnamed` is the only state in which the explicit creation profile
+   * applies. */
+  homeProfile?: (sessionId: string) => "home" | "ordinary" | "unnamed";
+  /** One model applied to a live Home session, so the Home record keeps the
+   * single source of truth for the model a re-enable restores. */
+  homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -792,8 +796,13 @@ export class RuntimeSlot {
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
   /** The one session id whose first runtime was created with the explicit Home
-   * profile, before the Home record named it. */
-  private readonly explicitHomeSessionId: string | undefined;
+   * profile, before the Home record named it. One-shot: cleared by that first
+   * runtime creation. */
+  private explicitHomeSessionId: string | undefined;
+  /** The curated profile each live runtime was built with. `setModel` and
+   * `compact` read this, never the record, so a policy is never applied to a
+   * runtime that did not load it. */
+  private readonly runtimeProfiles = new WeakMap<AgentSession, RuntimeProfile>();
 
   private constructor(
     private sessionManager: SessionManager,
@@ -1542,12 +1551,20 @@ export class RuntimeSlot {
   }
 
   /** Whether one runtime of this slot carries the curated Home profile. The
-   * explicit creation profile covers the very first runtime of a brand-new Home
-   * session, before its record exists, and only that session: a fork or a reset
-   * produces a new session id, which asks the Home owner instead. */
-  private isHomeProfile(sessionManager: SessionManager = this.sessionManager): boolean {
-    if (this.explicitHomeSessionId !== undefined && sessionManager.getSessionId() === this.explicitHomeSessionId) return true;
-    return this.dependencies.isHomeSession?.(sessionManager.getSessionId()) === true;
+   * record decides for every session it names; the explicit creation profile
+   * covers only the first runtime of a brand-new Home session, before the record
+   * names it, and never a fork or a reset (which produce a new session id). */
+  private isHomeProfile(sessionManager: SessionManager): boolean {
+    const sessionId = sessionManager.getSessionId();
+    const decision = this.dependencies.homeProfile?.(sessionId) ?? "unnamed";
+    if (decision === "home") return true;
+    if (decision === "ordinary") return false;
+    return this.explicitHomeSessionId === sessionId;
+  }
+
+  /** The profile the live runtime was built with. */
+  private liveProfile(): RuntimeProfile {
+    return this.runtimeProfiles.get(this.runtime.session) ?? "ordinary";
   }
 
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
@@ -1566,6 +1583,9 @@ export class RuntimeSlot {
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       const home = this.isHomeProfile(sessionManager);
+      // One-shot: a brand-new Home session's first runtime carries the explicit
+      // profile; every later runtime asks the record.
+      this.explicitHomeSessionId = undefined;
       const tronModuleHost: TronModuleHost = {
         sessionId: () => this.id,
         cwd: () => this.cwd,
@@ -1615,7 +1635,18 @@ export class RuntimeSlot {
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
-          ...(home ? { noExtensions: true, noSkills: true, noPromptTemplates: true, noContextFiles: true } : {}),
+          ...(home ? {
+            noExtensions: true,
+            noSkills: true,
+            noPromptTemplates: true,
+            noContextFiles: true,
+            // The agent directory's SYSTEM.md and APPEND_SYSTEM.md are not gated
+            // by any `no*` option, so Home drops them at the two overrides the
+            // loader exposes. Nothing from outside the curated profile reaches
+            // Home's system prompt.
+            systemPromptOverride: () => undefined,
+            appendSystemPromptOverride: () => [],
+          } : {}),
           extensionFactories,
           extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
             views: this.dependencies.browserLiveViews,
@@ -1652,6 +1683,7 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
       if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
+      this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
       created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
       this.compactionPolicies.set(created.session, compactionPolicy);
@@ -1896,15 +1928,51 @@ export class RuntimeSlot {
   }
 
   private async restorePreviousRuntime(previousManager: SessionManager): Promise<void> {
+    await this.replaceRuntime(previousManager);
+  }
+
+  /** Rebuild this slot's runtime over the same session manager, keeping the
+   * session identity, its subscribers and its presentation. The factory decides
+   * the profile from the record, so this is also how a profile change takes
+   * effect. */
+  private async replaceRuntime(sessionManager: SessionManager = this.sessionManager): Promise<void> {
     await this.runtime.dispose().catch(() => {});
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
-      cwd: previousManager.getCwd(),
+      cwd: sessionManager.getCwd(),
       agentDir: this.dependencies.agentDir,
-      sessionManager: previousManager,
+      sessionManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
     this.installRuntimeHooks();
     await this.bindSession();
+  }
+
+  /**
+   * Replace this slot's runtime in place after `commit` changes the profile
+   * decision for its session. The whole sequence runs in the slot's lane, which
+   * is also the lane prompt admission uses, so no prompt can be admitted between
+   * the idle check, the durable commit and the rebuild: the next prompt always
+   * sees the new profile. A busy slot refuses retryably and changes nothing.
+   */
+  async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
+    await this.lane.run(async () => {
+      this.assertUsable();
+      this.assertProfileChangeIdle();
+      const work = this.dependencies.workRegistry.begin({
+        kind: "administrative-provider-package-operation",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+      try {
+        await commit();
+        await this.replaceRuntime();
+        this.revision += 1;
+        this.emit("session.resourcesChanged", {});
+        this.publishSnapshot();
+      } finally {
+        work.settle();
+      }
+    });
   }
 
   private childSessionReferences(
@@ -7817,11 +7885,17 @@ export class RuntimeSlot {
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
       // Home must stay on a fixed physical model: a virtual model routes on the
-      // canonical transcript, which Home's profile does not own.
-      if (this.isHomeProfile() && model.api === VIRTUAL_MODEL_API) {
+      // canonical transcript, which Home's profile does not own. The live
+      // runtime's profile decides, so an ordinary session keeps the choice.
+      if (this.liveProfile() === "home" && model.api === VIRTUAL_MODEL_API) {
         throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
       }
       await this.runtime.session.setModel(model as Model<never>);
+      // The Home record is the single source of truth for the model a re-enable
+      // restores, and only an enabled Home's change belongs to it.
+      if (this.liveProfile() === "home") {
+        await this.dependencies.homeModelChanged?.(this.id, { provider, id: modelId });
+      }
       this.revision += 1;
       this.publishSnapshot();
       return this.revision;
@@ -7880,7 +7954,7 @@ export class RuntimeSlot {
     this.assertUsable();
     // Refused at admission: Home keeps its own history, and the SDK would only
     // refuse this later, after the command was already accepted.
-    if (this.isHomeProfile()) {
+    if (this.liveProfile() === "home") {
       throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
     }
     if (this.manualCompactionClaim) {
@@ -8947,8 +9021,19 @@ export class RuntimeSlot {
    * still makes this busy. */
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
-    if (this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken)) {
-      throw new GatewayError("busy", "Session must be idle for this operation");
+    if (this.isRunningWork(exceptWorkToken)) throw new GatewayError("busy", "Session must be idle for this operation");
+  }
+
+  /** The same idle predicate `assertIdle` applies, classified retryably because
+   * a profile change is safe to retry once the run settles. */
+  private assertProfileChangeIdle(): void {
+    this.assertUsable();
+    if (this.isRunningWork()) {
+      throw new GatewayError("busy", "Tron Home's session is running; retry when it is idle", true);
     }
+  }
+
+  private isRunningWork(exceptWorkToken?: string): boolean {
+    return this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken);
   }
 }

@@ -775,11 +775,20 @@ export class RuntimeRegistry {
         applySessionModel: async (sessionId, model) => {
           const slot = this.slots.get(sessionId);
           if (!slot) throw new GatewayError("internal", "Tron Home's session is not live");
+          const current = slot.snapshot().model;
+          if (current?.provider === model.provider && current.id === model.id) return;
           await slot.setModel(model.provider, model.id);
         },
+        sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
-        isBusy: (sessionId) => this.slots.get(sessionId)?.isBusy === true,
-        retireIdleRuntime: (sessionId) => this.retireSessionRuntime(sessionId),
+        replaceRuntimeForProfile: async (sessionId, commit) => {
+          const slot = this.slots.get(sessionId);
+          if (!slot || slot.isDisposed) {
+            await commit();
+            return;
+          }
+          await slot.replaceRuntimeForProfile(commit);
+        },
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
     });
@@ -1622,7 +1631,10 @@ export class RuntimeRegistry {
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
-      isHomeSession: (sessionId: string) => this.home.isEnabledHome(sessionId),
+      homeProfile: (sessionId: string) => this.home.profileFor(sessionId),
+      homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
+        this.options.persistenceDiagnostic?.(sessionId, "home-model-record-failed");
+      }),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
     };
@@ -4236,18 +4248,17 @@ export class RuntimeRegistry {
     }
   }
 
-  /** Retire one live runtime so its next creation reads the current runtime
-   * profile. Used only by the Home owner after a designation change, so a
-   * running session is refused rather than interrupted. */
-  private async retireSessionRuntime(sessionId: string): Promise<boolean> {
-    const slot = this.slots.get(sessionId);
-    if (!slot) return true;
-    return this.retireIdleRuntime({
-      sessionId,
-      slot,
-      reason: "idle",
-      eligible: () => this.slots.get(sessionId) === slot && !slot.isBusy,
-    });
+  /** Whether Home's recorded session still exists: a live runtime, or a
+   * canonical session the catalog still holds. A catalog read that cannot
+   * complete is not proof of absence, so the recorded session is kept rather
+   * than replaced. */
+  private async homeSessionPresent(sessionId: string): Promise<boolean> {
+    if (this.slots.has(sessionId)) return true;
+    try {
+      return (await this.catalogMembership(sessionId)).entry !== undefined;
+    } catch {
+      return true;
+    }
   }
 
   activeSessionIds(): string[] {

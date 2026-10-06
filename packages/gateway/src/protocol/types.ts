@@ -1027,7 +1027,9 @@ export const HOME_CAPABILITY = "home.v1";
 
 /** `home.status`: the one bounded Home projection. It is a read and performs no
  * inference. `available` is false only when a stored record exists but cannot be
- * used, which `reason` explains; the preserved record is never overwritten. */
+ * used, which `reason` explains; the preserved record is never overwritten.
+ * `live` is whether the session holds a runtime right now; `sessionPresent` is
+ * whether it exists at all, live or still on disk. */
 export interface HomeStatus {
   available: boolean;
   reason?: string;
@@ -1037,6 +1039,7 @@ export interface HomeStatus {
   generation?: number;
   model?: ModelRef;
   live: boolean;
+  sessionPresent: boolean;
 }
 
 /** `home.designate`/`home.disable` result: the exact admitted identity. */
