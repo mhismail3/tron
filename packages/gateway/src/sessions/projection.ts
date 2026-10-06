@@ -22,7 +22,6 @@ export function canonicalToolResultCallIDsFromBranch(branch: readonly SessionEnt
 export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): ReadonlySet<string> {
   return canonicalToolResultCallIDsFromBranch(manager.getBranch());
 }
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import { admitToolDisplayProjection } from "../display/display-contract.js";
@@ -1019,12 +1018,13 @@ export function fitSessionSnapshot(
   };
 }
 
-type ProjectableContent = string | Array<
-  | TextContent
-  | ImageContent
-  | { type: "thinking"; thinking: string; redacted?: boolean }
-  | { type: "toolCall"; id: string; name: string; arguments: unknown }
->;
+/** Every content block a Pi message can carry. Derived from the SDK's message
+ * union, so a block type added upstream fails `projectContent` at compile time
+ * instead of being dropped from every row (#470). */
+type MessageContentBlock<M> = M extends { content: infer C } ? C extends readonly unknown[] ? C[number] : never : never;
+export type PiMessageContentBlock = MessageContentBlock<AgentMessage>;
+
+type ProjectableContent = string | Array<PiMessageContentBlock>;
 
 const ATTACHMENT_TAG = /<attachment\b([^<>]*?)\s*\/>/g;
 const ATTACHMENT_ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
@@ -1205,6 +1205,13 @@ function projectContent(
         }];
         break;
       }
+      default: {
+        // Unreachable for the pinned SDK: every block type is a projected row
+        // above. A new SDK block type fails this assignment, so it cannot be
+        // silently dropped from the transcript.
+        const unclassified: never = part;
+        break;
+      }
     }
     for (const candidate of candidates) {
       if (projected.length >= MAX_CONTENT_PARTS - 1) {
@@ -1383,8 +1390,15 @@ export function projectMessage(
         tokensBefore: message.tokensBefore,
         semantic: semanticForStatus(),
       };
-    default:
+    case "system":
+      // System messages are model context and prompt state, never a chat row.
       return undefined;
+    default: {
+      // Unreachable for the pinned SDK: every message role is classified above.
+      // A new SDK role fails this assignment instead of silently dropping a row.
+      const unclassified: never = message;
+      return undefined;
+    }
   }
 }
 
@@ -1512,7 +1526,23 @@ function projectEntry(
         semantic: semanticForStatus(),
       };
     case "session_info":
+      // Session metadata is read from its own owner, not a transcript row.
       return undefined;
+    case "usage":
+      // Pi attributes model usage (for example cache warming) to a canonical
+      // entry that never participates in the conversation.
+      return undefined;
+    case "context_edit":
+      // A context-only edit rewrites model input; canonical JSONL and the tree
+      // projection's `contextEdit` kind own it, not the transcript.
+      return undefined;
+    default: {
+      // Unreachable for the pinned SDK: every entry type is classified above.
+      // A new SDK entry type fails this assignment instead of silently
+      // disappearing from the transcript.
+      const unclassified: never = entry;
+      return undefined;
+    }
   }
 }
 
@@ -1619,6 +1649,44 @@ function validCanonicalSummary(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/**
+ * Compile-time classification of every member of the Pi unions the canonical
+ * validators below gate. `satisfies Record<…>` fails the build when the pinned
+ * SDK adds or removes a member, so a new entry type, message role or content
+ * block must be classified here instead of reaching a default branch unseen
+ * (#470). Nothing reads these maps at runtime.
+ *
+ * `row`: Tron publishes it (a transcript or tree row).
+ * `hidden`: Tron consumes it without publishing a row.
+ * `n/a`: Tron receives it on this seam but no Tron behavior depends on it.
+ */
+const contentBlockClassification = {
+  text: "row", thinking: "row", image: "row", toolCall: "row",
+} satisfies Record<PiMessageContentBlock["type"], "row" | "hidden" | "n/a">;
+
+const messageRoleClassification = {
+  system: "hidden", user: "row", assistant: "row", toolResult: "row",
+  bashExecution: "row",
+  // A custom message is a row only when its producer asked for display;
+  // producer-hidden custom messages stay context-only by their own rule.
+  custom: "row",
+  branchSummary: "row", compactionSummary: "row",
+} satisfies Record<AgentMessage["role"], "row" | "hidden" | "n/a">;
+
+const canonicalEntryClassification = {
+  message: "row", thinking_level_change: "row", model_change: "row", compaction: "row",
+  branch_summary: "row", custom_message: "row", label: "row",
+  // Only Gateway-authored typed receipts project; arbitrary extension data in a
+  // custom entry never consumes a chat row.
+  custom: "row",
+  // Model-attributed usage never participates in the conversation.
+  usage: "hidden",
+  // Context-only edits rewrite model input; canonical JSONL and the tree
+  // projection's `contextEdit` kind own them, not the transcript.
+  context_edit: "hidden",
+  session_info: "hidden",
+} satisfies Record<SessionEntry["type"], "row" | "hidden" | "n/a">;
+
 function validContentPart(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const part = value as Record<string, unknown>;
@@ -1628,6 +1696,8 @@ function validContentPart(value: unknown): boolean {
     case "image": return typeof part.mimeType === "string" && typeof part.data === "string";
     case "toolCall": return typeof part.id === "string" && typeof part.name === "string"
       && Object.prototype.hasOwnProperty.call(part, "arguments");
+    // A value outside `contentBlockClassification` is a producer extension or a
+    // newer SDK block: fail closed rather than admit an unprojectable shape.
     default: return false;
   }
 }
@@ -1672,6 +1742,8 @@ function validMessage(value: unknown): boolean {
       return typeof message.fromId === "string" && typeof message.summary === "string";
     case "compactionSummary":
       return typeof message.summary === "string" && Number.isSafeInteger(message.tokensBefore);
+    // A role outside `messageRoleClassification` is a producer extension or a
+    // newer SDK message: fail closed rather than admit an unprojectable shape.
     default:
       return false;
   }
@@ -1713,6 +1785,11 @@ function validateCanonicalEntry(value: unknown): void {
         && typeof entry.display === "boolean"; break;
     case "label": valid = validTreeString(entry.targetId) && (entry.label === undefined || validTreeString(entry.label)); break;
     case "session_info": valid = entry.name === undefined || validTreeString(entry.name); break;
+    case "usage":
+      // Unchanged 0.99.1 behavior: Pi's `appendUsage` (cache warming) writes a
+      // canonical entry Tron does not project, and this fail-closed validator
+      // rejects it rather than admit an entry without a projected shape.
+      valid = false; break;
     case "context_edit": {
       const replacement = entry.replacement;
       valid = validTreeString(entry.targetId) && (replacement === null
@@ -1720,6 +1797,8 @@ function validateCanonicalEntry(value: unknown): void {
           && validContextEditableContent((replacement as Record<string, unknown>).content));
       break;
     }
+    // A type outside `canonicalEntryClassification` is a newer writer's entry:
+    // fail closed rather than admit an unprojectable shape.
     default: valid = false;
   }
   if (!valid) throw new GatewayError("conflict", "Session tree contains an invalid canonical entry payload");

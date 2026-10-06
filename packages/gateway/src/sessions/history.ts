@@ -1,6 +1,7 @@
 import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { JsonValue, SessionTreeNode } from "../protocol/types.js";
+import type { PiMessageContentBlock } from "./projection.js";
 
 const HISTORY_PAGE_SIZE = 100;
 export const HISTORY_TEXT_CHARS = 24_000;
@@ -13,14 +14,24 @@ export interface HistoryPage {
   totalEntries: number;
 }
 
-const kindNames: Record<string, string> = {
+/** Node kind per canonical entry type. `satisfies Record<…>` fails the build
+ * when the pinned SDK adds or removes an entry type, so a new type must be
+ * classified here instead of publishing its raw name as a node kind (#470). */
+const kindNames = {
+  message: "message", label: "label", compaction: "compaction", usage: "usage",
   thinking_level_change: "thinkingChange", model_change: "modelChange", branch_summary: "branchSummary",
   custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo", context_edit: "contextEdit",
-};
+} satisfies Record<SessionEntry["type"], string>;
+
+/** One content block as it appears in canonical JSONL: Pi's own block shapes,
+ * plus the tolerated `text` an older or foreign writer may have persisted on a
+ * thinking block. The runtime guards below still accept anything a malformed
+ * file can hold. */
+type PersistedContentBlock = PiMessageContentBlock & { text?: string };
 
 /** Walk only the selected entry's authored content; list previews never project
  * entire transcript bodies or register media blobs. Images stay media, not base64 text. */
-function* contentBlocks(content: unknown): Generator<string> {
+function* contentBlocks(content: string | Array<PersistedContentBlock>): Generator<string> {
   if (typeof content === "string") { yield content; return; }
   if (!Array.isArray(content)) return;
   for (const part of content) {
@@ -30,7 +41,13 @@ function* contentBlocks(content: unknown): Generator<string> {
       case "thinking": yield `Thinking\n${part.thinking ?? part.text ?? ""}`; break;
       case "toolCall": yield `Tool call: ${part.name}\n${JSON.stringify(part.arguments ?? {}, null, 2)}`; break;
       case "image": yield `Image (${part.mimeType ?? "image"})`; break;
-      default: yield JSON.stringify(part, null, 2);
+      default: {
+        // Unreachable for the pinned SDK: every block type is classified above.
+        // A new SDK block type fails this assignment instead of being serialized
+        // as opaque JSON in every preview.
+        const unclassified: never = part;
+        yield JSON.stringify(part, null, 2);
+      }
     }
   }
 }
@@ -64,6 +81,15 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
       yield `Target entry: ${entry.targetId}`;
       yield `Replacement: ${JSON.stringify(entry.replacement)}`;
       return;
+    case "usage":
+      // Model-attributed usage is canonical metadata, never authored content.
+      return;
+    default: {
+      // Unreachable for the pinned SDK: every entry type is classified above.
+      // A new SDK entry type fails this assignment instead of yielding nothing.
+      const unclassified: never = entry;
+      return;
+    }
   }
 }
 

@@ -288,6 +288,18 @@ request in its session (#407). Update focused owner tests and this boundary map 
 changes. Keep a candidate's detailed version matrix in its GitHub epic until
 closeout; do not turn this paragraph into a second change tracker.
 
+Every Pi union Tron switches over or maps is classified at compile time, so a
+candidate that adds a member cannot ship it silently ignored. The extension seam
+is inventoried in `src/extensions/compatibility-manifest.ts`; the session seam is
+classified in `src/sessions/projection.ts` (canonical entry types, message roles
+and content blocks), `src/sessions/history.ts` (entry-to-node-kind) and
+`src/sessions/runtime-slot.ts` (`AgentSessionEvent`). Each member is classified
+as a projected row, hidden, or n/a. The switch owners carry a `never` check and
+the validator owners a `satisfies Record<…>` inventory, so a new member fails
+`npm run build` and names the owner and the member. To prove the gate, add a
+synthetic member to the union declaration in the installed SDK's typings and run
+the build.
+
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
 any event, persistence, projection, packaging, UI, or UX difference as a
