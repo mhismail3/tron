@@ -210,7 +210,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
       if (prefix === "mobile-c") {
         mobile.send(JSON.stringify({ type: "request", id: "before-sync-visible", method: "session.presentation.set",
           params: { sessionId, subscriptionToken: opened.result.subscriptionToken, revision: 1, visible: true } }));
-        await vi.waitFor(() => expect(mobileFrames.find((frame) => frame.id === "before-sync-visible")?.error?.code).toBe("conflict"));
+        await waitFor(() => mobileFrames.find((frame) => frame.id === "before-sync-visible")?.error?.code === "conflict", "the pre-sync visibility conflict");
         expect(sessions.setPresentationVisibility).not.toHaveBeenCalled();
       }
       mobile.send(JSON.stringify({ type: "request", id: `${prefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
@@ -237,7 +237,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
 
     mobile.send(JSON.stringify({ type: "request", id: "stale-token-visible", method: "session.presentation.set",
       params: { sessionId: "c", subscriptionToken: mobileBToken, revision: 2, visible: true } }));
-    await vi.waitFor(() => expect(mobileFrames.find((frame) => frame.id === "stale-token-visible")?.error?.code).toBe("conflict"));
+    await waitFor(() => mobileFrames.find((frame) => frame.id === "stale-token-visible")?.error?.code === "conflict", "the stale-token visibility conflict");
     expect(sessions.setPresentationVisibility).toHaveBeenCalledOnce();
 
     request("technical-visible", "session.presentation.set", "a", {
@@ -257,7 +257,7 @@ const mobileEventStart = mobileFrames.length;
     gateway.rekeySession("c", "canonical-c");
     mobile.send(JSON.stringify({ type: "request", id: "alias-visible", method: "session.presentation.set",
       params: { sessionId: "c", subscriptionToken: mobileCToken, revision: 2, visible: true } }));
-    await vi.waitFor(() => expect(mobileFrames.find((frame) => frame.id === "alias-visible")?.ok).toBe(true));
+    await waitFor(() => mobileFrames.find((frame) => frame.id === "alias-visible")?.ok === true, "the rekeyed session's visibility answer");
     expect(sessions.setPresentationVisibility).toHaveBeenLastCalledWith(expect.objectContaining({
       sessionId: "canonical-c", subscriptionToken: mobileCToken, revision: 2, visible: true,
     }));
@@ -721,11 +721,11 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     expect(connection.synchronizations.has("barrier-session")).toBe(true);
 
     releaseOpen();
-    await vi.waitFor(() => expect(held).toHaveLength(1)); // the open response
+    await waitFor(() => held.length === 1, "the held open response");
     const opened = JSON.parse(held[0]!.encoded) as { id: string; result: { syncToken: string } };
     expect(opened.id).toBe("barrier-open");
     socket.send(JSON.stringify({ type: "request", id: "barrier-sync", method: "session.sync", params: { sessionId: "barrier-session", syncToken: opened.result.syncToken } }));
-    await vi.waitFor(() => expect(connection.synchronizations.has("barrier-session")).toBe(false));
+    await waitFor(() => !connection.synchronizations.has("barrier-session"), "the barrier session's synchronization to close");
     // Three quarantined 24 KiB snapshots exceed this connection's 48 KiB queue
     // once the responses ahead of them are counted; the suffix is released as
     // the one frame that carries the sequences it covers, and a later snapshot

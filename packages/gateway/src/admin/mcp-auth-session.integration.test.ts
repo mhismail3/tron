@@ -135,7 +135,7 @@ describe("MCP auth through a live Gateway session", () => {
     slot.hasBuiltinMcpCommand = admittedBuiltinCommand;
     faux.setResponses([async () => fauxAssistantMessage("login command handled")]);
     await service.invoke(client, "mcp.auth.start", { sessionId, server: "fixture", commandId: "mcp-auth-command-001" });
-    await vi.waitFor(() => expect(events.some((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url")).toBe(true), { timeout: 10_000, interval: 10 }).catch((error) => { throw new Error(`no auth URL event; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} active=${auth.activeOperationCount} requests=${JSON.stringify(requests)}`, { cause: error }); });
+    await waitFor(() => events.some((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url"), "the auth URL event").catch((error) => { throw new Error(`no auth URL event; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} active=${auth.activeOperationCount} requests=${JSON.stringify(requests)}`, { cause: error }); });
     const authEvent = events.find((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url")!.payload as any;
     expect(authEvent.target).toEqual({ kind: "mcp", sessionId, server: "fixture" });
     expect(authEvent.event.type).toBe("auth_url");
@@ -145,7 +145,7 @@ describe("MCP auth through a live Gateway session", () => {
       operationId: authEvent.operationId, callbackId: authEvent.callbackCapture.id, query: callback.search.slice(1),
     }) as any;
     expect(callbackResult.forwarded).toBe(true);
-    await vi.waitFor(() => expect(events.some((event) => event.topic === "auth.completed")).toBe(true), { timeout: 5_000, interval: 10 }).catch((error) => { throw new Error(`no completion; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} requests=${JSON.stringify(requests)} methods=${JSON.stringify(rpcMethods)}`, { cause: error }); });
+    await waitFor(() => events.some((event) => event.topic === "auth.completed"), "the completed MCP authentication event").catch((error) => { throw new Error(`no completion; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} requests=${JSON.stringify(requests)} methods=${JSON.stringify(rpcMethods)}`, { cause: error }); });
     expect((events.find((event) => event.topic === "auth.completed")!.payload as any).success).toBe(true);
     const persisted = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
     expect(persisted[`${origin}/mcp`].tokens.access_token).toBe(token);
@@ -155,7 +155,7 @@ describe("MCP auth through a live Gateway session", () => {
       fauxAssistantMessage("tool succeeded"),
     ]);
     await slot.prompt("Use the fixture tool");
-    await vi.waitFor(() => expect(slot.isBusy).toBe(false), { timeout: 10_000, interval: 10 }).catch((error) => { throw new Error(`turn stayed busy; requests=${JSON.stringify(requests)} calls=${toolCalls}`, { cause: error }); });
+    await waitFor(() => !slot.isBusy, "the MCP turn after sign-in to settle").catch((error) => { throw new Error(`turn stayed busy; requests=${JSON.stringify(requests)} calls=${toolCalls}`, { cause: error }); });
     expect(toolCalls).toBeGreaterThan(0);
     const toolResult = slot.snapshot().transcript.find((entry: any) => entry.kind === "message" && entry.role === "toolResult" && entry.toolCallId === "mcp-after-signin") as any;
     expect(toolResult?.content?.map((block: any) => block.type === "text" ? block.text : "").join("\\n")).toContain("worked:next-turn");

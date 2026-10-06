@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { AgentInstructions } from "./agent-instructions.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 // The Agent Instructions sheet claims to show what the model receives. These
 // cases pin the failure modes of the structured projection against the real
@@ -94,7 +95,7 @@ async function turn(f: Awaited<ReturnType<typeof fixture>>) {
     return fauxAssistantMessage("Done");
   }]);
   await f.slot.prompt("hello");
-  await vi.waitFor(() => expect(f.slot.isBusy).toBe(false), { timeout: 5_000, interval: 10 });
+  await waitFor(() => !f.slot.isBusy, "the turn to settle");
   return { received, during: during! };
 }
 

@@ -307,6 +307,7 @@
           "packages/gateway/package.json",
           "packages/gateway/package-lock.json",
           "packages/gateway/tsconfig.json",
+          "packages/gateway/tsconfig.test-support.json",
           "packages/gateway/vitest.config.ts",
           "packages/gateway/vitest.scale.config.ts",
           "packages/gateway/pi-sdk-baseline.json",
@@ -561,6 +562,23 @@
         "command": "for f in {paths}; do case \"$f\" in *.py) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *.mjs|*.js) node --check \"$f\" ;; *.ts) node --experimental-strip-types --check \"$f\" ;; *) case \"$(head -n 1 \"$f\")\" in *bash*|*/sh) bash -n \"$f\" ;; *python*) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *) echo \"no syntax check for $f\" >&2; exit 1 ;; esac ;; esac; done"
       }
     ]
+  },
+  "acceptance": {
+    "evidenceEnv": "TRON_IOS_E2E_STATE_DIR",
+    "journeys": {
+      "real-gateway-pair-and-chat": {
+        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
+        "report": "results/latest-ui/report.json",
+        "timeoutSeconds": 1800
+      },
+      "real-gateway-wrong-pairing-code": {
+        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
+        "report": "results/latest-ui/report.json",
+        "timeoutSeconds": 1800
+      }
+    }
   },
   "land": {
     "requiredChecks": [

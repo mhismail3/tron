@@ -90,7 +90,9 @@ took. If they ask for options, list the top three and wait.
      recent `main` history for the same fix.
 2. **Claim.**
    - Run `scripts/tron work start <issue>`, then work only in the worktree it
-     prints.
+     prints. When the parent epic's Landing is an integration branch, add
+     `--base <that branch>` (the epic's Decisions name it); the claim then
+     lands there, not on `main`.
    - If it refuses (claimed, ineligible, blocked), report the reason and pick
      again; never work around it.
    - A refused claim is not a reason to create a second branch.
@@ -127,10 +129,21 @@ took. If they ask for options, list the top three and wait.
      `land` still refuses a failing receipt, so stop and report.
 7. **Land.**
    - Write a short Markdown summary to a temporary file.
-   - Run `scripts/tron work land --summary-file <file>`, adding
-     `--needs-user-validation "<exact action and check>"` when only the
-     maintainer can complete the proof. The summary separates verified
-     behavior from assumptions and residual risks.
+   - Run `scripts/tron work land --summary-file <file>`. Add
+     `--acceptance <journey-id>[,<journey-id>]` for every registered journey
+     that proves this task's behavior: land runs each one against the head it is
+     about to verify, cites its report digest in the pull request and closes
+     the issue on the evidence. A journey a developer should re-run belongs in
+     the registry (`acceptance.journeys` in `.github/work.json`), with the
+     command it owns and the report that command leaves.
+   - Add `--needs-user-validation "<exact check>" --irreducible "<part>"` only
+     when part of the proof cannot be automated: `--irreducible` names that
+     part (real third-party consent, the maintainer's own route,
+     physical-device-only behavior), and neither flag is accepted without the
+     other. Installing or deploying a build is a deployment step, not
+     validation: state it beside the handoff, never as the check.
+   - The summary separates verified behavior from assumptions and residual
+     risks.
    - The Debug Gateway may be restarted by agents (AGENTS.md rule 8); Stable
      may not.
 8. **Clean up and sync.**
@@ -145,9 +158,10 @@ took. If they ask for options, list the top three and wait.
    anything handed to them. When work needs the maintainer's install, name the
    checkpoint: which builds (Mac and Stable Gateway, iPhone) cover it, and every
    other open handoff the same install makes ready, so one rebuild validates
-   and closes as many issues as possible. Offer the checkpoint only when no
-   agent work is running: a Stable restart drains and pauses it. Close an issue
-   only on the evidence its handoff asked for.
+   and closes as many issues as possible. Keep that install separate from the
+   handoff's validation check, which asks only for its irreducible part. Offer
+   the checkpoint only when no agent work is running: a Stable restart drains
+   and pauses it. Close an issue only on the evidence its handoff asked for.
 
 ## Plan larger work
 
@@ -156,6 +170,9 @@ For work that spans sessions or several tasks:
 2. Add one Task issue per claimable step as a sub-issue, with blocked-by links
    for the order.
 3. Add everything to the Project as Proposed, and present the epic to the user.
+   Landing (straight to `main`, or held on an integration branch until the
+   maintainer verifies the whole set) is the maintainer's decision: present it
+   as one, not as a default.
 
 Nothing in it can be claimed until the maintainer moves it to Ready.
 
