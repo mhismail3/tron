@@ -164,6 +164,9 @@ process you start.
   running.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
+- Reproduce load-dependent failures inside the test process (constrained
+  workers, an in-process hog, an injected delay). Never load the whole Mac with
+  busy loops: other agents' checks and the Stable Gateway share it.
 - Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`, and
   never stop a process or release a simulator, lane or lease another session
   holds. Stop only processes you started, and ask before stopping anything you
@@ -308,6 +311,10 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
     scrubbed by `verify`.
   - Screenshots, recordings and full logs go only to the private evidence
     repository. The repository is public.
+  - Every agent working an issue posts evidence on it at each milestone
+    (reproduced, fix candidate, blocked, landed), separating verified from
+    inferred claims. A delegating agent passes this rule to each child; the
+    [tron-work skill](.agents/skills/tron-work/SKILL.md) owns the procedure.
 - **Discovered work:** file it, then stay in scope.
   - File a new task issue (Task form). If it belongs to the current epic, make
     it a sub-issue there; otherwise label it `needs-triage`.

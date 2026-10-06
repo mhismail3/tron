@@ -2469,8 +2469,14 @@ images; the existing 10-file/25-MiB draft limits still apply. Oversized selectio
 are reported instead of silently losing images. Preparation is scoped to the exact
 chat and cancelled on retirement/coverage; after admission, uploads belong to the
 draft coordinator. Repeated pastes append rather than cancelling previous uploads.
+Pasted and Select Photos images upload only in formats every model provider
+accepts inline (`ProviderImageFormat`: JPEG, PNG, GIF, WebP). A paste uses an
+accepted clipboard representation when one is offered. Otherwise (an iPhone photo
+copies as HEIC) the device re-encodes the image as full-resolution JPEG with its
+orientation applied, and bytes that cannot be decoded are reported, never uploaded.
 
-`ComposerPastedImagesTests` covers provider loading, byte limits, image ordering,
+`ComposerPastedImagesTests` covers provider loading, byte limits, accepted-format
+preference, JPEG re-encoding and undecodable input, image ordering,
 unchanged text/selection, overflow, stale editor scope, and late cancellation.
 `ChatViewScrollHarnessTests.pastedImagesUsePhotoAttachmentFlow` mounts the real
 composer, proves batch chips appear before transport completes, captures a simulator
