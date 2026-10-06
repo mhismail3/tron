@@ -10,8 +10,12 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_TARGET = "TronMobileTests"
-FIXTURE_ONLY_TESTS = {
+# Inputs proven only by a real fixture runner: the fixture-only suite (which
+# skips under the ordinary XCTest runner) and the fault proxy that shapes every
+# one of its cases.
+FIXTURE_RUNNER_INPUTS = {
     "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift": "scripts/ios-gateway-e2e-test",
+    "scripts/ios-gateway-fault-proxy.mjs": "scripts/ios-gateway-e2e-test",
 }
 # Focus only sources with an audited owner. Other Settings files remain full-suite
 # until their test ownership has been established.
@@ -191,7 +195,7 @@ def test_commands(paths: list[str], *, has_deletions: bool = False) -> list[list
     ordinary_paths = []
     for raw_path in paths:
         relative = _relative(raw_path)
-        runner = FIXTURE_ONLY_TESTS.get(relative or "")
+        runner = FIXTURE_RUNNER_INPUTS.get(relative or "")
         if runner is None:
             ordinary_paths.append(raw_path)
         elif runner not in fixture_runners:
@@ -221,7 +225,7 @@ def main() -> int:
     result_code = 0
     try:
         for command in commands:
-            fixture_runner_started |= command[0] in FIXTURE_ONLY_TESTS.values()
+            fixture_runner_started |= command[0] in FIXTURE_RUNNER_INPUTS.values()
             result = subprocess.run(command, cwd=ROOT, check=False)
             if result.returncode:
                 result_code = result.returncode

@@ -2126,7 +2126,10 @@ pong deadline remains. HTTP header lengths come from Node's parsed
 request/response headers; WebSocket message sizes are decoded payload lengths
 plus estimated uncompressed frame overhead because `ws` hides compressed wire
 lengths. Thus this synthetic schedule is a reproducible shared application
-payload control, not a cellular capacity guarantee. A separate common-proxy
+payload control, not a cellular capacity guarantee. Because the proxy paces
+how fast it reads a shaped body, its listener bounds measure client inactivity
+rather than that pacing: no whole-request deadline, and each forwarded body
+part re-arms the idle bound, so a stalled client is still retired. A separate common-proxy
 blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
 `system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
 fixture counters increment once at the proxy forwarding transition, rather
@@ -2171,7 +2174,8 @@ scripts/ios-gateway-e2e-test run-lan
 and proves the reconnect case plus the shared-link case; the third
 `testRacesLanAndTailscaleLanes` is registered only by `run-lan`, requires the
 private-address fixture above, and is not implied by a green `run`. iOS work
-verification detects this fixture-only test owner and dispatches it through the
+verification detects this fixture-only test owner, and the fault proxy that
+shapes its cases, and dispatches either through the
 canonical `ios-gateway-e2e-test all` (prepare/build/run) owner instead of the
 ordinary XCTest runner, where every case would correctly skip. Verification
 then calls that same owner to stop the fixture while preserving its result

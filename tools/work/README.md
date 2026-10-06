@@ -294,6 +294,10 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   their declared suites only when every non-private top-level declaration is a
   test suite; shared helpers or unrecognized syntax force the complete unit
   target. Audited Settings UI sources select their explicit owning suites.
+  The fixture-only `RealGatewayPiBoundaryTests` and the fault proxy that shapes
+  its cases (`scripts/ios-gateway-fault-proxy.mjs`) dispatch to the real
+  `scripts/ios-gateway-e2e-test all` runner, where an ordinary run would skip
+  every case.
   Any deletion or rename anywhere in the branch diff forces the complete unit
   target because `{paths}` omits files that do not exist at HEAD. Unmapped
   source paths and empty selections also run the full target. Do not infer a

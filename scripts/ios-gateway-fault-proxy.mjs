@@ -93,7 +93,12 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     for (const response of waiters) answer(response, 200, { intercepted: true });
     waiters.clear();
   };
-  const server = createServer({ requestTimeout: 5_000, headersTimeout: 5_000 }, async (request, response) => {
+  // Once shaped, this proxy, not the client, paces how fast a request body is
+  // read, so its listener bounds must measure client inactivity rather than
+  // the fixture's own pacing: there is no whole-request deadline, and every
+  // forwarded body part re-arms the socket's idle bound (`server.timeout`).
+  // Headers are read unpaced and keep their own deadline.
+  const server = createServer({ requestTimeout: 0, headersTimeout: 5_000 }, async (request, response) => {
     if (request.url === "/_fixture/control") {
       if (request.headers["x-tron-fixture-token"] !== token) { answer(response, 403, {}); return; }
       try {
@@ -255,6 +260,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           for (let offset = 0; offset < bytes.length; offset += 16_384) {
             const part = bytes.subarray(offset, Math.min(offset + 16_384, bytes.length));
             await schedule("http-request-body", part.length, () => upstream.write(part));
+            request.socket.setTimeout(server.timeout);
           }
         }
         if (uploadTransfer?.startMs !== null && uploadTransfer?.startMs !== undefined) {
