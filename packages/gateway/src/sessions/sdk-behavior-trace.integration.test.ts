@@ -283,10 +283,13 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     // The faux model names tools unconditionally, unlike a real model whose
-    // catalog arrives at dispatch. Join MCP registration before those calls.
+    // catalog arrives at dispatch. Join MCP registration before those calls —
+    // by server, not by the exact tool name, because that name is one of the
+    // facts this trace compares (Pi 1.0 maps `-` to `_` in it).
     const session = (slot as unknown as { runtime: { session: { getAllTools(): Array<{ name: string }> } } }).runtime.session;
-    await waitFor(() => ["mcp__tron-fixture__echo", "mcp__tron-script__echo"]
-      .every((name) => session.getAllTools().some((tool) => tool.name === name)), "the fixture MCP tools to register");
+    const registered = (server: string): boolean => session.getAllTools().some((tool) =>
+      tool.name.startsWith("mcp__") && tool.name.includes(server) && tool.name.endsWith("__echo"));
+    await waitFor(() => ["fixture", "script"].every(registered), "the fixture MCP tools to register");
 
     await slot.prompt("trace the Pi SDK boundary");
     await waitFor(() => !slot.isBusy, "the traced turn to settle");
