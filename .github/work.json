@@ -310,6 +310,7 @@
           "packages/gateway/tsconfig.test-support.json",
           "packages/gateway/vitest.config.ts",
           "packages/gateway/vitest.scale.config.ts",
+          "packages/gateway/vitest.corpus.config.ts",
           "packages/gateway/pi-sdk-baseline.json",
           "packages/gateway/scripts/**",
           "packages/gateway/test-fixtures/**",

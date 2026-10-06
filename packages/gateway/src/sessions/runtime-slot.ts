@@ -4277,8 +4277,20 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         this.hooks.changed(this.id);
         break;
-      default:
+      // Turn boundaries and incremental bash output carry no Gateway runtime
+      // state: canonical entries and the message/tool cases above own every
+      // projection, and attention settlement keys off agent_start/agent_settled.
+      case "turn_start":
+      case "turn_end":
+      case "bash_execution_update":
         break;
+      default: {
+        // Unreachable for the pinned SDK: every AgentSessionEvent type is
+        // classified above. A new SDK event fails this assignment instead of
+        // being ignored without a runtime projection.
+        const unclassified: never = event;
+        break;
+      }
     }
   }
 

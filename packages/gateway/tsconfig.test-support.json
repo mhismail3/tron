@@ -2,10 +2,12 @@
   // The Gateway's own `tsconfig.json` excludes `src/**/*.test.ts` and has no
   // `include` for this package's test-only support modules, so a type error in
   // `test-support/` reached `npm run check` and `npm run build` unnoticed (#460).
+  // The corpus recorder is included for the same reason: it runs only before an
+  // SDK bump, so an unchecked type error would surface at the worst moment.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["test-support/**/*.ts"]
+  "include": ["test-support/**/*.ts", "test-fixtures/pi-sdk/record-corpus.test.ts"]
 }

@@ -245,9 +245,20 @@ Check the source state offline with `npm run check:pi-sdk`. Staged production
 payloads intentionally omit development-only `pi-sdk-baseline.json`; validate
 those trees with `node scripts/check-pi-sdk.mjs --runtime-tree <app>`. Run focused script tests with
 `npm run test:pi-sdk-scripts` and the isolated sequential rollback matrix with
-`npm run test:pi-sdk-rollback`. The committed `pi-sdk-baseline.json` records
-only the prior runtime used for rollback verification; `package.json` remains
-current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
+`npm run test:pi-sdk-rollback`. The rollback matrix seeds and rereads the
+persisted stores it owns — session JSONL, settings, auth, `mcp.json` (written by
+`pi mcp add` and read back with a hyphenated server name) and the MCP OAuth
+credential store — in both directions, and names the on-disk credential keys when
+a runtime cannot resolve what the other wrote. Only the rollback runtime may
+report that it has no built-in MCP surface; a candidate that drops or moves it
+fails instead of passing as unsupported. A store whose re-keying the maintainer
+has accepted as a one-way rollback delta is listed in `pi-sdk-baseline.json`
+under `knownOneWayDeltas`: an exact `{store, from, to, reason, rollbackState,
+credentialKey}` entry that names the one observation it accepts, so every other
+runtime, step, state, tool list and key still fails, and an entry whose delta is
+not observed fails as stale. The committed `pi-sdk-baseline.json` records the
+prior runtime used for rollback verification and any accepted one-way delta for
+that version range; `package.json` remains current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi
 family, without treating unrelated lockfile churn as an SDK change. CI runs the
 networked rollback matrix and hosted iOS/Gateway boundary only when that graph
@@ -259,9 +270,29 @@ family package through the current npm and prints bounded preflight evidence for
 version, source revision, integrity, and the registry-declared Node engine; it updates all four direct pins
 in one native `npm install --save-exact --engine-strict` operation, validates the
 resulting lockfile, runs `npm audit signatures`, and restores its owned
-manifests plus the disposable installed tree with `npm ci` on failure. Do not submit independent
+manifests plus the disposable installed tree with `npm ci` on failure. On
+success it also extracts the released `CHANGELOG.md` sections between the current
+and target versions from the coding-agent package it installed and writes them to
+the run's evidence under the git directory
+(`work/issue-<N>/pi-sdk-changelog-<from>-to-<to>.md`, or `work/pi-sdk-update/`
+outside a task branch), so the per-seam inventory starts from upstream release
+notes instead of a hand-read changelog; an update whose changelog carries no
+delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
+
+`test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
+layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote
+through the real Gateway, plus the Tron-level observation of that corpus reopened
+from a staged copy. It is generated, not hand-authored — `npm run
+record:pi-corpus` runs the recorder under the installed SDK, and
+`vitest.corpus.config.ts` owns that run because recording rewrites committed
+fixtures. Regenerate the corpus with `npm run record:pi-corpus` **before** bumping
+the family, so `src/sessions/pi-persisted-state-corpus.integration.test.ts`
+reopens state the previous SDK actually wrote and fails when an existing session,
+per-chat tool selection, model, saved provider key or MCP credential stops
+resolving. `test-fixtures/pi-sdk/README.md` describes what the corpus contains and
+which values are environment tokens.
 
 After each candidate update, inventory every release-note/API/documentation delta
 against its owning Gateway seam and record whether it is inherited, adapted with
@@ -288,11 +319,84 @@ request in its session (#407). Update focused owner tests and this boundary map 
 changes. Keep a candidate's detailed version matrix in its GitHub epic until
 closeout; do not turn this paragraph into a second change tracker.
 
+Every Pi union Tron switches over or maps is classified at compile time, so a
+candidate that adds a member cannot ship it silently ignored. The extension seam
+is inventoried in `src/extensions/compatibility-manifest.ts`; the session seam is
+classified in `src/sessions/projection.ts` (canonical entry types, message roles
+and content blocks, including which entries become chat rows and which become
+outline nodes), `src/sessions/history.ts` (the published entry set and its node
+kind) and `src/sessions/runtime-slot.ts` (`AgentSessionEvent`). Every one of those
+switches ends in a `never` default and the node-kind map is a `satisfies
+Record<…>` over declared kinds, so a new member fails `npm run build` and names
+the owner and the member. To prove the gate, add a synthetic member to the union
+declaration in the installed SDK's typings and run the build.
+
+### Pi SDK behavior trace
+
+`src/sessions/sdk-behavior-trace.integration.test.ts` owns the behavior seam of an
+SDK upgrade: what the pinned SDK makes Tron *emit, persist and send*. One
+deterministic faux-provider scenario runs through the real Gateway
+(`RuntimeRegistry`, `RuntimeSlot`, and Pi's own codemode/tool-search/mcp
+built-ins) and covers streamed text and thinking, a direct tool, codemode with a
+nested call plus `models.classify()` and `image()`, direct and codemode-exposed
+MCP tools from hyphenated fixture servers, tool search over the tool the
+codemode exposure keeps undeclared, steer and follow-up, abort, and manual
+compaction. Its normalized trace is compared byte-for-byte with
+`packages/gateway/test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`.
+
+The trace records each distinct provider request's declared tool names,
+system-prompt section headings, a hash of the normalized prompt text and how
+many consecutive requests it covers; the TypeSafe classifier request the
+codemode step makes, so a classify delta is shown rather than inferred; every
+client broadcast topic with the union of its payload structure; every canonical
+JSONL entry; and the slot's transcript projection. Ids, timestamps, durations,
+counters, the disposable temp root and package paths are normalized, and
+host- or checkout-derived numbers (`usage`, `cost`, `stats`, and the compaction
+entry's `tokensBefore`, which Pi estimates from the serialized context) are
+compared as structure only. A diff therefore means a behavior change rather than
+a new run or a different checkout.
+
+Two things the trace deliberately does not compare. A tool search that loads from
+*several* servers orders its tools by server connection order, so the scenario
+keeps a single searchable server. And a live-progress subtree (`streaming`, the
+live `toolExecutions` list, `partialResult`, `nestedCalls`, and the in-flight
+`message` of the progress topics) is pruned from an event's shape, because
+whether a run observed it is host timing rather than SDK behavior; its settled
+form is recorded by the transcript projection.
+
+Run it with `npm run test:sdk-behavior-trace`. A mismatch prints a unified diff
+and retains the full diff at `test-results/sdk-behavior-trace.diff` and the exact
+trace at `test-results/sdk-behavior-trace.actual.json`; the same comparison by
+hand is `git diff --no-index --no-color --unified=3 <golden> <actual>`. An
+intended change updates the golden with `npm run update:sdk-behavior-trace`
+(`TRON_UPDATE_SDK_BEHAVIOR_TRACE=1`), which prints the hunks it accepted. A
+second case runs the same scenario on one busy event-loop thread with an injected
+delay on every provider response, and must produce the same trace — so the golden
+cannot encode host timing, and only the idle case may write it. The scenario
+asserts that its own steps succeeded before the golden is accepted, so a golden
+cannot record a degraded scenario (a tool that was never active, a search that
+never ran) as correct behavior.
+
+The golden is darwin-specific: Tron's `computer` module registers only on darwin
+and its description and rule lines reach the prompt. The Gateway check that runs
+this file is macOS. Tron-owned prompt text (Tron's tool snippets, rule lines and
+operating context) is part of what the model is sent, so it is part of the
+golden: a Tron change to those surfaces updates this golden in the same pull
+request, and the diff names exactly which text moved. Masking it was rejected
+because the SDK's own tool-declaration wording sits in the same field: four of
+the 1.0.4 trial's 42 hunks rewrite the codemode declaration of Tron's own
+`display`, `computer`, `ask_user` and `jev` tools, and masking those descriptions
+would hide them.
+
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
 any event, persistence, projection, packaging, UI, or UX difference as a
 behavior-delta stop: do not normalize it silently; compare current and candidate
-behavior and obtain an explicit product decision before continuing.
+behavior and obtain an explicit product decision before continuing. For this
+seam the comparison is the trace above: an SDK-upgrade pull request reviews that
+diff hunk by hunk, classifies each hunk as inherited, adapted with evidence, or
+not applicable, and only then updates the golden. A hunk the reviewer cannot
+explain is the stop, not a reason to normalize the trace further.
 
 ## Ownership
 
@@ -2276,7 +2380,10 @@ is explicitly marked with `<field>Truncated`; content paging does not discard au
 identified without turning base64 into message text. Pi 0.87 context-edit entries are retained as
 `contextEdit` history evidence (target and replacement) but do not fabricate a chat row; system-message
 entries are retained as `systemMessage` history evidence and likewise stay out of the chat transcript.
-The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
+Pi's model-attributed `usage` entries (cache warming) stay canonical JSONL without a chat row or an outline
+node, and the history feed publishes them under their own declared `usage` kind with a `Cache warmed`
+preview: the feed is a contiguous canonical window, so every entry in an ordinal span keeps a row and the
+older/newer cursors still name its boundary nodes. The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
 Complete raw producer metadata/media remain in the canonical JSONL export. `history.test.ts`, `gateway-history.test.ts`, and the focused runtime registry
 integration case protect beyond-cap traversal, ordering, text/wire bounds, Unicode, subscription admission
 and runtime fencing. Using these APIs requires a user-initiated Mac Gateway update; source validation never

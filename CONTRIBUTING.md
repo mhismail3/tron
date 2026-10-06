@@ -47,9 +47,10 @@ agent execution, session state, inbox, badge, or reminder policy.
    `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
    clean manifest/lockfile, then run `npm run check:pi-sdk` and
    `npm run test:pi-sdk-scripts` and `npm run test:pi-sdk-rollback`. The
-   `pi-sdk-baseline.json` file records only the prior runtime used by the
-   sequential rollback probe; `package.json` remains the current-version
-   authority. The updater performs online metadata preflight, uses the npm
+   `pi-sdk-baseline.json` file records the prior runtime used by the sequential
+   rollback probe, and any one-way rollback delta the maintainer has accepted for
+   that version range under `knownOneWayDeltas`; `package.json` remains the
+   current-version authority. The updater performs online metadata preflight, uses the npm
    paired with the repository-pinned Node runtime, runs normal repository
    lifecycle scripts with `--engine-strict`, and restores only its owned manifests plus
    the disposable installed tree with `npm ci` if anything fails. No deployment or
