@@ -94,6 +94,41 @@ describe("aggregate transcript structure", () => {
       .map(entry => entry.id));
   });
 
+  it("hides Pi model-attributed usage entries from the transcript instead of throwing", () => {
+    // Pi's cache warmer appends a `usage` entry through appendUsage, which makes
+    // it the leaf of the active branch. It is canonical metadata with no authored
+    // content, so transcript projection must hide it instead of throwing.
+    const manager = SessionManager.inMemory("/tmp/usage-entry-transcript-fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Warm the cache", timestamp: 1 });
+    const usage = manager.appendUsage("cache_warm", "anthropic", "claude", {
+      input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    }).id;
+    expect(manager.getBranch().map(entry => entry.id)).toEqual([prompt, usage]);
+    const canonical = JSON.stringify(manager.getBranch());
+
+    expect(projectTranscript(manager, new BlobStore()).map(item => item.id)).toEqual([prompt]);
+    expect(projectTranscriptPage(manager, new BlobStore(), 1).items.map(item => item.id)).toEqual([prompt]);
+    expect(projectTranscriptPageAfter(manager, new BlobStore(), 1, 8_192, prompt).items).toEqual([]);
+    expect(projectedTranscriptOrdinal(manager, prompt)).toBe(0);
+
+    // Hiding is projection only: the canonical entry stays in Pi's JSONL.
+    expect(JSON.stringify(manager.getBranch())).toBe(canonical);
+  });
+
+  it("hides Pi model-attributed usage entries from the tree outline instead of throwing", () => {
+    const manager = SessionManager.inMemory("/tmp/usage-entry-tree-fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Warm the cache", timestamp: 1 });
+    manager.appendUsage("cache_warm", "anthropic", "claude", {
+      input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    });
+    // The warmer's entry is the leaf, so the outline must not publish it as a
+    // node with a kind outside `SessionTreeNode["kind"]`.
+    expect(projectTree(manager, new BlobStore()).map(node => ({ id: node.id, kind: node.kind })))
+      .toEqual([{ id: prompt, kind: "message" }]);
+  });
+
   it("keeps canonical context edits out of fabricated transcript rows while Pi applies them", () => {
     const manager = SessionManager.inMemory("/tmp/context-edit-projection-fixture");
     const prompt = manager.appendMessage({ role: "user", content: "Original prompt", timestamp: 1 });

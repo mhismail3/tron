@@ -1,6 +1,7 @@
 import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { JsonValue, SessionTreeNode } from "../protocol/types.js";
+import type { PiMessageContentBlock } from "./projection.js";
 
 const HISTORY_PAGE_SIZE = 100;
 export const HISTORY_TEXT_CHARS = 24_000;
@@ -13,14 +14,25 @@ export interface HistoryPage {
   totalEntries: number;
 }
 
-const kindNames: Record<string, string> = {
+/** Node kind per canonical entry type. `satisfies Record<…>` fails the build when
+ * the pinned SDK adds or removes an entry type, so a new type must be classified
+ * here instead of publishing its raw name as a node kind, and it types every
+ * value as a declared `SessionTreeNode` kind. */
+const kindNames = {
+  message: "message", label: "label", compaction: "compaction", usage: "usage",
   thinking_level_change: "thinkingChange", model_change: "modelChange", branch_summary: "branchSummary",
   custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo", context_edit: "contextEdit",
-};
+} satisfies Record<SessionEntry["type"], SessionTreeNode["kind"]>;
+
+/** One content block as it appears in canonical JSONL: Pi's own block shapes,
+ * plus the tolerated `text` an older or foreign writer may have persisted on a
+ * thinking block. The runtime guards below still accept anything a malformed
+ * file can hold. */
+type PersistedContentBlock = PiMessageContentBlock & { text?: string };
 
 /** Walk only the selected entry's authored content; list previews never project
  * entire transcript bodies or register media blobs. Images stay media, not base64 text. */
-function* contentBlocks(content: unknown): Generator<string> {
+function* contentBlocks(content: string | Array<PersistedContentBlock>): Generator<string> {
   if (typeof content === "string") { yield content; return; }
   if (!Array.isArray(content)) return;
   for (const part of content) {
@@ -30,9 +42,30 @@ function* contentBlocks(content: unknown): Generator<string> {
       case "thinking": yield `Thinking\n${part.thinking ?? part.text ?? ""}`; break;
       case "toolCall": yield `Tool call: ${part.name}\n${JSON.stringify(part.arguments ?? {}, null, 2)}`; break;
       case "image": yield `Image (${part.mimeType ?? "image"})`; break;
-      default: yield JSON.stringify(part, null, 2);
+      default: {
+        // Unreachable for the pinned SDK: every block type is classified above.
+        // A new SDK block type fails this assignment instead of being serialized
+        // as opaque JSON in every preview.
+        const unclassified: never = part;
+        yield JSON.stringify(part, null, 2);
+      }
     }
   }
+}
+
+/** Human preview for Pi's model-attributed usage record (cache warming). */
+const USAGE_ENTRY_PREVIEW = "Cache warmed";
+
+/** Bounded usage counters for the history entry metadata, shared by assistant
+ * messages and Pi's own usage records. */
+function boundedUsageCounters(usage: unknown): Record<string, JsonValue> {
+  const counters: Record<string, JsonValue> = {};
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return counters;
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
+    const value = (usage as Record<string, unknown>)[key];
+    if (typeof value === "number" && Number.isFinite(value)) counters[key] = value;
+  }
+  return counters;
 }
 
 function* entryBlocks(entry: SessionEntry): Generator<string> {
@@ -64,6 +97,18 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
       yield `Target entry: ${entry.targetId}`;
       yield `Replacement: ${JSON.stringify(entry.replacement)}`;
       return;
+    case "usage":
+      // Model-attributed usage is canonical metadata with no authored content; a
+      // detail read says what the record is, and the metadata carries the
+      // bounded provider/model/counter facts.
+      yield USAGE_ENTRY_PREVIEW;
+      return;
+    default: {
+      // Unreachable for the pinned SDK: every entry type is classified above.
+      // A new SDK entry type fails this assignment instead of yielding nothing.
+      const unclassified: never = entry;
+      return;
+    }
   }
 }
 
@@ -73,6 +118,7 @@ function entryPreview(entry: SessionEntry): string {
   if (entry.type === "message" && entry.message.role === "system") return "System context message";
   if (entry.type === "custom") return entry.customType.slice(0, 240);
   if (entry.type === "context_edit") return `Model context edit: ${entry.targetId}`;
+  if (entry.type === "usage") return USAGE_ENTRY_PREVIEW;
   if (entry.type === "message" || entry.type === "custom_message") {
     const message = entry.type === "message" ? entry.message : entry;
     if ("role" in message && message.role === "bashExecution") return message.command.slice(0, 240);
@@ -129,7 +175,9 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
     return { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp,
       kind: entry.type === "message" && entry.message.role === "bashExecution" ? "bash"
         : entry.type === "message" && entry.message.role === "system" ? "systemMessage"
-        : (kindNames[entry.type] ?? entry.type) as SessionTreeNode["kind"],
+        // A foreign entry type from a newer writer has no declared kind; keep its
+        // raw name visible rather than mislabelling it as session metadata.
+        : (kindNames[entry.type] ?? entry.type),
       ...(role ? { role } : {}), ...(label ? { label } : {}),
       ...(bookmarkTargetId ? { bookmarkTargetId } : {}), preview: entryPreview(entry),
       depth: 0, childCount: childCounts.get(entry.id) ?? 0, isCurrentPath: path.has(entry.id) };
@@ -184,12 +232,7 @@ export function historyEntry(manager: SessionManager, runtimeGeneration: string,
     if (message.role === "assistant") {
       metadata.provider = message.provider; metadata.model = message.model;
       metadata.stopReason = message.stopReason;
-      const usage: Record<string, JsonValue> = {};
-      for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
-        const value = message.usage?.[key];
-        if (typeof value === "number" && Number.isFinite(value)) usage[key] = value;
-      }
-      metadata.usage = usage;
+      metadata.usage = boundedUsageCounters(message.usage);
       if (message.errorMessage) metadata.error = message.errorMessage;
     }
     if (message.role === "toolResult") { metadata.tool = message.toolName; metadata.toolCallId = message.toolCallId; metadata.isError = message.isError; }
@@ -199,6 +242,11 @@ export function historyEntry(manager: SessionManager, runtimeGeneration: string,
   if (entry.type === "compaction") { metadata.tokensBefore = entry.tokensBefore; metadata.firstKeptEntryId = entry.firstKeptEntryId; }
   if (entry.type === "label") metadata.targetEntryId = entry.targetId;
   if (entry.type === "custom" || entry.type === "custom_message") metadata.customType = entry.customType;
+  if (entry.type === "usage") {
+    metadata.kind = entry.kind; metadata.provider = entry.provider; metadata.model = entry.model;
+    metadata.usage = boundedUsageCounters(entry.usage);
+    if (entry.note !== undefined) metadata.note = entry.note;
+  }
   // Scalar metadata is deliberately separate from content and remains bounded
   // even for malformed/custom producers. Do not send tool arguments, image
   // bytes or arbitrary extension details through this side channel.

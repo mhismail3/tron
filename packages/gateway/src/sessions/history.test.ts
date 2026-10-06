@@ -57,6 +57,46 @@ describe("canonical Session History pages", () => {
     expect(page.nodes.map(n => n.kind)).toEqual(expect.arrayContaining(["message", "customEntry", "label", "branchSummary", "thinkingChange", "modelChange", "compaction", "sessionInfo", "customMessage"]));
   });
 
+  it("publishes Pi model-attributed usage inside a contiguous admissible window", () => {
+    // Pi's cache warmer appends a `usage` entry on the active branch. The feed
+    // must publish it under its own declared kind so the window stays contiguous:
+    // every entry in the ordinal span has a node, and the cursors name the
+    // boundary nodes (the shape iOS `SessionHistoryPage.admitted` requires).
+    const manager = SessionManager.inMemory("/fixture");
+    const ids: string[] = [];
+    for (let index = 0; index < 105; index++) {
+      ids.push(manager.appendMessage({ role: "user", content: `message ${index}`, timestamp: 100 - index }));
+    }
+    ids.push(manager.appendUsage("cache_warm", "anthropic", "claude", {
+      input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    }).id);
+    const entries = manager.getEntries();
+
+    const first = historyPage(manager, "runtime");
+    expect(first.totalEntries).toBe(106);
+    expect(first.nodes.length).toBe(100);
+    expect(first.nodes.map(node => node.id)).toEqual(entries.slice(6).map(entry => entry.id).toReversed());
+    expect(first.older).toMatchObject({ ordinal: 6, entryId: entries[6]!.id, direction: "older" });
+    expect(first.newer).toBeUndefined();
+    const usage = first.nodes[0]!;
+    expect(usage).toMatchObject({ id: ids.at(-1), kind: "usage", preview: "Cache warmed" });
+
+    const second = historyPage(manager, "runtime", first.older);
+    expect(second.nodes.length).toBe(6);
+    expect(second.nodes.map(node => node.id)).toEqual(entries.slice(0, 6).map(entry => entry.id).toReversed());
+    expect(second.older).toBeUndefined();
+    expect(second.newer).toMatchObject({ ordinal: 5, entryId: entries[5]!.id, direction: "newer" });
+
+    // The row's detail read names the record and carries its bounded counters.
+    const detail = historyEntry(manager, "runtime", usage.id, 0);
+    expect(detail.text).toBe("Cache warmed");
+    expect(detail.metadata).toMatchObject({
+      type: "usage", kind: "cache_warm", provider: "anthropic", model: "claude",
+      usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11 },
+    });
+  });
+
   it("preserves model-context edits as explicit history evidence", () => {
     const manager = SessionManager.inMemory("/fixture");
     const target = manager.appendMessage({ role: "user", content: "Original request", timestamp: 0 });

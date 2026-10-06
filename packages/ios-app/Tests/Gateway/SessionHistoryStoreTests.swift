@@ -129,6 +129,26 @@ struct SessionHistoryStoreTests {
         }
     }
 
+    @Test("a window containing Pi's model-usage node is admitted, while the filtered shape is rejected")
+    func usageNodeWindowAdmission() throws {
+        // Pi's cache warmer records model-attributed usage on the active branch and the
+        // Gateway publishes it as its own declared node kind with a human preview. The
+        // page stays a contiguous canonical window; dropping the node while
+        // `totalEntries` still counts it is exactly what admission rejects.
+        let usage = SessionTreeNode(id: "2", parentId: "1", timestamp: "2026-01-01T00:00:02Z", kind: "usage",
+            label: nil, preview: "Cache warmed", role: nil, depth: 0, childCount: 0, isCurrentPath: true)
+        let contiguous = SessionHistoryPage(runtimeGeneration: "runtime", nodes: [usage, Self.node("1")],
+            older: nil, newer: nil, totalEntries: 2)
+        let admitted = try contiguous.admitted(runtime: "runtime")
+        #expect(admitted.entryRange == 1...2)
+        #expect(admitted.nodes.map(\.kind) == ["usage", "message"])
+        #expect(SessionHistoryRowPresentation(node: admitted.nodes[0]).title == "Cache warmed")
+
+        let filtered = SessionHistoryPage(runtimeGeneration: "runtime", nodes: [Self.node("1")],
+            older: nil, newer: nil, totalEntries: 2)
+        #expect(throws: SessionHistoryReadError.self) { try filtered.admitted(runtime: "runtime") }
+    }
+
     @Test("only successful explicit navigation advances native viewport identity")
     func viewportCommitOwnership() async throws {
         try await withTestWatchdog { @MainActor in
