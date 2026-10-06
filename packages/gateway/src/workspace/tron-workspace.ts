@@ -28,7 +28,8 @@ function isFeatureMarkerKey(key: string): boolean {
 
 /** Only owns internal-workspace initialization and availability. It neither
  * selects session cwd nor scans content nor owns extension data schemas. */
-export class TronWorkspace {  private home: string;
+export class TronWorkspace {
+  private home: string;
   private root: string;
   private initialization?: Promise<void>;
   private release: (() => Promise<void>) | undefined;
