@@ -3461,8 +3461,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         knobs itself: a fixture process starts under the harness's minimal
         environment (#445) and never sees this process's variables.
         """
-        real_node = shutil.which("node", path=environment["PATH"])
-        self.assertIsNotNone(real_node, "the pinned Node runtime is required by the E2E runner")
+        real_node = self.pinned_host_node(environment)
         binary = self.root / "fixture-node"
         binary.mkdir(exist_ok=True)
         gateway_source = binary / "fixture-gateway.cjs"
@@ -3577,6 +3576,45 @@ exec "{real_node}" "$@"
             if variable:
                 assignments[variable] = value
         return assignments
+
+    def pinned_host_node(self, environment: dict[str, str]) -> str:
+        """The real Node the synthetic fixture toolchain forwards to.
+
+        A test process started from a Gateway-spawned shell has that Gateway's
+        bundled runtime first on `PATH`: the very runtime #445 keeps out of a
+        fixture, and one that cannot load this checkout's node-pty prebuild. So
+        prefer the candidates the harness itself prefers, and use the first PATH
+        entry only on a machine that has neither (hosted CI's setup-node).
+        """
+        candidates = [
+            Path(os.environ.get("NVM_DIR", Path.home() / ".nvm")) / f"versions/node/v{NODE_VERSION}/bin/node",
+            Path("/opt/homebrew/bin/node"),
+            Path("/usr/local/bin/node"),
+        ]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if subprocess.run(
+                [str(candidate), "--version"], env=environment,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            ).stdout.strip() == f"v{NODE_VERSION}":
+                return str(candidate)
+        found = shutil.which("node", path=environment["PATH"])
+        self.assertIsNotNone(found, "the pinned Node runtime is required by the E2E runner")
+        return found
+
+    def nvm_pinned_environment(self, environment: dict[str, str]) -> dict[str, str]:
+        """The fixture toolchain selected the way a machine without TRON_NODE_BIN
+        selects it: the pinned Node in nvm's own layout, and no TRON_NODE_BIN.
+        """
+        result = self.readiness_node_environment(environment)
+        wrapper = Path(result.pop("TRON_NODE_BIN"))
+        pinned = self.root / f"nvm/versions/node/v{NODE_VERSION}/bin"
+        pinned.mkdir(parents=True)
+        for name in ("node", "npm"):
+            (pinned / name).symlink_to(wrapper.parent / name)
+        result["NVM_DIR"] = str(self.root / "nvm")
+        return result
 
     def default_roots_environment(self) -> dict[str, str]:
         """The harness's own defaults: no overrides, TMPDIR inside the fixture."""
@@ -4112,9 +4150,13 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
                 self.assertNotIn(inherited, recorded, f"{name} inherited {inherited} from the caller")
         # The fixture's own binding survives the scrub, on both processes: it is
         # what the Gateway needs to own its home, state, agent directory and
-        # listener, and what the proxy uses to restart it privately.
+        # listener, and what the proxy uses to restart it privately. Its `PATH` is
+        # the resolved Node directory plus the system directories and nothing else
+        # - not this shell's, and not this shell's PATH appended to it.
         gateway = self.fixture_environment_record(environment, "gateway.env")
         fixture_root = self.root / "e2e-state"
+        fixture_path = f"{Path(environment['TRON_NODE_BIN']).parent}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+        self.assertEqual(gateway.get("PATH"), fixture_path)
         self.assertEqual(gateway.get("TRON_GATEWAY_HOST"), "127.0.0.1")
         self.assertEqual(gateway.get("TRON_GATEWAY_LAN_ENDPOINT"), "off")
         self.assertEqual(gateway.get("TRON_MACHINE_GROUP_ID"), "tron-ios-e2e")
@@ -4123,7 +4165,10 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
         self.assertEqual(os.path.realpath(gateway["HOME"]), os.path.realpath(fixture_root / "home"))
         self.assertEqual(os.path.realpath(gateway["PI_CODING_AGENT_DIR"]), os.path.realpath(fixture_root / "agent"))
         self.assertTrue(gateway["PI_SUBAGENTS_TEMP_ROOT"].startswith(str(gateway["HOME"])))
+        # The fixture never needs the user's SSH agent either.
+        self.assertNotIn("SSH_AUTH_SOCK", gateway)
         proxy = self.fixture_environment_record(environment, "proxy.env")
+        self.assertEqual(proxy.get("PATH"), fixture_path)
         self.assertEqual(proxy.get("TRON_E2E_GATEWAY_ENTRY"), str(worktree / "packages/gateway/dist/index.js"))
 
     def test_the_first_node_on_the_callers_path_never_runs_the_fixture(self) -> None:
@@ -4131,12 +4176,15 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
 
         The wrapper below is the parent Gateway's bundled runtime in miniature:
         it answers the repository's pinned version and owns a sibling npm, so a
-        version check alone would accept it, and it cannot run the fixture.
+        version check alone would accept it, and it cannot run the fixture. The
+        fixture's own Node is the pinned Node in nvm's layout, which is how a
+        machine without `TRON_NODE_BIN` reaches it, so only a resolver that
+        prefers the caller's `PATH` over the pinned toolchain would use it.
         """
         worktree = self.clean_runner_checkout()
         harness = worktree / "scripts/ios-gateway-e2e-test"
         self.runnable_products(worktree)
-        environment = self.readiness_node_environment(self.environment)
+        environment = self.nvm_pinned_environment(self.environment)
         bundled = self.root / "bundled-runtime"
         bundled.mkdir()
         invoked = self.root / "bundled-runtime-invocations"
@@ -4162,25 +4210,38 @@ exit 1
     def test_a_node_that_cannot_load_the_gateways_native_modules_is_refused_by_name(self) -> None:
         """Failure mode 25: the toolchain failure is named before the fixture starts.
 
-        The Gateway's Node must load the installed node-pty prebuild. The
-        prebuild here is not a native module, so the load fails the way the
-        bundled runtime's Team ID fails it; the harness must report that dlopen
-        error and start nothing.
+        The Gateway's Node must load the installed node-pty prebuild. The prebuild
+        here is not a native module, so the load fails the way the bundled
+        runtime's Team ID fails it; the harness must report the loader's own error
+        and start nothing.
         """
         worktree = self.clean_runner_checkout()
         harness = worktree / "scripts/ios-gateway-e2e-test"
         self.runnable_products(worktree)
         prebuild = worktree / "packages/gateway/node_modules/node-pty/build/Release/pty.node"
         prebuild.parent.mkdir(parents=True)
-        prebuild.write_text("not a mach-o native module\n")
+        prebuild.write_text("not a native module\n")
         environment = self.readiness_node_environment(self.environment)
+        # The platform's own loader text (`dlopen` on macOS, `invalid ELF header`
+        # on Linux), produced by the same Node and the same file.
+        loader = subprocess.run(
+            [environment["TRON_NODE_BIN"], "-e",
+             "try { require(process.argv[1]); } catch (error) { process.stdout.write(String(error.message)); }",
+             str(prebuild)],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertTrue(
+            loader.stdout.strip(),
+            f"the fixture Node reported no loader error for {prebuild}: {loader.stderr}",
+        )
 
         try:
             result = self.e2e("run", harness=harness, environment=environment, timeout=120)
             self.assertNotEqual(result.returncode, 0, result.stdout)
-            self.assertIn(str(prebuild), result.stderr)
-            self.assertIn("dlopen", result.stderr)
+            self.assertIn("cannot load the Gateway's node-pty native module", result.stderr)
             self.assertIn(environment["TRON_NODE_BIN"], result.stderr)
+            self.assertIn(str(prebuild), result.stderr)
+            self.assertIn(loader.stdout.strip(), result.stderr, "the loader's own error is not what the harness reported")
         finally:
             self.e2e("stop", harness=harness, environment=environment)
         self.assertFalse((self.root / "e2e-state/gateway.pid").exists(), "the refused run started a fixture")

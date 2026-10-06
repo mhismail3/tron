@@ -12,20 +12,21 @@ gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
-# Keep the caller/setup-node toolchain ahead of Homebrew; .ci-tools contributes
-# repository-pinned helpers such as XcodeGen but never owns Node or npm. The
-# cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR).
+# .ci-tools contributes repository-pinned helpers such as XcodeGen but never owns
+# Node or npm, and its cache is wherever scripts/install-ci-tools.sh put it
+# (TRON_CI_TOOLS_DIR); the fixture's Node is resolved separately, below.
 export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 
-# The fixture's Node is the repository-pinned one, resolved the way
-# scripts/tron dev and packages/mac-app/scripts/bundle-gateway.sh resolve it, and
-# never taken from this shell's PATH first: a shell spawned by the Stable or
-# Debug Gateway carries that Gateway's bundled, team-signed runtime there, and
-# its library validation refuses the ad hoc-signed node-pty prebuild (#445). The
-# pinned nvm directory and Homebrew are tried first; a shell that provides none
-# of them (hosted CI's setup-node toolchain) falls back to PATH, and the
-# preflight below proves the Node finally chosen can load the Gateway's native
-# modules.
+# The fixture's Node is the repository-pinned one, from the same candidates
+# scripts/tron dev and packages/mac-app/scripts/bundle-gateway.sh use, in the one
+# order this harness needs: TRON_NODE_BIN, the pinned nvm directory, Homebrew, and
+# only then this shell's PATH. Those two scripts re-exec or run under a scrubbed
+# PATH, so they can check PATH second; this harness must run under the caller's
+# toolchain (Xcode, .ci-tools), and a shell spawned by the Stable or Debug
+# Gateway carries that Gateway's bundled, team-signed runtime on PATH. That
+# runtime answers the pinned version and owns a sibling npm, so a version check
+# cannot tell it apart; the preflight below refuses the Node finally chosen if it
+# cannot load the Gateway's native modules (#445).
 NODE_VERSION_FILE="$repo_root/.node-version"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "error: missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 127; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
@@ -62,17 +63,22 @@ NODE_BIN=""
 NPM_BIN=""
 fixture_environment=()
 # The two detached fixture processes run under the minimal environment a Gateway
-# gets from launchd, never this shell's, and under the same allow-list
-# `scripts/tron dev` re-executes itself with (#144). A caller spawned by the
-# Stable or Debug Gateway carries that Gateway's PATH, its TRON_GATEWAY_* values,
-# its payload identity and its PI_* store paths; none of it may reach the
-# fixture, which binds its own home, state, agent directory and listener.
+# gets from launchd, never this shell's: the same allow-list `scripts/tron dev`
+# re-executes itself with (#144), without SSH_AUTH_SOCK - the fixture never needs
+# the user's SSH agent. A caller spawned by the Stable or Debug Gateway carries
+# that Gateway's PATH, its TRON_GATEWAY_* values, its payload identity and its
+# PI_* store paths; none of it may reach the fixture, which binds its own home,
+# state, agent directory and listener.
 build_fixture_environment() {
   fixture_environment=("PATH=$(dirname "$NODE_BIN"):/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
   local name
-  for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING; do
-    [[ -n "${!name:-}" ]] && fixture_environment+=("$name=${!name}")
+  # An unset variable must not become this function's status: this call is the
+  # last statement of require_gateway_node, so an unset name (on Linux,
+  # __CF_USER_TEXT_ENCODING never exists) made errexit end the harness silently.
+  for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM __CF_USER_TEXT_ENCODING; do
+    if [[ -n "${!name:-}" ]]; then fixture_environment+=("$name=${!name}"); fi
   done
+  return 0
 }
 require_gateway_node() {
   [[ -n "$NODE_BIN" ]] && return 0
@@ -453,6 +459,10 @@ install_gateway_if_needed() {
     printf '%s\n' "$lock_hash" >"$run_root/npm-lock.sha256"
   fi
   "$NPM_BIN" --prefix "$gateway_dir" run build
+  # The same check the fixture start repeats, here so an install (and, for
+  # `all`/`run-ui`, the xcodebuild that follows) cannot come before a clear
+  # refusal for a Node that cannot load the modules it just installed (#445).
+  check_gateway_native_modules
 }
 
 write_fixture_extension() {
