@@ -288,11 +288,43 @@ request in its session (#407). Update focused owner tests and this boundary map 
 changes. Keep a candidate's detailed version matrix in its GitHub epic until
 closeout; do not turn this paragraph into a second change tracker.
 
+### Pi SDK behavior trace
+
+`src/sessions/sdk-behavior-trace.integration.test.ts` owns the behavior seam of an
+SDK upgrade: what the pinned SDK makes Tron *emit, persist and send*. One
+deterministic faux-provider scenario runs through the real Gateway
+(`RuntimeRegistry`, `RuntimeSlot`, and Pi's own codemode/tool-search/mcp
+built-ins) and covers streamed text and thinking, a direct tool, codemode with a
+nested call plus `models.classify()` and `image()`, direct and codemode-exposed
+MCP tools from a hyphenated fixture server, tool search, steer and follow-up,
+abort, and manual compaction. Its normalized trace is compared byte-for-byte
+with `packages/gateway/test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`.
+
+The trace records each provider request's declared tool names, system-prompt
+section headings and a hash of the normalized prompt text; every client
+broadcast topic with the union of its payload structure; every canonical JSONL
+entry; and the slot's transcript projection. Ids, timestamps, durations,
+counters and the disposable temp root are normalized, so a diff means a behavior
+change rather than a new run. The one ordering the trace does not compare is the
+tool list a tool search loads from *several* servers, which follows server
+connection order; the scenario therefore keeps a single searchable server.
+
+Run it with `npm run test:sdk-behavior-trace`. A mismatch prints a unified diff
+and retains the exact trace at `test-results/sdk-behavior-trace.actual.json`; an
+intended change updates the golden with `npm run update:sdk-behavior-trace`
+(`TRON_UPDATE_SDK_BEHAVIOR_TRACE=1`). A second case runs the same scenario under
+in-process CPU load and must produce the same trace, so the golden cannot encode
+host timing.
+
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
 any event, persistence, projection, packaging, UI, or UX difference as a
 behavior-delta stop: do not normalize it silently; compare current and candidate
-behavior and obtain an explicit product decision before continuing.
+behavior and obtain an explicit product decision before continuing. For this
+seam the comparison is the trace above: an SDK-upgrade pull request reviews that
+diff hunk by hunk, classifies each hunk as inherited, adapted with evidence, or
+not applicable, and only then updates the golden. A hunk the reviewer cannot
+explain is the stop, not a reason to normalize the trace further.
 
 ## Ownership
 
