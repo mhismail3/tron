@@ -6,6 +6,7 @@ import * as durableJson from "../util/durable-json.js";
 import { NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
 import type { PushRelayClient } from "./relay-client.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -62,7 +63,7 @@ describe("session notification read cuts", () => {
     expect(saved.slice(70)).toEqual(entries.slice(70));
     expect(saved.map(({ readAt: _, updatedAt: __, ...row }) => row))
       .toEqual(entries.map(({ readAt: _, updatedAt: __, ...row }) => row));
-    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ unreadCount: 10 }));
+    await waitFor(() => changed.mock.calls.at(-1)?.[0]?.unreadCount === 10, "the session read-cut broadcast");
     const restored = new NotificationService(new NotificationGrantStore(root), { available: false } as PushRelayClient);
     const page = await restored.inbox();
     expect(page.notifications).toHaveLength(50);
@@ -94,7 +95,7 @@ describe("session notification read cuts", () => {
     expect(changed).not.toHaveBeenCalled();
     await service.markSessionInboxRead("session-a");
     expect(write).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    await waitFor(() => changed.mock.calls.length === 1, "the read-cut broadcast");
     write.mockClear();
     changed.mockClear();
     await service.markSessionInboxRead("session-a");
@@ -115,7 +116,7 @@ describe("session notification read cuts", () => {
     const saved = (await store.snapshot()).inbox!;
     expect(saved[0]!.readAt).toBeDefined();
     expect(saved.slice(1).every((row) => row.readAt === undefined)).toBe(true);
-    await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    await waitFor(() => changed.mock.calls.length === 1, "the read-cut broadcast");
   });
 
   it("linearizes the opening cut with real notification admission, even at equal timestamps", async () => {
@@ -153,7 +154,7 @@ describe("session notification read cuts", () => {
     const drain = vi.spyOn(service, "drain");
     try {
       await service.enqueue({ sessionId: "session-a", sourceId: "queued", kind: "explicit", message: "Pending delivery" });
-      await vi.waitFor(() => expect(relay.send).toHaveBeenCalledOnce());
+      await waitFor(() => relay.send.mock.calls.length === 1, "the pending relay delivery");
       await service.markSessionInboxRead("session-a");
       expect((await store.snapshot()).inbox![0]).toMatchObject({ outcome: "queued", readAt: expect.any(String) });
     } finally {

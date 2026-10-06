@@ -35,12 +35,8 @@ import {
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import type { HomeRequestPolicy } from "../home/home-request-policy.js";
-import type { HomeMemoryPort } from "../home/home-owner.js";
-import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
-import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
-import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
+import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
@@ -171,12 +167,6 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
 }
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
-
-/** The curated runtime a session is built with. Decided at runtime creation:
- * `home` is passed explicitly by the Home owner for a brand-new Home session,
- * and every other creation asks the Home owner whether this session id is the
- * enabled Home. */
-export type RuntimeProfile = "ordinary" | "home";
 
 type QueueBehavior = QueuedMessageState["behavior"];
 
@@ -460,25 +450,6 @@ export interface RuntimeSlotDependencies {
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
   archivedAt: (sessionId: string) => string | undefined;
-  /** What the Home record says about this session id. Read once per runtime
-   * creation, so a profile change is never cached past the runtime it applies
-   * to. `unnamed` is the only state in which the explicit creation profile
-   * applies. */
-  homeProfile?: (sessionId: string) => "home" | "ordinary" | "unnamed";
-  /** Tron Home's request seam for one session id. Asked once per runtime
-   * creation, never for a fork or an ordinary session. */
-  homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
-  /** Tron Home's memory. The slot only reports that canonical entries changed;
-   * the memory owns what it reads, how long it waits and how much it spends. */
-  homeMemory?: HomeMemoryPort;
-  /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
-   * `memory_search` tools the tron-home module registers. Optional because a slot
-   * is constructible without a Home owner; a slot that has one always offers it,
-   * and it answers undefined for any session that is not the enabled Home. */
-  homeMemoryTools?: (sessionId: string) => HomeMemoryToolAccess | undefined;
-  /** One model applied to a live Home session, so the Home record keeps the
-   * single source of truth for the model a re-enable restores. */
-  homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -549,10 +520,6 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
-  /** The open Home activation of the live runtime, undefined for every ordinary
-   * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
-   * with the runtime it applies to. */
-  private homeRequestPolicy: HomeRequestPolicy | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
@@ -813,23 +780,13 @@ export class RuntimeSlot {
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
-  /** The one session id whose first runtime was created with the explicit Home
-   * profile, before the Home record named it. One-shot: cleared by that first
-   * runtime creation. */
-  private explicitHomeSessionId: string | undefined;
-  /** The curated profile each live runtime was built with. `setModel` and
-   * `compact` read this, never the record, so a policy is never applied to a
-   * runtime that did not load it. */
-  private readonly runtimeProfiles = new WeakMap<AgentSession, RuntimeProfile>();
 
   private constructor(
     private sessionManager: SessionManager,
     private readonly dependencies: RuntimeSlotDependencies,
     private readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
-    creationProfile: RuntimeProfile = "ordinary",
   ) {
-    this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
@@ -1005,9 +962,8 @@ export class RuntimeSlot {
     dependencies: RuntimeSlotDependencies,
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
-    creationProfile: RuntimeProfile = "ordinary",
   ): Promise<RuntimeSlot> {
-    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile);
+    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted);
     await slot.initialize();
     return slot;
   }
@@ -1568,23 +1524,6 @@ export class RuntimeSlot {
     this.lastTouchedAt = Date.now();
   }
 
-  /** Whether one runtime of this slot carries the curated Home profile. The
-   * record decides for every session it names; the explicit creation profile
-   * covers only the first runtime of a brand-new Home session, before the record
-   * names it, and never a fork or a reset (which produce a new session id). */
-  private isHomeProfile(sessionManager: SessionManager): boolean {
-    const sessionId = sessionManager.getSessionId();
-    const decision = this.dependencies.homeProfile?.(sessionId) ?? "unnamed";
-    if (decision === "home") return true;
-    if (decision === "ordinary") return false;
-    return this.explicitHomeSessionId === sessionId;
-  }
-
-  /** The profile the live runtime was built with. */
-  private liveProfile(): RuntimeProfile {
-    return this.runtimeProfiles.get(this.runtime.session) ?? "ordinary";
-  }
-
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
     return async ({ cwd, sessionManager, sessionStartEvent }) => {
       const trust = await this.dependencies.trust.requireResolved(cwd);
@@ -1600,44 +1539,12 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const home = this.isHomeProfile(sessionManager);
-      // One-shot: a brand-new Home session's first runtime carries the explicit
-      // profile; every later runtime asks the record.
-      this.explicitHomeSessionId = undefined;
-      const tronModuleHost: TronModuleHost = {
-        sessionId: () => this.id,
-        cwd: () => this.cwd,
-        workspace: this.dependencies.workspace,
-        displayArtifacts: this.dependencies.displayArtifacts,
-        notificationTitle: () => this.notificationTitle(),
-        // The notify tool samples the same foreground lease automatic
-        // alerts use, at its own admission boundary.
-        isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
-        contextPolicy: () => contextPolicy,
-        compactionPolicy: () => compactionPolicy,
-        // Summary auth can finish after Stop but before compaction_start
-        // rotates the display ID. Automatic work retains its prompt fence.
-        compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
-          || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
-        compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
-        ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
-        jev: new JevDecisionClient(modelRuntime),
-        ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
-        ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
-        ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
-        ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
-        ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-        // Home's memory tools are answered per call, because the memory a
-        // running Home reads can be reconfigured, blocked or released.
-        homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools?.(sessionId),
-      };
-      // Tron Home's curated profile: no agent-directory or project discovery,
-      // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
-      // Tron modules plus tron-home. An ordinary runtime is byte-for-byte what
-      // it was: the Home branch changes nothing it would have built.
-      const extensionFactories = home
-        ? homeModuleFactories(tronModuleHost)
-        : [
+      const services = await createAgentSessionServices({
+        cwd: trust.cwd,
+        agentDir: this.dependencies.agentDir,
+        modelRuntime,
+        resourceLoaderOptions: {
+          extensionFactories: [
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
               if (!operationId || !this.dependencies.mcpAuth) {
@@ -1649,26 +1556,31 @@ export class RuntimeSlot {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
-            ...tronModuleFactories(tronModuleHost),
-          ];
-      const services = await createAgentSessionServices({
-        cwd: trust.cwd,
-        agentDir: this.dependencies.agentDir,
-        modelRuntime,
-        resourceLoaderOptions: {
-          ...(home ? {
-            noExtensions: true,
-            noSkills: true,
-            noPromptTemplates: true,
-            noContextFiles: true,
-            // The agent directory's SYSTEM.md and APPEND_SYSTEM.md are not gated
-            // by any `no*` option, so Home drops them at the two overrides the
-            // loader exposes. Nothing from outside the curated profile reaches
-            // Home's system prompt.
-            systemPromptOverride: () => undefined,
-            appendSystemPromptOverride: () => [],
-          } : {}),
-          extensionFactories,
+            ...tronModuleFactories({
+              sessionId: () => this.id,
+              cwd: () => this.cwd,
+              workspace: this.dependencies.workspace,
+              displayArtifacts: this.dependencies.displayArtifacts,
+              notificationTitle: () => this.notificationTitle(),
+              // The notify tool samples the same foreground lease automatic
+              // alerts use, at its own admission boundary.
+              isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
+              contextPolicy: () => contextPolicy,
+              compactionPolicy: () => compactionPolicy,
+              // Summary auth can finish after Stop but before compaction_start
+              // rotates the display ID. Automatic work retains its prompt fence.
+              compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
+                || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
+              compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
+              ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
+              jev: new JevDecisionClient(modelRuntime),
+              ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
+              ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
+              ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
+              ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
+              ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+            }),
+          ],
           extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
@@ -1683,19 +1595,15 @@ export class RuntimeSlot {
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager);
+      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
       this.directBashProcesses = directBashProcesses;
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
-        // The allowlist is Home's executable ceiling. MCP tools cannot appear
-        // under it because no MCP extension is loaded, and Tron's direct bash
-        // tool is not registered at all for Home.
-        ...(home ? { tools: [...HOME_TOOL_NAMES] } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
-        ...(directBashProcesses ? { customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition] } : {}),
+        customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
       // passes its configured defaults, which skips AgentSession's own transcript
@@ -1704,31 +1612,8 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
       if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
-      this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
-      this.homeRequestPolicy = home
-        ? this.dependencies.homeRequestPolicy?.(sessionManager.getSessionId())
-        : undefined;
-      const homeRequestPolicy = this.homeRequestPolicy;
-      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
-      const baseStream = created.session.agent.streamFunction;
-      // The guard is INNERMOST, so it validates the exact request the
-      // provider-facing base stream receives: after `abortAwareStream` and after
-      // the compaction policy's summary-focus rewrite. Installed outermost, it
-      // would run before both and never see them.
-      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(
-        homeRequestPolicy ? homeRequestPolicy.wrapStreamFunction(baseStream) : baseStream,
-      ));
-      if (homeRequestPolicy) {
-        // Outermost on both: the request is cut after the SDK's own projection,
-        // and the digest expectation is recorded after every SDK context stage.
-        created.session.agent.transformContext = homeRequestPolicy.wrapTransformContext(
-          created.session.agent.transformContext,
-        );
-        created.session.agent.prepareRequest = homeRequestPolicy.wrapPrepareRequest(
-          created.session,
-          created.session.agent.prepareRequest,
-        );
-      }
+      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
+      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
       this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
       this.contextPolicies.set(created.session, contextPolicy);
@@ -1774,10 +1659,7 @@ export class RuntimeSlot {
       navigateTree: async (targetId, options) => {
         this.assertAutomationMayNotReplaceSession();
         const result = await this.runtime.session.navigateTree(targetId, options);
-        if (!result.cancelled) {
-          this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
-          this.noteCanonicalEntriesCommitted();
-        }
+        if (!result.cancelled) this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
         return result;
       },
       switchSession: (sessionPath, options) => {
@@ -1974,51 +1856,15 @@ export class RuntimeSlot {
   }
 
   private async restorePreviousRuntime(previousManager: SessionManager): Promise<void> {
-    await this.replaceRuntime(previousManager);
-  }
-
-  /** Rebuild this slot's runtime over the same session manager, keeping the
-   * session identity, its subscribers and its presentation. The factory decides
-   * the profile from the record, so this is also how a profile change takes
-   * effect. */
-  private async replaceRuntime(sessionManager: SessionManager = this.sessionManager): Promise<void> {
     await this.runtime.dispose().catch(() => {});
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
-      cwd: sessionManager.getCwd(),
+      cwd: previousManager.getCwd(),
       agentDir: this.dependencies.agentDir,
-      sessionManager,
+      sessionManager: previousManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
     this.installRuntimeHooks();
     await this.bindSession();
-  }
-
-  /**
-   * Replace this slot's runtime in place after `commit` changes the profile
-   * decision for its session. The whole sequence runs in the slot's lane, which
-   * is also the lane prompt admission uses, so no prompt can be admitted between
-   * the idle check, the durable commit and the rebuild: the next prompt always
-   * sees the new profile. A busy slot refuses retryably and changes nothing.
-   */
-  async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
-    await this.lane.run(async () => {
-      this.assertUsable();
-      this.assertProfileChangeIdle();
-      const work = this.dependencies.workRegistry.begin({
-        kind: "administrative-provider-package-operation",
-        sessionId: this.id,
-        hostEpoch: this.ui.hostEpoch,
-      });
-      try {
-        await commit();
-        await this.replaceRuntime();
-        this.revision += 1;
-        this.emit("session.resourcesChanged", {});
-        this.publishSnapshot();
-      } finally {
-        work.settle();
-      }
-    });
   }
 
   private childSessionReferences(
@@ -3695,7 +3541,6 @@ export class RuntimeSlot {
         // path below settles; before that point canonical durability is still
         // provisional and must not be projected as memory coverage.
         this.activeOperationId = undefined;
-        this.homeRequestPolicy?.settle(settledOperationId);
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;
         this.retry = undefined;
@@ -3977,7 +3822,6 @@ export class RuntimeSlot {
               reclassifiedAdmission.resolveDisposition("foreground");
               const displacedOwner = this.activeOperationId;
               this.activeOperationId = reclassifiedAdmission.id;
-              this.homeRequestPolicy?.transferOperation(displacedOwner, reclassifiedAdmission.id);
               const invocation = this.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
                 id: reclassifiedAdmission.id,
@@ -4277,9 +4121,6 @@ export class RuntimeSlot {
       }
       case "entry_appended":
         this.summaryContentDirty = true;
-        // Custom entries — context edits, extension callbacks — reach the log
-        // only here, and they change what the memory projects just as messages do.
-        this.noteCanonicalEntriesCommitted();
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
           // Keep this compatibility path for extension/custom persistence, but
           // ordinary Pi tool results arrive through message_end below.
@@ -4296,7 +4137,6 @@ export class RuntimeSlot {
         // new session's first prompt updates its title without a Gateway restart.
         this.summaryContentDirty = true;
         this.scheduleSnapshot();
-        this.noteCanonicalEntriesCommitted();
         if (event.message.role === "toolResult") {
           // Pi invokes listeners immediately before appending this exact
           // object. Verify canonical call-ID ownership in the next microtask;
@@ -5922,21 +5762,6 @@ export class RuntimeSlot {
     return canonicalToolResultCallIDs(this.runtime.session.sessionManager).has(toolCallId);
   }
 
-  /**
-   * Tron Home's memory follows the canonical log, not the slot's lane: the owner
-   * re-reads what a commit appended and drains its pump under its own bounds, so
-   * nothing here waits on it. Pi emits `message_end` immediately before the
-   * canonical append, so the report is deferred one microtask; the read is
-   * idempotent and the request path re-reads before it renders, so a report that
-   * lands early costs one incremental read and nothing else.
-   */
-  private noteCanonicalEntriesCommitted(): void {
-    if (this.liveProfile() !== "home") return;
-    const homeMemory = this.dependencies.homeMemory;
-    if (!homeMemory) return;
-    queueMicrotask(() => { homeMemory.entriesCommitted(this.id); });
-  }
-
   private observeCanonicalToolResultHandoff(
     message: Extract<AgentMessage, { role: "toolResult" }>,
   ): void {
@@ -6201,10 +6026,6 @@ export class RuntimeSlot {
           // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.activeOperationId;
           this.activeOperationId = item.id;
-          // The follow-up is part of the same activation: its boundary entry and
-          // its frozen memory view must not change, only the operation identity
-          // Tron now reports.
-          this.homeRequestPolicy?.transferOperation(syntheticOwner, item.id);
           this.operation = {
             id: item.id,
             kind: "prompt",
@@ -7153,11 +6974,6 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
-          // The canonical leaf immediately before Pi sees the input is the exact
-          // activation start: the input's own entry is appended inside
-          // `session.prompt` below, and steering later inserts entries after it,
-          // never before it.
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
           this.phase = "running";
@@ -7213,7 +7029,6 @@ export class RuntimeSlot {
         if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
         this.pendingQueueAdmission = undefined;
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
-        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
@@ -7294,7 +7109,6 @@ export class RuntimeSlot {
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
-        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         this.settleOperationWork(operationId);
         if (terminalLifecycle === "failed") {
@@ -7414,7 +7228,6 @@ export class RuntimeSlot {
         });
         this.invocations.delete(invocationId);
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
-        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
@@ -7963,18 +7776,7 @@ export class RuntimeSlot {
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
-      // Home must stay on a fixed physical model: a virtual model routes on the
-      // canonical transcript, which Home's profile does not own. The live
-      // runtime's profile decides, so an ordinary session keeps the choice.
-      if (this.liveProfile() === "home" && model.api === VIRTUAL_MODEL_API) {
-        throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
-      }
       await this.runtime.session.setModel(model as Model<never>);
-      // The Home record is the single source of truth for the model a re-enable
-      // restores, and only an enabled Home's change belongs to it.
-      if (this.liveProfile() === "home") {
-        await this.dependencies.homeModelChanged?.(this.id, { provider, id: modelId });
-      }
       this.revision += 1;
       this.publishSnapshot();
       return this.revision;
@@ -8031,11 +7833,6 @@ export class RuntimeSlot {
 
   async compact(instructions?: string): Promise<{ queued: boolean }> {
     this.assertUsable();
-    // Refused at admission: Home keeps its own history, and the SDK would only
-    // refuse this later, after the command was already accepted.
-    if (this.liveProfile() === "home") {
-      throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
-    }
     if (this.manualCompactionClaim) {
       throw new GatewayError("busy", "A manual compaction is already pending for this session");
     }
@@ -8332,9 +8129,6 @@ export class RuntimeSlot {
           ...(options.label ? { label: options.label } : {}),
         });
         if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
-        // Navigation rewrites the branch the memory projects: entries the branch
-        // no longer holds become omitted, and the view is folded again.
-        this.noteCanonicalEntriesCommitted();
         this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
         this.summaryContentDirty = true;
         completed = true;
@@ -9103,19 +8897,8 @@ export class RuntimeSlot {
    * still makes this busy. */
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
-    if (this.isRunningWork(exceptWorkToken)) throw new GatewayError("busy", "Session must be idle for this operation");
-  }
-
-  /** The same idle predicate `assertIdle` applies, classified retryably because
-   * a profile change is safe to retry once the run settles. */
-  private assertProfileChangeIdle(): void {
-    this.assertUsable();
-    if (this.isRunningWork()) {
-      throw new GatewayError("busy", "Tron Home's session is running; retry when it is idle", true);
+    if (this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken)) {
+      throw new GatewayError("busy", "Session must be idle for this operation");
     }
-  }
-
-  private isRunningWork(exceptWorkToken?: string): boolean {
-    return this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken);
   }
 }
