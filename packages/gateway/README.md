@@ -640,6 +640,22 @@ fail-local recovery, backup, prompt coverage, internal-file display, and the
 future managed-state contract are owned by
 [`docs/internal-workspace.md`](docs/internal-workspace.md).
 
+## Tron Home
+
+Tron Home is one opt-in persistent conversation per Gateway installation. It is
+created only by an explicit `home.designate`; until then every session is
+ordinary. `home.status` (a read) returns the bounded projection
+`{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live }`,
+`home.designate` and `home.disable` are command-id-receipted mutations, and
+`home.v1` is advertised in `hello`/`system.info`. Home runs in the neutral
+`<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
+curated runtime profile (no agent-directory or project discovery, no Pi
+built-ins, an `ask_user`/`display`/`notify` executable allowlist, per-session
+compaction disabled, a fixed physical model, and zero cache-warming requests),
+and its designation is keyed by session id, so a fork is ordinary. Ordinary
+sessions are byte-for-byte unaffected. The record, the profile, the RPCs, fork
+semantics and what is not built yet are owned by [`docs/home.md`](docs/home.md).
+
 ## Runtime and state
 
 The launcher executes `dist/index.js`, a small entrypoint that imports the
