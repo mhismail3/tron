@@ -5,13 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AutomationScheduler, AutomationAdmissionError, type AutomationExecutor, type AutomationExecutionHandle, type AutomationExecutionResult } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
 import { GatewayError } from "../errors.js";
-
-async function eventually(assertion: () => void): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    try { assertion(); return; } catch { await new Promise((resolve) => setTimeout(resolve, 2)); }
-  }
-  assertion();
-}
+import { waitFor } from "../../test-support/wait-for.js";
 
 describe("AutomationScheduler", () => {
   it("materializes one latest occurrence and commits its terminal result", async () => {
@@ -42,7 +36,7 @@ describe("AutomationScheduler", () => {
 
     scheduler.start();
     await scheduler.scan();
-    await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("succeeded"));
+    await waitFor(() => store.get(record.id).lastRun?.state === "succeeded", "the run to succeed");
 
     const updated = store.get(record.id);
     expect(updated.lastRun?.scheduledFor).toBe("2026-01-01T00:10:00.000Z");
@@ -96,7 +90,7 @@ describe("AutomationScheduler", () => {
       scheduler.start();
       now = Date.parse("2026-01-01T00:10:30Z");
       await scheduler.scan();
-      await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("running"));
+      await waitFor(() => store.get(record.id).currentRun?.state === "running", "the run to start");
 
       const cancellation = reason === "gateway-shutdown" ? scheduler.cancelActiveForShutdown()
         : scheduler.cancel(record.id, store.get(record.id).currentRun!.runId).then(
@@ -105,18 +99,18 @@ describe("AutomationScheduler", () => {
           );
       // Let the cooperative cancel settle first so the only remaining bound is the
       // completion grace for a completion that never arrives.
-      await eventually(() => expect(cancelCalls).toBe(1));
+      await waitFor(() => cancelCalls === 1, "the cooperative cancel to settle");
       await new Promise((resolve) => setTimeout(resolve, 0));
-      await eventually(() => expect(timers.has(5_000)).toBe(true));
+      await waitFor(() => timers.has(5_000), "the completion grace timer");
       fireGrace();
       await cancellation;
-      await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+      await waitFor(() => store.get(record.id).lastRun?.state === "outcomeUnknown", "the unknown-outcome result");
       expect(store.get(record.id).lastRun?.reason).toBe(`${reason}-settlement-timeout`);
 
       // Disposal is bounded by the same grace rather than awaiting the completion forever.
       timers.delete(5_000);
       const disposal = scheduler.dispose();
-      await eventually(() => expect(timers.has(5_000)).toBe(true));
+      await waitFor(() => timers.has(5_000), "the completion grace timer");
       fireGrace();
       await expect(disposal).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(() => scheduler.assertRunRetired(store.get(record.id).lastRun!.runId)).toThrow(/still owned/);
@@ -164,13 +158,13 @@ describe("AutomationScheduler", () => {
       scheduler.start();
       now = Date.parse("2026-01-01T00:10:30Z");
       await scheduler.scan();
-      await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("running"));
+      await waitFor(() => store.get(record.id).currentRun?.state === "running", "the run to start");
 
       const cancellation = scheduler.cancelActiveForShutdown();
-      await eventually(() => expect(timers.has(5_000)).toBe(true));
+      await waitFor(() => timers.has(5_000), "the completion grace timer");
       fireGrace();
       await cancellation;
-      await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+      await waitFor(() => store.get(record.id).lastRun?.state === "outcomeUnknown", "the unknown-outcome result");
       expect(store.get(record.id).lastRun?.reason).toBe("gateway-shutdown-cancellation-timeout");
       expect(store.get(record.id).activation).toBe("blocked");
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -268,7 +262,7 @@ describe("AutomationScheduler", () => {
     try {
       scheduler.start();
       const run = await scheduler.runNow(record.id, record.revision);
-      await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+      await waitFor(() => store.get(record.id).lastRun?.state === "outcomeUnknown", "the unknown-outcome result");
       await expect(scheduler.dispose()).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(() => scheduler.assertRunRetired(run.runId)).toThrow(/still owned/);
       expect(() => scheduler.assertRunRetired("another-run")).not.toThrow();
@@ -291,7 +285,7 @@ describe("AutomationScheduler", () => {
     scheduler.start();
     await scheduler.runNow(record.id, record.revision);
     await scheduler.scan();
-    await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("succeeded"));
+    await waitFor(() => store.get(record.id).lastRun?.state === "succeeded", "the run to succeed");
     expect(store.get(record.id).activation).toBe("draft");
   });
 
@@ -341,7 +335,7 @@ describe("AutomationScheduler", () => {
     });
     scheduler.start();
     await scheduler.scan();
-    await eventually(() => expect(start).toHaveBeenCalledTimes(2));
+    await waitFor(() => start.mock.calls.length === 2, "both admitted runs to start");
     await scheduler.scan();
     expect(start).toHaveBeenCalledTimes(2);
     scheduler.beginDrain();
@@ -376,10 +370,10 @@ describe("AutomationScheduler", () => {
     });
     scheduler.start();
     await scheduler.scan();
-    await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("admitting"));
+    await waitFor(() => store.get(record.id).currentRun?.state === "admitting", "the run to be admitted");
     const runId = store.get(record.id).currentRun!.runId;
     const cancellation = scheduler.cancel(record.id, runId);
-    await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("cancelling"));
+    await waitFor(() => store.get(record.id).currentRun?.state === "cancelling", "the run to be cancelled");
     releaseStart();
 
     await expect(cancellation).resolves.toMatchObject({ runId, state: "cancelled" });
@@ -441,7 +435,7 @@ describe("AutomationScheduler", () => {
     });
 
     scheduler.start();
-    await eventually(() => expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 30_000));
+    await waitFor(() => setTimer.mock.calls.some((call) => call.length === 2 && typeof call[0] === "function" && call[1] === 30_000), "the 30 s scheduler timer");
   });
 
   // G-1c/B2: the catalog owner may not have published a cut when recovery runs

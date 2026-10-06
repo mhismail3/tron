@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -16,14 +17,6 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   vi.unstubAllGlobals();
 });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 describe("codemode nested Jev and subagent tools", () => {
   it("enforces Jev ceilings before concurrent HTTP dispatch and preserves subagent workspace and Stop ownership", async () => {
@@ -117,9 +110,9 @@ export default function(pi) {
     const trustedController = vi.spyOn(internal, "trustedSubagentController").mockReturnValue({ execute: vi.fn() });
     const childBinding = vi.spyOn(internal, "processChildSessionBinding").mockReturnValue({ ref: "fake-child-session", producerId: "foreground-index:0", runId: "fake-run" });
     const prompt = slot.prompt("Run nested Jev and subagent calls");
-    await waitUntil(() => existsSync(handoffPath));
+    await waitFor(() => existsSync(handoffPath), "the handed-off process file");
     const handedTask = await readFile(handoffPath, "utf8");
-    await waitUntil(() => slot.snapshot().processActivities?.some((process) => process.kind === "subagent"));
+    await waitFor(() => slot.snapshot().processActivities?.some((process) => process.kind === "subagent"), "the subagent process activity");
     expect(jevRequests).toHaveLength(2);
     expect(maximumConcurrentJevRequests).toBe(2);
     expect(jevRequests.map((item) => (item.state as { id: string }).id).sort()).toEqual(["admitted-a", "admitted-b"]);
@@ -135,7 +128,7 @@ export default function(pi) {
     expect(internal.processOperationIDs.get(process!.processId)).toBe(internal.operation?.id);
     await slot.abortSubagentProcess(process!.processId, process!.runId!, authority!.expectedOperationId);
     await prompt;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     isForeground.mockRestore();
     toolOrigin.mockRestore();
     trustedController.mockRestore();

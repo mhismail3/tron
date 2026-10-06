@@ -55,7 +55,6 @@ import {
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
   type SessionBroadcast,
-  type RuntimeProfile,
   type RuntimeSlotDependencies,
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
@@ -101,7 +100,6 @@ import {
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
@@ -564,8 +562,6 @@ export class RuntimeRegistry {
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
-  /** The one owner of Tron Home's designation for this installation. */
-  private readonly home: HomeOwner;
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
@@ -739,8 +735,6 @@ export class RuntimeRegistry {
       scheduleToolOperations?: ScheduleToolOperations;
       jev?: JevDecisionClient;
       connections?: ConnectionOwner;
-      /** One Home designation lifecycle outcome, for the Gateway log. */
-      homeDiagnostic?: HomeDiagnostic;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -766,31 +760,6 @@ export class RuntimeRegistry {
       onReconciled: (reconciled) => { this.options.catalogReconciled?.(reconciled); },
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
-    });
-    this.home = new HomeOwner({
-      tronHome: options.tronHome,
-      trust: options.trust,
-      sessions: {
-        createHomeSession: async (cwd) => (await this.create(cwd, "home")).id,
-        applySessionModel: async (sessionId, model) => {
-          const slot = this.slots.get(sessionId);
-          if (!slot) throw new GatewayError("internal", "Tron Home's session is not live");
-          const current = slot.snapshot().model;
-          if (current?.provider === model.provider && current.id === model.id) return;
-          await slot.setModel(model.provider, model.id);
-        },
-        sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
-        hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
-        replaceRuntimeForProfile: async (sessionId, commit) => {
-          const slot = this.slots.get(sessionId);
-          if (!slot || slot.isDisposed) {
-            await commit();
-            return;
-          }
-          await slot.replaceRuntimeForProfile(commit);
-        },
-      },
-      ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
@@ -827,9 +796,6 @@ export class RuntimeRegistry {
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
-  /** The Home designation owner for this installation. */
-  homeOwner(): HomeOwner { return this.home; }
-
   /** Shared model recency for the model picker; newest first and bounded. */
   recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }
 
@@ -847,9 +813,6 @@ export class RuntimeRegistry {
   }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
-    // The designation is read before any runtime can be built, so no session
-    // ever opens with the wrong profile because the record loaded late.
-    await this.home.initialize();
     await this.workspace.initialize();
     // Load the durable recovery inputs before capturing catalog membership, as
     // before this optimization. The later evidence cut therefore cannot omit a
@@ -1631,10 +1594,6 @@ export class RuntimeRegistry {
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
-      homeProfile: (sessionId: string) => this.home.profileFor(sessionId),
-      homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
-        this.options.persistenceDiagnostic?.(sessionId, "home-model-record-failed");
-      }),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
     };
@@ -2653,7 +2612,7 @@ export class RuntimeRegistry {
     }
   }
 
-  async create(cwdInput: string, profile: RuntimeProfile = "ordinary"): Promise<RuntimeSlot> {
+  async create(cwdInput: string): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -2678,7 +2637,7 @@ export class RuntimeRegistry {
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
       slot = await stage(
         "session.create.runtime",
-        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, profile),
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {
@@ -4245,19 +4204,6 @@ export class RuntimeRegistry {
       return false;
     } finally {
       if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
-    }
-  }
-
-  /** Whether Home's recorded session still exists: a live runtime, or a
-   * canonical session the catalog still holds. A catalog read that cannot
-   * complete is not proof of absence, so the recorded session is kept rather
-   * than replaced. */
-  private async homeSessionPresent(sessionId: string): Promise<boolean> {
-    if (this.slots.has(sessionId)) return true;
-    try {
-      return (await this.catalogMembership(sessionId)).entry !== undefined;
-    } catch {
-      return true;
     }
   }
 

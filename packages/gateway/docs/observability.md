@@ -197,9 +197,9 @@ owner cell names that module too.
 Conventions used in the rows:
 
 - **Dynamic names.** An event name built at runtime is written as its pattern.
-  `deploy.<state>` on the deploy helper, `auth.login.<outcome>` on the Gateway,
-  `home.<outcome>` on the Gateway and `operation.<name>` on the phone are the
-  only four; each pattern's values are listed in its row.
+  `deploy.<state>` on the deploy helper, `auth.login.<outcome>` on the Gateway
+  and `operation.<name>` on the phone are the only three; each pattern's values
+  are listed in its row.
 - **Levels with a condition.** A row whose level changes says which side of the
   threshold or condition it is on. `SLOW_RPC_WARNING_MS` (1,000 ms) is the
   Gateway's named slow bound; iOS uses
@@ -214,7 +214,6 @@ Conventions used in the rows:
 | `gateway.fatal-startup` | error | `packages/gateway/src/index.ts` | loading the Gateway module graph or startup throws before the logger exists | `error` (one wrapped cause), `runtimeEpoch`, `payloadVersion` | The 2026-09-23 rebuild crashed in 0.3 s with `ERR_MODULE_NOT_FOUND` and wrote nothing |
 | `knowledge.model-failed` | warning | `packages/gateway/src/gateway-main.ts`, raised by `packages/gateway/src/knowledge/knowledge-curation.ts` | a Knowledge summary job fails because the model errored or returned an invalid contract | `code`, bounded `reason` prefixed by model ID and containing one copy of stop reason, content part types, text length, code-fence and leading-prose flags; never reply/source text | A model provider failure previously surfaced as a misleading JSON parse error, and the Luna reply was discarded without identifying its shape |
 | `gateway.started` | info | `packages/gateway/src/gateway-main.ts` | once per process, as the first record | `durationMs` since process start; pid, Node version and source revision in the message | A restart had no record at process start, so stop → listening could not be measured |
-| `home.<outcome>` | info for `designated`, `enabled`, `disabled`; warning for `unavailable` and `refused` | `packages/gateway/src/gateway-main.ts`, raised by `packages/gateway/src/home/home-owner.ts` | a `home.designate` or `home.disable` reaches a terminal outcome, or the stored record cannot be used | `reason` only, and only for `unavailable` (`unreadable`, `unsupported-record`) and `refused` (`session-busy`); never a path, session id or model identity | Tron Home's designation is a rare explicit user action whose failures were otherwise only visible in the client that asked; a preserved unusable record and a refused profile change both need one line the user can find |
 | `gateway.startup-step` | info | `packages/gateway/src/gateway-main.ts` | at each startup checkpoint | `step`, `durationMs` | Stop → bound (7.6–25.5 s) and bound → listening (10–26 s) had no records at all |
 | `gateway.startup-budget` | info, or warning past `STARTUP_LISTEN_BUDGET_MS` (5,000 ms) | `packages/gateway/src/gateway-main.ts`; constant owner `packages/gateway/src/lifecycle/startup-budget.ts` | once per process, the moment the Gateway is serving | `durationMs` (process start to listening), `step` (the step that owns most of it), and `budgetMs`/`stepMs`/`overBudgetMs` in the message | The per-step records name the stages but not a bound. It is this process's own start, not the wait a restarting client sees — that client counts from its own socket's close, which comes before the predecessor is down — so `scripts/tron-profile-gateway` reads this record (and its `budgetMs`) for the start and judges G-13's restart criterion on its own close → listening budget |
 | `gateway.bound` | info | `packages/gateway/src/transport/server.ts` | the listener binds, before warmup | — | Bounds the warmup window with `gateway.listening` |

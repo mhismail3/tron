@@ -1315,9 +1315,13 @@ ownership marker, and only this worktree's and lane's runs are removed by
   log, enforces overall and no-output deadlines, captures bounded process and
   partial-result evidence, then terminates only that owned group. Product
   failures are never converted into infrastructure retries.
-- The `HOSTED_TEST` app entry remains inert: it starts no Gateway, push,
-  dashboard, artifact-pruning, or other ambient production owner. Tests create
-  only the exact model or presentation boundary they exercise.
+- The `HOSTED_TEST` app entry starts no ambient production owner except the
+  production scene itself: a hosted launch with no fixture argument renders
+  `ProductionSceneRoot` (`Sources/App/ProductionSceneRoot.swift`), the same scene
+  and lifecycle modifiers the shipping app renders, which is what the real-UI
+  lane drives against a real Gateway. Every fixture arm stays inert (no Gateway,
+  push, dashboard or artifact-pruning owner) and tests create only the exact model
+  or presentation boundary they exercise.
 - CI uses the same runner core, uploads complete or partial logs, metadata,
   metrics, results, and timeout evidence unconditionally, and deletes only its
   exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
@@ -2214,24 +2218,23 @@ and record its matching private-address result. This routing does not claim all
 three cases were qualified by the shared-link run.
 
 The Gateway uses a fixture-owned home, state directory, agent directory,
-delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
-bound to that fixture on initial startup and restart so a caller's store cannot
-become a migration input. The fixture Gateway and its fault proxy also run under
-the same minimal allow-listed environment `scripts/tron dev` re-executes itself
-with, never the calling shell's: an agent shell spawned by Stable or the Debug
-Gateway carries that Gateway's PATH, its `TRON_GATEWAY_*` values (runtime epoch,
-channel, supervision, payload identity) and its `PI_*` store paths, and none of
-them may reach the fixture (the fault proxy would otherwise hand its own PATH to
-the Gateway it restarts privately). The harness runs the fixture with the
-repository-pinned Node it resolves itself - `TRON_NODE_BIN`, else the pinned
-`~/.nvm` directory, else Homebrew, and only then the caller's PATH - and proves
-the chosen Node against the installed node-pty native module before it starts
-anything, printing the real `dlopen` error; node-pty alone reports only its last
-attempt ("Failed to load native module"), which hides a bundled runtime whose
-Team ID cannot load the ad hoc-signed prebuild. Use `logs`, `status`, `stop`,
-and `clean` to inspect or manage those resources. The fixture directory and the focused DerivedData
-belong to one worktree: by default they are
-`$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
+delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly bound
+to that fixture on initial startup and restart so a caller's store cannot become a
+migration input. The fixture Gateway and its fault proxy also run under the same
+minimal allow-listed environment `scripts/tron dev` re-executes itself with, never
+the calling shell's: an agent shell spawned by Stable or the Debug Gateway carries
+that Gateway's PATH, its `TRON_GATEWAY_*` values (runtime epoch, channel,
+supervision, payload identity) and its `PI_*` store paths, and none of them may reach
+the fixture (the fault proxy would otherwise hand its own PATH to the Gateway it
+restarts privately). The harness runs the fixture with the repository-pinned Node it
+resolves itself - `TRON_NODE_BIN`, else the pinned `~/.nvm` directory, else Homebrew,
+and only then the caller's PATH - and proves the chosen Node against the installed
+node-pty native module before it starts anything, printing the real `dlopen` error;
+node-pty alone reports only its last attempt ("Failed to load native module"), which
+hides a bundled runtime whose Team ID cannot load the ad hoc-signed prebuild. Use
+`logs`, `status`, `stop`, and `clean` to inspect or manage those resources. The
+fixture directory and the focused DerivedData belong to one worktree: by default they
+are `$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
 `$TMPDIR/tron-ios-gateway-e2e-derived-<uid>-<worktree key>`, with the key
 `scripts/ios-test-build-identity.py worktree-key` gives the per-worktree test
 products (`TRON_IOS_E2E_STATE_DIR` and `TRON_IOS_E2E_DERIVED_DATA` override
@@ -2252,6 +2255,68 @@ refused with 73 and the `status --all` table. On CI, focused result/log evidence
 is uploaded before
 owned state is removed. This simulator boundary is an explicit Pi-graph/release
 checkpoint, not an ordinary edit-loop or general UI regression suite.
+
+The same harness owns one real-UI lane. `scripts/ios-gateway-e2e-test run-ui`
+installs and builds the fixture Gateway like `all`, builds the `Tron UI Validation`
+products (`UIValidation` test plan) in this worktree's one E2E DerivedData, patches
+only the `TronMobileUITests` target with the same `TRON_E2E_*` environment, and runs
+the journeys under `packages/ios-app/UITests/RealGateway/` — each against its own
+freshly owned fixture and pairing code while the lane stays leased, so a consumed
+pairing invitation is never reused. `run-ui [--only-testing OWNER …]` selects
+journeys; with none it runs the journeys it owns, and any other selector is refused
+before a build, fixture or lease is taken. `status` reports the UI products beside the
+unit ones. A journey the fixture never reached skips, which the harness refuses to
+report green: it requires exactly one executed, passing case, and a journey that
+cannot leave its evidence behind fails even when its XCTest run passed.
+
+`RealGatewayPairAndChatUITests` declares the failure modes it protects. The app is
+launched with no fixture argument, so the hosted app's no-fixture arm renders the
+shared `ProductionSceneRoot` — the production scene, the same lifecycle modifiers in
+the same order, and a real `AppModel` with a real `GatewayClient` — and pairs through
+the production invitation link (`tron://pair?…`, handed to the running app with
+`XCUIDevice.shared.system.open`), which is the path a QR code or a shared link takes.
+Pairing a device that has not finished setup leaves the setup sheet on its workspace
+step, so the journey then finishes first-run setup the way a user does: it chooses the
+fixture's own folder from the Mac through the sheet's browser, declines the project
+trust prompt, and advances the provider pages to `Finish setup`. That choice — not a
+seed, and not whichever read lands first — is what gives the new session its workspace.
+The journey then creates a session there, sends one prompt, reads the fixture's reply
+while the fixture is still delivering it and again when it completes (the observations
+are retained as a trace, not asserted: a transcript poll can land only on the completed
+row), then presses Home and waits for the system to report a background session before
+activating again. That transition is what retires the device's socket and reconnects:
+the harness requires the Gateway's own log to show a second opened connection and a
+closed one for that journey, and the journey requires the conversation intact after it.
+The wrong-code control uses the same link with a code the Gateway refuses: it asserts
+the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
+pairs through the same address — the setup sheet reaching its workspace step is what
+only a connected Gateway shows — so the control cannot pass by being a broken address.
+Both journeys retain screenshots.
+
+This lane pairs the hosted app for real, and the lane's app container is shared with the
+hosted unit lane of the same worktree; a pairing left behind made that lane's
+mounted-view tests time out (measured A/B/A on the lane, including the profile's own
+bytes written back into the app's preferences to reproduce it). Two owners now prevent
+it: the suite's teardown returns the hosted app to its unpaired launch state through the
+same `HOSTED_TEST` `--tron-reset-ui-test-state` hook every hosted UI test starts from,
+and `run-ui` removes that app with its data container (`simctl uninstall`) itself, on
+success, failure, deadline and signal, so a run that ends before its teardown cannot
+poison the unit lane; a run whose reset fails is not reported as passing. `run-ui` likewise stops the
+fixture it renewed on success as well as on failure, because it renews one per journey
+and has nothing to iterate against: no run leaves a Gateway and its fault proxy behind.
+A `SIGKILL` of the harness still leaves the pairing behind, because nothing executes
+after it; the unit lane's own isolation from a stale app container remains a follow-up.
+
+Each journey leaves one evidence directory under this worktree's fixture
+(`results/<utc>-ui.XXXXXX`) holding the `.xcresult`, the Gateway's canonical runtime
+log (`gateway.jsonl`), the fault proxy's `link-stats` JSON, the XCTest `summary.json`
+and `report.json`: every artifact's path and sha256 (a result bundle's digest covers its
+sorted file tree), the journey's final status including the incomplete-evidence
+override, whether the evidence is complete, the Gateway connection counts the journey
+was held to, the source revision and dirty flag it ran from, plus `report.sha256` for the
+report itself. That directory stays local; a pull request cites the digests. iOS work
+verification routes this journey file to the same harness (`run-ui`) instead of the
+ordinary hosted runner.
 
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,

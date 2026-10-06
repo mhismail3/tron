@@ -11,6 +11,7 @@ import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -37,14 +38,6 @@ afterEach(async () => {
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "RPC idle fixture cleanup failed");
 });
-
-async function until(predicate: () => boolean | Promise<boolean>, label = "condition"): Promise<void> {
-  const deadline = Date.now() + 10_000;
-  while (!await predicate()) {
-    if (Date.now() >= deadline) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
 
 interface Client {
   frames: any[];
@@ -151,14 +144,14 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     sockets.push(socket);
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
-    await until(() => socket.readyState === WebSocket.OPEN, "socket open");
+    await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await until(() => frames.some((frame) => frame.type === "hello"), "hello");
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,
       request: async (id: string, method: string, params: object) => {
         socket.send(JSON.stringify({ type: "request", id, method, params }));
-        await until(() => frames.some((frame) => frame.id === id), `response ${method}`);
+        await waitFor(() => frames.some((frame) => frame.id === id), `response ${method}`);
         return frames.find((frame) => frame.id === id);
       },
     };
@@ -242,10 +235,10 @@ describe("receipt-backed mutations against their own session work entry", () => 
       sessionId: session.id, commandId: "normal-completion", text: "Complete normally",
     });
     expect(prompted.ok).toBe(true);
-    await until(() => client.frames.slice(start).some(frame => frame.topic === "session.snapshot"
+    await waitFor(() => client.frames.slice(start).some(frame => frame.topic === "session.snapshot"
       && frame.payload.phase === "idle" && frame.payload.transcript.some((item: any) => item.role === "assistant")), "completed assistant snapshot");
     const settledIndex = client.frames.findLastIndex(frame => frame.topic === "session.snapshot" && frame.payload.phase === "idle");
-    await until(() => client.frames.slice(settledIndex + 1).some(frame => frame.topic === "session.configuration"
+    await waitFor(() => client.frames.slice(settledIndex + 1).some(frame => frame.topic === "session.configuration"
       && frame.payload.data.configurationBlocker === null), "normal completion ready event");
     record("normal assistant retirement publishes readiness", { readyWithoutReopen: true });
   });
@@ -259,7 +252,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       commandId: "configuration-prompt", sessionId: session.id, text: "Start a slow run",
     });
     expect(prompt.ok).toBe(true);
-    await until(async () => (await f.snapshot(client, session.id)).phase === "running");
+    await waitFor(async () => (await f.snapshot(client, session.id)).phase === "running", "the running phase reported by the snapshot");
     const stopped = await client.request("configuration-stop", "session.abort", {
       commandId: "configuration-stop", sessionId: session.id,
     });
@@ -316,7 +309,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const work = f.registry.administrativeWorkRegistry.begin({kind: "terminal-receipt-persistence", sessionId: session.id, hostEpoch: "fixture"});
     let settlementFrameCut = 0;
     try {
-      await until(() => client.frames.some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === "settling"), "settling publication");
+      await waitFor(() => client.frames.some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === "settling"), "settling publication");
       const busy = await f.snapshot(client, session.id);
       expect(busy.configurationBlocker).toBe("settling");
       const rejected = await client.request("settling-thinking", "session.setThinking", {
@@ -328,7 +321,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
       settlementFrameCut = client.frames.length;
     } finally { work.settle(); }
     // No session.open/snapshot RPC may rescue a missing retirement event.
-    await until(() => client.frames.slice(settlementFrameCut).some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === null), "ready publication after terminal retirement");
+    await waitFor(() => client.frames.slice(settlementFrameCut).some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === null), "ready publication after terminal retirement");
     const ready = await f.snapshot(client, session.id);
     expect(ready.revision).toBe(before.revision);
     const stale = await client.request("stale-thinking", "session.setThinking", {
@@ -427,7 +420,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const prompt = client.request("busy-prompt", "session.prompt", {
       commandId: "busy-prompt-command", sessionId: session.id, text: "start a slow run",
     });
-    await until(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "running phase");
+    await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "running phase");
 
     const rejectedByRun: string[] = [];
     for (const [method, params] of [
@@ -444,14 +437,14 @@ describe("receipt-backed mutations against their own session work entry", () => 
     }
     await client.request("busy-abort", "session.abort", { commandId: "busy-abort-command", sessionId: session.id });
     expect((await prompt).ok, "prompt admitted").toBe(true);
-    await until(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "idle"), "settled after abort");
+    await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "idle"), "settled after abort");
 
     // A concurrently admitted Bash RPC keeps the session unavailable: excluding
     // one request's own entry must not disable the check for another request.
     const bash = client.request("held-bash", "session.bash", {
       commandId: "held-bash-command", sessionId: session.id, command: "sleep 5", excludeFromContext: true,
     });
-    await until(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "bash running");
+    await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "bash running");
     const blocked = await client.request("held-set-tools", "session.setTools", {
       commandId: "held-set-tools-command", sessionId: session.id, tools: [],
     });

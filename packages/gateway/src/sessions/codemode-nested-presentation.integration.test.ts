@@ -8,6 +8,7 @@ import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { NativeLiveClient, NativeLiveClientFactory } from "../display/native-live-view.js";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const driver = vi.hoisted(() => ({ active: 0, maximumActive: 0, calls: 0 }));
 vi.mock("../machine/cua-client.js", () => ({ CuaComputerClient: class {
@@ -35,14 +36,6 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   driver.active = 0; driver.maximumActive = 0; driver.calls = 0;
 });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 describe("codemode nested presentation tools", () => {
   it("serializes nested computer driver calls and keeps native views session-owned under the codemode parent", async () => {
@@ -109,8 +102,8 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("Run nested presentation tools");
-    await waitUntil(() => slot.snapshot().toolExecutions.some((tool) =>
-      tool.toolCallId === "presentation-parent" && (tool.nestedCalls?.calls.length ?? 0) >= 5));
+    await waitFor(() => slot.snapshot().toolExecutions.some((tool) =>
+      tool.toolCallId === "presentation-parent" && (tool.nestedCalls?.calls.length ?? 0) >= 5), "the presentation parent's nested calls");
     const live = slot.snapshot();
     const liveParent = live.toolExecutions.find((tool) => tool.toolCallId === "presentation-parent");
     expect(live.toolExecutions.map((tool) => tool.toolCallId)).toEqual(["presentation-parent"]);
@@ -118,7 +111,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
       "computer", "display", "agent_browser", "native_capture",
     ]));
     await prompting;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const settled = slot.snapshot();
     expect(driver.maximumActive).toBe(1);
     expect(driver.calls).toBe(2);
@@ -161,7 +154,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     });
     registries.push(reopened);
     await reopened.initialize();
-    await waitUntil(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut());
+    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut");
     await reopened.catalog("all");
     const reloadedSlot = await reopened.acquire(slot.id);
     const reloadedParent = reloadedSlot.snapshot().transcript.find((item) =>
