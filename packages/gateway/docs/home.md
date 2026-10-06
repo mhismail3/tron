@@ -300,7 +300,7 @@ call.
 | --- | --- |
 | `zoom(id, n)` | Line `id+n` of the view, opened into the two lines of `n/2` under it; `n = 1` gives message `id` whole, as `id+0|kind: text` |
 | `date(id)` | The local date and time of message `id`, from its canonical entry: `2026-01-02 15:04:05 -07:00` |
-| `memory_search(query, from?, to?)` | A case-insensitive substring search over the projected messages in an index range: at most 20 lines `id+0|kind: snippet`, each snippet bounded to 300 characters, plus the range's match count |
+| `memory_search(query, from?, to?)` | A case-insensitive substring search over the projected messages in an index range `[from, to)`: at most 20 one-line hits `id+0|kind: snippet`, each snippet bounded to 300 characters, plus the range's match count |
 
 Rules the tool results hold to:
 
@@ -311,33 +311,48 @@ Rules the tool results hold to:
   answers the recipe's `(not summarized yet: zoom it)` placeholder, never the
   text it held before, and an `[omitted]` message answers `[omitted]`.
 - **The projection is never stale.** Every tool ingests the canonical commits
-  appended since the last read before it answers, and never waits for the pump
-  the ingest starts.
+  appended since the last read before it answers, never waits for the pump the
+  ingest starts, and re-reads the memory's state afterwards: an ingest that stops
+  the memory — a canonical line over the reader's per-line bound, say — answers
+  `memory-blocked` instead of serving the catalog it held before that commit.
 - **An address that is not a line is refused**, not guessed at: a power-of-two
   `n`, `id % n == 0` and `id + n <= T` are required, and anything else answers
-  `No line id+n.` with the numbers. A `date` for a message that does not exist
-  answers `No line id+1.` the same way, and a query that is empty or over 200
-  characters is refused with the bound it broke.
-- **Absence is never proof.** The search header reports how many messages in the
-  range are `[omitted]` and how many hold capped text, so a message that could
-  not be searched is named rather than looking like a message that never matched.
+  `No line id+n.` with the numbers. `zoom`'s arguments are plain numbers on
+  purpose, so a fractional, negative or zero `id` or `n` reaches that refusal
+  rather than failing schema validation. A `date` for a message that does not
+  exist answers `No line id+1.` the same way, and a query that is empty or over
+  200 characters is refused with the bound it broke.
+- **Absence is never proof.** Every hit is one line: its snippet has the
+  message's newlines flattened, as a view line renders text, so a message's own
+  text cannot look like another hit's line. The search header names its range as
+  `[from, to)` and reports how many messages in it are `[omitted]` and how many
+  hold capped text, so a message that could not be searched is named rather than
+  looking like a message that never matched. The `[omitted]` placeholder is that
+  message's projected text, so a search finds it like any other text.
 - **A result is bounded.** Every tool result is capped at the recipe's `CAP`
   (30,000 characters, head and tail kept with a marker), so a 128 KiB message
   cannot enter the transcript whole.
 - **The tools belong to Home.** They resolve their memory through the Home owner
   at every call, so a session that is not the enabled Home — or a memory that is
-  not configured, not open, or stopped — answers a typed `unavailable` result
-  with its reason: `not-home-session`, `memory-not-configured`,
-  `memory-unavailable`, `memory-blocked` or `timestamp-unavailable`. A tool call
-  is only reachable from an activation, which has already opened and waited for
-  this memory; a call never opens, configures or resumes one.
+  not configured, not open, stopped, or replaced by a reconfiguration while the
+  call ran — answers a typed `unavailable` result with its reason:
+  `not-home-session`, `memory-not-configured`, `memory-unavailable`,
+  `memory-blocked` or `timestamp-unavailable`. A tool call is only reachable from
+  an activation, which has already opened and waited for this memory; a call never
+  opens, configures or resumes one.
 
 The view preamble carries the navigation paragraph the recipe's `VIEW_DOC`
-requires (the line format, the kinds, zooming before acting on a summary, and
-`date`). That preamble is constant text, so the system prompt, the tool list and
-the preamble that opens every view are byte-identical across activations: they are
-the head of every cached prefix, and only the summaries below the preamble move.
-The summaries themselves stay request-local evidence, never instructions.
+requires (the line format, the kinds — `talk` covers a reply and the tool calls
+in it — zooming before acting on a summary, and `date`). That preamble is constant
+text, so the system prompt, the tool list and the preamble that opens every view
+are byte-identical across activations: they are the head of every cached prefix,
+and only the summaries below the preamble move. The summaries themselves stay
+request-local evidence, never instructions.
+
+A `date` for a message whose catalog record was written before that field
+existed is answered from the source by entry id — every parsed entry, not only
+the branch — so a record that has since left the branch still answers, and only an
+entry the file no longer holds is `timestamp-unavailable`.
 
 `memory_search` is a Tron addition to the recipe's tools, not a recipe section.
 The recipe's tree navigation is otherwise unchanged, and both surfaces are

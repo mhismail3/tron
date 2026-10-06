@@ -16,7 +16,7 @@ import {
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import {
-  projectBranch, readCanonicalSession, episodicDigest,
+  projectBranch, readCanonicalEntryInstants, readCanonicalSession, episodicDigest,
   type EpisodicCanonicalCut, type EpisodicCanonicalEntry,
 } from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
@@ -350,12 +350,14 @@ export class EpisodicMemory {
 
   /**
    * The canonical instant of one message: the catalog record's own field, or —
-   * for a record written before that field existed — a bounded read of the
-   * canonical session by entry id. That read happens at most once per memory and
-   * is remembered, because an entry's instant never changes. `unavailable` is the
-   * source's answer that it cannot prove the instant any more (the entry left the
-   * branch it read, or the read itself failed); `undefined` means this memory
-   * holds no such message.
+   * for a record written before that field existed — the instant the source proves
+   * for that entry id. That proof covers every parsed entry of the file, not only
+   * the branch the last entry follows, so an entry that has left the branch is
+   * still dated; the read is the bounded canonical reader the owner already uses,
+   * it is not `SessionManager`, and it happens at most once per memory because an
+   * entry's instant never changes. `unavailable` is the source's answer that it
+   * holds no such entry (or that it cannot read the file at all): the memory never
+   * invents a time. `undefined` means this memory holds no such message.
    */
   async entryTimestamp(id: number): Promise<EpisodicTimestampResult | undefined> {
     this.assertOpen();
@@ -483,6 +485,12 @@ export class EpisodicMemory {
     if (this.closed) return;
     this.closed = true;
     this.abort.abort();
+    // An ingest in flight holds the mutex and is still appending to this store, and
+    // the opener is what keeps a second writer out: releasing it before that ingest
+    // finishes would both let a second opener take a store that is still being
+    // written and leave records landing after the store was closed. Everything this
+    // memory owed is durable before the opener goes.
+    await this.mutex.run(async () => {});
     await this.draining?.catch(() => {});
     if (this.storeKey) EpisodicMemory.openStores.delete(this.storeKey);
     for (const waiter of this.waiters.splice(0)) {
@@ -591,19 +599,19 @@ export class EpisodicMemory {
   }
 
   /**
-   * The instants of the branch this memory can read, keyed by entry id, for
+   * The instants of every entry the canonical file holds, keyed by entry id, for
    * catalog records written before the optional `timestamp` existed. One bounded
-   * read of the canonical file (the reader the owner already uses, which never
-   * repairs or migrates), remembered for the life of this memory. A read that
-   * fails is not remembered: the next question asks the source again, and the
-   * answer in the meantime is `unavailable` rather than a guess.
+   * read (the reader the owner already uses, which never repairs or migrates),
+   * remembered for the life of this memory. A read that fails is not remembered:
+   * the next question asks the source again, and the answer in the meantime is
+   * `unavailable` rather than a guess.
    */
   private canonicalTimestamps(): Promise<Map<string, string>> {
-    this.legacyTimestamps ??= readCanonicalSession({
+    this.legacyTimestamps ??= readCanonicalEntryInstants({
       path: this.dependencies.sessionFile,
       sessionId: this.dependencies.sessionId,
       maxLineBytes: this.limits.maxSourceLineBytes,
-    }).then(cut => new Map(cut.branch.map(entry => [entry.id, entry.timestamp])), () => {
+    }).catch(() => {
       this.legacyTimestamps = undefined;
       return new Map<string, string>();
     });

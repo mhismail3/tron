@@ -30,9 +30,15 @@ import {
  * factory, and in the executable allowlist `HOME_TOOL_NAMES` that
  * `home-designation.integration.test.ts` asserts. */
 
+/**
+ * The zoom arguments are plain numbers on purpose: every invalid address — a
+ * fractional, negative or zero `id`/`n`, not only the ones a bound could express —
+ * must reach the memory and answer `No line id+n.`, instead of failing schema
+ * validation where the model can only see a validation error.
+ */
 const ZOOM_PARAMETERS = Type.Object({
-  id: Type.Integer({ minimum: 0, description: "The first message id of the line, the id in the view's `id+n`." }),
-  n: Type.Integer({ minimum: 1, description: "How many messages the line covers, the n in the view's `id+n`." }),
+  id: Type.Number({ description: "The first message id of the line, the id in the view's `id+n`." }),
+  n: Type.Number({ description: "How many messages the line covers, the n in the view's `id+n`." }),
 }, { additionalProperties: false });
 
 const DATE_PARAMETERS = Type.Object({

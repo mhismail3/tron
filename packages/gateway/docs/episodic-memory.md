@@ -26,6 +26,11 @@ it the commits the runtime reports, and sends each activation the view it render
   Ingestion, invalidation and `resume()` are serialized behind one mutex; the
   pump is not, so a build may still be running when the next commit invalidates
   nodes (see **Concurrency** below).
+- `dispose()` sets this memory closed, aborts in-flight compactor calls, **waits
+  for the mutex** — so an ingest already appending to the store finishes before
+  the opener is released — then awaits the pump, releases the waiter list and
+  releases this session's opener. The wait is what keeps a reconfiguration from
+  handing the store to a second owner while the first is still writing it.
 - The canonical read is **incremental**: the reader remembers the file's
   dev/ino, size, complete byte offset and the digest of the last complete line.
   When the file only grew, it reads from the offset and extends the branch it
@@ -40,8 +45,9 @@ it the commits the runtime reports, and sends each activation the view it render
   view's budget is soft, so this is not a hard window check; that belongs to the
   request layer.
 - `status()` is the bounded status query (below); `resume()` clears a blocked
-  state and restarts the pump; `dispose()` aborts in-flight compactor calls,
-  releases every waiter and releases this session's opener.
+  state and restarts the pump; `dispose()` closes the memory, aborts in-flight
+  compactor calls, waits for an ingest that is still writing, and only then
+  releases every waiter and this session's opener.
 
 The owner never subscribes to a session and never opens it with
 `SessionManager`. It reads the file itself, which is what makes "never repair or
@@ -178,18 +184,23 @@ text.
 - **`entryTimestamp(id)`** returns the catalog record's own instant, or — for a
   record written before the optional field — the instant the canonical source
   proves for that entry id. That read is the bounded canonical reader the owner
-  already uses, it is not `SessionManager`, and it happens at most once per
-  memory: an entry's instant never changes. `unavailable` is the source's own
-  answer that it can no longer prove it (the entry left the branch it read, or
-  the read failed) — the memory never invents a time.
+  already uses, it is not `SessionManager`, and it covers **every parsed entry of
+  the file, not only the branch the last entry follows**: a record that has since
+  left the branch is still an entry the source can date. It happens at most once
+  per memory and is remembered, because an entry's instant never changes —
+  including across a navigation, since the map is keyed by entry id.
+  `unavailable` is the source's answer that it holds no such entry, or that it
+  cannot read the file at all — the memory never invents a time.
 - **`searchMessages(query, from, to)`** is Tron's addition to the recipe's tools:
   one case-insensitive substring pass over the projected catalog, bounded by
   `EPISODIC_SEARCH_HITS` (20) lines whose snippets are bounded by
-  `EPISODIC_SEARCH_SNIPPET_CHARS` (300), with the whole range's match count and
-  its `[omitted]` and capped counts, so a message that holds no searchable text
-  is named instead of silently absent. An empty query, or one over
-  `EPISODIC_SEARCH_QUERY_CHARS` (200), is refused; omitted bounds default to the
-  whole memory and are clamped to it.
+  `EPISODIC_SEARCH_SNIPPET_CHARS` (300) and carry the message's newlines flattened
+  to spaces, exactly as a view line renders text, so one hit is one line. It
+  reports the whole range's match count and its `[omitted]` and capped counts, so
+  a message that holds no searchable text is named instead of silently absent; an
+  `[omitted]` message's projected text is `[omitted]`, and the search finds it like
+  any other text. An empty query, or one over `EPISODIC_SEARCH_QUERY_CHARS` (200),
+  is refused; omitted bounds default to the whole memory and are clamped to it.
 
 These reads never ingest, open, or start anything: their caller does, and the
 caller (`HomeMemory`) ingests the latest commits before every call so a
@@ -199,7 +210,9 @@ projection is never stale.
 
 - Ingestion, invalidation and `resume()` take one per-memory mutex
   (`packages/gateway/src/util/async-mutex.ts`), so two `entriesCommitted` calls
-  cannot interleave index assignment or append a message twice.
+  cannot interleave index assignment or append a message twice. `dispose()` takes
+  the same mutex before it releases the opener, so the one opener per store is
+  released only once the store has no writer.
 - The pump runs outside that mutex. Every build carries the generation and the
   input revisions it started from, and a result whose generation changed, whose
   child was revoked or rebuilt, or whose message record was superseded is

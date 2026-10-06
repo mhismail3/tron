@@ -114,9 +114,11 @@ export function capText(text: string, capChars: number, tailChars: number): { te
 
 /**
  * The window one search hit shows around its match: at most `limit` characters,
- * the match kept whole, with `…` marking each end that was cut. The caller's
- * query bound is under `limit`, so the match always fits. The marks are inside
- * `limit`, so the returned snippet is bounded by it whatever it cut.
+ * the match kept whole, with `…` marking each end that was cut, and its newlines
+ * flattened to single spaces exactly as a view line renders text, so one hit stays
+ * one line. The caller's query bound is under `limit`, so the match always fits,
+ * and the marks are inside `limit`, so the returned snippet is bounded by it
+ * whatever it cut.
  */
 export function snippetAround(text: string, matchIndex: number, matchLength: number, limit: number): string {
   // Two characters are reserved for the truncation marks, so the snippet is
@@ -126,7 +128,8 @@ export function snippetAround(text: string, matchIndex: number, matchLength: num
   const latest = Math.max(0, text.length - body);
   const start = Math.min(Math.max(0, matchIndex - Math.floor((body - matchLength) / 2)), latest);
   const end = Math.min(text.length, start + body);
-  return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+  const window = text.slice(start, end).replace(/\n+/gu, " ");
+  return `${start > 0 ? "…" : ""}${window}${end < text.length ? "…" : ""}`;
 }
 
 /** A level-0 free node (gist §3): the source itself when it fits `nodeBytes`. */
