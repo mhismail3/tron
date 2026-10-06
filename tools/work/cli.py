@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import acceptance  # noqa: E402
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import cleanup  # noqa: E402
@@ -55,6 +56,10 @@ def main(argv: list) -> int:
     landing.add_argument("--summary-file", type=Path, help="Markdown for the Summary section (required to open)")
     landing.add_argument("--needs-user-validation", metavar="TEXT",
                         help="exact maintainer-only action and check; the issue stays open as Needs you")
+    landing.add_argument("--irreducible", metavar="PART",
+                        help="the part no acceptance journey can prove; required with --needs-user-validation")
+    landing.add_argument("--acceptance", metavar="JOURNEY_ID[,JOURNEY_ID]",
+                        help="run these registered acceptance journeys and require their reports for this head")
     landing.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
     landing.add_argument("--evidence-manifest", type=Path,
                          help="head-bound media manifest; recapture if merging the base changes the head")
@@ -87,13 +92,15 @@ def main(argv: list) -> int:
             return issues.run(Gh(root), config, args.closed_limit if args.closed else 0)
         if args.command == "land":
             return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
-                             args.needs_user_validation, evidence_manifest=args.evidence_manifest)
+                             args.needs_user_validation, args.irreducible, args.acceptance,
+                             evidence_manifest=args.evidence_manifest)
         if args.command == "steward":
             return land.steward(Gh(root), root, config, args.land)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError, issues.IssuesError,
-            land.LandError, warm.WarmError, cleanup.CleanupError, FileNotFoundError, json.JSONDecodeError) as error:
+            land.LandError, acceptance.AcceptanceError, warm.WarmError, cleanup.CleanupError, FileNotFoundError,
+            json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64

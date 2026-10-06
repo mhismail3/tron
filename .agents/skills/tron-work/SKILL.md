@@ -127,10 +127,21 @@ took. If they ask for options, list the top three and wait.
      `land` still refuses a failing receipt, so stop and report.
 7. **Land.**
    - Write a short Markdown summary to a temporary file.
-   - Run `scripts/tron work land --summary-file <file>`, adding
-     `--needs-user-validation "<exact action and check>"` when only the
-     maintainer can complete the proof. The summary separates verified
-     behavior from assumptions and residual risks.
+   - Run `scripts/tron work land --summary-file <file>`. Add
+     `--acceptance <journey-id>[,<journey-id>]` for every registered journey
+     that proves this task's behavior: land runs each one against the head it is
+     about to verify, cites its report digest in the pull request and closes
+     the issue on the evidence. A journey a developer should re-run belongs in
+     the registry (`acceptance.journeys` in `.github/work.json`), with the
+     command it owns and the report that command leaves.
+   - Add `--needs-user-validation "<exact check>" --irreducible "<part>"` only
+     when part of the proof cannot be automated: `--irreducible` names that
+     part (real third-party consent, the maintainer's own route,
+     physical-device-only behavior), and neither flag is accepted without the
+     other. Installing or deploying a build is a deployment step, not
+     validation: state it beside the handoff, never as the check.
+   - The summary separates verified behavior from assumptions and residual
+     risks.
    - The Debug Gateway may be restarted by agents (AGENTS.md rule 8); Stable
      may not.
 8. **Clean up and sync.**
@@ -145,9 +156,10 @@ took. If they ask for options, list the top three and wait.
    anything handed to them. When work needs the maintainer's install, name the
    checkpoint: which builds (Mac and Stable Gateway, iPhone) cover it, and every
    other open handoff the same install makes ready, so one rebuild validates
-   and closes as many issues as possible. Offer the checkpoint only when no
-   agent work is running: a Stable restart drains and pauses it. Close an issue
-   only on the evidence its handoff asked for.
+   and closes as many issues as possible. Keep that install separate from the
+   handoff's validation check, which asks only for its irreducible part. Offer
+   the checkpoint only when no agent work is running: a Stable restart drains
+   and pauses it. Close an issue only on the evidence its handoff asked for.
 
 ## Plan larger work
 

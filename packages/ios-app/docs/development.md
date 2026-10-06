@@ -2309,7 +2309,8 @@ A `SIGKILL` of the harness still leaves the pairing behind, because nothing exec
 after it; the unit lane's own isolation from a stale app container remains a follow-up.
 
 Each journey leaves one evidence directory under this worktree's fixture
-(`results/<utc>-ui.XXXXXX`) holding the `.xcresult`, the Gateway's canonical runtime
+(`results/<utc>-ui.XXXXXX`, with `results/latest-ui` linking the run that just
+finished) holding the `.xcresult`, the Gateway's canonical runtime
 log (`gateway.jsonl`), the fault proxy's `link-stats` JSON, the XCTest `summary.json`
 and `report.json`: every artifact's path and sha256 (a result bundle's digest covers its
 sorted file tree), the journey's final status including the incomplete-evidence

@@ -563,6 +563,23 @@
       }
     ]
   },
+  "acceptance": {
+    "evidenceEnv": "TRON_IOS_E2E_STATE_DIR",
+    "journeys": {
+      "real-gateway-pair-and-chat": {
+        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
+        "report": "results/latest-ui/report.json",
+        "timeoutSeconds": 1800
+      },
+      "real-gateway-wrong-pairing-code": {
+        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
+        "report": "results/latest-ui/report.json",
+        "timeoutSeconds": 1800
+      }
+    }
+  },
   "land": {
     "requiredChecks": [
       "policy"

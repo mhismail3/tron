@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+import acceptance
 import claim as claims
 import start
 import verify
@@ -192,6 +193,31 @@ def default_title(branch: str, issue_title: str) -> str:
     return f"{branch.split('/', 1)[0]}: {_FORM_PREFIX.sub('', issue_title).strip()}"
 
 
+def validation_handoff(action: Optional[str], irreducible: Optional[str]) -> Optional[str]:
+    """The Maintainer validation section: what no journey can prove, then the check itself.
+
+    A handoff without its irreducible part asks the maintainer to redo work an
+    acceptance journey could have done, so the two flags travel together; a flag
+    whose value is blank counts as absent rather than naming anything.
+    """
+    action, irreducible = _given(action), _given(irreducible)
+    if action is None and irreducible is None:
+        return None
+    if irreducible is None:
+        raise LandError('--needs-user-validation requires --irreducible "<part>": name the part no '
+                        "acceptance journey can prove")
+    if action is None:
+        raise LandError("--irreducible names the part of a --needs-user-validation handoff that no "
+                        "acceptance journey can prove")
+    return f"Irreducible: {irreducible}\n\n{action}"
+
+
+def _given(value: Optional[str]) -> Optional[str]:
+    """A flag's value, or None when it is absent or blank."""
+    stripped = value.strip() if isinstance(value, str) else None
+    return stripped or None
+
+
 def verification(receipt: dict, evidence_link: Optional[str] = None) -> str:
     checks = receipt["checks"]
     required = receipt["required"]
@@ -215,9 +241,28 @@ def verification(receipt: dict, evidence_link: Optional[str] = None) -> str:
     return "\n".join(lines)
 
 
+def acceptance_evidence(records: List[dict]) -> str:
+    """The acceptance half of the Verification section: one passing journey per line.
+
+    The reports stay local, because they name this machine's paths; the body
+    carries each one's sha256 and the fields that make it judgeable.
+    """
+    lines = ["### Acceptance journeys", "",
+             "Each journey ran against this head; the digest is the sha256 of the `report.json` "
+             "that run left:", ""]
+    for record in records:
+        lines.append(f"- `{record['journey']}`: passed in {record['seconds']}s; evidence complete; "
+                     f"{record['artifacts']} artifact(s); report sha256 `{record['sha256']}`; "
+                     f"source `{record['revision']}` fingerprint `{record['fingerprint']}`.")
+    return "\n".join(lines)
+
+
 def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Optional[str],
-              evidence_link: Optional[str] = None) -> str:
+              evidence_link: Optional[str] = None,
+              acceptance_records: Optional[List[dict]] = None) -> str:
     body = f"{keyword} #{number}\n\n## Summary\n\n{summary.strip()}\n\n## Verification\n\n{verification(receipt, evidence_link)}\n"
+    if acceptance_records:
+        body += f"\n{acceptance_evidence(acceptance_records)}\n"
     if action is not None:
         # On GitHub before the merge, so a stop after the merge cannot lose it.
         body += f"\n## Maintainer validation\n\n{action.strip()}\n"
@@ -243,6 +288,9 @@ def merge_intent(pull: int, body: str, number: int) -> Tuple[str, Optional[str]]
 
 
 def _handoff_marker(pull: int) -> str:
+    # #334 types this marker with the handoff's runner and its deployment
+    # prerequisite; until then the format is unchanged, and a second marker
+    # format would orphan every existing handoff.
     return f"<!-- work:needs-you pull={pull} -->"
 
 
@@ -397,6 +445,20 @@ def _repository(gh: Gh) -> Tuple[str, str]:
 # --------------------------------------------------------------------- land
 
 
+def run_acceptance(config: dict, root: Path, journeys: List[str]) -> List[dict]:
+    """Run the named journeys against the head land is about to verify, and keep their reports.
+
+    They run before the receipt: a journey that fails, or a report that does not
+    name this head, stops land before anything is pushed, posted or merged. The
+    text published from the reports passes the scrub command here, before the
+    first write.
+    """
+    head = _out(root, "rev-parse", "HEAD")
+    records = [acceptance.run(config, root, head, journey) for journey in journeys]
+    _scrub(root, config, "acceptance evidence", acceptance_evidence(records))
+    return records
+
+
 def _wait(gh: Gh, config: dict, pull: int, head: str, sleep: Callable[[float], None],
           clock: Callable[[], float]) -> None:
     settings = config["land"]
@@ -424,14 +486,16 @@ def _wait(gh: Gh, config: dict, pull: int, head: str, sleep: Callable[[float], N
 
 
 def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg: Optional[str],
-         summary_path: Optional[Path], action: Optional[str],
-         sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
-         evidence_manifest: Optional[Path] = None) -> int:
+         summary_path: Optional[Path], action: Optional[str], irreducible: Optional[str] = None,
+         acceptance_arg: Optional[str] = None, sleep: Callable[[float], None] = time.sleep,
+         clock: Callable[[], float] = time.monotonic, evidence_manifest: Optional[Path] = None) -> int:
     rules, settings = config["claim"], config["land"]
     remote, base = rules["remote"], rules["baseBranch"]
     root = Path(_out(repo, "rev-parse", "--show-toplevel"))
 
     # Gates: everything that can refuse does so before the first GitHub write.
+    section = validation_handoff(action, irreducible)
+    journeys = acceptance.requested(config, acceptance_arg) if acceptance_arg is not None else []
     branch = _git(root, "symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
     if not branch:
         raise LandError("HEAD is detached; land runs on a claim branch")
@@ -448,7 +512,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     head = _out(root, "rev-parse", "HEAD")
     merged = _merged_pull(gh, branch, head, base)
     if merged is not None:
-        return _resume(gh, root, config, branch, number, session, head, merged, action)
+        return _resume(gh, root, config, branch, number, session, head, merged, section)
     owned = [c for c in claims.existing_claims(root, remote, base, number) if c.branch == branch]
     if not owned:
         raise LandError(f"{remote}/{branch} does not exist; claim the issue with start first")
@@ -472,14 +536,15 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     title = title_arg or (pull["title"] if pull else default_title(branch, issue["title"]))
     _scrub(root, config, "title", title)
     _scrub(root, config, "summary", summary)
-    if action is not None:
+    if section is not None:
         # Checked now: after the merge a refusal would lose the handoff.
-        _scrub(root, config, "validation text", action)
-    keyword = "Refs" if action is not None else "Closes"
+        _scrub(root, config, "validation text", section)
+    keyword = "Refs" if section is not None else "Closes"
 
     for round_number in range(1, settings["maxRounds"] + 1):
         if update_from_base(root, remote, base):
             print(f"merged:   {remote}/{base} into {branch}")
+        records = run_acceptance(config, root, journeys) if journeys else []
         receipt = verify.verify(root, config, evidence_manifest)
         head = receipt["head"]
         if not receipt["passed"]:
@@ -489,10 +554,11 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
             raise LandError(f"push to {remote}/{branch} was refused: {pushed.stderr.strip()}")
         print(f"posted:   {verify.post(gh, root, config, receipt)}")
 
-        # Every part of the body already passed the scrub: the title, summary and
-        # validation text in the gates, the receipt fields in verify.post's comment.
+        # Every part of the body already passed the scrub: the title, summary,
+        # validation text and acceptance evidence in the gates, the receipt
+        # fields in verify.post's comment.
         evidence_link = f"../../{name}{config['verify']['evidenceRepositorySuffix']}/tree/HEAD/{number}/{head}"
-        body = pull_body(keyword, number, summary, receipt, action, evidence_link)
+        body = pull_body(keyword, number, summary, receipt, section, evidence_link, records)
         if pull is None:
             url = gh.run("pr", "create", "--base", base, "--head", branch, "--title", title, "--body-file", "-",
                          stdin=body).strip().splitlines()[-1]
@@ -517,13 +583,13 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         raise LandError(f"{remote}/{base} moved in each of {settings['maxRounds']} rounds; nothing was merged. "
                         "Run land again.")
 
-    after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, action, resumable=True)
+    after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, section, resumable=True)
     print("cleanup:  run `work cleanup` from this worktree once you are done in it")
     return 0
 
 
 def _resume(gh: Gh, root: Path, config: dict, branch: str, number: int, session: str, head: str, pull: dict,
-            action_arg: Optional[str]) -> int:
+            section: Optional[str]) -> int:
     """Finish a land that stopped after GitHub merged `pull` at the local head."""
     rules = config["claim"]
     remote, base = rules["remote"], rules["baseBranch"]
@@ -534,7 +600,7 @@ def _resume(gh: Gh, root: Path, config: dict, branch: str, number: int, session:
         raise LandError(f"{branch} is claimed by session {owner or 'unknown: no claim commit'}, not {session}")
     # The merged body is what GitHub merged with; a different request cannot change it now.
     keyword, action = merge_intent(pull["number"], pull["body"], number)
-    if action_arg is not None and action_arg.strip() != action:
+    if section is not None and section != action:
         raise LandError(f"#{pull['number']} merged with `{keyword} #{number}` and "
                         + ("different validation text" if action else "no validation handoff")
                         + "; run land again without --needs-user-validation to finish what it merged")
