@@ -2255,8 +2255,9 @@ mounted-view tests time out (measured A/B/A on the lane, including the profile's
 bytes written back into the app's preferences to reproduce it). Two owners now prevent
 it: the suite's teardown returns the hosted app to its unpaired launch state through the
 same `HOSTED_TEST` `--tron-reset-ui-test-state` hook every hosted UI test starts from,
-and `run-ui` repeats that reset itself on success, failure, deadline and signal, so a run
-that ends before its teardown cannot poison the unit lane. `run-ui` likewise stops the
+and `run-ui` removes that app with its data container (`simctl uninstall`) itself, on
+success, failure, deadline and signal, so a run that ends before its teardown cannot
+poison the unit lane; a run whose reset fails is not reported as passing. `run-ui` likewise stops the
 fixture it renewed on success as well as on failure, because it renews one per journey
 and has nothing to iterate against: no run leaves a Gateway and its fault proxy behind.
 A `SIGKILL` of the harness still leaves the pairing behind, because nothing executes

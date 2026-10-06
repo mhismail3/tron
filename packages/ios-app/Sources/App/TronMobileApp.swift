@@ -4,16 +4,29 @@ import TronMobileCore
 @main
 struct TronMobileApp: App {
     #if HOSTED_TEST
+    /// The hosted app's no-fixture arm: the production scene, built by the one
+    /// owner the shipping arm also builds. Only this arm constructs that owner -
+    /// and with it the push coordinator and the path observer - so every fixture
+    /// arm below stays inert.
+    private struct HostedProductionScene: View {
+        @StateObject private var owner: ProductionSceneOwner
+
+        init(model: AppModel) {
+            _owner = StateObject(wrappedValue: ProductionSceneOwner(model: model))
+        }
+
+        var body: some View {
+            ProductionSceneRoot(owner: owner, pushDelegate: nil)
+        }
+    }
+
     @State private var hostedModel: AppModel
-    @State private var hostedScene: ProductionSceneOwner
 
     init() {
         // The fixture arms keep their own hosted views and this memory-only
         // model; the no-fixture arm renders the production scene with the same
         // owner the shipping app builds (`ProductionSceneRoot`).
-        let model = AppModel()
-        _hostedModel = State(initialValue: model)
-        _hostedScene = State(initialValue: ProductionSceneOwner(model: model))
+        _hostedModel = State(initialValue: AppModel())
     }
 
     var body: some Scene {
@@ -65,7 +78,7 @@ struct TronMobileApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-instructions-fixture") {
                 HostedAgentInstructionsFixtureView()
             } else {
-                ProductionSceneRoot(owner: hostedScene, pushDelegate: nil)
+                HostedProductionScene(model: hostedModel)
             }
         }
     }

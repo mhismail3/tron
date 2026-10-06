@@ -47,15 +47,15 @@ ui_journey_is_owned() {
   return 1
 }
 
-# The WebSocket connections the fixture Gateway's own log must show for a
-# journey, as "opened closed". A journey that backgrounds the app retires its
-# socket and reconnects when it returns: one connection is opened before that
-# and a second one after it, and the first is closed. A journey that never
-# connects requires none.
+# The WebSocket connections the fixture Gateway's own log must show for a journey,
+# as "<minimum opened> <retire-then-reconnect required: yes|no>". A journey that
+# backgrounds the app retires its socket and reconnects when it returns, so one
+# connection closes before a *different* one opens; a journey that never connects
+# requires none.
 ui_journey_connections() {
   case "$1" in
-    *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 1" ;;
-    *) echo "0 0" ;;
+    *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
+    *) echo "0 no" ;;
   esac
 }
 
@@ -136,6 +136,9 @@ ui_xctestrun_glob="Tron UI Validation_UIValidation_*.xctestrun"
 # stay empty for every other command, whose runs never pair the app.
 ui_simulator_id=""
 ui_app_state_owner=0
+# Whether this command has already returned the lane's hosted app to its fresh
+# state: a signal and the EXIT trap both ask for it, so it runs once.
+ui_app_state_reset=0
 # Whether this command's fixture must be stopped when it ends. A real-UI command
 # renews a fixture per journey and has nothing to iterate against, so it never
 # leaves one running; the unit lane keeps its fixture for iteration.
@@ -677,13 +680,13 @@ capture_journey_evidence() {
 }
 
 write_journey_report() {
-  local attempt_dir="$1" journey="$2" final_status="$3" duration="$4" opened="$5" closed="$6" evidence_complete="$7"
+  local attempt_dir="$1" journey="$2" final_status="$3" duration="$4" opened="$5" closed="$6" reconnected="$7" evidence_complete="$8"
   TRON_E2E_REPORT_DIR="$attempt_dir" TRON_E2E_JOURNEY="$journey" \
     TRON_E2E_JOURNEY_STATUS="$final_status" TRON_E2E_JOURNEY_SECONDS="$duration" \
     TRON_E2E_CONNECTIONS_OPENED="$opened" TRON_E2E_CONNECTIONS_CLOSED="$closed" \
+    TRON_E2E_CONNECTIONS_RECONNECTED="$reconnected" \
     TRON_E2E_EVIDENCE_COMPLETE="$evidence_complete" \
     TRON_E2E_RUN_ROOT="$run_root" TRON_E2E_DERIVED_DATA="$derived_data" \
-    TRON_E2E_SOURCE="$(python3 "$identity_owner" show --worktree "$repo_root")" \
     python3 - <<'PY'
 import hashlib, json, os
 from pathlib import Path
@@ -719,7 +722,14 @@ for name in artifacts:
                        "bytes": path.stat().st_size})
     else:
         listed.append({"path": name, "kind": "missing"})
-source = json.loads(os.environ["TRON_E2E_SOURCE"])
+# The identity stamped into the products that ran, not one re-derived after the
+# journey: a report has to name the source state whose bytes produced it, and the
+# fingerprint is what ties a dirty worktree's report to exact bytes.
+stamp = Path(os.environ["TRON_E2E_DERIVED_DATA"]) / "build-identity.json"
+try:
+    source = json.loads(stamp.read_text())
+except (OSError, ValueError) as error:
+    raise SystemExit(f"cannot read the products' build identity {stamp}: {error}")
 report = {
     "schema": "tron.ios-e2e-ui-journey.v1",
     "journey": os.environ["TRON_E2E_JOURNEY"],
@@ -729,10 +739,12 @@ report = {
     "gateway_connections": {
         "opened": int(os.environ["TRON_E2E_CONNECTIONS_OPENED"]),
         "closed": int(os.environ["TRON_E2E_CONNECTIONS_CLOSED"]),
+        "retired_before_reconnect": os.environ["TRON_E2E_CONNECTIONS_RECONNECTED"] == "1",
     },
     "source": {
         "revision": source.get("revision"),
         "dirty": bool(source.get("dirty")),
+        "source_fingerprint": source.get("source_fingerprint"),
         "worktree_key": source.get("worktree_key"),
     },
     "command": "scripts/ios-gateway-e2e-test run-ui --only-testing " + os.environ["TRON_E2E_JOURNEY"],
@@ -748,30 +760,41 @@ print(f"evidence report: {path} (sha256 {digest})")
 PY
 }
 
-# What the fixture Gateway's own log says about this device's connections. The
-# journey that backgrounds the app must leave a second opened connection and a
-# closed one behind it; the Gateway's log is canonical truth for both.
+# What the fixture Gateway's own log says about this device's connections, in the
+# log's own order, as "<opened> <closed> <retired before a different connection
+# opened: 1|0>". The Gateway's log is canonical truth for both halves; the third
+# value is the lifecycle fact a backgrounded journey must leave, and it cannot be
+# satisfied by the app terminating (which always closes the last socket).
 gateway_connection_counts() {
-  python3 - "$TRON_E2E_TRON_HOME/logs/gateway.jsonl" <<'PY'
+  python3 - "$TRON_E2E_TRON_HOME/logs/gateway.jsonl" <<'COUNTS'
 import json, sys
-opened = closed = 0
+events = []
 try:
     with open(sys.argv[1], encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if '"connection.' not in line:
                 continue
             try:
-                event = json.loads(line).get("event")
+                value = json.loads(line)
             except ValueError:
                 continue
-            if event == "connection.opened":
-                opened += 1
-            elif event == "connection.closed":
-                closed += 1
+            event = value.get("event")
+            if event in ("connection.opened", "connection.closed"):
+                events.append((event, value.get("connectionId") or value.get("peerClientId") or "unknown"))
 except OSError:
     pass
-print(f"{opened} {closed}")
-PY
+opened = sum(1 for event, _ in events if event == "connection.opened")
+closed = sum(1 for event, _ in events if event == "connection.closed")
+retired = 0
+for index, (event, connection) in enumerate(events):
+    if event != "connection.closed":
+        continue
+    if any(later_event == "connection.opened" and later != connection
+           for later_event, later in events[index + 1:]):
+        retired = 1
+        break
+print(f"{opened} {closed} {retired}")
+COUNTS
 }
 
 run_ui_journey() {
@@ -809,15 +832,21 @@ run_ui_journey() {
       status=65
     fi
   fi
-  # The Gateway's own log is the record of what the app did with its socket. A
-  # journey that backgrounds the app must leave a retired connection and a new
-  # one behind it; a journey that never connects requires none.
-  local opened=0 closed=0 required_opened=0 required_closed=0
-  read -r opened closed <<<"$(gateway_connection_counts)"
-  read -r required_opened required_closed <<<"$(ui_journey_connections "$journey")"
-  if ((status == 0)) && ((opened < required_opened || closed < required_closed)); then
-    echo "error: the Gateway logged $opened opened and $closed closed connections; this journey must leave at least $required_opened opened and $required_closed closed ($journey)" >&2
-    status=65
+  # The Gateway's own log is the record of what the app did with its socket: a
+  # journey that backgrounds the app must close one connection before opening a
+  # different one, and a journey that never connects requires none.
+  local opened=0 closed=0 reconnected=0
+  local required_opened=0 requires_reconnect=no
+  read -r opened closed reconnected <<<"$(gateway_connection_counts)"
+  read -r required_opened requires_reconnect <<<"$(ui_journey_connections "$journey")"
+  if ((status == 0)); then
+    if ((opened < required_opened)); then
+      echo "error: the Gateway logged $opened opened connection(s); this journey must leave at least $required_opened ($journey)" >&2
+      status=65
+    elif [[ "$requires_reconnect" == yes ]] && ((reconnected == 0)); then
+      echo "error: the Gateway logged $opened opened and $closed closed connections with no close before a different open; this journey must retire its socket before reconnecting ($journey)" >&2
+      status=65
+    fi
   fi
   local evidence_failure=0
   capture_journey_evidence "$attempt_dir" || evidence_failure=1
@@ -828,7 +857,7 @@ run_ui_journey() {
     final_status=1
   fi
   if ! write_journey_report "$attempt_dir" "$journey" "$final_status" "$((SECONDS - case_started))" \
-    "$opened" "$closed" "$((evidence_failure == 0 ? 1 : 0))"; then
+    "$opened" "$closed" "$reconnected" "$((evidence_failure == 0 ? 1 : 0))"; then
     ((final_status == 0)) && final_status=1
   fi
   echo "Real-UI journey $journey completed in $((SECONDS - case_started))s (status $final_status); evidence: $attempt_dir"
@@ -903,41 +932,46 @@ print(value)
 PY
 }
 
-# A journey is handed its invitation link by the system, so the app is launched
-# by the journey itself with the same launch arguments a hosted UI test uses.
-
-# The hosted test app persists whatever a real-UI journey pairs or configures,
-# and the hosted unit lane launches that same app in this worktree's lane. Only
-# the command can guarantee it is left unpaired: a deadline, a signal or a crash
-# ends the journey before its own teardown runs. The reset is the app's own
-# HOSTED_TEST hook (`--tron-reset-ui-test-state`), launched through simctl while
-# this command still holds the lane's booted simulator. A SIGKILL of this command
-# cannot run it, which is the documented residual.
+# The hosted test app persists whatever a real-UI journey pairs or configures, and
+# the hosted unit lane launches that same app in this worktree's lane. Only the
+# command can guarantee it is left unpaired: a deadline, a signal or a crash ends
+# the journey before its own teardown runs.
 #
-# The reset removes the hosted test app with its container rather than launching
-# it with the app's own reset hook: that hook only runs once the app has launched
-# and built its model, and a deadline or a signal ends the run before that.
+# The reset removes the app with its data container (`simctl uninstall`), while
+# this command still holds the lane's booted simulator, rather than launching the
+# app with its own HOSTED_TEST reset hook: that hook only runs once the app has
+# launched and built its model, and a deadline or a signal can cut that short -
+# the pairing would survive, which is the poisoning this reset prevents. The next
+# run installs the app under test again. A SIGKILL of this command runs none of
+# this, which is the documented residual.
+#
+# It runs once per command: a signal and the EXIT trap both ask for it, and the
+# second ask must not try to uninstall an app that is already gone. It returns
+# non-zero when it could not reset, because an otherwise passing run must not
+# leave the unit lane poisoned.
 reset_hosted_app_state() {
   ((ui_app_state_owner)) || return 0
+  ((ui_app_state_reset)) && return 0
   [[ -n "$ui_simulator_id" ]] || return 0
   local bundle_id
   bundle_id="$(hosted_app_bundle_id)" \
-    || { echo "warning: no built TronMobile.app to reset the lane's hosted app state" >&2; return 0; }
-  # `simctl uninstall` removes the app with its data container, which is the one
-  # reset this command can guarantee: the app's own HOSTED_TEST reset needs the
-  # app to launch and finish building its model, and a deadline or a signal can
-  # cut that short - the pairing would survive, which is the poisoning this reset
-  # exists to prevent. The next run installs the app under test again.
+    || { echo "error: no built TronMobile.app to reset the lane's hosted app state" >&2; return 1; }
   if ! xcrun simctl uninstall "$ui_simulator_id" "$bundle_id" >/dev/null 2>&1; then
-    echo "warning: could not reset the lane's hosted app state ($bundle_id)" >&2
-    return 0
+    echo "error: could not reset the lane's hosted app state ($bundle_id)" >&2
+    return 1
   fi
+  ui_app_state_reset=1
+  return 0
 }
 
 finish_e2e_run() {
   local status=$?
   trap - EXIT
-  reset_hosted_app_state
+  # A passing run whose reset failed is not a passing run: the lane would keep the
+  # pairing the unit lane shares.
+  if ! reset_hosted_app_state && ((status == 0)); then
+    status=1
+  fi
   # A real-UI command owns the fixture it renewed for its journeys: it stops it on
   # success too, so no run leaves a Gateway and its fault proxy behind.
   if ((status != 0 || stop_fixture_on_exit)); then
@@ -1024,8 +1058,9 @@ handle_signal() {
   local signal_number="$1"
   trap - INT TERM HUP
   # A signal ends a real-UI command before its tests finish: the hosted app is
-  # still paired, and the unit lane shares it.
-  reset_hosted_app_state
+  # still paired, and the unit lane shares it. The signal's own exit stands even
+  # when the reset cannot run.
+  reset_hosted_app_state || true
   stop_gateway
   exit $((128 + signal_number))
 }

@@ -103,33 +103,35 @@ final class GatewayPathDiagnosticsObserver {
 /// owns: the shipping app composes incident retention (the persisted client
 /// diagnostic store and the notification inbox) and the hosted test app stays
 /// memory-only, as it is composed today.
+/// `ObservableObject` is what lets `@StateObject` create this owner exactly once
+/// for the hosted no-fixture arm; nothing here publishes a change.
 @MainActor
-final class ProductionSceneOwner {
+final class ProductionSceneOwner: ObservableObject {
     let model: AppModel
     let appearance = AppearanceSettings.shared
     let backgroundCheckpoints = AppBackgroundCheckpointCoordinator()
     let pushNotifications = PushNotificationCoordinator()
     let pendingShares = UserDefaultsPendingShareStore()
-    /// Started on first use: a composition that never renders the production
-    /// scene (a hosted fixture arm) starts no path monitor and records no path
-    /// diagnostics on its model.
-    private(set) lazy var pathDiagnostics = GatewayPathDiagnosticsObserver(model: model)
+    /// Created with the owner, before the scene's first `.task`, as the shipping
+    /// app created it in its own `init`: the monitor's first update lands before
+    /// `setSceneActive` reads the current path.
+    let pathDiagnostics: GatewayPathDiagnosticsObserver
 
     init(model: AppModel) {
         self.model = model
+        pathDiagnostics = GatewayPathDiagnosticsObserver(model: model)
     }
 }
 
 /// The production scene: the shipping app's window content and the lifecycle
 /// modifiers that drive it.
 ///
-/// `pushDelegate` is the composition's one injected dependency. Push
+/// `pushDelegate` is the composition's one injected dependency: push
 /// registration is driven by the app's `UIApplicationDelegateAdaptor`
-/// (`AppDelegate`), which the shipping app installs; a composition without that
-/// adaptor passes `nil` and still runs every other production modifier. The
-/// adaptor is not shared with the hosted app: it is installed at `App` level, so
-/// it would also become part of every hosted fixture arm, and a paired profile
-/// reaches App Attest and notification-permission work that no fixture asks for.
+/// (`AppDelegate`), and the shipping app passes its own. The adaptor is declared
+/// on the `App`, so installing it for the hosted app would install it for every
+/// hosted arm - the fixture arms included, which stay inert; they pass `nil` and
+/// still run every other production modifier.
 struct ProductionSceneRoot: View {
     let owner: ProductionSceneOwner
     let pushDelegate: AppDelegate?

@@ -1885,8 +1885,6 @@ if command == 'bootstatus':
     raise SystemExit(0)
 if command == 'terminate':
     raise SystemExit(0)
-if command == 'launch':
-    print('4242'); raise SystemExit(0)
 if command == 'uninstall':
     raise SystemExit(0)
 if command == 'get_app_container':
@@ -3216,7 +3214,7 @@ if "build-for-testing" in arguments:
     with (products / (scheme + "_" + test_plan + "_iOS.xctestrun")).open("wb") as handle:
         plistlib.dump({"TestConfigurations": [{"IsEnabled": True, "TestTargets": targets}]}, handle)
     # The built hosted product, so a command that resets the lane's app state can
-    # read the bundle identifier it must launch.
+    # read the bundle identifier it must remove.
     app_plist = products / "Test-iphonesimulator/TronMobile.app/Info.plist"
     app_plist.parent.mkdir(parents=True, exist_ok=True)
     with app_plist.open("wb") as handle:
@@ -3483,14 +3481,19 @@ process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
 const logs = `${process.env.TRON_DATA_DIR}/logs`;
 fs.mkdirSync(logs, { recursive: true });
 fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "gateway.started" }) + "\\n");
-// The Gateway's own record of the device connections a journey left behind:
-// opened then closed, as the real Gateway writes them.
+// The Gateway's own record of the device connections a journey left behind, in the
+// order the real Gateway writes them: each connection opens and closes under its
+// own id, so a backgrounded journey's retire-then-reconnect is visible as a close
+// before a different connection's open.
 const connections = (process.env.FAKE_E2E_GATEWAY_CONNECTIONS || "2 1").split(/\\s+/).map(Number);
-for (let index = 0; index < connections[0]; index++) {
-  fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "connection.opened" }) + "\\n");
-}
-for (let index = 0; index < connections[1]; index++) {
-  fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "connection.closed" }) + "\\n");
+for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {
+  const connectionId = `fixture-connection-${index + 1}`;
+  if (index < connections[0]) {
+    fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "connection.opened", connectionId }) + "\\n");
+  }
+  if (index < connections[1]) {
+    fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "connection.closed", connectionId }) + "\\n");
+  }
 }
 const enrollment = `${process.env.TRON_DATA_DIR}/gateway/enrollment.json`;
 fs.writeFileSync(enrollment, JSON.stringify({ code: "fixture-pairing-code" }), { mode: 0o600 });
@@ -3680,7 +3683,11 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
                 self.assertTrue(report["evidence_complete"])
                 self.assertEqual(report["source"]["revision"], source["revision"])
                 self.assertEqual(report["source"]["dirty"], bool(source["dirty"]))
-                self.assertEqual(report["gateway_connections"], {"opened": 2, "closed": 1})
+                self.assertEqual(
+                    report["gateway_connections"],
+                    {"opened": 2, "closed": 1, "retired_before_reconnect": True},
+                )
+                self.assertEqual(report["source"]["source_fingerprint"], source["source_fingerprint"])
                 artifacts = {artifact["path"]: artifact for artifact in report["artifacts"]}
                 self.assertEqual(sorted(artifacts), sorted(expected_artifacts))
                 for name, artifact in artifacts.items():
@@ -3724,19 +3731,32 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         self.assertEqual(missing, ["proxy-link-stats.json"])
         self.assertTrue((directories[0] / "Journeys.xcresult").is_dir())
 
-    def test_run_ui_refuses_a_journey_that_left_no_reconnect(self) -> None:
+    def test_run_ui_refuses_a_journey_that_never_connected(self) -> None:
         """Failure mode 20: the journey that backgrounds the app must leave the
-        Gateway's own record of a retired connection and a new one."""
+        Gateway's own record of its connections."""
         journey = self.owned_ui_journeys()[0]
         environment = self.ui_environment(FAKE_E2E_GATEWAY_CONNECTIONS="1 0")
         result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
         self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
-        self.assertIn("must leave at least 2 opened and 1 closed", result.stderr)
+        self.assertIn("must leave at least 2", result.stderr)
         directories = self.journey_evidence(result.stdout)
         self.assertEqual(len(directories), 1, result.stdout)
         report = json.loads((directories[0] / "report.json").read_text())
         self.assertEqual(report["journey_status"], 65)
-        self.assertEqual(report["gateway_connections"], {"opened": 1, "closed": 0})
+        self.assertEqual(report["gateway_connections"]["opened"], 1)
+
+    def test_run_ui_refuses_a_journey_whose_socket_was_never_retired(self) -> None:
+        """Failure mode 20: connections that never retire are not a background
+        reconnect, however many of them opened."""
+        journey = self.owned_ui_journeys()[0]
+        environment = self.ui_environment(FAKE_E2E_GATEWAY_CONNECTIONS="2 0")
+        result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("no close before a different open", result.stderr)
+        directories = self.journey_evidence(result.stdout)
+        report = json.loads((directories[0] / "report.json").read_text())
+        self.assertEqual(report["gateway_connections"]["opened"], 2)
+        self.assertFalse(report["gateway_connections"]["retired_before_reconnect"])
 
     def test_run_ui_releases_its_lane_and_leaves_current_products(self) -> None:
         """Failure mode 21: the lane is released when the command ends, the

@@ -350,8 +350,9 @@ private enum RealGatewayUIHost {
 }
 
 /// The real Gateway fixture `scripts/ios-gateway-e2e-test run-ui` provides to
-/// this runner. The runner receives the fixture's port and one-time code, and the
-/// harness seeds the app's own state before the journey starts.
+/// this runner: the fixture's port and one-time code. The journey drives the
+/// app's own state itself, and the harness only returns the app to its unpaired
+/// state when the run ends.
 private struct RealGatewayUIFixture {
     let host = "127.0.0.1"
     let port: Int
