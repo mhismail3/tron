@@ -192,7 +192,11 @@ final class ModelPickerPresentationTests: XCTestCase {
             detents: nil
         ) { controller in
             XCTAssertTrue(probe.contains("picker.card.openai/gpt-5"))
-            try await Task.sleep(for: .milliseconds(500))
+            // The detent applies after the picker publishes its measurement;
+            // await that settled height, then assert it below.
+            try await awaitHostedCondition("Sheet settled at the published fit height") {
+                ModelPickerSheetFixture<EmptyView>.publishedFitHeight.map { abs(controller.view.bounds.height - $0) <= 2 } ?? false
+            }
             let fit = try XCTUnwrap(ModelPickerSheetFixture<EmptyView>.publishedFitHeight,
                                     "the picker never published a fit height")
             // The published value is the visible sheet height the rails need.

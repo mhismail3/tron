@@ -58,7 +58,7 @@ final class DashboardActivityClockHostedTests: XCTestCase {
             let age = render.date.timeIntervalSince(refreshed)
             XCTAssertEqual(age, age.rounded(), accuracy: 0.000_1, "\(model.renders)")
             XCTAssertGreaterThan(render.date, previous.date, "\(model.renders)")
-            XCTAssertEqual(render.label, GatewayTimestamp.relativeDescription(refreshed, relativeTo: render.date), "\(model.renders)")
+            XCTAssertEqual(render.label, GatewayTimestamp.relativeDescription(refreshed, relativeTo: render.reference), "\(model.renders)")
             XCTAssertNotEqual(render.label, previous.label, "A render without a label change: \(model.renders)")
             previous = render
         }
@@ -70,6 +70,9 @@ final class DashboardActivityClockHostedTests: XCTestCase {
 private final class DashboardClockFixtureModel {
     struct Render {
         let date: Date
+        /// The instant the label was formatted for: the entry date, or now when
+        /// SwiftUI delivers the entry after it.
+        let reference: Date
         let label: String
     }
 
@@ -93,7 +96,7 @@ private struct DashboardClockFixture: View {
         TimelineView(clock) { timeline in
             let date = max(timeline.date, .now)
             let label = clock.label(relativeTo: date)
-            let _ = model.renders.append(.init(date: timeline.date, label: label))
+            let _ = model.renders.append(.init(date: timeline.date, reference: date, label: label))
             let _ = model.onRender?()
             Text(label)
         }
