@@ -2770,7 +2770,7 @@ owners narrow while iterating and use the full configured suite for checkpoints.
 Tests own every remote boundary through injected fetchers, resolvers and HTTP
 stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
 connection opened by an in-process socket in the Vitest worker and fails the
-test (or file) that attempted it, so an unstubbed in-process fetch cannot pass or
+current test (or the file, for async work that outlives its test), so an unstubbed in-process fetch cannot pass or
 hang depending on the host's network. It does not cover child processes or DNS
 lookups.
 

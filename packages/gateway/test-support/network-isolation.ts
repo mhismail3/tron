@@ -5,8 +5,9 @@ import { afterAll, afterEach } from "vitest";
 // and HTTP stubs. An unstubbed path that reaches the real network passes or
 // fails by host network (#295: a pinned public address hung for the 15 s
 // capture deadline on hosted runners and failed fast locally). Refuse every
-// non-loopback TCP connection immediately and fail the test that made it, even
-// when product error handling would otherwise absorb the refused connection.
+// non-loopback TCP connection immediately and fail the current test (or the file,
+// for async work that outlives its test), even when product error handling
+// would otherwise absorb the refused connection.
 const violations: string[] = [];
 const connect = net.Socket.prototype.connect;
 
