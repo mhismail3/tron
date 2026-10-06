@@ -164,7 +164,201 @@ export async function listSessions(
 function usage(): never {
   process.stderr.write(`Usage: tron-chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]\n\n`);
   process.stderr.write(`Attaches to the Gateway-owned canonical runtime. It never opens Pi JSONL directly.\n`);
+  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id> <tokenBudget>, /home resume, /home context, /abort, /quit\n`);
   process.exit(64);
+}
+
+/** `home.status`: the same bounded projection the RPC returns. */
+export interface HomeStatusEnvelope {
+  available: boolean;
+  reason?: string;
+  enabled: boolean;
+  homeId?: string;
+  sessionId?: string;
+  generation?: number;
+  model?: { provider: string; id: string };
+  live: boolean;
+  sessionPresent: boolean;
+}
+
+interface HomeDesignationEnvelope { homeId: string; sessionId: string; generation: number }
+
+/** `home.configureMemory`/`home.resumeMemory` and `home.status`'s `memory`: the
+ * same bounded memory projection the RPCs return. */
+export interface HomeMemoryEnvelope {
+  configured: boolean;
+  open: boolean;
+  model?: { provider: string; id: string };
+  tokenBudget?: number;
+  spentTokens?: number;
+  blocked?: string;
+  reason?: string;
+}
+
+/** `home.context`: the bounded request context of Home's current or last
+ * activation. The sizes are absent when that activation prepared no request. */
+export interface HomeContextEnvelope {
+  available: boolean;
+  activationStartEntryId?: string | null;
+  activationOpen?: boolean;
+  viewLines?: number;
+  viewBytes?: number;
+  effectiveTokens?: number;
+  contextWindow?: number;
+  lastRefusalReason?: string;
+  lastRefusalDetail?: string;
+}
+
+/** One `/home` line, resolved without touching the Gateway. */
+export type HomeCommand =
+  | { kind: "status" }
+  | { kind: "designate"; model?: { provider: string; id: string } }
+  | { kind: "disable" }
+  | { kind: "memory"; model: { provider: string; id: string }; tokenBudget: number }
+  | { kind: "resume" }
+  | { kind: "context" }
+  | { kind: "usage" };
+
+/** Returns undefined for any line that is not a `/home` command, so it continues
+ * to the model. An unknown subcommand prints usage instead of reaching the
+ * model, and a malformed model argument throws for the caller to report. */
+export function parseHomeCommand(input: string): HomeCommand | undefined {
+  if (input !== "/home" && !input.startsWith("/home ")) return undefined;
+  if (input === "/home" || input === "/home status") return { kind: "status" };
+  if (input === "/home disable") return { kind: "disable" };
+  if (input === "/home resume") return { kind: "resume" };
+  if (input === "/home context") return { kind: "context" };
+  if (input === "/home designate") return { kind: "designate" };
+  if (input.startsWith("/home designate ")) {
+    return { kind: "designate", model: parseHomeModelArgument(input.slice("/home designate ".length).trim()) };
+  }
+  if (input === "/home memory" || input.startsWith("/home memory ")) {
+    const arguments_ = input.slice("/home memory".length).trim().split(/\s+/u).filter((part) => part !== "");
+    // The shape is exactly a model and a budget. Any other shape is usage; a
+    // value that cannot be read is reported with its own reason.
+    if (arguments_.length !== 2) return { kind: "usage" };
+    return {
+      kind: "memory",
+      model: parseHomeModelArgument(arguments_[0]!),
+      tokenBudget: parseHomeTokenBudget(arguments_[1]!),
+    };
+  }
+  return { kind: "usage" };
+}
+
+export function describeHomeStatus(status: HomeStatusEnvelope): string {
+  if (!status.available) return `Home unavailable: ${status.reason ?? "the stored record could not be used"}`;
+  if (!status.enabled) return "Home is not designated.";
+  const model = status.model ? `, model ${status.model.provider}/${status.model.id}` : "";
+  const session = status.sessionPresent ? "" : ", its session is missing (designate creates a new one)";
+  return `Home is designated: session ${status.sessionId}, generation ${status.generation}${model}, ${status.live ? "runtime live" : "runtime not loaded"}${session}.`;
+}
+
+const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> <tokenBudget> | /home resume | /home context\n";
+
+export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+  return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
+}
+
+/** `provider/id`, the same spelling the model picker uses. */
+export function parseHomeModelArgument(argument: string): { provider: string; id: string } {
+  const separator = argument.indexOf("/");
+  const provider = separator > 0 ? argument.slice(0, separator) : "";
+  const id = separator > 0 ? argument.slice(separator + 1) : "";
+  if (!provider || !id) throw new Error("Name the model as provider/id, for example anthropic/claude-sonnet-4-5");
+  return { provider, id };
+}
+
+/** A positive whole number of tokens. The Gateway owns the ceiling, so a value it
+ * refuses is the RPC's refusal to report; this only has to be a number. */
+export function parseHomeTokenBudget(argument: string): number {
+  if (!/^\d+$/u.test(argument)) throw new Error("The token budget is a whole number of tokens, for example 1000000");
+  const budget = Number(argument);
+  if (!Number.isSafeInteger(budget) || budget < 1) throw new Error("The token budget is at least one token");
+  return budget;
+}
+
+/** What the memory projection says, in one line: the model and budget it is
+ * spending against, the spend so far, whether its store is open yet and the
+ * reason it is blocked. */
+export function describeHomeMemory(memory: HomeMemoryEnvelope): string {
+  if (!memory.configured) return "Home memory is not configured. /home memory <provider/id> <tokenBudget> configures it.";
+  const model = memory.model ? `model ${memory.model.provider}/${memory.model.id}` : "an unrecorded model";
+  const budget = memory.tokenBudget === undefined ? "no recorded budget" : `budget ${memory.tokenBudget} tokens`;
+  const spend = memory.spentTokens === undefined ? "" : `, ${memory.spentTokens} spent`;
+  const open = memory.open ? "open" : "not open yet (it opens at the first activation)";
+  const blocked = memory.blocked ? `, blocked: ${memory.blocked}` : "";
+  return `Home memory: ${model}, ${budget}${spend}, ${open}${blocked}.`;
+}
+
+/** What the request-context projection says: the activation's start, whether it
+ * is still open, the size of the request it prepared, and its own refusal. */
+export function describeHomeContext(context: HomeContextEnvelope): string {
+  if (!context.available) return "Home has no activation to report yet.";
+  const start = context.activationStartEntryId ?? "the start of the conversation";
+  const state = context.activationOpen ? "open" : "settled";
+  const sizes = context.viewLines === undefined
+    ? "it was refused before it prepared a request"
+    : `${context.viewLines} view lines (${context.viewBytes} bytes), about ${context.effectiveTokens} tokens of a ${context.contextWindow}-token window`;
+  const refusal = context.lastRefusalReason
+    ? `, last refusal ${context.lastRefusalReason}${context.lastRefusalDetail ? `: ${context.lastRefusalDetail}` : ""}`
+    : "";
+  return `Home activation (${state}), started after ${start}: ${sizes}${refusal}.`;
+}
+
+export async function configureHomeMemory(
+  client: Pick<GatewayProtocolClient, "request">,
+  model: { provider: string; id: string },
+  tokenBudget: number,
+): Promise<string> {
+  const result = await client.request("home.configureMemory", {
+    commandId: randomUUID(), model, tokenBudget,
+  }) as unknown as HomeMemoryEnvelope;
+  return describeHomeMemory(result);
+}
+
+export async function resumeHomeMemory(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+  const result = await client.request("home.resumeMemory", { commandId: randomUUID() }) as unknown as HomeMemoryEnvelope;
+  return describeHomeMemory(result);
+}
+
+export async function homeContextCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+  return describeHomeContext(await client.request("home.context", {}) as unknown as HomeContextEnvelope);
+}
+
+export async function designateHome(
+  client: Pick<GatewayProtocolClient, "request">,
+  model?: { provider: string; id: string },
+): Promise<string> {
+  const result = await client.request("home.designate", {
+    commandId: randomUUID(),
+    ...(model ? { model } : {}),
+  }) as unknown as HomeDesignationEnvelope;
+  return `Home designated: session ${result.sessionId}, generation ${result.generation}.`;
+}
+
+export async function disableHome(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+  const result = await client.request("home.disable", { commandId: randomUUID() }) as unknown as HomeDesignationEnvelope;
+  return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
+}
+
+/** Run one `/home` command, reporting its outcome on stdout and any failure on
+ * stderr so the chat continues. */
+export async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
+  if (command.kind === "usage") {
+    process.stderr.write(HOME_USAGE);
+    return;
+  }
+  try {
+    if (command.kind === "status") process.stdout.write(`${await homeStatusCommand(client)}\n`);
+    else if (command.kind === "designate") process.stdout.write(`${await designateHome(client, command.model)}\n`);
+    else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.model, command.tokenBudget)}\n`);
+    else if (command.kind === "resume") process.stdout.write(`${await resumeHomeMemory(client)}\n`);
+    else if (command.kind === "context") process.stdout.write(`${await homeContextCommand(client)}\n`);
+    else process.stdout.write(`${await disableHome(client)}\n`);
+  } catch (error) {
+    process.stderr.write(`home: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
 }
 
 function operationNeedsSettlement(
@@ -346,6 +540,13 @@ async function runTerminalChat(): Promise<void> {
       if (prompt === "/quit" || prompt === "/exit") break;
       if (prompt === "/abort") {
         await client.request("session.abort", { sessionId, kind: "agent", commandId: randomUUID() });
+        continue;
+      }
+      // Home commands are Gateway-wide, not session-scoped, so they work before
+      // or without an attached session's runtime being the Home one.
+      const homeCommand = parseHomeCommand(prompt);
+      if (homeCommand) {
+        await runHomeCommand(client, homeCommand);
         continue;
       }
       const commandId = randomUUID();

@@ -6,8 +6,13 @@ on:
   workflow_dispatch:
 
 concurrency:
+  # Group key stays ref-scoped: PR runs supersede each other per ref. A started
+  # base-branch push run must finish - it is the evidence behind the epic's
+  # consecutive green main pushes - so only pull_request events cancel in
+  # progress. GitHub still keeps at most one pending run per group, so the
+  # newest pending main run supersedes an older pending one.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   policy:

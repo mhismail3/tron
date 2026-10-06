@@ -20,7 +20,11 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(model: ObservationModel, workRegistry?: GatewayWorkRegistry): Promise<{ store: KnowledgeStore; observer: KnowledgeObservationService }> {
+async function fixture(
+  model: ObservationModel,
+  workRegistry?: GatewayWorkRegistry,
+  sessionExcluded?: (sessionId: string) => boolean,
+): Promise<{ store: KnowledgeStore; observer: KnowledgeObservationService }> {
   const root = await mkdtemp(join(tmpdir(), "tron-observer-")); roots.push(root);
   const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
   const store = new KnowledgeStore(workspace);
@@ -29,7 +33,7 @@ async function fixture(model: ObservationModel, workRegistry?: GatewayWorkRegist
     eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
     observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
   });
-  return { store, observer: new KnowledgeObservationService(store, model, workRegistry) };
+  return { store, observer: new KnowledgeObservationService(store, model, workRegistry, undefined, sessionExcluded) };
 }
 
 const entries = [
@@ -41,6 +45,29 @@ const entries = [
 const output = JSON.stringify({ observations: [{ text: "The release is planned for Friday.", attribution: "user", certainty: "qualified", observedAt: "2026-01-01T00:00:01Z" }] });
 
 describe("KnowledgeObservationService", () => {
+  it("keeps a session the Gateway excludes out of automatic observation", async () => {
+    // Tron Home is excluded by the Gateway's predicate (its memory is its own,
+    // docs/home.md). The refused cut must leave no observation and no coverage,
+    // and the same cut for a session the predicate allows must still publish.
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer }, undefined, (sessionId) => sessionId === "session-1");
+    try {
+      // The predicate is consulted before anything is queued, so the refusal is
+      // complete when `admit` returns false: no inference can be pending behind
+      // it, and no coverage was written.
+      expect(observer.admit({ sessionId: "session-1", entries, outcome: "completed" })).toBe(false);
+      expect(infer).not.toHaveBeenCalled();
+      expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+      expect((await store.status()).coverageCount).toBe(0);
+
+      const eligible = await fixture({ infer: async () => output });
+      try {
+        expect(eligible.observer.admit({ sessionId: "session-1", entries, outcome: "completed" })).toBe(true);
+        await waitFor(async () => (await eligible.store.list({ kind: "observation" })).records.length === 1);
+      } finally { eligible.observer.dispose(); }
+    } finally { observer.dispose(); }
+  });
+
   it("publishes observations from one prose-wrapped JSON object", async () => {
     const { store, observer } = await fixture({ infer: async () => "Observations follow.\n" + output + "\nEnd." });
     try {

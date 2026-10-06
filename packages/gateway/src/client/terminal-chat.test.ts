@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
 import { GatewayClientError } from "./gateway-client.js";
-import { connectResilient, listSessions, synchronizeTerminalSession } from "./terminal-chat.js";
+import { afterEach } from "vitest";
+import {
+  configureHomeMemory, connectResilient, designateHome, describeHomeContext, describeHomeMemory,
+  describeHomeStatus, disableHome, homeContextCommand, homeStatusCommand, listSessions,
+  parseHomeCommand, parseHomeModelArgument, parseHomeTokenBudget, resumeHomeMemory, runHomeCommand,
+  synchronizeTerminalSession,
+} from "./terminal-chat.js";
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return { id, cwd: "/workspace", firstMessage: id, ...extra };
@@ -130,5 +136,153 @@ describe("terminal chat session catalog", () => {
       sessions: [session("one"), session("two")], listRevision: 1,
     }]);
     await expect(listSessions(overlong, { pageSize: 1 })).rejects.toThrow(/malformed/);
+  });
+});
+
+describe("terminal chat Home commands", () => {
+  it("routes only /home lines to the Home commands", () => {
+    expect(parseHomeCommand("hello")).toBeUndefined();
+    expect(parseHomeCommand("/homework")).toBeUndefined();
+    expect(parseHomeCommand("/home")).toEqual({ kind: "status" });
+    expect(parseHomeCommand("/home status")).toEqual({ kind: "status" });
+    expect(parseHomeCommand("/home disable")).toEqual({ kind: "disable" });
+    expect(parseHomeCommand("/home designate")).toEqual({ kind: "designate" });
+    expect(parseHomeCommand("/home designate anthropic/claude-sonnet-4-5"))
+      .toEqual({ kind: "designate", model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+    // An unknown subcommand prints usage instead of reaching the model.
+    expect(parseHomeCommand("/home please")).toEqual({ kind: "usage" });
+    expect(() => parseHomeCommand("/home designate anthropic")).toThrow(/provider\/id/);
+
+    // The memory commands: a fixed shape, a fixed model spelling, a whole budget.
+    expect(parseHomeCommand("/home resume")).toEqual({ kind: "resume" });
+    expect(parseHomeCommand("/home context")).toEqual({ kind: "context" });
+    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5 5000")).toEqual({
+      kind: "memory", model: { provider: "anthropic", id: "claude-haiku-4-5" }, tokenBudget: 5000,
+    });
+    expect(parseHomeCommand("/home memory")).toEqual({ kind: "usage" });
+    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5")).toEqual({ kind: "usage" });
+    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5 5000 extra")).toEqual({ kind: "usage" });
+    expect(() => parseHomeCommand("/home memory anthropic 5000")).toThrow(/provider\/id/);
+    expect(() => parseHomeCommand("/home memory anthropic/claude-haiku-4-5 0")).toThrow(/at least one token/);
+    expect(() => parseHomeCommand("/home memory anthropic/claude-haiku-4-5 1.5")).toThrow(/whole number/);
+    expect(parseHomeTokenBudget("1000000")).toBe(1_000_000);
+  });
+
+  it("reads home.status and reports what the Gateway returned", async () => {
+    const request = vi.fn(async () => ({ available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true }));
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+
+    const described = await homeStatusCommand(client);
+    expect(request).toHaveBeenCalledExactlyOnceWith("home.status", {});
+    expect(described).toContain("session");
+
+    // Each state is distinguishable from the projection alone.
+    expect(describeHomeStatus({ available: false, reason: "unreadable", enabled: false, live: false, sessionPresent: false }))
+      .toContain("unreadable");
+    expect(describeHomeStatus({ available: true, enabled: false, live: false, sessionPresent: false }))
+      .not.toEqual(describeHomeStatus({ available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true, sessionPresent: true }));
+  });
+
+  it("sends the two mutations with a command id and reports the new generation", async () => {
+    const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({ homeId: "home", sessionId: "session", generation: 2 }));
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+
+    const designated = await designateHome(client, { provider: "anthropic", id: "claude-sonnet-4-5" });
+    expect(request).toHaveBeenLastCalledWith("home.designate", {
+      commandId: expect.any(String), model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+    });
+    expect(designated).toContain("session");
+
+    await designateHome(client);
+    expect(request).toHaveBeenLastCalledWith("home.designate", { commandId: expect.any(String) });
+
+    const disabled = await disableHome(client);
+    expect(request).toHaveBeenLastCalledWith("home.disable", { commandId: expect.any(String) });
+    expect(disabled).toContain("session");
+  });
+
+  it("configures Home's memory with the model and budget it was given", async () => {
+    const model = { provider: "anthropic", id: "claude-haiku-4-5" };
+    const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({
+      configured: true, open: false, model, tokenBudget: 5_000,
+    }));
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+
+    const described = await configureHomeMemory(client, model, 5_000);
+    expect(request).toHaveBeenLastCalledWith("home.configureMemory", {
+      commandId: expect.any(String), model, tokenBudget: 5_000,
+    });
+    expect(described).toContain(model.id);
+
+    // The state the projection reports is what makes each outcome distinguishable:
+    // an open store with a spend, a blocked one with its reason, and none at all.
+    expect(describeHomeMemory({ configured: true, open: true, model, tokenBudget: 5_000, spentTokens: 1_200 }))
+      .toContain("1200");
+    expect(describeHomeMemory({ configured: true, open: false, model, tokenBudget: 5_000, blocked: "budget-exhausted" }))
+      .toContain("budget-exhausted");
+    expect(describeHomeMemory({ configured: false, open: false })).toContain("not configured");
+  });
+
+  it("resumes Home's memory and reports the state it left", async () => {
+    const model = { provider: "anthropic", id: "claude-haiku-4-5" };
+    const request = vi.fn(async () => ({
+      configured: true, open: true, model, tokenBudget: 5_000, spentTokens: 900,
+    }));
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+
+    const before = describeHomeMemory({ configured: true, open: false, model, tokenBudget: 5_000, blocked: "retries-exhausted" });
+    const after = await resumeHomeMemory(client);
+    expect(request).toHaveBeenLastCalledWith("home.resumeMemory", { commandId: expect.any(String) });
+    expect(before).toContain("retries-exhausted");
+    expect(after).not.toContain("blocked");
+    expect(after).toContain("900");
+  });
+
+  it("reads the request context and prints its bounded fields", async () => {
+    const request = vi.fn(async () => ({
+      available: true, activationStartEntryId: "entry-2", activationOpen: false,
+      viewLines: 7, viewBytes: 500, effectiveTokens: 2_197, contextWindow: 128_000,
+      lastRefusalReason: "context-overflow", lastRefusalDetail: "effective 2197 tokens leave no head-room",
+    }));
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+
+    const described = await homeContextCommand(client);
+    expect(request).toHaveBeenCalledExactlyOnceWith("home.context", {});
+    expect(described).toContain("entry-2");
+    expect(described).toContain("7");
+    expect(described).toContain("128000");
+    expect(described).toContain("context-overflow");
+
+    // An activation refused before it prepared a request has its reason and no
+    // sizes, and a Home that never ran one says so rather than inventing numbers.
+    const refused = describeHomeContext({ available: true, activationStartEntryId: "entry-3", activationOpen: false, lastRefusalReason: "memory-not-configured" });
+    expect(refused).toContain("memory-not-configured");
+    expect(refused).not.toContain("view lines");
+    expect(describeHomeContext({ available: true, activationStartEntryId: null, activationOpen: true, viewLines: 0, viewBytes: 0, effectiveTokens: 0, contextWindow: 0 }))
+      .toContain("open");
+    expect(describeHomeContext({ available: false })).toContain("no activation");
+  });
+
+  it("prints usage for a bad argument and reports a failed command without ending the chat", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await runHomeCommand({ request: vi.fn() } as unknown as Pick<GatewayProtocolClient, "request">, { kind: "usage" });
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining("/home memory"));
+
+      const failing = { request: vi.fn(async () => { throw new GatewayClientError("unavailable", "the Gateway is draining", true); }) } as unknown as Pick<GatewayProtocolClient, "request">;
+      await runHomeCommand(failing, { kind: "resume" });
+      expect(stderr).toHaveBeenLastCalledWith(expect.stringContaining("draining"));
+      expect(stdout).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+
+  it("names the model as provider/id and refuses a malformed argument", () => {
+    expect(parseHomeModelArgument("anthropic/claude-sonnet-4-5")).toEqual({ provider: "anthropic", id: "claude-sonnet-4-5" });
+    expect(() => parseHomeModelArgument("anthropic")).toThrow(/provider\/id/);
+    expect(() => parseHomeModelArgument("/model")).toThrow(/provider\/id/);
   });
 });
