@@ -9,6 +9,7 @@ import { createTronNativeCaptureExtension } from "../display/tron-native-capture
 import { createTronComputerExtension } from "../display/tron-computer-extension.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
+import { createTronHomeExtension } from "../home/tron-home-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -165,6 +166,48 @@ export function tronModuleFactories(host: TronModuleHost): TronModuleRegistratio
     const factory = tronModule.factory(host);
     if (factory) registrations.push({ name: tronModule.name, factory });
   }
+  return registrations;
+}
+
+/** The existing Tron modules a Home runtime keeps, in definition order. Home's
+ * curation excludes Pi built-ins (codemode, tool-search, MCP) and the modules
+ * whose work belongs to an ordinary project session. */
+export const HOME_MODULE_NAMES: readonly string[] = [
+  "tron-context-window",
+  "tron-compaction-policy",
+  "tron-ask-user",
+  "tron-display",
+  "tron-notify",
+];
+
+/** The one module only a Home runtime loads. It is not part of `TRON_MODULES`
+ * because `modules.list` reports what every session registers, and an ordinary
+ * session never loads it. */
+export const TRON_HOME_MODULE: TronModule = {
+  name: "tron-home",
+  purpose: "Adds Home's operating context and keeps Home out of prompt-cache warming.",
+  tools: [],
+  commands: [],
+  factory: () => createTronHomeExtension(),
+};
+
+/** The executable tool ceiling for a Home runtime, passed to the SDK as its
+ * registration allowlist. MCP is excluded structurally: no MCP extension is
+ * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
+ * allowlist semantic. */
+export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify"];
+
+/** The curated Home profile: the kept Tron modules plus tron-home, and nothing
+ * else. Availability stays host-owned exactly as for an ordinary session. */
+export function homeModuleFactories(host: TronModuleHost): TronModuleRegistration[] {
+  const registrations: TronModuleRegistration[] = [];
+  for (const tronModule of TRON_MODULES) {
+    if (!HOME_MODULE_NAMES.includes(tronModule.name)) continue;
+    const factory = tronModule.factory(host);
+    if (factory) registrations.push({ name: tronModule.name, factory });
+  }
+  const factory = TRON_HOME_MODULE.factory(host);
+  if (factory) registrations.push({ name: TRON_HOME_MODULE.name, factory });
   return registrations;
 }
 

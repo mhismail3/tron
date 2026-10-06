@@ -36,7 +36,8 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
-import { tronModuleFactories } from "../extensions/tron-modules.js";
+import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
@@ -167,6 +168,12 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
 }
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
+
+/** The curated runtime a session is built with. Decided at runtime creation:
+ * `home` is passed explicitly by the Home owner for a brand-new Home session,
+ * and every other creation asks the Home owner whether this session id is the
+ * enabled Home. */
+export type RuntimeProfile = "ordinary" | "home";
 
 type QueueBehavior = QueuedMessageState["behavior"];
 
@@ -450,6 +457,10 @@ export interface RuntimeSlotDependencies {
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
   archivedAt: (sessionId: string) => string | undefined;
+  /** Whether this session id is the enabled Tron Home. Read once per runtime
+   * creation, so a profile change is never cached past the runtime it applies
+   * to. */
+  isHomeSession?: (sessionId: string) => boolean;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -780,13 +791,18 @@ export class RuntimeSlot {
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
+  /** The one session id whose first runtime was created with the explicit Home
+   * profile, before the Home record named it. */
+  private readonly explicitHomeSessionId: string | undefined;
 
   private constructor(
     private sessionManager: SessionManager,
     private readonly dependencies: RuntimeSlotDependencies,
     private readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
+    creationProfile: RuntimeProfile = "ordinary",
   ) {
+    this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
@@ -962,8 +978,9 @@ export class RuntimeSlot {
     dependencies: RuntimeSlotDependencies,
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
+    creationProfile: RuntimeProfile = "ordinary",
   ): Promise<RuntimeSlot> {
-    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted);
+    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile);
     await slot.initialize();
     return slot;
   }
@@ -1524,6 +1541,15 @@ export class RuntimeSlot {
     this.lastTouchedAt = Date.now();
   }
 
+  /** Whether one runtime of this slot carries the curated Home profile. The
+   * explicit creation profile covers the very first runtime of a brand-new Home
+   * session, before its record exists, and only that session: a fork or a reset
+   * produces a new session id, which asks the Home owner instead. */
+  private isHomeProfile(sessionManager: SessionManager = this.sessionManager): boolean {
+    if (this.explicitHomeSessionId !== undefined && sessionManager.getSessionId() === this.explicitHomeSessionId) return true;
+    return this.dependencies.isHomeSession?.(sessionManager.getSessionId()) === true;
+  }
+
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
     return async ({ cwd, sessionManager, sessionStartEvent }) => {
       const trust = await this.dependencies.trust.requireResolved(cwd);
@@ -1539,12 +1565,38 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const services = await createAgentSessionServices({
-        cwd: trust.cwd,
-        agentDir: this.dependencies.agentDir,
-        modelRuntime,
-        resourceLoaderOptions: {
-          extensionFactories: [
+      const home = this.isHomeProfile(sessionManager);
+      const tronModuleHost: TronModuleHost = {
+        sessionId: () => this.id,
+        cwd: () => this.cwd,
+        workspace: this.dependencies.workspace,
+        displayArtifacts: this.dependencies.displayArtifacts,
+        notificationTitle: () => this.notificationTitle(),
+        // The notify tool samples the same foreground lease automatic
+        // alerts use, at its own admission boundary.
+        isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
+        contextPolicy: () => contextPolicy,
+        compactionPolicy: () => compactionPolicy,
+        // Summary auth can finish after Stop but before compaction_start
+        // rotates the display ID. Automatic work retains its prompt fence.
+        compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
+          || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
+        compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
+        ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
+        jev: new JevDecisionClient(modelRuntime),
+        ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
+        ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
+        ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
+        ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
+        ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+      };
+      // Tron Home's curated profile: no agent-directory or project discovery,
+      // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
+      // Tron modules plus tron-home. An ordinary runtime is byte-for-byte what
+      // it was: the Home branch changes nothing it would have built.
+      const extensionFactories = home
+        ? homeModuleFactories(tronModuleHost)
+        : [
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
               if (!operationId || !this.dependencies.mcpAuth) {
@@ -1556,31 +1608,15 @@ export class RuntimeSlot {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
-            ...tronModuleFactories({
-              sessionId: () => this.id,
-              cwd: () => this.cwd,
-              workspace: this.dependencies.workspace,
-              displayArtifacts: this.dependencies.displayArtifacts,
-              notificationTitle: () => this.notificationTitle(),
-              // The notify tool samples the same foreground lease automatic
-              // alerts use, at its own admission boundary.
-              isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
-              contextPolicy: () => contextPolicy,
-              compactionPolicy: () => compactionPolicy,
-              // Summary auth can finish after Stop but before compaction_start
-              // rotates the display ID. Automatic work retains its prompt fence.
-              compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
-                || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
-              compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
-              ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
-              jev: new JevDecisionClient(modelRuntime),
-              ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
-              ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
-              ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
-              ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
-              ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-            }),
-          ],
+            ...tronModuleFactories(tronModuleHost),
+          ];
+      const services = await createAgentSessionServices({
+        cwd: trust.cwd,
+        agentDir: this.dependencies.agentDir,
+        modelRuntime,
+        resourceLoaderOptions: {
+          ...(home ? { noExtensions: true, noSkills: true, noPromptTemplates: true, noContextFiles: true } : {}),
+          extensionFactories,
           extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
@@ -1595,15 +1631,19 @@ export class RuntimeSlot {
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
+      const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager);
       this.directBashProcesses = directBashProcesses;
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
+        // The allowlist is Home's executable ceiling. MCP tools cannot appear
+        // under it because no MCP extension is loaded, and Tron's direct bash
+        // tool is not registered at all for Home.
+        ...(home ? { tools: [...HOME_TOOL_NAMES] } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
-        customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
+        ...(directBashProcesses ? { customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition] } : {}),
       });
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
       // passes its configured defaults, which skips AgentSession's own transcript
@@ -1612,7 +1652,7 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
       if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
-      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
+      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
       created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
       this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
@@ -7776,6 +7816,11 @@ export class RuntimeSlot {
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
+      // Home must stay on a fixed physical model: a virtual model routes on the
+      // canonical transcript, which Home's profile does not own.
+      if (this.isHomeProfile() && model.api === VIRTUAL_MODEL_API) {
+        throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
+      }
       await this.runtime.session.setModel(model as Model<never>);
       this.revision += 1;
       this.publishSnapshot();
@@ -7833,6 +7878,11 @@ export class RuntimeSlot {
 
   async compact(instructions?: string): Promise<{ queued: boolean }> {
     this.assertUsable();
+    // Refused at admission: Home keeps its own history, and the SDK would only
+    // refuse this later, after the command was already accepted.
+    if (this.isHomeProfile()) {
+      throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
+    }
     if (this.manualCompactionClaim) {
       throw new GatewayError("busy", "A manual compaction is already pending for this session");
     }
