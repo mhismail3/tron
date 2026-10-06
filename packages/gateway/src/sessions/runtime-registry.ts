@@ -1650,6 +1650,7 @@ export class RuntimeRegistry {
       homeProfile: (sessionId: string) => this.home.profileFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
+      homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
         this.options.persistenceDiagnostic?.(sessionId, "home-model-record-failed");
       }),

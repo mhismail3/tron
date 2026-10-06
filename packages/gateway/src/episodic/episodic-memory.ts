@@ -3,7 +3,8 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
   EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
-  EPISODIC_PLACEHOLDER, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
+  EPISODIC_PLACEHOLDER, EPISODIC_SEARCH_HITS, EPISODIC_SEARCH_QUERY_CHARS, EPISODIC_SEARCH_SNIPPET_CHARS,
+  EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
   type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState,
@@ -15,13 +16,13 @@ import {
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import {
-  projectBranch, readCanonicalSession, episodicDigest,
+  projectBranch, readCanonicalEntryInstants, readCanonicalSession, episodicDigest,
   type EpisodicCanonicalCut, type EpisodicCanonicalEntry,
 } from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
-  decodeContextRuns, encodeNodeCode, fitView, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress,
-  parseNodeAddress, placeholderBytes, utf8Bytes, viewContext,
+  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, fitView, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress,
+  parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes, viewContext,
   type EpisodicViewPart,
 } from "./episodic-tree.js";
 
@@ -67,6 +68,27 @@ interface Waiter {
   reject: (error: Error) => void;
   signal?: AbortSignal;
   onAbort?: () => void;
+}
+
+/** One message's instant, as Home's `date` tool reports it. `unavailable` is the
+ * source's own answer that it can no longer prove it: never a guessed time. */
+export type EpisodicTimestampResult = { kind: "timestamp"; timestamp: string } | { kind: "unavailable" };
+
+/** One search's outcome (`EPISODIC_SEARCH_HITS` lines, the whole range's match
+ * count, and how much of the range could contribute no searchable text at all, so
+ * an absence is never read as proof). */
+export interface EpisodicSearchResult {
+  /** At most `EPISODIC_SEARCH_HITS` lines, `id+0|kind: <snippet>`, in index order. */
+  lines: string[];
+  /** Messages in the range whose projected text contains the query. */
+  matches: number;
+  /** Messages in the range that are `[omitted]`. */
+  omitted: number;
+  /** Messages in the range whose projected text was capped. */
+  capped: number;
+  /** The range searched, after clamping to the messages this memory holds. */
+  from: number;
+  to: number;
 }
 
 /** What one build started from. A result is published only while the generation
@@ -126,6 +148,10 @@ export class EpisodicMemory {
   private draining: Promise<void> | null = null;
   private appending: Promise<void> = Promise.resolve();
   private storeKey: string | undefined;
+  /** Instants read from the canonical source for catalog records written before
+   * the optional `timestamp` existed. Read at most once per memory: an entry's
+   * instant never changes. */
+  private legacyTimestamps: Promise<Map<string, string>> | undefined;
   private closed = false;
 
   private constructor(private readonly dependencies: EpisodicMemoryDependencies, limits: EpisodicLimits) {
@@ -290,6 +316,96 @@ export class EpisodicMemory {
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
   }
 
+  /**
+   * The recipe's zoom (gist §7.1): line `id+n` opened into the two lines of
+   * `id+n/2` under it, or — at n = 1 — the message itself, from the catalog's
+   * current projection, so a redaction, an exclusion or an `[omitted]` slot is
+   * exactly what the caller reads. `undefined` when `id+n` is not a line of this
+   * memory: n is not a power of two, id is not a multiple of n, or the line runs
+   * past the last message.
+   *
+   * A child that is not built right now — never built, or invalidated and not yet
+   * rebuilt — renders the placeholder, never the text it held before (gist §6): a
+   * revoked node is deleted, so stale text cannot survive here. The caller
+   * ingests the canonical commits first, and never awaits the pump for them.
+   */
+  zoomLines(id: number, n: number): string[] | undefined {
+    this.assertOpen();
+    if (!Number.isSafeInteger(id) || !Number.isSafeInteger(n) || n < 1) return undefined;
+    const level = Math.log2(n);
+    if (level % 1 !== 0 || level > EPISODIC_MAX_LEVEL) return undefined;
+    if (id < 0 || id % n !== 0 || id + n > this.messages.size) return undefined;
+    if (n === 1) {
+      const message = this.messages.get(id);
+      if (!message) return undefined;
+      // The recipe's `id+0|`: the logged message, not the summarized node.
+      return [`${id}+0|${message.kind}: ${message.text}`];
+    }
+    const half = n / 2;
+    return [id, id + half].map((start) => {
+      const node = this.nodes.get(nodeAddress(level - 1, start / half));
+      return `${start}+${half}|${node ? viewLine(node.text) : EPISODIC_PLACEHOLDER}`;
+    });
+  }
+
+  /**
+   * The canonical instant of one message: the catalog record's own field, or —
+   * for a record written before that field existed — the instant the source proves
+   * for that entry id. That proof covers every parsed entry of the file, not only
+   * the branch the last entry follows, so an entry that has left the branch is
+   * still dated; the read is the bounded canonical reader the owner already uses,
+   * it is not `SessionManager`, and it happens at most once per memory because an
+   * entry's instant never changes. `unavailable` is the source's answer that it
+   * holds no such entry (or that it cannot read the file at all): the memory never
+   * invents a time. `undefined` means this memory holds no such message.
+   */
+  async entryTimestamp(id: number): Promise<EpisodicTimestampResult | undefined> {
+    this.assertOpen();
+    const message = this.messages.get(id);
+    if (!message) return undefined;
+    if (message.timestamp !== undefined) return { kind: "timestamp", timestamp: message.timestamp };
+    const timestamps = await this.canonicalTimestamps();
+    const timestamp = timestamps.get(message.entryId);
+    return timestamp === undefined ? { kind: "unavailable" } : { kind: "timestamp", timestamp };
+  }
+
+  /**
+   * One case-insensitive substring pass over the projected catalog (Tron's
+   * addition to the recipe's tools). Bounded: a hit line per match up to
+   * `EPISODIC_SEARCH_HITS`, each snippet bounded to
+   * `EPISODIC_SEARCH_SNIPPET_CHARS`, and the range's `[omitted]` and capped counts,
+   * so a message that cannot be searched is named rather than silently absent.
+   * `undefined` for an empty query or one over `EPISODIC_SEARCH_QUERY_CHARS`.
+   * Omitted bounds default to the whole memory and are clamped to it.
+   */
+  searchMessages(query: string, from?: number, to?: number): EpisodicSearchResult | undefined {
+    this.assertOpen();
+    if (query.length === 0 || query.length > EPISODIC_SEARCH_QUERY_CHARS) return undefined;
+    const count = this.messages.size;
+    const start = Math.min(Math.max(from ?? 0, 0), count);
+    const end = Math.min(Math.max(to ?? count, start), count);
+    const needle = query.toLowerCase();
+    const lines: string[] = [];
+    let matches = 0;
+    let omitted = 0;
+    let capped = 0;
+    for (let index = start; index < end; index += 1) {
+      const message = this.messages.get(index);
+      if (!message) continue;
+      // An omitted message holds no searchable text: its `[omitted]` text is a
+      // placeholder, counted in the header and never reported as a hit.
+      if (message.omitted) { omitted += 1; continue; }
+      if (message.omissions.includes("capped")) capped += 1;
+      const at = message.text.toLowerCase().indexOf(needle);
+      if (at < 0) continue;
+      matches += 1;
+      if (lines.length < EPISODIC_SEARCH_HITS) {
+        lines.push(`${index}+0|${message.kind}: ${snippetAround(message.text, at, query.length, EPISODIC_SEARCH_SNIPPET_CHARS)}`);
+      }
+    }
+    return { lines, matches, omitted, capped, from: start, to: end };
+  }
+
   /** Clear the blocked state, re-read the source and restart the pump
    * (departure 5). The cause must have been fixed by the caller: a larger budget,
    * a different model, a reachable source. */
@@ -371,6 +487,12 @@ export class EpisodicMemory {
     if (this.closed) return;
     this.closed = true;
     this.abort.abort();
+    // An ingest in flight holds the mutex and is still appending to this store, and
+    // the opener is what keeps a second writer out: releasing it before that ingest
+    // finishes would both let a second opener take a store that is still being
+    // written and leave records landing after the store was closed. Everything this
+    // memory owed is durable before the opener goes.
+    await this.mutex.run(async () => {});
     await this.draining?.catch(() => {});
     if (this.storeKey) EpisodicMemory.openStores.delete(this.storeKey);
     for (const waiter of this.waiters.splice(0)) {
@@ -476,6 +598,26 @@ export class EpisodicMemory {
       if (node.sourceDigest !== episodicDigest(`${message.kind}: ${message.text}`)) changed.push(node.index);
     }
     if (changed.length > 0) await this.invalidate(changed);
+  }
+
+  /**
+   * The instants of every entry the canonical file holds, keyed by entry id, for
+   * catalog records written before the optional `timestamp` existed. One bounded
+   * read (the reader the owner already uses, which never repairs or migrates),
+   * remembered for the life of this memory. A read that fails is not remembered:
+   * the next question asks the source again, and the answer in the meantime is
+   * `unavailable` rather than a guess.
+   */
+  private canonicalTimestamps(): Promise<Map<string, string>> {
+    this.legacyTimestamps ??= readCanonicalEntryInstants({
+      path: this.dependencies.sessionFile,
+      sessionId: this.dependencies.sessionId,
+      maxLineBytes: this.limits.maxSourceLineBytes,
+    }).catch(() => {
+      this.legacyTimestamps = undefined;
+      return new Map<string, string>();
+    });
+    return this.legacyTimestamps;
   }
 
   /** Invalidate exactly the affected leaves, their ancestors, and every node

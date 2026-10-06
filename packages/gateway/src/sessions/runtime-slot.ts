@@ -37,6 +37,7 @@ import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
+import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -470,6 +471,11 @@ export interface RuntimeSlotDependencies {
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
   homeMemory?: HomeMemoryPort;
+  /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
+   * `memory_search` tools the tron-home module registers. Optional because a slot
+   * is constructible without a Home owner; a slot that has one always offers it,
+   * and it answers undefined for any session that is not the enabled Home. */
+  homeMemoryTools?: (sessionId: string) => HomeMemoryToolAccess | undefined;
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
   homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
@@ -1621,6 +1627,9 @@ export class RuntimeSlot {
         ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
         ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
         ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+        // Home's memory tools are answered per call, because the memory a
+        // running Home reads can be reconfigured, blocked or released.
+        homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools?.(sessionId),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept

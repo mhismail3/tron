@@ -10,6 +10,7 @@ import { createTronComputerExtension } from "../display/tron-computer-extension.
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
+import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -40,6 +41,11 @@ export interface TronModuleHost {
   notifications?: NotificationService;
   scheduleToolOperations?: ScheduleToolOperations;
   machineId?: string;
+  /** Tron Home's memory for one session id, or undefined for every session that
+   * is not the enabled Home. Read at every tool call, never cached. Requiring it
+   * here is what keeps the wiring honest: the only Home runtime is built by a
+   * slot that answers this. */
+  homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -185,17 +191,17 @@ export const HOME_MODULE_NAMES: readonly string[] = [
  * session never loads it. */
 export const TRON_HOME_MODULE: TronModule = {
   name: "tron-home",
-  purpose: "Adds Home's operating context and keeps Home out of prompt-cache warming.",
-  tools: [],
+  purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
+  tools: ["zoom", "date", "memory_search"],
   commands: [],
-  factory: () => createTronHomeExtension(),
+  factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId())),
 };
 
 /** The executable tool ceiling for a Home runtime, passed to the SDK as its
  * registration allowlist. MCP is excluded structurally: no MCP extension is
  * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
  * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify"];
+export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search"];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */
