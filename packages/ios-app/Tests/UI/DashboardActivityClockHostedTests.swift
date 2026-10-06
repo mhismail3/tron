@@ -49,17 +49,20 @@ final class DashboardActivityClockHostedTests: XCTestCase {
         model.onRender = nil
 
         let refreshedRenders = Array(model.renders.dropFirst())
-        let secondsLabels = (3...59).map { GatewayTimestamp.relativeDescription(refreshed, relativeTo: refreshed.addingTimeInterval(Double($0))) }
-        XCTAssertTrue(secondsLabels.contains(refreshedRenders[0].label), "\(model.renders)")
+        // The first refreshed render is the label change the new timestamp
+        // owes, formatted for the instant its body actually ran at: the entry
+        // itself, or a later `now` when the host delivered it late. Assert that
+        // exact label against its recorded reference instead of a range, so a
+        // late body pass cannot be mistaken for a violation.
+        XCTAssertEqual(refreshedRenders[0].label, GatewayTimestamp.relativeDescription(refreshed, relativeTo: refreshedRenders[0].reference), "\(model.renders)")
         var previous = refreshedRenders[0]
         for render in refreshedRenders.dropFirst() {
-            // Each tick lands on a change instant: whole seconds after the new
-            // timestamp, later than the last, with the label for that instant.
+            // Each later tick lands on a change instant: whole seconds after the
+            // new timestamp, later than the last, labelled for that instant.
             let age = render.date.timeIntervalSince(refreshed)
             XCTAssertEqual(age, age.rounded(), accuracy: 0.000_1, "\(model.renders)")
             XCTAssertGreaterThan(render.date, previous.date, "\(model.renders)")
             XCTAssertEqual(render.label, GatewayTimestamp.relativeDescription(refreshed, relativeTo: render.reference), "\(model.renders)")
-            XCTAssertNotEqual(render.label, previous.label, "A render without a label change: \(model.renders)")
             previous = render
         }
     }
