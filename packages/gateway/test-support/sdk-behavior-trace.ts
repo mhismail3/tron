@@ -398,7 +398,7 @@ export async function compareWithGolden(comparison: GoldenComparison): Promise<{
     `Retained unified diff: ${comparison.diffPath}`,
     `Reproduce it with: git diff --no-index --no-color --unified=3 ${comparison.goldenPath} ${comparison.actualPath}`,
     "Review every hunk: an intended change updates the golden with",
-    `\`${BEHAVIOR_TRACE_UPDATE_ENV}=1 npm run update:sdk-behavior-trace\`, and the pull request lists each hunk.`,
+    "`npm run update:sdk-behavior-trace`, and the pull request lists each hunk.",
     "",
     ...shown,
     ...(lines.length > shown.length ? [`… ${lines.length - shown.length} more diff lines in ${comparison.diffPath}`] : []),
