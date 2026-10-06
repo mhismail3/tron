@@ -11,6 +11,21 @@ export interface TronWorkspaceDescriptor {
   reason?: "unavailable" | "owned_elsewhere" | "closed";
 }
 
+/** The capabilities that record their namespace's initialization beside the
+ * workspace root. Adding one here is what lets a missing namespace be reported
+ * as lost state instead of a fresh installation. */
+export type TronWorkspaceFeature = "knowledge" | "episodic";
+
+const FEATURE_MARKER_KEYS = ["knowledgeInitialized", "episodicInitialized"] as const;
+
+function featureMarkerKey(feature: TronWorkspaceFeature): string {
+  return `${feature}Initialized`;
+}
+
+function isFeatureMarkerKey(key: string): boolean {
+  return (FEATURE_MARKER_KEYS as readonly string[]).includes(key);
+}
+
 /** Only owns internal-workspace initialization and availability. It neither
  * selects session cwd nor scans content nor owns extension data schemas. */
 export class TronWorkspace {
@@ -81,8 +96,9 @@ export class TronWorkspace {
       if (read.present) {
         const value = read.value as Record<string, unknown> | null;
         if (!value || typeof value !== "object" || Array.isArray(value)
-          || Object.keys(value).some(key => key !== "version" && key !== "knowledgeInitialized")
-          || value.version !== 1 || (value.knowledgeInitialized !== undefined && typeof value.knowledgeInitialized !== "boolean")) {
+          || Object.keys(value).some(key => key !== "version" && !isFeatureMarkerKey(key))
+          || value.version !== 1
+          || FEATURE_MARKER_KEYS.some(key => value[key] !== undefined && typeof value[key] !== "boolean")) {
           throw new Error("Invalid workspace initialization record");
         }
       }
@@ -122,21 +138,21 @@ export class TronWorkspace {
 
   /** Feature initialization evidence lives beside the workspace root so loss of
    * a feature namespace cannot be mistaken for a fresh installation. */
-  async featureInitialized(feature: "knowledge"): Promise<boolean> {
+  async featureInitialized(feature: TronWorkspaceFeature): Promise<boolean> {
     await this.initialize();
     const marker = join(this.home, "gateway", "workspace-state", "initialized.json");
     const read = await readSecureJson<unknown>(marker, 256);
     if (!read.present) return false;
     if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)) return false;
-    return (read.value as Record<string, unknown>)[`${feature}Initialized`] === true;
+    return (read.value as Record<string, unknown>)[featureMarkerKey(feature)] === true;
   }
 
-  async markFeatureInitialized(feature: "knowledge"): Promise<void> {
+  async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {
     await this.initialize();
     const marker = join(this.home, "gateway", "workspace-state", "initialized.json");
     const read = await readSecureJson<unknown>(marker, 256);
     const value = read.present && read.value && typeof read.value === "object" && !Array.isArray(read.value) ? read.value as Record<string, unknown> : { version: 1 };
-    await durableAtomicWriteJson(marker, { ...value, version: 1, [`${feature}Initialized`]: true });
+    await durableAtomicWriteJson(marker, { ...value, version: 1, [featureMarkerKey(feature)]: true });
   }
 
   /** Read-only resolution for display. The document producer creates files/;

@@ -2774,6 +2774,14 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 
 [Session search](docs/session-search.md) owns the `session-search.v1` capability.
 
+## Episodic memory
+
+[Episodic memory](docs/episodic-memory.md) owns the projected-summary tree over
+one canonical session (`packages/gateway/src/episodic/`): its projection rules,
+the tree and view algorithms, invalidation semantics and measured cost,
+retries/budget/blocked states, and its storage under the internal workspace. No
+live session calls it yet; wiring it to Home's commits is a later task.
+
 ## Development
 
 ```bash
