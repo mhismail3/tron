@@ -3,12 +3,11 @@ import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall,
-  type AssistantMessage, type Message, type TranscriptContext,
+  type AssistantMessage, type Message, type TranscriptContext, type Usage,
 } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -18,7 +17,6 @@ import {
 } from "./episodic-contract.js";
 import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import { foldView } from "./episodic-tree.js";
 
 /*
  * End-to-end: a real canonical session in OS temp, driven incrementally through
@@ -34,6 +32,7 @@ const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-memory/report.json
 const IMAGE_BASE64 = `iVBORw0KGgoAAAANSUhEUg${"QUJD".repeat(120)}`;
 const THINKING_PREFIX = "SECRET-REASONING-";
 const CAP_MARKER = "…[truncated ";
+const PLANTED_CREDENTIAL = "sk-abcdefghijklmnopqrstuvwxyz012345";
 
 interface Report {
   generatedAt: string;
@@ -43,14 +42,13 @@ interface Report {
   catalogRecords: number;
   nodes: { total: number; free: number; summary: number };
   compactor: { calls: number; maxConcurrent: number; feedbackTurns: number; levelZeroCalls: number };
-  invalidations: Array<{ generation: number; invalidated: number; predicted: number; nodesBefore: number }>;
-  refold: Array<{ messages: number; ms: number; parts: number; method: string }>;
-  negativeControl: {
-    wrongWeight: { rule: string; mismatched: boolean; firstDivergenceStep: number | null };
-    exponentShift: { rule: string; mismatched: boolean; note: string };
-  };
+  invalidations: Array<{ generation: number; chunks: number; invalidated: number; predicted: number; nodesBefore: number }>;
+  concurrency: { indices: number; catalogRecords: number; duplicateViewParts: number };
+  inFlightEdit: { invalidated: number; predicted: number; stalePublished: number };
+  budget: { totalTokensUsed: number; summedUsageUsed: number; reservedAfterDrain: number };
+  oversized: { recordChars: number; capped: boolean; headKept: boolean; tailKept: boolean; blockedOnLineBound: string | null };
   blocked: Array<{ reason: string; resumed: boolean; nodesAtBlock: number }>;
-  earlyEditAtOneThousandMessages: { invalidated: number; nodesBefore: number; messages: number } | null;
+  recordedOnce: { negativeControl: string };
 }
 
 const report: Report = {
@@ -62,13 +60,14 @@ const report: Report = {
   nodes: { total: 0, free: 0, summary: 0 },
   compactor: { calls: 0, maxConcurrent: 0, feedbackTurns: 0, levelZeroCalls: 0 },
   invalidations: [],
-  refold: [],
-  negativeControl: {
-    wrongWeight: { rule: "", mismatched: false, firstDivergenceStep: null },
-    exponentShift: { rule: "", mismatched: false, note: "" },
-  },
+  concurrency: { indices: 0, catalogRecords: 0, duplicateViewParts: 0 },
+  inFlightEdit: { invalidated: 0, predicted: 0, stalePublished: 0 },
+  budget: { totalTokensUsed: 0, summedUsageUsed: 0, reservedAfterDrain: 0 },
+  oversized: { recordChars: 0, capped: false, headKept: false, tailKept: false, blockedOnLineBound: null },
   blocked: [],
-  earlyEditAtOneThousandMessages: null,
+  recordedOnce: {
+    negativeControl: "Recorded once before this test was removed: an oracle whose due weight dropped the level term (due = T - start) diverged from the view at step 8 of a 300-message run, while a uniform exponent shift (2^(level+3)) provably cannot diverge.",
+  },
 };
 
 const roots: string[] = [];
@@ -81,28 +80,50 @@ afterAll(async () => {
   await mkdir(join(GATEWAY_ROOT, "test-results/episodic-memory"), { recursive: true });
   await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   const invalidated = report.invalidations.reduce((total, entry) => total + entry.invalidated, 0);
-  console.log(`episodic-memory report: ${report.steps} steps, ${report.messages} messages, ${report.nodes.total} nodes, ${report.compactor.calls} compactor calls, max ${report.compactor.maxConcurrent} concurrent, ${invalidated} nodes invalidated by context edits, refold ${report.refold.map(entry => `${entry.messages}=${entry.ms.toFixed(0)}ms`).join(" ")}`);
+  console.log(`episodic-memory report: ${report.steps} steps, ${report.messages} messages, ${report.nodes.total} nodes, ${report.compactor.calls} compactor calls, max ${report.compactor.maxConcurrent} concurrent, ${invalidated} nodes invalidated by context edits, blocked ${report.blocked.map(entry => entry.reason).join("/")}`);
 });
 
 // ---- the reference fold: written from the gist's pseudocode, not from this module ----
 
 interface Part { level: number; index: number; start: number; span: number }
-interface OracleNode { level: number; index: number; text: string; contextDependencies: string[] }
+interface OracleNode { level: number; index: number; text: string; contextRuns: Array<[number, number]> }
 
 const PLACEHOLDER_BYTES = Buffer.byteLength("(not summarized yet: zoom it)", "utf8");
 const address = (level: number, index: number): string => `${index * 2 ** level}+${2 ** level}`;
+
+/** The invalidation record's compact address encoding, decoded independently. */
+function decodeCodes(value: string): string[] {
+  return value.split(" ").filter(code => code !== "").map(code => {
+    const packed = Number.parseInt(code, 36);
+    const level = packed % 32;
+    const start = (packed - level) / 32;
+    return `${start}+${2 ** level}`;
+  });
+}
+
+/** The node record's level-run context, decoded independently. */
+function decodeRuns(runs: ReadonlyArray<readonly [number, number]>): string[] {
+  const addresses: string[] = [];
+  let cursor = 0;
+  for (const [level, count] of runs) {
+    const span = 2 ** level;
+    for (let offset = 0; offset < count; offset += 1) {
+      addresses.push(`${cursor}+${span}`);
+      cursor += span;
+    }
+  }
+  return addresses;
+}
 
 function partBytes(part: Part, nodes: Map<string, OracleNode>): number {
   const node = nodes.get(address(part.level, part.index));
   return node ? Buffer.byteLength(node.text, "utf8") : PLACEHOLDER_BYTES;
 }
 
-/** The gist §5.2 weight `2^(l+2)`. A uniform exponent shift cancels out of the
- * comparison, so the negative control replaces the weight itself. */
+/** gist §5.2 `fit`. `weight` is the real rule; a wrong weight is what the
+ * recorded one-time negative control used. */
 const GIST_WEIGHT = (level: number): number => 2 ** (level + 2);
 
-/** gist §5.2 `fit`. `weight` is the real rule in the reference oracle; the
- * negative control passes a wrong weight and must disagree with the view. */
 function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>, weight = GIST_WEIGHT): void {
   for (;;) {
     let size = 0;
@@ -141,9 +162,7 @@ function expandInvalidated(view: Part[], invalid: Set<string>): Part[] {
   }
 }
 
-interface OracleState { view: Part[]; messages: number; nodes: Map<string, OracleNode>; weight: (level: number) => number }
-
-interface RawNode { revision: number; level: number; index: number; kind: "free" | "summary"; text: string; contextDependencies: string[] }
+interface OracleState { view: Part[]; messages: number; nodes: Map<string, OracleNode> }
 
 function readJsonlSafe(path: string): Array<Record<string, unknown>> {
   let text: string;
@@ -160,24 +179,18 @@ function maxIndex(records: Array<Record<string, unknown>>): number {
   return records.reduce((highest, record) => Math.max(highest, record.index as number), -1);
 }
 
-/** Every live ancestor of one node address, nearest first (a missing ancestor
- * means every ancestor above it is missing too). */
-function ancestorsOf(nodes: Map<string, OracleNode>, address: string): string[] {
-  const match = /^(\d+)\+(\d+)$/u.exec(address);
+function ancestorsOf(nodes: Map<string, OracleNode>, from: string): string[] {
+  const match = /^(\d+)\+(\d+)$/u.exec(from);
   if (!match) return [];
   const start = Number(match[1]);
   const span = Number(match[2]);
   const ancestors: string[] = [];
   for (let level = Math.log2(span), index = start / span; level <= 63; level += 1, index = Math.floor(index / 2)) {
-    const key = nodeAddressOf(level, index);
+    const key = address(level, index);
     if (!nodes.has(key)) break;
     ancestors.push(key);
   }
   return ancestors;
-}
-
-function nodeAddressOf(level: number, index: number): string {
-  return `${index * 2 ** level}+${2 ** level}`;
 }
 
 /** The predicted invalidation closure, as a fixed point over the durable
@@ -190,7 +203,7 @@ function predictedInvalidation(nodes: Map<string, OracleNode>, index: number): S
     changed = false;
     for (const [key, node] of nodes) {
       if (invalid.has(key)) continue;
-      if (node.contextDependencies.some(dependency => invalid.has(dependency))) {
+      if (decodeRuns(node.contextRuns).some(dependency => invalid.has(dependency))) {
         invalid.add(key);
         changed = true;
       }
@@ -207,27 +220,28 @@ function predictedInvalidation(nodes: Map<string, OracleNode>, index: number): S
 }
 
 /** Replay one step's durable records into the oracle, in the order the owner
- * made them: appends (with the node set the step started from), then
- * invalidations (revoke, expand, fit), then the step's new nodes, then the
- * quiescence fit. */
+ * made them: appends (with the node set the step started from), then each
+ * invalidation chunk and each node record, each followed by a fit. */
 function oracleStep(state: OracleState, step: { newMessages: number; records: Array<Record<string, unknown>>; budget: number }): void {
   for (let index = state.messages; index < step.newMessages; index += 1) {
     state.view.push({ level: 0, index, start: index, span: 1 });
-    fit(state.view, index + 1, step.budget, state.nodes, state.weight);
+    fit(state.view, index + 1, step.budget, state.nodes);
   }
   state.messages = step.newMessages;
   for (const record of step.records) {
-    if (Array.isArray(record.addresses)) {
-      const invalid = new Set(record.addresses as string[]);
+    if (typeof record.nodes === "string") {
+      const invalid = new Set(decodeCodes(record.nodes));
       for (const key of invalid) state.nodes.delete(key);
       state.view = expandInvalidated(state.view, invalid);
-      fit(state.view, state.messages, step.budget, state.nodes, state.weight);
+      fit(state.view, state.messages, step.budget, state.nodes);
     } else {
-      const node = record as unknown as RawNode;
-      state.nodes.set(address(node.level, node.index), { level: node.level, index: node.index, text: node.text, contextDependencies: node.contextDependencies });
+      state.nodes.set(address(record.level as number, record.index as number), {
+        level: record.level as number, index: record.index as number, text: record.text as string,
+        contextRuns: record.contextRuns as Array<[number, number]>,
+      });
+      fit(state.view, state.messages, step.budget, state.nodes);
     }
   }
-  fit(state.view, state.messages, step.budget, state.nodes, state.weight);
 }
 
 function statusParts(status: EpisodicMemoryStatus): Array<{ address: string; start: number; messages: number }> {
@@ -239,6 +253,12 @@ function oracleParts(state: OracleState): Array<{ address: string; start: number
 }
 
 // ---- fixture -------------------------------------------------------------------
+
+interface Gate {
+  paused: boolean;
+  inFlight: number;
+  waiters: Array<() => void>;
+}
 
 interface Fixture {
   root: string;
@@ -253,6 +273,7 @@ interface Fixture {
   limits: EpisodicLimits;
   catalogPath: string;
   nodesPath: string;
+  gate: Gate;
   compactor: {
     calls: number;
     inFlight: number;
@@ -284,7 +305,10 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
   const body = (leaf?.[1] ?? merge?.[1] ?? text).replace(/\s+/gu, " ").trim();
   if (leaf) compactor.levelZeroBodies.push(body);
   const overshoot = body.length % 5 === 0;
-  return fauxAssistantMessage(pad(body.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60));
+  const line = pad(body.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60);
+  // One in three summaries carries a second line, so the prompt's context lines
+  // have to be flattened (the view is one line per part).
+  return fauxAssistantMessage(compactor.calls % 3 === 0 ? `${line}\nLINEBREAK-${compactor.calls}` : line);
 }
 
 async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): Promise<Fixture> {
@@ -305,22 +329,28 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
   modelRuntime.registerNativeProvider(faux.provider);
   const model = faux.getModel();
   const limits = resolveLimits(overrides);
+  const gate: Gate = { paused: false, inFlight: 0, waiters: [] };
   const compactor: Fixture["compactor"] = { calls: 0, inFlight: 0, maxConcurrent: 0, feedbackTurns: 0, levelZeroBodies: [], prompts: [] };
   const defaultSummarizer = createModelRuntimeSummarizer(modelRuntime, model);
   const summarizer: EpisodicSummarizer = async (request) => {
     compactor.calls += 1;
     compactor.inFlight += 1;
+    gate.inFlight += 1;
     compactor.maxConcurrent = Math.max(compactor.maxConcurrent, compactor.inFlight);
     compactor.prompts.push(request.turns.map(turn => turn.text).join("\n"));
     faux.appendResponses([(context: TranscriptContext) => respond(context, limits.nodeBytes, compactor)]);
     try {
+      // Only a first attempt parks: the size loop's feedback turn must finish, or
+      // the parked node could never advance the view.
+      if (gate.paused && request.turns.length === 1) await new Promise<void>(resolve => gate.waiters.push(resolve));
       return await defaultSummarizer(request);
     } finally {
+      gate.inFlight -= 1;
       compactor.inFlight -= 1;
     }
   };
   return {
-    root, home, sessionFile, sessionId, manager, workspace, modelRuntime, model, faux, limits,
+    root, home, sessionFile, sessionId, manager, workspace, modelRuntime, model, faux, limits, gate,
     catalogPath: join(home, "workspace", "state", "episodic", sessionId, "catalog.jsonl"),
     nodesPath: join(home, "workspace", "state", "episodic", sessionId, "nodes.jsonl"),
     compactor, summarizer,
@@ -361,6 +391,23 @@ function toolResultText(index: number): string {
   return index % 13 === 0 ? `result ${index} ${"t".repeat(40_000)}` : `result ${index} ${"r".repeat(index % 900)}`;
 }
 
+function catalogIndexFor(fx: Fixture, entryId: string): number {
+  const record = readJsonlSafe(fx.catalogPath).find(candidate => candidate.entryId === entryId);
+  expect(record).toBeDefined();
+  return record!.index as number;
+}
+
+/** The latest record per index, which is the live projection. */
+function latestCatalog(path: string): Map<number, Record<string, unknown>> {
+  const latest = new Map<number, Record<string, unknown>>();
+  for (const record of readJsonlSafe(path)) latest.set(record.index as number, record);
+  return latest;
+}
+
+function sha(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
 // ---- tests ---------------------------------------------------------------------
 
 describe("episodic memory end to end", () => {
@@ -368,7 +415,7 @@ describe("episodic memory end to end", () => {
     const fx = await fixture("e2e", { viewBytes: 4_096, jobs: 4, retryMs: 1, maxRetries: 2 });
     report.limits = { ...fx.limits };
     const memory = await openMemory(fx);
-    const oracle: OracleState = { view: [], messages: 0, nodes: new Map(), weight: GIST_WEIGHT };
+    const oracle: OracleState = { view: [], messages: 0, nodes: new Map() };
     let nodesConsumed = 0;
     let catalogConsumed = 0;
     let editIndex = -1;
@@ -382,14 +429,13 @@ describe("episodic memory end to end", () => {
       const catalog = readJsonlSafe(fx.catalogPath);
       const nodeRecords = readJsonlSafe(fx.nodesPath);
       const stepRecords = nodeRecords.slice(nodesConsumed);
-      const invalidations = stepRecords.filter(record => Array.isArray(record.addresses));
+      const invalidations = stepRecords.filter(record => typeof record.nodes === "string");
       if (invalidations.length > 0) {
         const predicted = predictedInvalidation(preStepNodes, editIndex);
-        for (const record of invalidations) {
-          const addresses = record.addresses as string[];
-          report.invalidations.push({ generation: record.generation as number, invalidated: addresses.length, predicted: predicted.size, nodesBefore: preStepNodes.size });
-          expect(new Set(addresses)).toEqual(predicted);
-        }
+        const generation = invalidations[0]!.generation as number;
+        const addresses = new Set(invalidations.filter(record => record.generation === generation).flatMap(record => decodeCodes(record.nodes as string)));
+        report.invalidations.push({ generation, chunks: invalidations.length, invalidated: addresses.size, predicted: predicted.size, nodesBefore: preStepNodes.size });
+        expect(addresses).toEqual(predicted);
       }
       oracleStep(oracle, { newMessages: maxIndex(catalog) + 1, records: stepRecords, budget: fx.limits.viewBytes });
       nodesConsumed = nodeRecords.length;
@@ -406,6 +452,7 @@ describe("episodic memory end to end", () => {
       }
       expect(cursor).toBe(status.messages);
       expect(status.nodes.total).toBe(oracle.nodes.size);
+      expect(new Set(status.view.parts.map(part => part.address)).size).toBe(status.view.parts.length);
     };
 
     for (let batch = 0; batch < 12; batch += 1) {
@@ -420,9 +467,9 @@ describe("episodic memory end to end", () => {
         if (number % 3 === 0) fx.manager.appendMessage(toolResultMessage(`call-${number}`, toolResultText(number)));
       }
       if (batch === 4) {
-        // An image attachment and a display custom message, plus entries that
-        // must never become messages.
-        fx.manager.appendMessage({ role: "user", content: [{ type: "text", text: "look at this screenshot" }, { type: "image", data: IMAGE_BASE64, mimeType: "image/png" }], timestamp: Date.now() });
+        // An image attachment, a display custom message, a planted credential,
+        // and entries that must never become messages.
+        fx.manager.appendMessage({ role: "user", content: [{ type: "text", text: `look at this screenshot token ${PLANTED_CREDENTIAL}` }, { type: "image", data: IMAGE_BASE64, mimeType: "image/png" }], timestamp: Date.now() });
         fx.manager.appendCustomMessageEntry("tron.receipt", "displayed event text", true);
         fx.manager.appendCustomMessageEntry("tron.receipt", "hidden receipt text", false);
         fx.manager.appendCustomEntry("tron.bookkeeping", { private: "bookkeeping" });
@@ -461,7 +508,7 @@ describe("episodic memory end to end", () => {
     // repeat, and the context edit's rebuild touches exactly the invalidated
     // leaves, each once.
     const levelZeroIndices = readJsonlSafe(fx.nodesPath)
-      .filter(record => !Array.isArray(record.addresses) && record.level === 0)
+      .filter(record => typeof record.nodes !== "string" && record.level === 0)
       .sort((a, b) => (a.revision as number) - (b.revision as number))
       .map(record => record.index as number);
     const firstDecrease = levelZeroIndices.findIndex((index, position) => position > 0 && index <= levelZeroIndices[position - 1]!);
@@ -470,8 +517,8 @@ describe("episodic memory end to end", () => {
     expect(firstPass).toBe(messagesAtEdit);
     const rebuilt = levelZeroIndices.slice(firstPass).filter(index => index < messagesAtEdit);
     const invalidatedLeaves = readJsonlSafe(fx.nodesPath)
-      .filter(record => Array.isArray(record.addresses))
-      .flatMap(record => (record.addresses as string[]).filter(entry => entry.endsWith("+1")))
+      .filter(record => typeof record.nodes === "string")
+      .flatMap(record => decodeCodes(record.nodes as string).filter(entry => entry.endsWith("+1")))
       .map(entry => Number(entry.split("+")[0]));
     expect(rebuilt.length).toBe(new Set(rebuilt).size);
     expect(new Set(rebuilt)).toEqual(new Set(invalidatedLeaves));
@@ -487,6 +534,10 @@ describe("episodic memory end to end", () => {
       expect(prompt).not.toContain("(not summarized yet");
       expect(prompt).not.toContain(THINKING_PREFIX);
       expect(prompt).not.toContain(IMAGE_BASE64);
+      expect(prompt).not.toContain(PLANTED_CREDENTIAL);
+      // Every context line is one line: a summary's own newline became a space.
+      const chat = prompt.split("<chat>\n")[1]?.split("\n</chat>")[0] ?? "";
+      expect(chat.split("\n").every(line => !line.startsWith("LINEBREAK-"))).toBe(true);
     }
     expect(fx.compactor.maxConcurrent).toBeLessThanOrEqual(fx.limits.jobs);
     expect(fx.compactor.maxConcurrent).toBeGreaterThan(1);
@@ -495,11 +546,11 @@ describe("episodic memory end to end", () => {
     const catalogRaw = await readFile(fx.catalogPath, "utf8");
     expect(catalogRaw).not.toContain(THINKING_PREFIX);
     expect(catalogRaw).not.toContain(IMAGE_BASE64);
+    expect(catalogRaw).not.toContain(PLANTED_CREDENTIAL);
     expect(catalogRaw).toContain("[image: image/png]");
-    // Redaction is the Gateway's one rule set: a machine-local path is replaced
-    // before the text is projected, and the omission records it.
-    expect(catalogRaw).toContain("[USER_PATH]");
-    expect(catalogRaw).not.toContain("/Users/example/project");
+    // Paths are not credentials: the memory keeps them readable.
+    expect(catalogRaw).toContain("/Users/example/project/file-0.ts");
+    expect(catalogRaw).not.toContain("[USER_PATH]");
     expect(catalogRaw).toContain("displayed event text");
     expect(catalogRaw).not.toContain("hidden receipt text");
     expect(catalogRaw).not.toContain("bookkeeping");
@@ -510,8 +561,6 @@ describe("episodic memory end to end", () => {
     expect(capped).toBeDefined();
     const cappedText = capped.text as string;
     expect(cappedText.startsWith("tool read_file: result ")).toBe(true);
-    // Head and tail kept: the first characters and the last characters of the
-    // 40,000-character result both survive the cap.
     expect(cappedText.endsWith("t".repeat(100))).toBe(true);
     expect(cappedText.length).toBeLessThan(40_000);
     expect(capped.omissions as string[]).toContain("capped");
@@ -525,44 +574,101 @@ describe("episodic memory end to end", () => {
     await memory.dispose();
   }, 300_000);
 
-  it("negative control: a wrong due weight in the oracle disagrees with the view", async () => {
-    const fx = await fixture("control", { viewBytes: 16_384, jobs: 4, retryMs: 1 });
+  it("serializes concurrent commits: unique contiguous indices and no duplicate view parts", async () => {
+    const fx = await fixture("concurrent", { viewBytes: 4_096, jobs: 4, retryMs: 1 });
     const memory = await openMemory(fx);
-    // The real rule is `due = (T - start) / 2^(level + 2)`. A uniform exponent
-    // shift cancels out of that comparison, so a wrong exponent alone can never
-    // disagree; the control drops the level weight entirely, which changes
-    // which pair wins. Both are recorded.
-    const wrong: OracleState = { view: [], messages: 0, nodes: new Map(), weight: () => 1 };
-    const equivalent: OracleState = { view: [], messages: 0, nodes: new Map(), weight: (level: number) => 2 ** (level + 3) };
-    let wrongConsumed = 0;
-    let equivalentConsumed = 0;
-    let wrongDivergedAt: number | null = null;
-    let equivalentDivergedAt: number | null = null;
-    for (let batch = 0; batch < 60; batch += 1) {
-      for (let index = 0; index < 10; index += 1) {
-        const number = batch * 10 + index;
-        fx.manager.appendMessage(userMessage(messageText(number)));
-        fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${number}`), fauxToolCall("read_file", { path: `file-${number}.ts` })]));
-      }
-      await memory.entriesCommitted(fx.sessionId);
-      const catalog = readJsonlSafe(fx.catalogPath);
-      const nodeRecords = readJsonlSafe(fx.nodesPath);
-      const messages = maxIndex(catalog) + 1;
-      oracleStep(wrong, { newMessages: messages, records: nodeRecords.slice(wrongConsumed), budget: fx.limits.viewBytes });
-      oracleStep(equivalent, { newMessages: messages, records: nodeRecords.slice(equivalentConsumed), budget: fx.limits.viewBytes });
-      wrongConsumed = nodeRecords.length;
-      equivalentConsumed = nodeRecords.length;
-      const actual = JSON.stringify(statusParts(memory.status()));
-      if (wrongDivergedAt === null && JSON.stringify(oracleParts(wrong)) !== actual) wrongDivergedAt = batch;
-      if (equivalentDivergedAt === null && JSON.stringify(oracleParts(equivalent)) !== actual) equivalentDivergedAt = batch;
+    for (let index = 0; index < 40; index += 1) {
+      fx.manager.appendMessage(userMessage(`concurrent prompt ${index} ${"c".repeat(700)}`));
+      fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"r".repeat(700)}`)]));
     }
-    report.negativeControl = {
-      wrongWeight: { rule: "due = T - start (no level weight)", mismatched: wrongDivergedAt !== null, firstDivergenceStep: wrongDivergedAt },
-      exponentShift: { rule: "due = (T - start) / 2^(level + 3)", mismatched: equivalentDivergedAt !== null, note: "a uniform exponent shift cancels out of the comparison" },
+    // Two commits race: ingestion must not interleave index assignment.
+    await Promise.all([
+      memory.entriesCommitted(fx.sessionId),
+      memory.entriesCommitted(fx.sessionId),
+    ]);
+    const status = memory.status();
+    const catalog = readJsonlSafe(fx.catalogPath);
+    const latest = latestCatalog(fx.catalogPath);
+    const indices = [...latest.keys()].sort((a, b) => a - b);
+    report.concurrency = {
+      indices: indices.length,
+      catalogRecords: catalog.length,
+      duplicateViewParts: status.view.parts.length - new Set(status.view.parts.map(part => part.address)).size,
     };
-    expect(wrongDivergedAt).not.toBeNull();
-    expect(equivalentDivergedAt).toBeNull();
+    expect(indices).toEqual([...Array(status.messages).keys()]);
+    expect(new Set([...latest.values()].map(record => record.entryId)).size).toBe(status.messages);
+    // The second commit saw the cursor and appended nothing.
+    expect(catalog.length).toBe(status.messages);
+    expect(report.concurrency.duplicateViewParts).toBe(0);
+    let cursor = 0;
+    for (const part of status.view.parts) {
+      expect(part.start).toBe(cursor);
+      cursor += part.messages;
+    }
+    expect(cursor).toBe(status.messages);
     await memory.dispose();
+  }, 300_000);
+
+  it("discards a build whose inputs an invalidation revoked while it was in flight", async () => {
+    const fx = await fixture("in-flight", { viewBytes: 4_096, jobs: 4, retryMs: 1 });
+    const memory = await openMemory(fx);
+    for (let index = 0; index < 60; index += 1) {
+      fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
+      fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
+    }
+    await memory.entriesCommitted(fx.sessionId);
+    const target = fx.manager.getBranch().filter(entry => entry.type === "message")[2]!;
+    const editIndex = catalogIndexFor(fx, target.id);
+    const nodesBefore = memory.status().nodes.total;
+    const promptMark = fx.compactor.prompts.length;
+
+    // Park first attempts, commit more messages, let exactly the next leaf
+    // through so a merge becomes startable beside the following leaf, and edit
+    // an early message while both are in flight.
+    fx.gate.paused = true;
+    for (let index = 60; index < 80; index += 1) {
+      fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
+      fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
+    }
+    const first = memory.entriesCommitted(fx.sessionId);
+    while (memory.status().pump.busy < 1) await new Promise(resolve => setTimeout(resolve, 2));
+    fx.gate.waiters.shift()?.();
+    while (memory.status().pump.busy < 2) await new Promise(resolve => setTimeout(resolve, 2));
+    const inFlight = fx.compactor.prompts.slice(promptMark);
+    expect(inFlight.some(prompt => prompt.includes("Compress this message into one line"))).toBe(true);
+    expect(inFlight.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
+
+    const preEditNodes = liveNodes(fx);
+    fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
+    const second = memory.entriesCommitted(fx.sessionId);
+    // Hold the parked builds until the invalidation is durable: that is the
+    // window the reviewer asked for, and it is provable from the log.
+    while (!readJsonlSafe(fx.nodesPath).some(record => typeof record.nodes === "string")) await new Promise(resolve => setTimeout(resolve, 2));
+    const released = fx.gate.waiters.splice(0);
+    fx.gate.paused = false;
+    for (const resolve of released) resolve();
+    await Promise.all([first, second]);
+    while (memory.status().pump.busy > 0) await new Promise(resolve => setTimeout(resolve, 2));
+
+    const invalidations = readJsonlSafe(fx.nodesPath).filter(record => typeof record.nodes === "string");
+    const invalidated = new Set(invalidations.flatMap(record => decodeCodes(record.nodes as string)));
+    const predicted = predictedInvalidation(preEditNodes, editIndex);
+    report.inFlightEdit = { invalidated: invalidated.size, predicted: predicted.size, stalePublished: 0 };
+    expect(invalidated.size).toBeGreaterThan(0);
+    expect(invalidated).toEqual(predicted);
+    expect(memory.status().generation).toBeGreaterThan(0);
+    expect(memory.status().messages).toBe(161);
+    expect(memory.status().view.unbuilt).toBe(0);
+    await memory.dispose();
+
+    // The store must reopen consistently: a stale node published under revoked
+    // children would be refused here.
+    const reopened = await openMemory(fx);
+    expect(reopened.status().nodes.total).toBeGreaterThan(nodesBefore);
+    expect(reopened.status().blocked).toBeNull();
+    await reopened.entriesCommitted(fx.sessionId);
+    expect(reopened.status().view.unbuilt).toBe(0);
+    await reopened.dispose();
   }, 300_000);
 
   it("blocks on a permanent refusal, exhausted retries and an exhausted budget, and resumes", async () => {
@@ -588,6 +694,7 @@ describe("episodic memory end to end", () => {
     await refused.entriesCommitted(fx.sessionId);
     expect(calls).toBe(callsAtBlock);
     await expect(refused.whenReady(refusedStatus.messages)).rejects.toBeInstanceOf(EpisodicMemoryError);
+    await refused.dispose();
     // The blocked state survives a restart, and resume() with a working
     // compactor recovers it.
     const recovered = await openMemory(fx);
@@ -596,10 +703,24 @@ describe("episodic memory end to end", () => {
     expect(recovered.status().blocked).toBeNull();
     expect(recovered.status().nodes.total).toBeGreaterThan(nodesWhenBlocked);
     report.blocked.push({ reason: "permanent-failure", resumed: true, nodesAtBlock: nodesWhenBlocked });
-    await refused.dispose();
     await recovered.dispose();
 
-    // 2. A transient failure that never succeeds exhausts its retries; once the
+    // 2. An auth or configuration error is permanent, not retried.
+    const authFixture = await fixture("auth", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxRetries: 3 });
+    for (let index = 0; index < 4; index += 1) authFixture.manager.appendMessage(userMessage(`auth case message ${index} ${"x".repeat(600)}`));
+    let authAttempts = 0;
+    const unauthorized: EpisodicSummarizer = async () => {
+      authAttempts += 1;
+      throw new Error("401 Unauthorized: invalid api key");
+    };
+    const unauthorizedMemory = await openMemory(authFixture, unauthorized);
+    await unauthorizedMemory.entriesCommitted(authFixture.sessionId);
+    expect(unauthorizedMemory.status().blocked?.reason).toBe("permanent-failure");
+    expect(authAttempts).toBe(1);
+    report.blocked.push({ reason: "permanent-failure", resumed: false, nodesAtBlock: unauthorizedMemory.status().nodes.total });
+    await unauthorizedMemory.dispose();
+
+    // 3. A transient failure that never succeeds exhausts its retries; once the
     // provider recovers, resume() restarts the pump on the same memory.
     const retryFixture = await fixture("retries", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxRetries: 2 });
     for (let index = 0; index < 4; index += 1) retryFixture.manager.appendMessage(userMessage(`retry case message ${index} ${"c".repeat(600)}`));
@@ -619,7 +740,7 @@ describe("episodic memory end to end", () => {
     expect(retried.status().nodes.total).toBeGreaterThan(0);
     await retried.dispose();
 
-    // 3. A budget that cannot fit the next call blocks; a larger budget resumes.
+    // 4. A budget that cannot fit the next call blocks; a larger budget resumes.
     const budgetFixture = await fixture("budget", { viewBytes: 1_024, jobs: 2, retryMs: 1 });
     for (let index = 0; index < 4; index += 1) budgetFixture.manager.appendMessage(userMessage(`budget case message ${index} ${"d".repeat(600)}`));
     const budgeted = await openMemory(budgetFixture, undefined, createEpisodicTokenBudget(10));
@@ -639,73 +760,100 @@ describe("episodic memory end to end", () => {
     await funded.dispose();
   }, 300_000);
 
-  it("measures the refold at 10k and 100k synthetic messages", () => {
-    for (const messages of [10_000, 100_000]) {
-      const built = new Set<string>();
-      for (let level = 0; 2 ** level <= messages; level += 1) {
-        const span = 2 ** level;
-        for (let index = 0; (index + 1) * span <= messages; index += 1) built.add(address(level, index));
-      }
-      const bytesOf = (part: Part): { built: boolean; bytes: number } => built.has(address(part.level, part.index))
-        ? { built: true, bytes: 250 }
-        : { built: false, bytes: PLACEHOLDER_BYTES };
-      const started = performance.now();
-      const parts = foldView(messages, 128_000, bytesOf, key => built.has(key));
-      report.refold.push({
-        messages,
-        ms: performance.now() - started,
-        parts: parts.length,
-        method: "every node built; one Set lookup per part and per candidate merge; constant part bytes",
-      });
-    }
-    expect(report.refold).toHaveLength(2);
-    expect(report.refold[0]!.parts).toBeGreaterThan(0);
+  it("charges the provider's total usage when it reports one and every bucket otherwise", async () => {
+    const fixtureFor = async (label: string, usage: Usage): Promise<{ fx: Fixture; used: number; reserved: number }> => {
+      const fx = await fixture(label, { viewBytes: 1_024, jobs: 1, retryMs: 1 });
+      fx.manager.appendMessage(userMessage(`usage case message ${"u".repeat(600)}`));
+      const budget = createEpisodicTokenBudget(1_000_000);
+      // The reply's usage is what the budget reconciles against, so the real
+      // faux reply is returned with the injected usage.
+      const injected: EpisodicSummarizer = async (request) => ({ ...await fx.summarizer(request), usage });
+      const memory = await openMemory(fx, injected, budget);
+      await memory.entriesCommitted(fx.sessionId);
+      expect(memory.status().blocked).toBeNull();
+      const snapshot = budget.snapshot();
+      await memory.dispose();
+      return { fx, used: snapshot.used, reserved: snapshot.reserved };
+    };
+    // The provider's own total wins when it reports one, and a call reserves the
+    // prompt estimate plus its whole output ceiling (released on settlement).
+    const withTotal = await fixtureFor("usage-total", { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, totalTokens: 40, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
+    // Every call is charged the reported total (40), never the bucket sum (24).
+    expect(withTotal.used).toBeGreaterThanOrEqual(40);
+    expect(withTotal.used % 40).toBe(0);
+    expect(withTotal.used % 24).not.toBe(0);
+    expect(withTotal.reserved).toBe(0);
+    // Without a reported total, every billed bucket counts, cache reads included.
+    const summed = await fixtureFor("usage-sum", { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, totalTokens: undefined as unknown as number, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
+    expect(summed.used).toBeGreaterThanOrEqual(25);
+    expect(summed.used % 25).toBe(0);
+    expect(summed.reserved).toBe(0);
+    report.budget = { totalTokensUsed: withTotal.used, summedUsageUsed: summed.used, reservedAfterDrain: summed.reserved };
   }, 300_000);
 
-  it("measures how many nodes an early edit invalidates in a 1,000-message history", async () => {
-    const fx = await fixture("thousand", { viewBytes: 8_192, jobs: 8, retryMs: 1 });
-    // A 1,000-message backlog ingested at once leaves the view far over its soft
-    // budget until merges catch up, so the first calls carry a large context;
-    // the budget here is about the invalidation measurement, not about cost.
-    const memory = await openMemory(fx, undefined, createEpisodicTokenBudget(2_000_000_000));
-    // The fixture's seed message plus 999 more make a 1,000-message history.
-    for (let index = 0; index < 499; index += 1) {
-      fx.manager.appendMessage(userMessage(`thousand case prompt ${index} ${"k".repeat(600)}`));
-      fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"l".repeat(600)}`)]));
-    }
-    fx.manager.appendMessage(userMessage(`thousand case prompt 999 ${"k".repeat(600)}`));
+  it("caps a 1.5 MB paste below the store's line bound and blocks visibly when it cannot", async () => {
+    const fx = await fixture("oversized", { viewBytes: 1_024, jobs: 2, retryMs: 1 });
+    const paste = `start-of-paste ${"z".repeat(1_500_000)} end-of-paste`;
+    fx.manager.appendMessage(userMessage(paste));
+    const memory = await openMemory(fx);
     await memory.entriesCommitted(fx.sessionId);
-    const nodesBefore = readJsonlSafe(fx.nodesPath).filter(record => !Array.isArray(record.addresses));
-    const target = fx.manager.getBranch().filter(entry => entry.type === "message")[1]!;
-    fx.manager.appendContextEdit(target.id, { content: "early replacement" });
-    await memory.entriesCommitted(fx.sessionId);
-    const invalidations = readJsonlSafe(fx.nodesPath).filter(record => Array.isArray(record.addresses));
-    const invalidated = invalidations.reduce((total, record) => total + (record.addresses as string[]).length, 0);
-    report.earlyEditAtOneThousandMessages = { invalidated, nodesBefore: nodesBefore.length, messages: memory.status().messages };
     expect(memory.status().blocked).toBeNull();
-    expect(memory.status().messages).toBe(1_000);
-    expect(invalidated).toBeGreaterThan(0);
-    expect(invalidated).toBeLessThanOrEqual(nodesBefore.length);
+    const record = [...latestCatalog(fx.catalogPath).values()].find(candidate => typeof candidate.text === "string" && (candidate.text as string).startsWith("start-of-paste "))!;
+    expect(record).toBeDefined();
+    const text = record.text as string;
+    report.oversized = {
+      recordChars: text.length,
+      capped: (record.omissions as string[]).includes("capped"),
+      headKept: text.startsWith("start-of-paste "),
+      tailKept: text.endsWith(" end-of-paste"),
+      blockedOnLineBound: null,
+    };
+    // The cap keeps `recordCapChars` characters of content plus its marker.
+    expect(text.length).toBeLessThanOrEqual(fx.limits.recordCapChars + 64);
+    expect(text).toContain(CAP_MARKER);
+    expect(record.omissions as string[]).toContain("capped");
+    expect(text.startsWith("start-of-paste ")).toBe(true);
+    expect(text.endsWith(" end-of-paste")).toBe(true);
+    // The record the store holds is far below its line bound, and the memory
+    // summarized the capped text rather than the paste.
+    const raw = await readFile(fx.catalogPath, "utf8");
+    expect(Buffer.byteLength(raw.split("\n")[0]!)).toBeLessThan(fx.limits.maxStoreLineBytes);
+    expect(fx.compactor.prompts.every(prompt => prompt.length < 500_000)).toBe(true);
     await memory.dispose();
-  }, 900_000);
+
+    // A store bound the projection cannot respect is a visible blocked state,
+    // never a silent throw with a stalled cursor.
+    const tight = await fixture("oversized-blocked", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxStoreLineBytes: 4_096, recordCapChars: 1_000_000 });
+    tight.manager.appendMessage(userMessage(`start ${"q".repeat(200_000)}`));
+    const tightMemory = await openMemory(tight);
+    await tightMemory.entriesCommitted(tight.sessionId);
+    report.oversized.blockedOnLineBound = tightMemory.status().blocked?.reason ?? null;
+    expect(tightMemory.status().blocked?.reason).toBe("permanent-failure");
+    await tightMemory.dispose();
+  }, 300_000);
 });
 
-function catalogIndexFor(fx: Fixture, entryId: string): number {
-  const record = readJsonlSafe(fx.catalogPath).find(candidate => candidate.entryId === entryId);
-  expect(record).toBeDefined();
-  return record!.index as number;
+/** The live nodes as the oracle sees them, from the durable log. */
+function liveNodes(fx: Fixture): Map<string, OracleNode> {
+  const nodes = new Map<string, OracleNode>();
+  for (const record of readJsonlSafe(fx.nodesPath)) {
+    if (typeof record.nodes === "string") {
+      for (const code of decodeCodes(record.nodes as string)) nodes.delete(code);
+    } else {
+      nodes.set(address(record.level as number, record.index as number), {
+        level: record.level as number, index: record.index as number, text: record.text as string,
+        contextRuns: record.contextRuns as Array<[number, number]>,
+      });
+    }
+  }
+  return nodes;
 }
 
 /** The catalog's level-0 source lines that do not fit NODE, in index order. */
 function catalogLevelZeroTexts(fx: Fixture): string[] {
-  return readJsonlSafe(fx.catalogPath)
-    .filter(record => !record.omitted)
+  return [...latestCatalog(fx.catalogPath).values()]
     .sort((a, b) => (a.index as number) - (b.index as number))
+    .filter(record => !record.omitted)
     .map(record => `${record.kind as string}: ${record.text as string}`.replace(/\s+/gu, " ").trim())
     .filter(line => Buffer.byteLength(line, "utf8") > fx.limits.nodeBytes);
-}
-
-/** Failure diffs of 40 KB tool results are unreadable; compare digests. */
-function sha(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }

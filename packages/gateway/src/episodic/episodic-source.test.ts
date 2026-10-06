@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -209,5 +209,71 @@ describe("episodic canonical source reader", () => {
     expect(memory.status().blocked?.reason).toBe("source-unavailable");
     await expect(memory.whenReady(1)).rejects.toBeInstanceOf(EpisodicMemoryError);
     await memory.dispose();
+  });
+
+  it("never gives a hidden custom message or a state entry a slot, even for a null edit", async () => {
+    const fx = await fixture("hidden");
+    const hidden = fx.manager.appendCustomMessageEntry("tron.receipt", "hidden receipt", false);
+    const displayed = fx.manager.appendCustomMessageEntry("tron.receipt", "displayed receipt", true);
+    fx.manager.appendCustomEntry("tron.bookkeeping", { private: true });
+    fx.manager.appendContextEdit(hidden, null);
+    fx.manager.appendContextEdit(displayed, null);
+    const memory = await memoryFor(fx);
+    await memory.entriesCommitted(fx.sessionId);
+    const latest = new Map<number, Record<string, unknown>>();
+    for (const record of catalogRecords(await readFile(fx.catalogPath, "utf8"))) latest.set(record.index as number, record);
+    // Only the seed message and the displayed event hold slots; the hidden
+    // custom message and the state entry never had one to omit.
+    expect(memory.status().messages).toBe(2);
+    expect(latest.get(0)!.text).toBe("first prompt");
+    expect(latest.get(1)!.omitted).toBe(true);
+    expect(latest.get(1)!.kind).toBe("event");
+    expect(latest.get(1)!.text).toBe("[omitted]");
+    await memory.dispose();
+  });
+
+  it("answers whenReady for cut 0 on an empty memory and refuses an impossible or aborted wait", async () => {
+    const fx = await fixture("ready");
+    fx.manager.appendMessage(userMessage("second prompt"));
+    const memory = await memoryFor(fx);
+    // Nothing is ingested yet: cut 0 is trivially ready, a cut beyond the
+    // message count is not answerable, and an aborted wait rejects at once.
+    await memory.whenReady(0);
+    await expect(memory.whenReady(1)).rejects.toThrowError(/beyond/u);
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(memory.whenReady(1, { signal: aborted.signal })).rejects.toBeInstanceOf(EpisodicMemoryError);
+    await memory.entriesCommitted(fx.sessionId);
+    expect(memory.status().messages).toBe(2);
+    await memory.whenReady(2);
+    await expect(memory.whenReady(3)).rejects.toThrowError(/beyond/u);
+    await memory.dispose();
+  });
+
+  it("continues at the cursor when the file only grew", async () => {
+    const fx = await fixture("incremental");
+    const first = await readCanonicalSession({ path: fx.sessionFile, sessionId: fx.sessionId, maxLineBytes: 1_024 * 1_024 });
+    expect(first.incremental).toBe(false);
+    fx.manager.appendMessage(userMessage("appended after the first read"));
+    const second = await readCanonicalSession({
+      path: fx.sessionFile, sessionId: fx.sessionId, maxLineBytes: 1_024 * 1_024,
+      previous: { cursor: first.cursor, branch: first.branch },
+    });
+    expect(second.incremental).toBe(true);
+    expect(second.branch.map(entry => entry.id)).toEqual(fx.manager.getBranch().map(entry => entry.id));
+    expect(second.completeBytes).toBeGreaterThan(first.completeBytes);
+    // A rewrite that changes the line before the offset falls back to the whole
+    // file rather than extending a prefix that is no longer there.
+    const rewritten = join(fx.root, "rewritten.jsonl");
+    const raw = await readFile(fx.sessionFile, "utf8");
+    const lines = raw.split("\n").filter(line => line !== "");
+    lines[lines.length - 1] = lines[lines.length - 1]!.replace("appended after the first read", "rewritten later on");
+    await writeFile(rewritten, `${lines.join("\n")}\n`);
+    const reread = await readCanonicalSession({
+      path: rewritten, sessionId: fx.sessionId, maxLineBytes: 1_024 * 1_024,
+      previous: { cursor: second.cursor, branch: second.branch },
+    });
+    expect(reread.incremental).toBe(false);
+    expect(reread.branch.at(-1)!.id).toBe(second.branch.at(-1)!.id);
   });
 });

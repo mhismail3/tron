@@ -27,6 +27,11 @@ export interface EpisodicLimits {
   capChars: number;
   /** Characters of the tail kept when a text is capped; the head keeps the rest. */
   capTailChars: number;
+  /** Max characters of one projected user, assistant or event text. The recipe
+   * sends those whole; a memory record must still fit its store's line, so this
+   * is the store bound, not a model-input bound (a JSON string can expand to
+   * six bytes per character, and the record carries the digests around it). */
+  recordCapChars: number;
   /** Wait before retrying a transiently failed node (gist `RETRY`). */
   retryMs: number;
   /** Transient retries per compactor call before the node blocks. The recipe
@@ -48,6 +53,9 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   tries: 5,
   capChars: 30_000,
   capTailChars: 4_000,
+  // 128 Ki characters: six bytes per character of JSON escaping plus the record
+  // around it stays under the one-megabyte store line bound.
+  recordCapChars: 128 * 1_024,
   retryMs: 10_000,
   maxRetries: 3,
   maxSourceLineBytes: 16 * 1_024 * 1_024,
@@ -56,6 +64,11 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
 
 /** Version of every persisted episodic document. */
 export const EPISODIC_STORE_VERSION = 1 as const;
+
+/** How many revoked nodes one invalidation record carries. The record is
+ * written once per chunk in ancestor-first order, so any prefix of a batch
+ * leaves a consistent store. */
+export const EPISODIC_INVALIDATION_CHUNK = 2_048;
 
 /** What a level-0 node whose message is not a message any more shows. */
 export const EPISODIC_OMITTED_TEXT = "[omitted]";
@@ -79,10 +92,12 @@ export type EpisodicErrorKind =
   | "invalid-store"
   | "unsafe-store"
   | "source"
-  | "invalid-request";
+  | "invalid-request"
+  | "already-open";
 
 /** One error type for every refusal this module makes, so a caller can tell a
- * visible refusal (invalid store, unsafe directory) from a blocked memory. */
+ * visible refusal (invalid store, unsafe directory, a second opener) from a
+ * blocked memory. */
 export class EpisodicMemoryError extends Error {
   constructor(readonly kind: EpisodicErrorKind, message: string) {
     super(message);
@@ -108,15 +123,24 @@ export interface EpisodicMessageRecord {
   sourceDigest: string;
   /** sha256 of `text`. */
   projectedDigest: string;
-  /** Why content was left out: `thinking`, `attachment`, `capped`, `redacted`,
-   * `context-edit`, `off-branch`. */
+  /** Why content was left out: `thinking`, `attachment`, `capped`,
+   * `record-cap`, `credentials`, `context-edit`, `off-branch`, `empty`,
+   * `unsupported-part`. */
   omissions: string[];
   /** The entry contributes no text of its own (a null context edit, or a
    * navigation that left the branch). Never sent to the model. */
   omitted: boolean;
 }
 
-/** One node of the binary tree (gist §3), or the revocation of one. */
+/**
+ * One run of the view lines a node's compactor call was given: `[level, count]`
+ * in view order. The view tiles from message 0, so the run list reconstructs
+ * every address exactly and stays bounded by the number of level changes
+ * instead of growing with the view.
+ */
+export type EpisodicContextRun = readonly [level: number, count: number];
+
+/** One node of the binary tree (gist §3). */
 export interface EpisodicNodeRecord {
   revision: number;
   level: number;
@@ -125,32 +149,52 @@ export interface EpisodicNodeRecord {
   text: string;
   /** Revisions of the two children a merge was built from. */
   childRevisions?: readonly [number, number];
-  /** Addresses of the view lines this node's compactor call was given. Empty
-   * for a free node, which made no call. */
-  contextDependencies: readonly string[];
+  /** The context runs of this node's compactor call. Empty for a free node,
+   * which made no call. */
+  contextRuns: readonly EpisodicContextRun[];
   textDigest: string;
   /** sha256 of the child texts (merge) or the source message text (leaf). */
   sourceDigest: string;
 }
 
-/** Append-only revocation of a whole invalidation, written as one durable line
- * so a crash can never leave a revoked child under a live parent. */
+/**
+ * Append-only revocation, one record per chunk of one invalidation. Addresses
+ * are encoded as space-separated base-36 codes (see `encodeNodeCode`), and the
+ * chunks are written ancestor-first, so a crash between chunks leaves a
+ * consistent store: every live parent still has live children.
+ */
 export interface EpisodicInvalidationRecord {
   revision: number;
   generation: number;
-  addresses: readonly string[];
+  /** Zero-based chunk number and the chunk count of this invalidation. */
+  part: number;
+  parts: number;
+  nodes: string;
 }
 
 export type EpisodicNodeLogRecord = EpisodicNodeRecord | EpisodicInvalidationRecord;
 
 export function isInvalidationRecord(record: EpisodicNodeLogRecord): record is EpisodicInvalidationRecord {
-  return (record as EpisodicInvalidationRecord).addresses !== undefined;
+  return (record as EpisodicInvalidationRecord).nodes !== undefined;
+}
+
+/** Where the canonical reader stopped, and the identity of the file it read, so
+ * the next read can continue at the offset when the file only grew. */
+export interface EpisodicSourceCursor {
+  dev: number;
+  ino: number;
+  size: number;
+  completeBytes: number;
+  leafEntryId: string | null;
+  /** sha256 of the last complete line's JSON text, so an in-place rewrite of
+   * the prefix is detected by the window read before the offset. */
+  leafLineDigest: string | null;
 }
 
 export interface EpisodicStoreState {
   version: typeof EPISODIC_STORE_VERSION;
   generation: number;
-  cursor: { completeBytes: number; leafEntryId: string | null } | null;
+  cursor: EpisodicSourceCursor | null;
   blocked: EpisodicBlocked | null;
 }
 
@@ -261,7 +305,7 @@ export function resolveLimits(overrides?: Partial<EpisodicLimits>): EpisodicLimi
   for (const [name, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value < 0) throw new EpisodicMemoryError("invalid-request", `Episodic limit ${name} must be a non-negative integer`);
   }
-  for (const name of ["nodeBytes", "viewBytes", "jobs", "tries", "maxSourceLineBytes", "maxStoreLineBytes"] as const) {
+  for (const name of ["nodeBytes", "viewBytes", "jobs", "tries", "recordCapChars", "maxSourceLineBytes", "maxStoreLineBytes"] as const) {
     if (limits[name] === 0) throw new EpisodicMemoryError("invalid-request", `Episodic limit ${name} must be positive`);
   }
   return limits;

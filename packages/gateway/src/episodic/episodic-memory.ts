@@ -1,20 +1,27 @@
+import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { AsyncMutex } from "../util/async-mutex.js";
 import {
-  EpisodicMemoryError, EPISODIC_OMITTED_TEXT, EPISODIC_PLACEHOLDER, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION,
-  defaultSleep, resolveLimits,
+  EpisodicMemoryError, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
+  EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
-  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSummarizer, type EpisodicTokenBudget,
-  type EpisodicViewPartStatus,
+  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicSummarizer,
+  type EpisodicTokenBudget, type EpisodicViewPartStatus,
 } from "./episodic-contract.js";
 import {
-  EPISODIC_COMPACT_PROMPT, classifyReply, compactorRequest, contextBlock, createModelRuntimeSummarizer,
-  estimateCompactorTokens, leafStep, mergeStep, sizeFeedback, summarizerText, withFeedback,
+  EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
+  createModelRuntimeSummarizer, estimateCompactorReservation, leafStep, mergeStep, sizeFeedback,
+  summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
-import { projectBranch, readCanonicalSession, episodicDigest, type EpisodicCanonicalCut } from "./episodic-source.js";
+import {
+  projectBranch, readCanonicalSession, episodicDigest,
+  type EpisodicCanonicalCut, type EpisodicCanonicalEntry,
+} from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
-  fitView, foldView, freeNodeText, mergedFreeText, nodeAddress, parseNodeAddress, placeholderBytes, utf8Bytes, viewLineTexts,
+  decodeContextRuns, encodeNodeCode, fitView, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress,
+  parseNodeAddress, placeholderBytes, utf8Bytes, viewContext,
   type EpisodicViewPart,
 } from "./episodic-tree.js";
 
@@ -24,6 +31,11 @@ import {
  * the brief). It never subscribes to a session; `entriesCommitted` re-reads the
  * canonical file after its cursor and drains the pump, and `whenReady` is what a
  * request layer waits on.
+ *
+ * Ingestion, invalidation and `resume` are serialized behind one mutex. The pump
+ * is not: it may still be building when the next commit invalidates nodes, so
+ * every build carries the generation and the input revisions it started from and
+ * discards its result when either changed.
  */
 
 /** The pump stops on this signal: the memory is blocked and `resume()` restarts
@@ -48,13 +60,27 @@ interface Waiter {
   onAbort?: () => void;
 }
 
+/** What one build started from. A result is published only while the generation
+ * and every input revision still match. */
+interface BuildStamp {
+  generation: number;
+  inputs: Array<{ address: string; revision: number }>;
+  messageIndex?: number;
+  messageRevision?: number;
+}
+
 export class EpisodicMemory {
+  /** One in-process opener per store: two memories over one session would write
+   * the same files without a lock between them. */
+  private static readonly openStores = new Set<string>();
+
   private readonly limits: EpisodicLimits;
   private readonly store: EpisodicStore;
   private readonly summarizer: EpisodicSummarizer;
   private readonly budget: EpisodicTokenBudget;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly diagnostic: (record: EpisodicDiagnostic) => void;
+  private readonly mutex = new AsyncMutex();
   private readonly abort = new AbortController();
 
   private readonly messages = new Map<number, EpisodicMessageRecord>();
@@ -64,10 +90,13 @@ export class EpisodicMemory {
   private view: EpisodicViewPart[] = [];
   private revision = 1;
   private generation = 0;
-  private cursor: { completeBytes: number; leafEntryId: string | null } | null = null;
+  private sourceCursor: EpisodicSourceCursor | null = null;
+  private sourceBranch: EpisodicCanonicalEntry[] = [];
   private blocked: EpisodicBlocked | null = null;
   private waiters: Waiter[] = [];
   private draining: Promise<void> | null = null;
+  private appending: Promise<void> = Promise.resolve();
+  private storeKey: string | undefined;
   private closed = false;
 
   private constructor(private readonly dependencies: EpisodicMemoryDependencies, limits: EpisodicLimits) {
@@ -80,39 +109,55 @@ export class EpisodicMemory {
   }
 
   /** Open (or start) the memory for one source session: load the persisted
-   * catalog and nodes, replay them, and fold the view from message 0. */
+   * catalog and nodes, replay them, fold the view from message 0 (sliced, so a
+   * long history never blocks the loop for the whole fold), and repair a
+   * catalog revision whose invalidation a crash lost. */
   static async open(dependencies: EpisodicMemoryDependencies): Promise<EpisodicMemory> {
     const limits = resolveLimits(dependencies.limits);
+    const descriptor = await dependencies.workspace.describe();
+    if (!descriptor.available) throw new EpisodicMemoryError("unsafe-store", "Tron internal workspace is unavailable; episodic memory cannot be opened");
+    const storeKey = join(descriptor.root, "state", "episodic", dependencies.sessionId);
+    if (EpisodicMemory.openStores.has(storeKey)) {
+      throw new EpisodicMemoryError("already-open", `Episodic memory for session ${dependencies.sessionId} is already open in this process`);
+    }
+    EpisodicMemory.openStores.add(storeKey);
     const memory = new EpisodicMemory(dependencies, limits);
-    let snapshot: EpisodicStoreSnapshot;
+    memory.storeKey = storeKey;
     try {
-      snapshot = await memory.store.read();
-    } catch (error) {
-      if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
-        memory.diagnostic({ event: "episodic.store-refused", level: "error", message: "Episodic memory store was refused", reason: error.kind });
+      let snapshot: EpisodicStoreSnapshot;
+      try {
+        snapshot = await memory.store.read();
+      } catch (error) {
+        if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
+          memory.diagnostic({ event: "episodic.store-refused", level: "error", message: "Episodic memory store was refused", reason: error.kind });
+        }
+        throw error;
       }
+      const replayed = EpisodicStore.replay(snapshot);
+      for (const [index, record] of replayed.messages) memory.messages.set(index, record);
+      for (const [address, record] of replayed.nodes) memory.nodes.set(address, record);
+      for (const record of replayed.messages.values()) memory.entryIndex.set(record.entryId, record.index);
+      memory.revision = snapshot.highestRevision + 1;
+      memory.generation = Math.max(snapshot.state?.generation ?? 0, snapshot.highestGeneration);
+      if (snapshot.state) {
+        memory.sourceCursor = snapshot.state.cursor;
+        memory.blocked = snapshot.state.blocked;
+      }
+      if (snapshot.recoveredTornBytes > 0) {
+        memory.diagnostic({
+          event: "episodic.store-recovered", level: "warning",
+          message: "Discarded a torn trailing episodic record that was never acknowledged",
+          counts: { bytes: snapshot.recoveredTornBytes },
+        });
+      }
+      memory.assertConsistent();
+      memory.view = await foldViewSliced(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
+      await memory.repairCatalogMismatch();
+      return memory;
+    } catch (error) {
+      EpisodicMemory.openStores.delete(storeKey);
       throw error;
     }
-    const replayed = EpisodicStore.replay(snapshot);
-    for (const [index, record] of replayed.messages) memory.messages.set(index, record);
-    for (const [address, record] of replayed.nodes) memory.nodes.set(address, record);
-    for (const record of replayed.messages.values()) memory.entryIndex.set(record.entryId, record.index);
-    memory.revision = memory.highestRevision(snapshot) + 1;
-    if (snapshot.state) {
-      memory.generation = snapshot.state.generation;
-      memory.cursor = snapshot.state.cursor;
-      memory.blocked = snapshot.state.blocked;
-    }
-    if (snapshot.recoveredTornBytes > 0) {
-      memory.diagnostic({
-        event: "episodic.store-recovered", level: "warning",
-        message: "Discarded a torn trailing episodic record that was never acknowledged",
-        counts: { bytes: snapshot.recoveredTornBytes },
-      });
-    }
-    memory.assertConsistent();
-    memory.view = foldView(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
-    return memory;
   }
 
   /** Re-read the canonical session, ingest what the cursor has not seen, and
@@ -120,20 +165,25 @@ export class EpisodicMemory {
   async entriesCommitted(sessionId: string): Promise<void> {
     this.assertOpen();
     if (sessionId !== this.dependencies.sessionId) throw new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session");
-    if (this.blocked) return;
-    await this.ingest();
+    await this.mutex.run(async () => {
+      if (this.blocked) return;
+      await this.ingest();
+    });
     await this.drain();
   }
 
   /** Resolves when every part of the view covering messages before `cut` is a
    * built summary (gist §6). The view is soft-budgeted, so this is not a hard
-   * window check. A blocked memory rejects instead of waiting forever. */
+   * window check. It rejects a cut beyond the message count, a blocked memory,
+   * and an already-aborted wait. */
   async whenReady(cut: number, options: { signal?: AbortSignal } = {}): Promise<void> {
     this.assertOpen();
     if (!Number.isSafeInteger(cut) || cut < 0) throw new EpisodicMemoryError("invalid-request", "whenReady cut must be a non-negative integer");
-    if (this.blocked) throw this.blockedError();
-    if (this.viewReady(cut)) return;
     const signal = options.signal;
+    if (signal?.aborted) throw new EpisodicMemoryError("closed", "whenReady wait was cancelled");
+    if (this.blocked) throw this.blockedError();
+    if (cut > this.messages.size) throw new EpisodicMemoryError("invalid-request", `whenReady cut ${cut} is beyond the ${this.messages.size} messages this memory holds`);
+    if (this.viewReady(cut)) return;
     return new Promise<void>((resolve, reject) => {
       const waiter: Waiter = { cut, resolve, reject, ...(signal ? { signal } : {}) };
       if (signal) {
@@ -148,11 +198,13 @@ export class EpisodicMemory {
    * have been fixed by the caller: a larger budget, a reachable source. */
   async resume(): Promise<void> {
     this.assertOpen();
-    if (this.blocked) {
-      this.blocked = null;
-      await this.saveState();
-      await this.ingest();
-    }
+    await this.mutex.run(async () => {
+      if (this.blocked) {
+        this.blocked = null;
+        await this.saveState();
+        await this.ingest();
+      }
+    });
     await this.drain();
   }
 
@@ -211,6 +263,7 @@ export class EpisodicMemory {
     this.closed = true;
     this.abort.abort();
     await this.draining?.catch(() => {});
+    if (this.storeKey) EpisodicMemory.openStores.delete(this.storeKey);
     for (const waiter of this.waiters.splice(0)) {
       if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
       waiter.reject(new EpisodicMemoryError("closed", "Episodic memory was disposed"));
@@ -221,8 +274,14 @@ export class EpisodicMemory {
 
   private async ingest(): Promise<void> {
     let cut: EpisodicCanonicalCut;
+    const previous = this.sourceCursor && this.sourceBranch.length > 0 ? { cursor: this.sourceCursor, branch: this.sourceBranch } : undefined;
     try {
-      cut = await readCanonicalSession({ path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId, maxLineBytes: this.limits.maxSourceLineBytes });
+      cut = await readCanonicalSession({
+        path: this.dependencies.sessionFile,
+        sessionId: this.dependencies.sessionId,
+        maxLineBytes: this.limits.maxSourceLineBytes,
+        ...(previous ? { previous } : {}),
+      });
     } catch (error) {
       if (error instanceof EpisodicMemoryError && error.kind === "source") {
         await this.block("source-unavailable", error.message);
@@ -230,62 +289,96 @@ export class EpisodicMemory {
       }
       throw error;
     }
-    if (this.cursor && this.cursor.completeBytes === cut.completeBytes && this.cursor.leafEntryId === cut.leafEntryId) return;
+    if (previous && cut.completeBytes === previous.cursor.completeBytes && cut.leafEntryId === previous.cursor.leafEntryId) {
+      this.sourceCursor = cut.cursor;
+      this.sourceBranch = cut.branch;
+      return;
+    }
 
     const projection = projectBranch(cut, this.limits);
     const changed: number[] = [];
     const seen = new Set<string>();
-    for (const message of projection) {
-      seen.add(message.entryId);
-      const existing = this.entryIndex.get(message.entryId);
-      if (existing === undefined) {
-        const index = this.messages.size;
-        this.entryIndex.set(message.entryId, index);
-        const record: EpisodicMessageRecord = { revision: this.takeRevision(), index, ...message, sessionId: this.dependencies.sessionId };
-        await this.store.appendCatalog(record);
-        this.messages.set(index, record);
-        // A new message appends one part to the view; nothing is invalidated.
-        this.view.push({ level: 0, index, start: index, span: 1 });
-        this.fit();
-        continue;
+    try {
+      for (const message of projection) {
+        seen.add(message.entryId);
+        const existing = this.entryIndex.get(message.entryId);
+        if (existing === undefined) {
+          const index = this.messages.size;
+          const record: EpisodicMessageRecord = { revision: this.takeRevision(), index, ...message, sessionId: this.dependencies.sessionId };
+          await this.appendCatalog(record);
+          this.entryIndex.set(message.entryId, index);
+          this.messages.set(index, record);
+          // A new message appends one part to the view; nothing is invalidated.
+          this.view.push({ level: 0, index, start: index, span: 1 });
+          this.fit();
+          continue;
+        }
+        const current = this.messages.get(existing);
+        if (current && current.text === message.text && current.omitted === message.omitted && current.kind === message.kind) continue;
+        const record: EpisodicMessageRecord = { revision: this.takeRevision(), index: existing, ...message, sessionId: this.dependencies.sessionId };
+        await this.appendCatalog(record);
+        this.messages.set(existing, record);
+        changed.push(existing);
       }
-      const current = this.messages.get(existing);
-      if (current && current.text === message.text && current.omitted === message.omitted && current.kind === message.kind) continue;
-      const record: EpisodicMessageRecord = { revision: this.takeRevision(), index: existing, ...message, sessionId: this.dependencies.sessionId };
-      await this.store.appendCatalog(record);
-      this.messages.set(existing, record);
-      changed.push(existing);
-    }
 
-    // Navigation: an entry the branch no longer holds keeps its index and
-    // becomes `[omitted]`, so no later message is ever renumbered.
-    for (const [entryId, index] of this.entryIndex) {
-      if (seen.has(entryId)) continue;
-      const current = this.messages.get(index);
-      if (!current || current.omitted) continue;
-      const record: EpisodicMessageRecord = {
-        ...current,
-        revision: this.takeRevision(),
-        text: EPISODIC_OMITTED_TEXT,
-        omitted: true,
-        projectedDigest: episodicDigest(EPISODIC_OMITTED_TEXT),
-        omissions: [...new Set([...current.omissions, "off-branch"])],
-      };
-      await this.store.appendCatalog(record);
-      this.messages.set(index, record);
-      changed.push(index);
-    }
+      // Navigation: an entry the branch no longer holds keeps its index and
+      // becomes `[omitted]`, so no later message is ever renumbered.
+      for (const [entryId, index] of this.entryIndex) {
+        if (seen.has(entryId)) continue;
+        const current = this.messages.get(index);
+        if (!current || current.omitted) continue;
+        const record: EpisodicMessageRecord = {
+          ...current,
+          revision: this.takeRevision(),
+          text: EPISODIC_OMITTED_TEXT,
+          omitted: true,
+          projectedDigest: episodicDigest(EPISODIC_OMITTED_TEXT),
+          omissions: [...new Set([...current.omissions, "off-branch"])],
+        };
+        await this.appendCatalog(record);
+        this.messages.set(index, record);
+        changed.push(index);
+      }
 
-    if (changed.length > 0) await this.invalidate(changed);
-    this.cursor = { completeBytes: cut.completeBytes, leafEntryId: cut.leafEntryId };
+      if (changed.length > 0) await this.invalidate(changed);
+    } catch (error) {
+      // A record the store refuses is a visible blocked state, never a silent
+      // throw that leaves the cursor stalled.
+      if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
+        await this.block("permanent-failure", error.message);
+        return;
+      }
+      throw error;
+    }
+    this.sourceCursor = cut.cursor;
+    this.sourceBranch = cut.branch;
     await this.saveState();
+  }
+
+  /** A catalog revision whose invalidation a crash lost: a live leaf whose
+   * recorded source digest disagrees with the message it summarizes is a leaf
+   * whose summary is stale, so the closure runs again at load. */
+  private async repairCatalogMismatch(): Promise<void> {
+    const changed: number[] = [];
+    for (const node of this.nodes.values()) {
+      if (node.level !== 0) continue;
+      const message = this.messages.get(node.index);
+      if (!message) continue;
+      if (node.sourceDigest !== episodicDigest(`${message.kind}: ${message.text}`)) changed.push(node.index);
+    }
+    if (changed.length > 0) await this.invalidate(changed);
   }
 
   /** Invalidate exactly the affected leaves, their ancestors, and every node
    * whose recorded summarizer context included any invalidated node,
    * transitively (departure 3). A node added by the closure brings its own
    * ancestors with it: a parent stands in for its children, so a revoked child
-   * under a live parent would be an inconsistent store. */
+   * under a live parent would be an inconsistent store.
+   *
+   * The revocation is written in ancestor-first chunks. Any prefix of that order
+   * leaves every live parent with live children, so a crash between chunks is a
+   * consistent (if under-invalidated) store, and `repairCatalogMismatch` finds
+   * the changed leaf again on the next open. */
   private async invalidate(changedIndices: readonly number[]): Promise<void> {
     const invalid = new Set<string>();
     const ancestorsOf = (address: string): string[] => {
@@ -303,7 +396,7 @@ export class EpisodicMemory {
     };
     const dependents = new Map<string, string[]>();
     for (const [address, node] of this.nodes) {
-      for (const dependency of node.contextDependencies) {
+      for (const dependency of decodeContextRuns(node.contextRuns)) {
         const list = dependents.get(dependency);
         if (list) list.push(address); else dependents.set(dependency, [address]);
       }
@@ -322,17 +415,33 @@ export class EpisodicMemory {
     }
     if (invalid.size === 0) return;
     this.generation += 1;
-    const record: EpisodicInvalidationRecord = { revision: this.takeRevision(), generation: this.generation, addresses: [...invalid].sort() };
-    // Durable before use: a crash between revoking and rebuilding must not leave
-    // a revoked child under a live parent.
-    await this.store.appendNode(record);
-    for (const address of invalid) this.nodes.delete(address);
-    this.expandInvalidatedParts(invalid);
-    this.fit();
+    const generation = this.generation;
+    const ordered = [...invalid].sort((left, right) => {
+      const a = parseNodeAddress(left)!;
+      const b = parseNodeAddress(right)!;
+      return b.level - a.level || a.index - b.index;
+    });
+    const parts = Math.ceil(ordered.length / EPISODIC_INVALIDATION_CHUNK);
+    for (let part = 0; part < parts; part += 1) {
+      const chunk = ordered.slice(part * EPISODIC_INVALIDATION_CHUNK, (part + 1) * EPISODIC_INVALIDATION_CHUNK);
+      const record: EpisodicInvalidationRecord = {
+        revision: this.takeRevision(), generation, part, parts,
+        nodes: chunk.map(address => {
+          const parsed = parseNodeAddress(address)!;
+          return encodeNodeCode(parsed.level, parsed.index);
+        }).join(" "),
+      };
+      // Durable before use: a crash between revoking and rebuilding must not
+      // leave a revoked child under a live parent.
+      await this.appendNode(record);
+      for (const address of chunk) this.nodes.delete(address);
+      this.expandInvalidatedParts(new Set(chunk));
+      this.fit();
+    }
     this.diagnostic({
       event: "episodic.source-invalidated", level: "info",
       message: "A source revision invalidated summarized nodes",
-      counts: { invalidated: invalid.size, generation: this.generation },
+      counts: { invalidated: invalid.size, generation },
     });
   }
 
@@ -360,47 +469,52 @@ export class EpisodicMemory {
   private async drain(): Promise<void> {
     if (this.closed || this.blocked) return;
     if (!this.draining) {
-      this.draining = this.drainLoop().finally(() => { this.draining = null; });
+      this.draining = this.pump().finally(() => { this.draining = null; });
     }
     await this.draining;
   }
 
-  private async drainLoop(): Promise<void> {
+  /** The recipe's pump: fill the JOBS slots, and re-pump after **each**
+   * completion, so a finished merge never waits behind a slow sibling. Every
+   * published node fits the view first. */
+  private async pump(): Promise<void> {
+    const running = new Map<string, Promise<void>>();
     try {
-      while (!this.closed && !this.blocked) {
-        const batch = this.startableNodes();
-        if (batch.length === 0) break;
-        await Promise.all(batch.map(node => this.buildNode(node.level, node.index)));
-        this.settleWaiters();
+      for (;;) {
+        if (this.closed || this.blocked) break;
+        while (running.size < this.limits.jobs) {
+          const next = this.nextStartable();
+          if (!next) break;
+          const key = nodeAddress(next.level, next.index);
+          const task = this.buildNode(next.level, next.index).finally(() => { running.delete(key); });
+          running.set(key, task);
+        }
+        if (running.size === 0) break;
+        await Promise.race(running.values());
       }
     } finally {
-      // One fit at quiescence, with the drained node set: the view is then a
-      // function of (message count, built nodes) at this point, not of the order
-      // builds happened to finish in.
-      this.fit();
+      await Promise.allSettled([...running.values()]);
       this.settleWaiters();
     }
   }
 
   /** Rule 3 of gist §4.1: a node builds only when its whole context is
    * summarized (`end <= first(view)`), which is what keeps leaves in order. */
-  private startableNodes(): Array<{ level: number; index: number }> {
+  private nextStartable(): { level: number; index: number } | undefined {
     const count = this.messages.size;
     const first = this.firstUnbuilt();
-    const batch: Array<{ level: number; index: number }> = [];
     for (let level = 0; 2 ** level <= count; level += 1) {
       const span = 2 ** level;
       for (let index = 0; (index + 1) * span <= count; index += 1) {
-        if (batch.length >= this.limits.jobs) return batch;
         const address = nodeAddress(level, index);
         if (this.nodes.has(address) || this.building.has(address)) continue;
         const end = level === 0 ? index : (index + 1) * span;
         if (end > first) continue;
         if (level > 0 && (!this.nodes.has(nodeAddress(level - 1, index * 2)) || !this.nodes.has(nodeAddress(level - 1, index * 2 + 1)))) continue;
-        batch.push({ level, index });
+        return { level, index };
       }
     }
-    return batch;
+    return undefined;
   }
 
   private firstUnbuilt(): number {
@@ -413,21 +527,62 @@ export class EpisodicMemory {
     if (this.closed || this.blocked) return;
     this.building.add(address);
     try {
-      const record = await this.composeNode(level, index);
-      if (!record) return;
-      // Durable before use: the record is written and fsynced, then published.
-      await this.store.appendNode(record);
+      const stamp = this.buildStamp(level, index);
+      if (!stamp) {
+        // The node's source is gone, so it can never be composed. That is a
+        // stopped pump with a reason, never a busy loop.
+        await this.block("permanent-failure", `node ${address} has no source to summarize`);
+        return;
+      }
+      const record = await this.composeNode(level, index, stamp);
+      if (!record || this.stale(stamp)) return;
+      // The append is serialized, so the durable order is the publication order
+      // and the view fits the same sequence the log replays.
+      await this.appendNode(record);
+      if (this.stale(stamp)) return;
       this.nodes.set(address, record);
+      this.fit();
     } catch (error) {
       if (error instanceof EpisodicBlockedSignal) await this.block(error.blocked.reason, error.blocked.detail);
       else if (error instanceof EpisodicClosedSignal) return;
-      else throw error;
+      else if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
+        await this.block("permanent-failure", error.message);
+      } else throw error;
     } finally {
       this.building.delete(address);
     }
   }
 
-  private async composeNode(level: number, index: number): Promise<EpisodicNodeRecord | undefined> {
+  private buildStamp(level: number, index: number): BuildStamp | undefined {
+    if (level === 0) {
+      const message = this.messages.get(index);
+      if (!message) return undefined;
+      return { generation: this.generation, inputs: [], messageIndex: index, messageRevision: message.revision };
+    }
+    const childA = this.nodes.get(nodeAddress(level - 1, index * 2));
+    const childB = this.nodes.get(nodeAddress(level - 1, index * 2 + 1));
+    if (!childA || !childB) return undefined;
+    return {
+      generation: this.generation,
+      inputs: [
+        { address: nodeAddress(level - 1, index * 2), revision: childA.revision },
+        { address: nodeAddress(level - 1, index * 2 + 1), revision: childB.revision },
+      ],
+    };
+  }
+
+  /** True when this build's result must not be published: the memory closed or
+   * blocked, an invalidation bumped the generation, or one of its inputs was
+   * revoked or rebuilt while the compactor call ran. */
+  private stale(stamp: BuildStamp): boolean {
+    if (this.closed || this.blocked) return true;
+    if (this.generation !== stamp.generation) return true;
+    for (const input of stamp.inputs) if (this.nodes.get(input.address)?.revision !== input.revision) return true;
+    if (stamp.messageIndex !== undefined && this.messages.get(stamp.messageIndex)?.revision !== stamp.messageRevision) return true;
+    return false;
+  }
+
+  private async composeNode(level: number, index: number, stamp: BuildStamp): Promise<EpisodicNodeRecord | undefined> {
     const span = 2 ** level;
     if (level === 0) {
       const message = this.messages.get(index);
@@ -440,9 +595,9 @@ export class EpisodicMemory {
       }
       const free = freeNodeText(message.kind, message.text, this.limits.nodeBytes);
       if (free) return this.freeNode(level, index, free, episodicDigest(source));
-      const lines = this.contextLines(index);
-      const text = await this.compact(lines, leafStep(message.kind, message.text, this.limits.nodeBytes));
-      return this.summaryNode(level, index, text, lines, episodicDigest(source));
+      const context = this.context(index);
+      const text = await this.compact(context.lines, leafStep(message.kind, message.text, this.limits.nodeBytes), stamp);
+      return this.summaryNode(level, index, text, context.runs, episodicDigest(source));
     }
     const childA = this.nodes.get(nodeAddress(level - 1, index * 2));
     const childB = this.nodes.get(nodeAddress(level - 1, index * 2 + 1));
@@ -451,34 +606,35 @@ export class EpisodicMemory {
     const childRevisions: [number, number] = [childA.revision, childB.revision];
     const free = mergedFreeText(childA.text, childB.text, this.limits.nodeBytes);
     if (free) return { ...this.freeNode(level, index, free, episodicDigest(source)), childRevisions };
-    const lines = this.contextLines((index + 1) * span);
-    const text = await this.compact(lines, mergeStep(childA.text, childB.text, this.limits.nodeBytes));
-    return { ...this.summaryNode(level, index, text, lines, episodicDigest(source)), childRevisions };
+    const context = this.context((index + 1) * span);
+    const text = await this.compact(context.lines, mergeStep(childA.text, childB.text, this.limits.nodeBytes), stamp);
+    return { ...this.summaryNode(level, index, text, context.runs, episodicDigest(source)), childRevisions };
   }
 
   private freeNode(level: number, index: number, text: string, sourceDigest: string): EpisodicNodeRecord {
-    return { revision: this.takeRevision(), level, index, kind: "free", text, contextDependencies: [], textDigest: episodicDigest(text), sourceDigest };
+    return { revision: this.takeRevision(), level, index, kind: "free", text, contextRuns: [], textDigest: episodicDigest(text), sourceDigest };
   }
 
-  private summaryNode(level: number, index: number, text: string, lines: readonly { address: string }[], sourceDigest: string): EpisodicNodeRecord {
+  private summaryNode(level: number, index: number, text: string, runs: EpisodicNodeRecord["contextRuns"], sourceDigest: string): EpisodicNodeRecord {
     return {
       revision: this.takeRevision(), level, index, kind: "summary", text,
-      contextDependencies: lines.map(line => line.address), textDigest: episodicDigest(text), sourceDigest,
+      contextRuns: runs, textDigest: episodicDigest(text), sourceDigest,
     };
   }
 
-  /** The context block's lines: the view up to the node's end, bare, no ids. */
-  private contextLines(end: number): Array<{ address: string; text: string }> {
-    return viewLineTexts(this.view, end, part => this.nodes.get(nodeAddress(part.level, part.index))?.text);
+  /** The context block's lines and level runs: the view up to the node's end,
+   * bare, no ids, one line per part. */
+  private context(end: number): { lines: string[]; runs: EpisodicNodeRecord["contextRuns"] } {
+    return viewContext(this.view, end, part => this.nodes.get(nodeAddress(part.level, part.index))?.text);
   }
 
   // ---- one compactor call, the size loop, retries and the budget ---------------
 
-  private async compact(lines: readonly { text: string }[], step: string): Promise<string> {
-    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, contextBlock(lines.map(line => line.text)), step, this.abort.signal);
+  private async compact(lines: readonly string[], step: string, stamp: BuildStamp): Promise<string> {
+    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, contextBlock(lines), step, this.abort.signal);
     const tries: string[] = [];
     for (let attempt = 0; attempt < this.limits.tries; attempt += 1) {
-      const reply = await this.compactCall(request);
+      const reply = await this.compactCall(request, stamp);
       tries.push(reply);
       if (utf8Bytes(reply) <= this.limits.nodeBytes || attempt + 1 >= this.limits.tries) break;
       request = withFeedback(request, reply, sizeFeedback(reply, this.limits.nodeBytes));
@@ -488,9 +644,10 @@ export class EpisodicMemory {
     return tries.reduce((shortest, line) => utf8Bytes(line) < utf8Bytes(shortest) ? line : shortest, tries[0]!);
   }
 
-  private async compactCall(request: EpisodicCompactorRequest): Promise<string> {
+  private async compactCall(request: EpisodicCompactorRequest, stamp: BuildStamp): Promise<string> {
     for (let attempt = 0; ; attempt += 1) {
-      const estimate = estimateCompactorTokens(request);
+      if (this.stale(stamp)) throw new EpisodicClosedSignal();
+      const estimate = estimateCompactorReservation(request);
       if (!this.budget.reserve(estimate)) {
         throw new EpisodicBlockedSignal({ reason: "budget-exhausted", detail: `A compactor call estimated at ${estimate} tokens does not fit the remaining budget` });
       }
@@ -500,14 +657,14 @@ export class EpisodicMemory {
       } catch (error) {
         this.budget.settle(estimate, 0);
         if (this.closed || error instanceof EpisodicClosedSignal) throw new EpisodicClosedSignal();
-        if (attempt >= this.limits.maxRetries) {
-          throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: error instanceof Error ? error.message : "the compactor call failed" });
-        }
+        const verdict = classifyThrown(error);
+        const detail = error instanceof Error ? error.message : "the compactor call failed";
+        if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
+        if (attempt >= this.limits.maxRetries) throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail });
         await this.wait(this.limits.retryMs);
         continue;
       }
-      const usage = message.usage;
-      this.budget.settle(estimate, (usage?.input ?? 0) + (usage?.output ?? 0));
+      this.budget.settle(estimate, usageTokens(message.usage));
       const verdict = classifyReply(message);
       if (verdict === "ok") return summarizerText(message);
       if (verdict === "permanent") {
@@ -543,6 +700,7 @@ export class EpisodicMemory {
   }
 
   private viewReady(cut: number): boolean {
+    if (cut <= 0) return true;
     for (const part of this.view) {
       if (part.start >= cut) return true;
       if (!this.nodes.has(nodeAddress(part.level, part.index))) return false;
@@ -595,19 +753,29 @@ export class EpisodicMemory {
   }
 
   private async saveState(): Promise<void> {
-    await this.store.saveState({ version: EPISODIC_STORE_VERSION, generation: this.generation, cursor: this.cursor, blocked: this.blocked });
+    await this.store.saveState({ version: EPISODIC_STORE_VERSION, generation: this.generation, cursor: this.sourceCursor, blocked: this.blocked });
+  }
+
+  /** Every append is chained, so the durable order equals the request order and
+   * a concurrent build can never interleave a line. */
+  private appendCatalog(record: EpisodicMessageRecord): Promise<void> {
+    return this.enqueueAppend(() => this.store.appendCatalog(record));
+  }
+
+  private appendNode(record: EpisodicNodeRecord | EpisodicInvalidationRecord): Promise<void> {
+    return this.enqueueAppend(() => this.store.appendNode(record));
+  }
+
+  private enqueueAppend(operation: () => Promise<void>): Promise<void> {
+    const next = this.appending.then(operation);
+    this.appending = next.catch(() => {});
+    return next;
   }
 
   private takeRevision(): number {
     const revision = this.revision;
     this.revision += 1;
     return revision;
-  }
-
-  private highestRevision(snapshot: EpisodicStoreSnapshot): number {
-    let highest = 0;
-    for (const record of [...snapshot.messages, ...snapshot.nodes]) if (record.revision > highest) highest = record.revision;
-    return highest;
   }
 
   /** A loaded store must be internally consistent; a live parent whose child is

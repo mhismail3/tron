@@ -71,8 +71,9 @@ never make anything look further along than it was. Output only the line;
 non-ASCII characters cost 2-4 bytes.`;
 
 /** A compactor reply is one line; 2,048 tokens leaves room for the overshoot
- * the size loop then trims, without letting a runaway reply be unbounded. */
-const COMPACTOR_MAX_TOKENS = 2_048;
+ * the size loop then trims, without letting a runaway reply be unbounded. It is
+ * also what a call reserves for its output. */
+export const COMPACTOR_MAX_TOKENS = 2_048;
 
 /** A realistic, dense, multi-item summary line (gist §4.2 `SCALE`): models
  * cannot count bytes, so one real example of exactly `NODE` bytes shows them
@@ -159,10 +160,33 @@ export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   return "permanent";
 }
 
-/** The tokens one call will cost, estimated before it is made (departure 5). */
-export function estimateCompactorTokens(request: EpisodicCompactorRequest): number {
+/** The tokens one call will cost, estimated before it is made (departure 5):
+ * the prompt's estimate plus the call's whole output ceiling, so a call can
+ * never overshoot its reservation by more than the provider's own accounting. */
+export function estimateCompactorReservation(request: EpisodicCompactorRequest): number {
   const text = request.turns.reduce((total, turn) => total + turn.text.length, request.system.length);
-  return Math.ceil(text / 4);
+  return Math.ceil(text / 4) + COMPACTOR_MAX_TOKENS;
+}
+
+/** What one call actually cost. The provider's own total is authoritative when
+ * it reports one; otherwise every billed bucket is summed. */
+export function usageTokens(usage: Usage | undefined): number {
+  if (!usage) return 0;
+  if (typeof usage.totalTokens === "number" && Number.isFinite(usage.totalTokens)) return Math.max(0, Math.round(usage.totalTokens));
+  return Math.max(0, (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0));
+}
+
+/** Classify a thrown compactor failure with the pinned provider classifier: an
+ * auth or configuration error is permanent, a transient provider or transport
+ * error is retried. The classifier reads an assistant message, so the thrown
+ * text is handed to it in that shape. */
+export function classifyThrown(error: unknown): EpisodicReplyClass {
+  const message = error instanceof Error ? error.message : String(error);
+  const synthetic: AssistantMessage = {
+    role: "assistant", content: [], api: "faux" as AssistantMessage["api"], provider: "faux" as AssistantMessage["provider"],
+    model: "unknown", usage: ZERO_USAGE, stopReason: "error", errorMessage: message, timestamp: 0,
+  };
+  return isRetryableAssistantError(synthetic) ? "transient" : "permanent";
 }
 
 export function compactorRequest(system: string, context: string, step: string, signal: AbortSignal): EpisodicCompactorRequest {

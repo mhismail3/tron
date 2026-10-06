@@ -1,29 +1,35 @@
 import { constants } from "node:fs";
-import { lstat, mkdir, open } from "node:fs/promises";
+import { lstat, mkdir, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { readSecureJson } from "../util/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
   EpisodicMemoryError, EPISODIC_STORE_VERSION,
-  type EpisodicInvalidationRecord, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState,
+  type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState,
 } from "./episodic-contract.js";
-import { nodeAddress } from "./episodic-tree.js";
+import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
 
 /*
  * Departure 4 of the brief: the memory persists under the Tron internal
  * workspace's capability state, `state/episodic/<sourceSessionId>/`, owned and
  * secured the way KnowledgeStore owns `state/knowledge/` (owner-only 0700
- * directory, created lazily, owner-only files, secure bounded reads).
+ * directory, created lazily, owner-only files, secure bounded reads, no-follow
+ * opens with a dev/ino identity check).
  *
  * The catalog and the node log are append-only JSONL, and every record is
  * fsynced before it is used. A trailing partial line is a torn, unacknowledged
  * write (the record never became durable), so it is truncated away on load and
  * reported; any other unparsable record refuses the store visibly.
+ *
+ * A namespace that the workspace marker says was initialized but that is now
+ * missing is lost state, not a new installation: it refuses rather than
+ * restarting and re-spending every compactor call.
  */
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
 const STATE_MAX_BYTES = 64 * 1_024;
+const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "budget-exhausted", "source-unavailable"]);
 
 interface StorePaths {
   root: string;
@@ -40,6 +46,10 @@ export interface EpisodicStoreSnapshot {
   state: EpisodicStoreState | null;
   /** Bytes of torn trailing records discarded on load. */
   recoveredTornBytes: number;
+  /** The highest generation any record in the node log names. */
+  highestGeneration: number;
+  /** The highest revision any record carries. */
+  highestRevision: number;
 }
 
 export class EpisodicStore {
@@ -67,7 +77,11 @@ export class EpisodicStore {
   async read(): Promise<EpisodicStoreSnapshot> {
     const paths = await this.paths();
     if (!(await directoryExists(paths.root))) {
-      return { present: false, messages: [], nodes: [], state: null, recoveredTornBytes: 0 };
+      // The workspace marker is the evidence that this namespace once existed.
+      if (await this.workspace.featureInitialized("episodic")) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory namespace is missing after it was initialized");
+      }
+      return { present: false, messages: [], nodes: [], state: null, recoveredTornBytes: 0, highestGeneration: 0, highestRevision: 0 };
     }
     await assertOwnerDirectory(paths.root);
     const marker = await readSecureJson<unknown>(paths.initialized, 256);
@@ -82,23 +96,38 @@ export class EpisodicStore {
     const stateRead = await readSecureJson<unknown>(paths.state, STATE_MAX_BYTES);
     let state: EpisodicStoreState | null = null;
     if (stateRead.present) state = validateState(stateRead.value);
+    let highestGeneration = 0;
+    let highestRevision = 0;
+    for (const record of nodesRead.records) {
+      if ("nodes" in record && record.generation > highestGeneration) highestGeneration = record.generation;
+      if (record.revision > highestRevision) highestRevision = record.revision;
+    }
+    for (const record of catalogRead.records) if (record.revision > highestRevision) highestRevision = record.revision;
     return {
       present: true,
       messages: catalogRead.records,
       nodes: nodesRead.records,
       state,
       recoveredTornBytes: catalogRead.tornBytes + nodesRead.tornBytes,
+      highestGeneration,
+      highestRevision,
     };
   }
 
-  /** The latest record per message index, and per node address, in log order. */
+  /** The latest record per message index, and per node address, in log order.
+   * Invalidation chunks revoke the addresses they name. */
   static replay(snapshot: EpisodicStoreSnapshot): { messages: Map<number, EpisodicMessageRecord>; nodes: Map<string, EpisodicNodeRecord> } {
     const messages = new Map<number, EpisodicMessageRecord>();
     for (const record of snapshot.messages) messages.set(record.index, record);
     const nodes = new Map<string, EpisodicNodeRecord>();
     for (const record of snapshot.nodes) {
-      if ("addresses" in record) {
-        for (const address of record.addresses) nodes.delete(address);
+      if ("nodes" in record) {
+        for (const code of record.nodes.split(" ")) {
+          if (code === "") continue;
+          const address = decodeNodeCode(code);
+          if (address === undefined) throw new EpisodicMemoryError("invalid-store", "Episodic invalidation record names an address that cannot be decoded");
+          nodes.delete(address);
+        }
       } else nodes.set(nodeAddress(record.level, record.index), record);
     }
     return { messages, nodes };
@@ -118,10 +147,12 @@ export class EpisodicStore {
   }
 
   private async append(path: string, record: unknown): Promise<void> {
-    await this.ensureRoot();
+    const paths = await this.ensureRoot();
     const line = `${JSON.stringify(record)}\n`;
     if (Buffer.byteLength(line, "utf8") > this.maxLineBytes) throw new EpisodicMemoryError("invalid-store", "Episodic record exceeds the store's line bound");
-    const handle = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT, 0o600);
+    const opened = await openOwnerFile(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT, 0o600);
+    if (!opened) throw new EpisodicMemoryError("invalid-store", "Episodic store file could not be created");
+    const { handle, created } = opened;
     try {
       await handle.writeFile(line, "utf8");
       // Durable before use: the recipe fsyncs every node, and a record a caller
@@ -130,15 +161,24 @@ export class EpisodicStore {
     } finally {
       await handle.close();
     }
+    // A new file's directory entry needs its own sync, or a crash can lose the
+    // file that already holds acknowledged records.
+    if (created) await syncDirectory(paths.root);
   }
 
-  private async ensureRoot(): Promise<void> {
+  private async ensureRoot(): Promise<StorePaths> {
     const paths = await this.paths();
     const stateRoot = await this.workspaceStateRoot();
     await assertOwnerDirectory(stateRoot, true);
     await assertOwnerDirectory(join(stateRoot, "episodic"), true);
     await assertOwnerDirectory(paths.root, true);
-    if (!(await fileExists(paths.initialized))) await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
+    if (!(await fileExists(paths.initialized))) {
+      await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
+      // The workspace marker is what tells a later start that this namespace is
+      // lost state rather than a fresh installation.
+      await this.workspace.markFeatureInitialized("episodic");
+    }
+    return paths;
   }
 }
 
@@ -147,32 +187,79 @@ function validateState(value: unknown): EpisodicStoreState {
   const state = value as Partial<EpisodicStoreState>;
   if (state.version !== EPISODIC_STORE_VERSION) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an unknown version");
   if (typeof state.generation !== "number" || !Number.isSafeInteger(state.generation) || state.generation < 0) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has no generation");
-  if (state.cursor !== null && state.cursor !== undefined
-    && (typeof state.cursor !== "object" || typeof state.cursor.completeBytes !== "number" || !Number.isSafeInteger(state.cursor.completeBytes))) {
-    throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
+  const cursor = state.cursor;
+  if (cursor !== null && cursor !== undefined) {
+    if (typeof cursor !== "object" || Array.isArray(cursor)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
+    for (const field of ["dev", "ino", "size", "completeBytes"] as const) {
+      if (typeof cursor[field] !== "number" || !Number.isSafeInteger(cursor[field]) || cursor[field] < 0) {
+        throw new EpisodicMemoryError("invalid-store", `Episodic memory state cursor has no ${field}`);
+      }
+    }
+    if (cursor.leafEntryId !== null && typeof cursor.leafEntryId !== "string") throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid leaf");
+    if (cursor.leafLineDigest !== null && typeof cursor.leafLineDigest !== "string") throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid line digest");
+  }
+  const blocked = state.blocked;
+  if (blocked !== null && blocked !== undefined) {
+    if (typeof blocked !== "object" || Array.isArray(blocked) || typeof blocked.reason !== "string" || !BLOCKED_REASONS.has(blocked.reason)
+      || (blocked.detail !== undefined && typeof blocked.detail !== "string")) {
+      throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid blocked state");
+    }
   }
   return {
     version: EPISODIC_STORE_VERSION,
     generation: state.generation,
-    cursor: state.cursor ? { completeBytes: state.cursor.completeBytes, leafEntryId: typeof state.cursor.leafEntryId === "string" ? state.cursor.leafEntryId : null } : null,
-    blocked: state.blocked ?? null,
+    cursor: cursor ? { ...cursor } : null,
+    blocked: blocked ? { ...blocked } : null,
   };
 }
 
-async function readJsonl<T>(path: string, maxLineBytes: number, isRecord: (value: Record<string, unknown>) => boolean): Promise<{ records: T[]; tornBytes: number }> {
-  let handle;
+/** Open one store file without following a symlink, verify it is an owner-only
+ * regular file, and prove the path was not replaced between the check and the
+ * open. Returns whether this call created the file. */
+async function openOwnerFile(path: string, flags: number, mode?: number): Promise<{ handle: FileHandle; created: boolean } | undefined> {
+  const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw new EpisodicMemoryError("unsafe-store", "Episodic store file could not be inspected");
+  });
+  let handle: FileHandle;
   try {
-    handle = await open(path, constants.O_RDONLY);
+    handle = await open(path, flags | constants.O_NOFOLLOW, mode);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { records: [], tornBytes: 0 };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw new EpisodicMemoryError("invalid-store", `Episodic store file cannot be opened: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
   }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) {
+      throw new EpisodicMemoryError("unsafe-store", "Episodic store file is not a bounded owner-only regular file");
+    }
+    if (before && (before.dev !== info.dev || before.ino !== info.ino)) {
+      throw new EpisodicMemoryError("unsafe-store", "Episodic store file changed its identity while opening");
+    }
+    return { handle, created: before === undefined };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  const handle = await open(path, constants.O_RDONLY);
+  try {
+    await syncDurably(handle);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readJsonl<T>(path: string, maxLineBytes: number, isRecord: (value: Record<string, unknown>) => boolean): Promise<{ records: T[]; tornBytes: number }> {
+  const opened = await openOwnerFile(path, constants.O_RDONLY);
+  if (!opened) return { records: [], tornBytes: 0 };
+  const { handle } = opened;
   const records: T[] = [];
   let completeBytes = 0;
   let tornBytes = 0;
   try {
-    const info = await handle.stat();
-    if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) throw new EpisodicMemoryError("unsafe-store", "Episodic store file is not a bounded owner-only regular file");
     const buffer = Buffer.alloc(1_024 * 1_024);
     let pending = Buffer.alloc(0);
     let offset = 0;
@@ -199,12 +286,14 @@ async function readJsonl<T>(path: string, maxLineBytes: number, isRecord: (value
   if (tornBytes > 0) {
     // The partial line was never a durable record; leaving it would let the
     // next append concatenate onto it.
-    const writer = await open(path, "r+");
-    try {
-      await writer.truncate(completeBytes);
-      await syncDurably(writer);
-    } finally {
-      await writer.close();
+    const writer = await openOwnerFile(path, constants.O_RDWR);
+    if (writer) {
+      try {
+        await writer.handle.truncate(completeBytes);
+        await syncDurably(writer.handle);
+      } finally {
+        await writer.handle.close();
+      }
     }
   }
   return { records, tornBytes };
@@ -218,6 +307,10 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(entry => typeof entry === "string");
 }
 
+function isContextRuns(value: unknown): boolean {
+  return Array.isArray(value) && value.every(run => Array.isArray(run) && run.length === 2 && isRevision(run[0]) && isRevision(run[1]) && run[1] > 0);
+}
+
 function isCatalogRecord(value: Record<string, unknown>): boolean {
   return isRevision(value.revision) && isRevision(value.index) && typeof value.entryId === "string"
     && (value.kind === "user" || value.kind === "talk" || value.kind === "echo" || value.kind === "event")
@@ -226,11 +319,14 @@ function isCatalogRecord(value: Record<string, unknown>): boolean {
 }
 
 function isNodeLogRecord(value: Record<string, unknown>): boolean {
-  if (isStringArray(value.addresses)) return isRevision(value.revision) && isRevision(value.generation);
+  if (typeof value.nodes === "string") {
+    return isRevision(value.revision) && isRevision(value.generation) && isRevision(value.part) && isRevision(value.parts)
+      && value.part < value.parts && value.nodes.split(" ").every(code => code === "" || decodeNodeCode(code) !== undefined);
+  }
   const childRevisions = value.childRevisions;
   return isRevision(value.revision) && isRevision(value.level) && isRevision(value.index)
     && (value.kind === "free" || value.kind === "summary") && typeof value.text === "string"
-    && isStringArray(value.contextDependencies) && typeof value.textDigest === "string" && typeof value.sourceDigest === "string"
+    && isContextRuns(value.contextRuns) && typeof value.textDigest === "string" && typeof value.sourceDigest === "string"
     && (childRevisions === undefined || (Array.isArray(childRevisions) && childRevisions.length === 2 && childRevisions.every(isRevision)));
 }
 
