@@ -72,16 +72,17 @@ GitHub run covers the rest.
 
 ## `start`
 
-`scripts/tron work start <issue>` claims one issue and prepares its isolated
-workspace:
+`scripts/tron work start <issue> [--base <branch>]` claims one issue and
+prepares its isolated workspace:
 
 1. **Eligibility.** The issue is open, is not an epic, has Status Ready in the
    Project, and every issue it is blocked by is closed.
 2. **Claim.** The claim is the creation of the remote branch
    `<type>/<issue>-<slug>`, whose first commit is an empty claim commit carrying
-   `Work-Claim-Issue` and `Work-Claim-Session` trailers.
+   `Work-Claim-Issue`, `Work-Claim-Session` and `Work-Claim-Base` trailers.
    - The commit is based on the freshly fetched remote base branch, never on
-     local `main`.
+     local `main`: `--base`, otherwise `claim.baseBranch` (see
+     [The claim's base](#the-claims-base)).
    - The push only creates the ref (`--force-with-lease=<ref>:`), so the remote
      accepts exactly one claimant.
    - Squash merges drop the empty commit.
@@ -109,6 +110,68 @@ active claims exceeds `claim.softCap`; the claim still proceeds.
 Re-running `start` in the same session resumes a claim that is already made.
 It fills in whatever is missing (Status, comment, worktree) and never makes a
 second claim. A different session is refused, and the refusal names the owner.
+
+### The claim's base
+
+A claim starts from and lands into one base branch. It is recorded in the
+claim commit's `Work-Claim-Base` trailer: `start --base <branch>`, otherwise
+`claim.baseBranch`. A claim commit made before bases were recorded has no
+trailer, and its claim keeps `claim.baseBranch`. Wherever this document says
+*base branch* for a claim, it means that base:
+
+- `verify` diffs from the merge-base with it;
+- `land` merges it in, opens the pull request into it, checks it again before
+  merging, squash-merges into it, and resumes from a merge into it;
+- `steward --land` requires the head to contain its tip;
+- `cleanup` proves a merge into it.
+
+A base other than `claim.baseBranch` must be another open issue's claim
+branch that exists on the remote and carries its claim commit, so every
+long-lived branch belongs to an issue. Use one to hold a set of changes off
+`claim.baseBranch` until the maintainer verifies them together: an integrating
+issue's claim holds them, each piece of work is claimed with `--base <that
+claim branch>` and lands into it, and the integrating issue then lands them all
+at once.
+
+- A claim's base is fixed for its life. A resumed `start` with a different
+  `--base` is refused.
+- `land` and `steward --land` refuse a pull request whose base is not the
+  claim's base.
+- `land` and `steward --land` refuse to land a branch that an open issue's
+  claim starts from, because landing deletes the branch that claim lands into.
+  A stacked claim whose issue is closed does not count.
+- GitHub applies `Closes #N` only to merges into the default branch, so `land`
+  closes a stacked claim's issue itself, with a comment naming the branch it
+  landed into.
+- Claim commits are still found in the range from `claim.baseBranch`, which a
+  claim commit is never on. That range also holds the claim commit of the
+  branch beneath a stacked claim, which names another issue.
+
+To hold work that has already landed, revert it on `claim.baseBranch` through
+a normal claim. Then build the held branch on the new tip by reverting that
+revert. A held branch cut from before the revert would keep the revert when it
+merges and silently drop the work.
+
+### Base failure modes
+
+`test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
+repositories, local bare remotes and the fake `gh`.
+
+75. **A stacked claim uses the wrong base.** `verify`, `land` (update, pull
+    request, merge, resume and the closing comment), `steward` and `cleanup`
+    use the base the claim commit records. A claim without one keeps
+    `claim.baseBranch`. The claim commit is found even though the branch beneath
+    carries another issue's claim commit.
+76. **A base is invented, or changes.** `start` refuses a base that is not
+    `claim.baseBranch` or an open issue's claim branch carrying its claim
+    commit, refuses the issue's own branch, and refuses a resumed claim with a
+    different base, all before any claim or GitHub write.
+77. **A base lands under open stacked claims.** `land` and `steward --land`
+    refuse, naming the stacked claims, before any GitHub write. A stacked claim
+    whose issue is closed does not block.
+78. **A pull request into another base is merged.** `land` refuses an open
+    pull request into another base before any GitHub write, and `steward
+    --land` before merging.
 
 ### Warm-worktree failure modes
 
@@ -168,8 +231,8 @@ committed head of the current branch and writes a receipt for that exact commit.
 
 1. **Clean head.** A worktree with modified, staged or untracked files is
    refused, because the receipt describes a commit and not a working tree.
-2. **Diff.** It fetches the remote base branch (`claim.remote`,
-   `claim.baseBranch`) and computes the changed paths from
+2. **Diff.** It fetches the remote base branch (on a claim branch, the claim's
+   base; otherwise `claim.baseBranch`) and computes the changed paths from
    `merge-base(<remote>/<base>, HEAD)..HEAD`, deletions included.
 3. **Check set.** `verify.checks` names each check with path globs and a shell
    command run from the repository root after `verify.prelude`. A check is
@@ -634,6 +697,9 @@ as does `acceptance` for the journeys it can run.
    - the worktree has modified, staged or untracked files, HEAD is detached,
      or a merge, rebase, cherry-pick, revert or bisect is in progress;
    - the issue is closed or not in the Project;
+   - the open pull request for the branch merges into another base than the
+     claim's, or an open issue's claim starts from this branch
+     ([The claim's base](#the-claims-base));
    - no pull request is open for the branch and `--summary-file` is missing;
    - `--needs-user-validation` is given without `--irreducible`, or
      `--irreducible` without `--needs-user-validation`;
@@ -706,7 +772,8 @@ as does `acceptance` for the journeys it can run.
      `dashboard.needsYouStatus`. The issue stays open until the maintainer
      confirms.
    - Otherwise, it closes the issue if GitHub has not, with a comment naming the
-     pull request and the merge commit. Status becomes `land.doneStatus`.
+     pull request and the merge commit, and the base when it is not
+     `claim.baseBranch`. Status becomes `land.doneStatus`.
    - It deletes the remote branch with a lease on the merged head. A branch
      that is already gone (the repository may delete merged branches) is fine;
      a branch at any other commit, including one pushed to just before the
@@ -856,7 +923,9 @@ branch in this repository, it lists:
 
 - the verify status and every required check succeed on the pull request's
   head;
-- the head contains the base branch tip;
+- the pull request merges into the claim's base, and the head contains that
+  branch's tip;
+- no open issue's claim starts from the branch;
 - the remote branch is at that head;
 - any local worktree on the branch is clean and at the same commit;
 - the body starts with `Closes #N` or `Refs #N`, as `land` writes it. A
@@ -979,7 +1048,7 @@ A worktree is provably done when all of these hold:
   checkout, on a claim branch (`<type>/<issue>-<slug>`), and not locked;
 - the branch head is accounted for, in either of two ways:
   - GitHub reports a pull request from that branch in this repository MERGED
-    into `claim.baseBranch`, and that pull request's head is the local branch
+    into the claim's base, and that pull request's head is the local branch
     head. Ancestry is not used, because a squash merge leaves the branch head
     outside the base branch;
   - or the issue the branch claims is CLOSED and the branch holds nothing

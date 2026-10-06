@@ -35,7 +35,7 @@ body:
     id: landing
     attributes:
       label: Landing
-      description: Tasks merge straight to main unless the epic must ship as one release.
+      description: Tasks merge straight to main unless the epic must ship as one release. An integration branch is an open issue's claim branch; tasks then claim with `scripts/tron work start <issue> --base <branch>` and land into it.
       options:
         - Tasks merge to main
         - Integration branch (reason in Decisions)

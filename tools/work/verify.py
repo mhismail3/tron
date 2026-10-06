@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
 
+import claim as claims
 from gh import Gh, GhError
 
 _CHECK_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -303,9 +304,23 @@ def media_links(receipt: dict, evidence_link: str) -> list:
             for index, entry in enumerate(receipt.get("artifacts", []), 1)]
 
 
+def branch_base(root: Path, config: dict) -> str:
+    """The base the current branch is compared with: its claim's recorded base, else the configured one."""
+    rules = config["claim"]
+    branch = subprocess.run(["git", "symbolic-ref", "-q", "--short", "HEAD"], cwd=root,
+                            capture_output=True, text=True).stdout.strip()
+    number = claims.claimed_issue(branch) if branch else None
+    if number is None:
+        return rules["baseBranch"]
+    try:
+        return claims.claim_base(root, rules["remote"], rules["baseBranch"], "HEAD", number)
+    except claims.ClaimError as error:
+        raise VerifyError(str(error)) from None
+
+
 def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None) -> dict:
     settings, claim = config["verify"], config["claim"]
-    remote, base = claim["remote"], claim["baseBranch"]
+    remote = claim["remote"]
     checks = load_checks(settings)
     root = Path(_git(repo, "rev-parse", "--show-toplevel").strip())
     dirty = _dirty(root)
@@ -313,6 +328,7 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None) -
         raise VerifyError("commit or remove local changes first; the receipt binds to a commit:\n  "
                           + "\n  ".join(dirty[:20]))
     head = _git(root, "rev-parse", "HEAD").strip()
+    base = branch_base(root, config)
     _git(root, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
     base_tip = _git(root, "rev-parse", f"{remote}/{base}").strip()
     merge_base = _git(root, "merge-base", base_tip, head).strip()
@@ -449,7 +465,7 @@ def _upload(gh: Gh, repository: str, path: str, content: bytes, message: str) ->
 def open_pull(gh: Gh, branch: str) -> Optional[dict]:
     """The open pull request from `branch` in this repository, if any."""
     pulls = json.loads(gh.run("pr", "list", "--head", branch, "--state", "open",
-                              "--json", "number,title,body,url,isCrossRepository"))
+                              "--json", "number,title,body,url,isCrossRepository,baseRefName"))
     # Claim branch names are public; a fork can open a pull request with the same head name.
     own = sorted((p for p in pulls if not p["isCrossRepository"]), key=lambda p: p["number"])
     return own[0] if own else None

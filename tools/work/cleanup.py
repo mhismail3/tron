@@ -40,7 +40,7 @@ class Settings:
     primary: Path
     root: Path
     remote: str
-    base: str
+    base: str  # the configured base; each claim lands into its own recorded base (`_claim_base`)
     regenerable: List[str]  # git glob pathspecs
     releases: List[dict]
     started: Path  # the worktree (or checkout) cleanup was started from
@@ -108,9 +108,21 @@ def _issue_state(gh: Gh, number: int) -> str:
     return json.loads(gh.run("issue", "view", str(number), "--json", "state"))["state"]
 
 
-def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Optional[str], Optional[str]]:
+def _claim_base(tree: Worktree, settings: Settings, number: int) -> str:
+    """The base the claim on this worktree lands into: recorded in its claim commit, else the configured one.
+
+    Read from local refs only; a configured base ref that is missing proves nothing later on.
+    """
+    try:
+        found = claims.claim_commit(tree.path, f"{settings.remote}/{settings.base}", tree.head, number)
+    except claims.ClaimError:
+        return settings.base
+    return (found.base if found else None) or settings.base
+
+
+def _claim_commit(tree: Worktree, settings: Settings, number: int, base: str) -> Tuple[Optional[str], Optional[str]]:
     """(the claim commit the head is, why the branch is more than the single claim `start` made)."""
-    base_ref = f"{settings.remote}/{settings.base}"
+    base_ref = f"{settings.remote}/{base}"
     # The base branch moving on is not a change to the branch: a claim commit made
     # against an older remote base tip is still the only commit beyond this ref.
     counted = _git(tree.path, "rev-list", "--count", f"{base_ref}..{tree.head}", check=False)
@@ -120,7 +132,7 @@ def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Opti
     if beyond != "1":
         return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
     # The same trailers `start` writes, the dashboard reads and `land` checks.
-    if claims.claim_session(tree.path, base_ref, tree.head, number) is None:
+    if claims.claim_commit(tree.path, base_ref, tree.head, number) is None:
         return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
     # `start` commits the base tree itself. Work amended or squashed into that
     # commit keeps its message and trailers, so the content decides: one parent,
@@ -221,13 +233,14 @@ class Done:
 
 def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
     """(how the head is provably done, why it is not) — a merged pull request, or a spent claim."""
-    pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
+    # `_scope` admits only claim branches, so the issue number is known here.
+    number = claims.claimed_issue(tree.branch)
+    base = _claim_base(tree, settings, number)
+    pull, why = _merged_head(gh, tree.branch, tree.head, base)
     if pull:
         return Done(f"{pull} merged", False), []
     reasons = [why] if why else []
-    # `_scope` admits only claim branches, so the issue number is known here.
-    number = claims.claimed_issue(tree.branch)
-    claim_commit, why_not = _claim_commit(tree, settings, number)
+    claim_commit, why_not = _claim_commit(tree, settings, number, base)
     if claim_commit is None:
         reasons.append(why_not)
     else:

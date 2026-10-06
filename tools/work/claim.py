@@ -10,6 +10,9 @@ from typing import List, Optional
 
 ISSUE_TRAILER = "Work-Claim-Issue"
 SESSION_TRAILER = "Work-Claim-Session"
+# The branch the claim starts from and lands into. Claim commits made before it
+# was recorded carry none, and their claims keep the configured base.
+BASE_TRAILER = "Work-Claim-Base"
 _MAX_SLUG_WORDS = 5
 # `<type>/<issue>-<slug>`; group 1 is the issue number.
 _CLAIM_BRANCH = re.compile(r"^[a-z0-9._-]+/([0-9]+)-")
@@ -73,7 +76,7 @@ def is_active(state: str, labels: List[str], status: Optional[str], rules: dict)
             and not set(labels) & set(rules["excludeLabels"]))
 
 
-def claim_comment(session: str, branch: str, worktree: str, base: str) -> str:
+def claim_comment(session: str, branch: str, worktree: str, base: str, base_sha: str) -> str:
     # The repository may be public: only paths relative to the checkout's
     # parent directory are published.
     if worktree.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", worktree):
@@ -83,7 +86,7 @@ def claim_comment(session: str, branch: str, worktree: str, base: str) -> str:
         f"Claimed by session `{session}`.\n\n"
         f"- Branch: `{branch}`\n"
         f"- Worktree: `{worktree}`\n"
-        f"- Base: `{base[:12]}`\n"
+        f"- Base: `{base}` at `{base_sha[:12]}`\n"
     )
 
 
@@ -102,6 +105,13 @@ class Claim:
     branch: str
     sha: str
     session: Optional[str]  # None when the branch has no claim commit
+    base: Optional[str] = None  # the recorded base; None when none is recorded
+
+
+@dataclass(frozen=True)
+class ClaimCommit:
+    session: str
+    base: Optional[str]  # None when the claim commit predates recorded bases
 
 
 @dataclass
@@ -120,46 +130,73 @@ def _remote_heads(repo: Path, remote: str) -> dict:
     return heads
 
 
-def claim_session(repo: Path, base_ref: str, head: str, number: int) -> Optional[str]:
-    """The session named by the claim commit of `number` in `base_ref..head`, if any."""
+def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
+    """The claim commit of `number` in `range_base..head`, if any.
+
+    `range_base` is the configured base, which a claim commit is never on. So the
+    range holds a stacked claim's commit too, beside the claim commit of the branch
+    beneath it, which names another issue.
+    """
     # Branch-only commits, oldest first; the first carrying this issue's
     # trailer is the claim. Merges from the base branch add only base commits.
-    trailers = f"%(trailers:key={ISSUE_TRAILER},key={SESSION_TRAILER},valueonly,separator=%x00)"
-    log = _git(repo, "log", "--reverse", f"--format={trailers}%x1e", f"{base_ref}..{head}").stdout
+    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER))
+    log = _git(repo, "log", "--reverse", f"--format=%(trailers:{keys},separator=%x00)%x1e",
+               f"{range_base}..{head}").stdout
     for record in log.split("\x1e"):
-        values = [v.strip() for v in record.strip().split("\x00") if v.strip()]
-        if len(values) == 2 and values[0] == str(number):
-            return values[1]
+        fields = {}
+        for trailer in record.strip().split("\x00"):
+            key, _, value = trailer.partition(":")
+            if value.strip():
+                fields.setdefault(key.strip(), value.strip())
+        if fields.get(ISSUE_TRAILER) == str(number) and fields.get(SESSION_TRAILER):
+            return ClaimCommit(fields[SESSION_TRAILER], fields.get(BASE_TRAILER))
     return None
 
 
-def _read_claims(repo: Path, remote: str, base: str, heads: dict) -> List[Claim]:
+def claim_base(repo: Path, remote: str, default_base: str, head: str, number: int) -> str:
+    """The branch the claim on `head` starts from and lands into.
+
+    The base recorded in its claim commit, or `default_base` when the claim
+    commit records none or `head` has no claim commit. Fetches `default_base`.
+    """
+    _git(repo, "fetch", "-q", "--no-tags", remote,
+         f"+refs/heads/{default_base}:refs/remotes/{remote}/{default_base}")
+    found = claim_commit(repo, f"{remote}/{default_base}", head, number)
+    return (found.base if found else None) or default_base
+
+
+def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> List[Claim]:
     if not heads:
         return []
     refspecs = [f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in heads]
-    _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}", *refspecs)
-    return [Claim(b, heads[b], claim_session(repo, f"{remote}/{base}", f"{remote}/{b}", claimed_issue(b)))
-            for b in sorted(heads)]
+    _git(repo, "fetch", "-q", "--no-tags", remote,
+         f"+refs/heads/{default_base}:refs/remotes/{remote}/{default_base}", *refspecs)
+    claims = []
+    for b in sorted(heads):
+        found = claim_commit(repo, f"{remote}/{default_base}", f"{remote}/{b}", claimed_issue(b))
+        claims.append(Claim(b, heads[b], found.session if found else None, found.base if found else None))
+    return claims
 
 
-def existing_claims(repo: Path, remote: str, base: str, number: int) -> List[Claim]:
-    """Every remote branch for the issue, with its owner, sorted by name."""
+def existing_claims(repo: Path, remote: str, default_base: str, number: int) -> List[Claim]:
+    """Every remote branch for the issue, with its owner and recorded base, sorted by name."""
     heads = {b: s for b, s in _remote_heads(repo, remote).items() if claimed_issue(b) == number}
-    return _read_claims(repo, remote, base, heads)
+    return _read_claims(repo, remote, default_base, heads)
 
 
-def all_claims(repo: Path, remote: str, base: str) -> List[Claim]:
-    """Every claim-style remote branch of every issue, with its owner, sorted by name."""
+def all_claims(repo: Path, remote: str, default_base: str) -> List[Claim]:
+    """Every claim-style remote branch of every issue, with its owner and recorded base, sorted by name."""
     heads = {b: s for b, s in _remote_heads(repo, remote).items() if claimed_issue(b) is not None}
-    return _read_claims(repo, remote, base, heads)
+    return _read_claims(repo, remote, default_base, heads)
 
 
 def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, session: str) -> ClaimResult:
+    """Claim `number` as `branch`, starting from the fetched tip of `base` and recording it."""
     _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
     base_sha = _git(repo, "rev-parse", f"{remote}/{base}").stdout.strip()
     message = (
         f"chore: claim #{number}\n\n"
-        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n"
+        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n{BASE_TRAILER}: {base}\n"
     )
     tree = _git(repo, "rev-parse", f"{base_sha}^{{tree}}").stdout.strip()
     sha = _git(repo, "commit-tree", tree, "-p", base_sha, "-m", message).stdout.strip()
@@ -172,13 +209,13 @@ def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, s
     return ClaimResult(won=pushed.returncode == 0, sha=sha, base=base_sha)
 
 
-def resolve_race(repo: Path, remote: str, base: str, number: int, session: str) -> bool:
+def resolve_race(repo: Path, remote: str, default_base: str, number: int, session: str) -> bool:
     """After claiming, keep the claim only if it is the issue's smallest branch name.
 
     Every claimant applies the same rule, so exactly one survives; a loser
     deletes only its own ref, and only at the commit it pushed.
     """
-    claims = existing_claims(repo, remote, base, number)
+    claims = existing_claims(repo, remote, default_base, number)
     if not claims:
         raise ClaimError(f"no branch exists for #{number} after claiming")
     if claims[0].session == session:
