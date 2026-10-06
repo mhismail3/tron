@@ -51,6 +51,47 @@ import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js"
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
+/** Test-owned producer for one deterministic status.json replacement.
+ *
+ * `openOwnedExtensionArtifact` (runtime-slot) opens the artifact and then
+ * verifies that the inode it opened is the one it stats; a producer that
+ * atomically renames a new file over `status.json` in that window makes the
+ * read lose, which is the race "retries a status.json read that raced an atomic
+ * replacement" is about. Racing a real producer loop for that window made the
+ * case load-dependent (#430: its sample-size guard was a speed budget), so the
+ * `open` wrapper below performs exactly one real write+rename inside that
+ * window instead. `vi.mock` factories are hoisted, so their state lives here. */
+const statusJsonReplace = vi.hoisted(() => ({
+  /** Armed only by the case that injects the replacement. */
+  armed: false,
+  /** Real replacements performed, and the reads they made lose. */
+  replacements: 0,
+  losses: 0,
+  payload: "",
+  statusPath: "",
+  tempPath: "",
+  /** True only inside the read-with-retry invocation under observation. */
+  insideRetryInvocation: (): boolean => false,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
+      const handle = await (actual.open as unknown as (target: unknown, ...args: unknown[]) => Promise<unknown>)(path, ...rest);
+      if (statusJsonReplace.armed && statusJsonReplace.losses === 0
+        && statusJsonReplace.insideRetryInvocation() && String(path) === statusJsonReplace.statusPath) {
+        statusJsonReplace.losses += 1;
+        await actual.writeFile(statusJsonReplace.tempPath, statusJsonReplace.payload);
+        await actual.rename(statusJsonReplace.tempPath, statusJsonReplace.statusPath);
+        statusJsonReplace.replacements += 1;
+      }
+      return handle;
+    },
+  };
+});
+
 async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const value of stream) chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
@@ -78,11 +119,6 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
   return { paths: () => reads.mock.calls.map(([path]) => String(path)), restore: () => reads.mockRestore() };
 }
 
-/** A test that writes canonical files itself is an external writer: the folder
- * watcher observes it, but no reader polls for it. Forcing one owner reconcile
- * is the deterministic equivalent of waiting the watcher out, and settling the
- * owner then makes its rows and the durable document current without waiting
- * out the persist debounce. */
 /** Passes `discoverExtensionArtifactsUntil` may run before it stops on its own.
  * It only stops the loop: the caller's pass assertion is the bound, so a lagging
  * routing is reported as a pass count instead of a hang. It sits well above the
@@ -5694,12 +5730,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // The run must be offered by the first pass this call runs. Everything the
     // pass needs is already derived: the root was walked above, so every
     // unchanged artifact fact is cached by identity and the walk reaches the end
-    // of the root without spending the 1,024-read budget; the per-root routing
-    // budget for one root and two live slots is 512 (runtime-registry.ts:3935),
-    // and candidates no live slot can attribute are filtered out before that
-    // slice (runtime-registry.ts:3966), so the late run is the only candidate
-    // left to offer. A second pass means attribution or routing regressed, which
-    // is the bound this case's title claims.
+    // of the root without spending the `MAX_EXTENSION_DISCOVERY_WORK` read
+    // budget; the per-root routing budget (`rootBudget`, the remaining work split
+    // across the roots and live slots — 512 at most for one root and two slots)
+    // is an upper bound, and candidates no live slot can attribute are filtered
+    // out before that slice, so the late run is the only candidate left to
+    // offer. A second pass means attribution or routing regressed, which is the
+    // bound this case's title claims.
     const passes = await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
     expect(passes, "the pass that offers the newly attributed run").toBe(1);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([late.asyncDir]));
@@ -5813,6 +5850,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const asyncDir = join(delegated.delegatedRoot, "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    // The registry's own 750 ms pass can offer this same artifact, which would put
+    // a second retry invocation inside the injected window; this case is about the
+    // slot's retry path, so it owns the cadence and makes one read the only one.
+    const registryInternal = fixture.registry as unknown as { artifactDiscoveryTimer?: NodeJS.Timeout };
+    if (registryInternal.artifactDiscoveryTimer) clearInterval(registryInternal.artifactDiscoveryTimer);
+    registryInternal.artifactDiscoveryTimer = undefined;
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
     (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
@@ -5833,17 +5876,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(projected()).toMatchObject({ status: "running" });
 
     // A producer replaces an active run's status.json by an atomic rename, so a
-    // read can open one inode and stat another. The discovery lane owns no
-    // watcher for that window and used to report the first losing read as a
-    // rejected artifact.
+    // read can open one inode and stat another. `openOwnedExtensionArtifact`
+    // verifies that the inode it opened is the one it stats, and the discovery
+    // lane used to report the first losing read as a rejected artifact.
     //
-    // The event this case needs is a read that lost that race and was retried:
-    // observing it read-only through the existing retry path is what makes the
-    // sample real, where the old `passes > 100` was a speed budget (#430:
-    // `expected 69 to be greater than 100`). A read that returns nothing is the
-    // only reason `readExtensionStatusArtifactWithReplacementRetry` reads again,
-    // and a first read that returns nothing under a non-stop rename is a losing
-    // read. No production hook is added.
+    // The loss is injected, not raced for: the file-scoped `open` wrapper above
+    // performs exactly one real write+rename between this path's own open and its
+    // verifying stat, so the read it is inside loses by construction. Host
+    // scheduling, the fs threadpool and any load on the machine can therefore no
+    // longer decide whether the case observes its event — the old sample guard
+    // (`passes > 100`) was the speed budget that let them (#430). Only the
+    // test-owned producer is deterministic here; the spies below only observe.
     const slotInternals = slot as unknown as {
       readExtensionStatusArtifact: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
       readExtensionStatusArtifactWithReplacementRetry: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
@@ -5857,6 +5900,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // more than one read inside it is this path retrying a read that lost the
     // race with the producer's rename.
     const retryInvocation = new AsyncLocalStorage<{ reads: number }>();
+    statusJsonReplace.insideRetryInvocation = () => retryInvocation.getStore() !== undefined;
     let retriedLosingReads = 0;
     vi.spyOn(slotInternals, "readExtensionStatusArtifact").mockImplementation(async (directory: string) => {
       const invocation = retryInvocation.getStore();
@@ -5872,31 +5916,23 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
           if (invocation.reads > 1) retriedLosingReads += 1;
         }
       }));
-    const tempPath = join(asyncDir, "status.tmp");
-    let replacing = true;
-    const replacer = (async () => {
-      while (replacing) {
-        await writeFile(tempPath, payload);
-        await rename(tempPath, statusPath);
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    })();
+    const canonicalAsyncDir = await realpath(asyncDir);
+    statusJsonReplace.armed = true;
+    statusJsonReplace.losses = 0;
+    statusJsonReplace.replacements = 0;
+    statusJsonReplace.payload = payload;
+    statusJsonReplace.statusPath = join(canonicalAsyncDir, "status.json");
+    statusJsonReplace.tempPath = join(canonicalAsyncDir, "status.tmp");
     try {
-      // One pass is enough once the storm collides with a read; a storm that
-      // never loses a read still reports this label at the shared hang bound
-      // rather than a pass count nobody can derive from host speed.
-      await waitFor(
-        async () => {
-          await discoverExtensionArtifactsUntil(fixture.registry);
-          return retriedLosingReads > 0;
-        },
-        "a status.json read to lose the replace race and be retried",
-      );
+      // One read; the product's retry path runs because the injected replace made
+      // that read lose, and its second read succeeds.
+      await slot.discoverExtensionArtifact(asyncDir);
     } finally {
-      replacing = false;
-      await replacer;
+      statusJsonReplace.armed = false;
+      statusJsonReplace.insideRetryInvocation = () => false;
     }
-    expect(retriedLosingReads, "the losing read the case observed").toBeGreaterThan(0);
+    expect(statusJsonReplace.replacements, "the injected replace").toBe(1);
+    expect(retriedLosingReads, "the read that lost the race and was retried").toBe(1);
     expect(warnings.filter((warning) => warning.reason === "artifact-replacement-in-progress")).toEqual([]);
     expect(projected()).toMatchObject({ status: "running", runId });
     await rm(delegated.root, { recursive: true, force: true });

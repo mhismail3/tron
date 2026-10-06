@@ -25,13 +25,26 @@ export const WAIT_HANG_BOUND_MS = 12_000;
 export const HOOK_HANG_BOUND_MS = 5_000;
 
 /**
- * Real time, captured at module load. `vi.useFakeTimers()` replaces
- * `globalThis.Date` and the global timer functions for the rest of the test, and
- * a poll must never move a clock the test owns: that would fire the timers under
- * test (epic #400). `node:timers` is not a target of the global replacement, so
- * both references stay real even while a test's clock is fake.
+ * Real monotonic time, captured at module load. `vi.useFakeTimers()` replaces
+ * `globalThis.Date`, `process.hrtime` and the global timer functions for the rest
+ * of the test, and a poll must never move a clock the test owns: that would fire
+ * the timers under test (epic #400).
+ *
+ * The escape is a snapshot, not an exemption. Vitest 4.1.10 does patch
+ * `node:timers` (fake-timers writes `_global[name]` onto the module) and proxies
+ * a builtin's namespace by reading `mod[prop]`, but a *named* ESM import of a
+ * builtin binds at link time and only `syncBuiltinESMExports()` moves it, which
+ * nothing in vitest's dist calls. `import timers from "node:timers"` (a default
+ * import) would read the patched object at every use and silently break this;
+ * the "fires its own bound under a fully faked clock" negative control is what
+ * catches that. A captured `process.hrtime.bigint` keeps its original function
+ * the same way, and unlike `Date.now` it cannot follow a system clock jump.
  */
-const realDateNow = Date.now;
+const realHrtime = process.hrtime.bigint.bind(process.hrtime);
+
+function realNowMs(): number {
+  return Number(realHrtime() / 1_000_000n);
+}
 
 export interface WaitForOptions {
   /** Poll cadence in ms. */
@@ -66,13 +79,13 @@ export async function waitFor<T>(
 ): Promise<T> {
   const boundMs = options.boundMs ?? WAIT_HANG_BOUND_MS;
   const intervalMs = options.intervalMs ?? 10;
-  const deadline = realDateNow() + boundMs;
+  const deadline = realNowMs() + boundMs;
   for (;;) {
-    const remaining = deadline - realDateNow();
+    const remaining = deadline - realNowMs();
     if (remaining <= 0) throw unmetCondition(label, boundMs);
     const value = await evaluateWithin(condition, remaining, () => unmetCondition(label, boundMs));
     if (value !== undefined && value !== false) return value as T;
-    const pause = Math.min(intervalMs, deadline - realDateNow());
+    const pause = Math.min(intervalMs, deadline - realNowMs());
     if (pause > 0) await realDelay(pause);
   }
 }
@@ -106,8 +119,11 @@ async function evaluateWithin<T>(
     timer = realSetTimeout(() => reject(onExpiry()), remainingMs);
   });
   const evaluation = (async () => condition())();
-  // The abandoned evaluation may still reject after the bound fired; it is no
-  // longer awaited, and an unhandled rejection would fail an unrelated test.
+  // The evaluation abandoned here keeps running, and that is deliberate: it is a
+  // test-owned condition, only the failure path reaches this, and its rejection is
+  // handled below. A nested wait can therefore poll on for up to its own bound
+  // after an outer one has already failed the run — wasted worker time on a run
+  // that is already reporting, not a leak.
   evaluation.catch(() => {});
   try {
     return await Promise.race([evaluation, expiry]);
