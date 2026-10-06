@@ -245,8 +245,14 @@ Check the source state offline with `npm run check:pi-sdk`. Staged production
 payloads intentionally omit development-only `pi-sdk-baseline.json`; validate
 those trees with `node scripts/check-pi-sdk.mjs --runtime-tree <app>`. Run focused script tests with
 `npm run test:pi-sdk-scripts` and the isolated sequential rollback matrix with
-`npm run test:pi-sdk-rollback`. The committed `pi-sdk-baseline.json` records
-only the prior runtime used for rollback verification; `package.json` remains
+`npm run test:pi-sdk-rollback`. The rollback matrix seeds and rereads the
+persisted stores it owns — session JSONL, settings, auth, `mcp.json` (with a
+hyphenated server name) and the MCP OAuth credential store — in both directions,
+and names the on-disk credential keys when a runtime cannot resolve what the
+other wrote. A runtime that predates Pi's built-in MCP extension (0.87.1)
+reports that it skipped the MCP case, so a passing run never implies coverage it
+did not have. The committed `pi-sdk-baseline.json` records only the prior runtime
+used for rollback verification; `package.json` remains
 current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi
 family, without treating unrelated lockfile churn as an SDK change. CI runs the
@@ -259,7 +265,14 @@ family package through the current npm and prints bounded preflight evidence for
 version, source revision, integrity, and the registry-declared Node engine; it updates all four direct pins
 in one native `npm install --save-exact --engine-strict` operation, validates the
 resulting lockfile, runs `npm audit signatures`, and restores its owned
-manifests plus the disposable installed tree with `npm ci` on failure. Do not submit independent
+manifests plus the disposable installed tree with `npm ci` on failure. On
+success it also extracts the released `CHANGELOG.md` sections between the current
+and target versions from the coding-agent package it installed and writes them to
+the run's evidence under the git directory
+(`work/issue-<N>/pi-sdk-changelog-<from>-to-<to>.md`, or `work/pi-sdk-update/`
+outside a task branch), so the per-seam inventory starts from upstream release
+notes instead of a hand-read changelog; an update whose changelog carries no
+delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 

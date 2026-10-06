@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DIRECT_PI_PACKAGES, PI_PACKAGES, validSha512Integrity } from "./check-pi-sdk.mjs";
-import { auditCommand, exactVersion, metadataCommand, readMetadata, runUpdate, updateCommand } from "./update-pi-sdk.mjs";
+import { auditCommand, changelogEvidencePath, compareVersions, exactVersion, extractChangelogDelta, metadataCommand, readMetadata, runUpdate, updateCommand } from "./update-pi-sdk.mjs";
 
 const version = "1.2.3";
+const currentVersion = "1.0.0";
 const integrity = `sha512-${Buffer.alloc(64).toString("base64")}`;
 const gitHead = "0123456789abcdef0123456789abcdef01234567";
 const short = (name) => name.slice(name.indexOf("/") + 1);
@@ -18,11 +19,11 @@ const lockPath = (name, nested = false) => nested
 
 async function makeRepo() {
   const root = await mkdtemp(join(tmpdir(), "tron-pi-sdk-update-"));
-  const dependencies = Object.fromEntries(DIRECT_PI_PACKAGES.map((name) => [name, version]));
+  const dependencies = Object.fromEntries(DIRECT_PI_PACKAGES.map((name) => [name, currentVersion]));
   const packages = { "": { dependencies } };
   for (const name of PI_PACKAGES) {
     const nested = !DIRECT_PI_PACKAGES.includes(name);
-    packages[lockPath(name, nested)] = { version, resolved: tarball(name), ...(nested ? {} : { integrity }) };
+    packages[lockPath(name, nested)] = { version: currentVersion, resolved: tarball(name).replace(version, currentVersion), ...(nested ? {} : { integrity }) };
   }
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "fixture", private: true, dependencies }));
   await writeFile(join(root, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages }));
@@ -31,6 +32,55 @@ async function makeRepo() {
   execFileSync("git", ["add", "package.json", "package-lock.json", "pi-sdk-baseline.json"], { cwd: root });
   execFileSync("git", ["-c", "user.name=Tron Test", "-c", "user.email=tron-test@example.invalid", "commit", "-qm", "fixture"], { cwd: root });
   return root;
+}
+
+const changelogFixture = `# Changelog
+
+## [1.3.0] - 2026-11-01
+
+### Fixed
+
+- Released after the target.
+
+## [1.2.3] - 2026-10-05
+
+### Fixed
+
+- The target release.
+
+## [1.2.0] - 2026-09-20
+
+### New Features
+
+- Inside the range.
+
+## [Unreleased]
+
+- Not a release yet.
+
+## [1.0.0] - 2026-08-01
+
+### New Features
+
+- The lower bound itself.
+`;
+
+/** Stage the installed tree the fake npm's successful install would leave, so
+ * post-install validation and the changelog extract read a real package. */
+async function stageInstalledTree(root, changelog = changelogFixture) {
+  for (const name of PI_PACKAGES) {
+    const packageRoot = join(root, lockPath(name, !DIRECT_PI_PACKAGES.includes(name)));
+    await mkdir(packageRoot, { recursive: true });
+    const manifest = { name, version: currentVersion, ...(name === "@earendil-works/pi-coding-agent" ? { bin: { pi: "dist/bundle/cli.js" } } : {}) };
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify(manifest));
+  }
+  const agentRoot = join(root, lockPath("@earendil-works/pi-coding-agent"));
+  await mkdir(join(agentRoot, "dist", "bundle"), { recursive: true });
+  await writeFile(join(agentRoot, "dist", "bundle", "cli.js"), "#!/usr/bin/env node\n");
+  await chmod(join(agentRoot, "dist", "bundle", "cli.js"), 0o755);
+  await writeFile(join(agentRoot, "CHANGELOG.md"), changelog);
+  await mkdir(join(root, "node_modules", ".bin"), { recursive: true });
+  await symlink("../@earendil-works/pi-coding-agent/dist/bundle/cli.js", join(root, "node_modules", ".bin", "pi"));
 }
 
 async function fakeNpm(root, mode = "success") {
@@ -132,15 +182,17 @@ test("reports both update and recovery failures", async () => {
 test("snapshots the current package version as rollback metadata before install", async () => {
   const root = await makeRepo();
   try {
+    await stageInstalledTree(root);
     const { script } = await fakeNpm(root);
     runUpdate({ gatewayDir: root, version, npmBin: script });
-    assert.deepEqual(JSON.parse(await readFile(join(root, "pi-sdk-baseline.json"), "utf8")), { schema: 1, rollbackVersion: version });
+    assert.deepEqual(JSON.parse(await readFile(join(root, "pi-sdk-baseline.json"), "utf8")), { schema: 1, rollbackVersion: currentVersion });
   } finally { await cleanup(root); }
 });
 
 test("runs metadata, native install, coherence, and signature audit in order", async () => {
   const root = await makeRepo();
   try {
+    await stageInstalledTree(root);
     const { script, log } = await fakeNpm(root);
     const result = runUpdate({ gatewayDir: root, version, npmBin: script });
     const commands = (await readFile(log, "utf8")).trim().split("\n");
@@ -148,5 +200,45 @@ test("runs metadata, native install, coherence, and signature audit in order", a
     assert.match(commands[PI_PACKAGES.length], /^install /);
     assert.match(commands[PI_PACKAGES.length + 1], /^audit signatures /);
     assert.equal(result.metadata.length, PI_PACKAGES.length);
+  } finally { await cleanup(root); }
+});
+
+test("extracts exactly the released changelog sections between the two versions", () => {
+  const delta = extractChangelogDelta(changelogFixture, currentVersion, version);
+  assert.match(delta, /## \[1\.2\.3\]/u);
+  assert.match(delta, /## \[1\.2\.0\]/u);
+  assert.doesNotMatch(delta, /## \[1\.3\.0\]/u, "a release after the target is not part of this update's inventory");
+  assert.doesNotMatch(delta, /## \[1\.0\.0\]/u, "the current version is already in use, so its notes are not a delta");
+  assert.doesNotMatch(delta, /Not a release yet\./u, "an unreleased section is not a release's notes");
+  assert.match(delta, /- Inside the range\./u, "the section body is kept, not just its heading");
+  assert.equal(compareVersions("1.2.0-beta.1", "1.2.0"), -1, "a prerelease sorts before its release");
+  assert.throws(() => extractChangelogDelta(changelogFixture, "1.3.0", "1.3.0"), /no release section/u);
+  assert.throws(() => extractChangelogDelta(changelogFixture, version, "^1.3.0"), /exact semver bounds/u);
+});
+
+test("writes the changelog delta into this run's evidence outside the checkout", async () => {
+  const root = await makeRepo();
+  try {
+    await stageInstalledTree(root);
+    const { script } = await fakeNpm(root);
+    const result = runUpdate({ gatewayDir: root, version, npmBin: script });
+    assert.equal(result.changelog.from, currentVersion);
+    assert.equal(result.changelog.to, version);
+    assert.equal(result.changelog.path, changelogEvidencePath(root, currentVersion, version));
+    assert.equal(result.changelog.path.startsWith(`${root}/`), false, "evidence is never written into the package tree");
+    const evidence = await readFile(result.changelog.path, "utf8");
+    assert.match(evidence, /## \[1\.2\.3\] - 2026-10-05/u);
+    assert.match(evidence, /## \[1\.2\.0\] - 2026-09-20/u);
+    assert.doesNotMatch(evidence, /## \[1\.3\.0\]/u);
+    assert.match(evidence, /Source: @earendil-works\/pi-coding-agent@1\.2\.3 CHANGELOG\.md/u);
+  } finally { await cleanup(root); }
+});
+
+test("refuses to report an update whose changelog carries no delta", async () => {
+  const root = await makeRepo();
+  try {
+    await stageInstalledTree(root, "# Changelog\n\n## [1.0.0] - 2026-08-01\n\n- Nothing new.\n");
+    const { script } = await fakeNpm(root);
+    assert.throws(() => runUpdate({ gatewayDir: root, version, npmBin: script }), /restored package\.json\/package-lock\.json and ran npm ci/u);
   } finally { await cleanup(root); }
 });

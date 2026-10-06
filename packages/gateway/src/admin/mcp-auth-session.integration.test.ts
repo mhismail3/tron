@@ -48,7 +48,7 @@ describe("MCP auth through a live Gateway session", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-auth-session-")); roots.push(root);
     const agentDir = join(root, "agent"), cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
-    let origin = "", authQuery: URLSearchParams | undefined, token = "", toolCalls = 0;
+    let origin = "", authQuery: URLSearchParams | undefined, token = "", toolCalls = 0, registrationCount = 0, refreshCount = 0;
     const requests: string[] = [], rpcMethods: string[] = [];
     const fixture = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", origin || "http://127.0.0.1");
@@ -56,9 +56,14 @@ describe("MCP auth through a live Gateway session", () => {
       if (url.pathname === "/.well-known/oauth-protected-resource") return reply(res, 200, { resource: `${origin}/mcp`, authorization_servers: [origin] });
       if (url.pathname === "/.well-known/oauth-authorization-server") return reply(res, 200, {
         issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, registration_endpoint: `${origin}/register`,
-        response_types_supported: ["code"], grant_types_supported: ["authorization_code"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"],
+        response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"],
       });
-      if (url.pathname === "/register") return reply(res, 201, { client_id: "fixture-client" });
+      if (url.pathname === "/register") {
+        registrationCount += 1;
+        const registration = JSON.parse(await requestBody(req)) as { redirect_uris?: string[] };
+        if (!registration.redirect_uris?.[0]?.match(/^http:\/\/127\.0\.0\.1:\d+\/callback$/)) return reply(res, 400, { error: "invalid_redirect_uri" });
+        return reply(res, 201, { client_id: "fixture-client", redirect_uris: registration.redirect_uris });
+      }
       if (url.pathname === "/authorize") {
         authQuery = url.searchParams;
         const callback = new URL(url.searchParams.get("redirect_uri")!);
@@ -67,10 +72,17 @@ describe("MCP auth through a live Gateway session", () => {
       }
       if (url.pathname === "/token") {
         const form = new URLSearchParams(await requestBody(req));
+        if (form.get("grant_type") === "refresh_token") {
+          if (form.get("refresh_token") !== "fixture-refresh-token") return reply(res, 400, { error: "invalid_grant" });
+          refreshCount += 1; token = "fixture-refreshed-token";
+          return reply(res, 200, { access_token: token, token_type: "Bearer", refresh_token: "fixture-refresh-token", expires_in: 3600 });
+        }
         const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");
         if (form.get("grant_type") !== "authorization_code" || challenge !== authQuery?.get("code_challenge")) return reply(res, 400, { error: "invalid_grant" });
         token = "fixture-access-token";
-        return reply(res, 200, { access_token: token, token_type: "Bearer", expires_in: 3600 });
+        // One second: Pi refreshes a token this close to expiry, so the turn after sign-in
+        // exercises the refresh path on the credential the sign-in itself persisted.
+        return reply(res, 200, { access_token: token, token_type: "Bearer", refresh_token: "fixture-refresh-token", expires_in: 1 });
       }
       if (url.pathname === "/mcp") {
         if (req.headers.authorization !== `Bearer ${token}` || !token) {
@@ -148,7 +160,12 @@ describe("MCP auth through a live Gateway session", () => {
     await waitFor(() => events.some((event) => event.topic === "auth.completed"), "the completed MCP authentication event").catch((error) => { throw new Error(`no completion; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} requests=${JSON.stringify(requests)} methods=${JSON.stringify(rpcMethods)}`, { cause: error }); });
     expect((events.find((event) => event.topic === "auth.completed")!.payload as any).success).toBe(true);
     const persisted = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
-    expect(persisted[`${origin}/mcp`].tokens.access_token).toBe(token);
+    expect(registrationCount).toBe(1);
+    expect(authQuery?.get("code_challenge_method")).toBe("S256");
+    // The fixture expires the sign-in token in one second, so Pi refreshes it and
+    // persists the rotation before the session's next turn.
+    expect(persisted[`${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
+    expect(refreshCount).toBe(1);
 
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("mcp__fixture__fixture_tool", { value: "next-turn" }, { id: "mcp-after-signin" })], { stopReason: "toolUse" }),
@@ -160,10 +177,14 @@ describe("MCP auth through a live Gateway session", () => {
     const toolResult = slot.snapshot().transcript.find((entry: any) => entry.kind === "message" && entry.role === "toolResult" && entry.toolCallId === "mcp-after-signin") as any;
     expect(toolResult?.content?.map((block: any) => block.type === "text" ? block.text : "").join("\\n")).toContain("worked:next-turn");
     expect(events.filter((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url")).toHaveLength(1);
+    const afterTurn = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
+    expect(afterTurn[`${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
+    expect(refreshCount).toBe(1);
     const toolOutput = toolResult?.content?.map((block: any) => block.type === "text" ? block.text : "").join("\\n") ?? "";
     const artifact = { rpcStarted: true, authTarget: authEvent.target, authUrlRelayed: true, callbackForwarded: callbackResult.forwarded,
-      authCompleted: true, tokenPersistedInAgentDir: true, directToolCallSucceeded: toolOutput.includes("worked:next-turn"),
-      toolCallRequests: toolCalls, fauxProviderTurns: 2 };
+      authCompleted: true, pkceS256: authQuery?.get("code_challenge_method") === "S256", dynamicRegistrationCount: registrationCount,
+      tokenPersistedInAgentDir: true, tokenRefreshedAfterExpiry: refreshCount === 1,
+      directToolCallSucceeded: toolOutput.includes("worked:next-turn"), toolCallRequests: toolCalls, fauxProviderTurns: 2 };
     const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-signin-session.json");
     await mkdir(join(process.cwd(), "test-results"), { recursive: true });
     await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
