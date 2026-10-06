@@ -281,7 +281,7 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
                    f":refs/heads/{branch}", check=False)
     if deleted.returncode != 0:
         detail = (deleted.stderr.strip().splitlines() or ["no detail"])[-1]
-        return f"kept: the delete with a lease on the merged head {head[:12]} was refused ({detail})"
+        return f"kept: the delete with a lease on {head[:12]} was refused ({detail})"
     return "deleted"
 
 

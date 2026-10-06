@@ -1,10 +1,11 @@
-"""Isolated checks for cleanup failure modes 53-62 and 66 in README.md.
+"""Isolated checks for cleanup failure modes 53-62, 66 and 70 in README.md.
 
 Real temporary repositories: a local bare remote, a primary clone, and linked
 task worktrees under the configured root. GitHub is a fake `gh` (WORK_GH) that
-answers `pr list` from a JSON file of pull requests and records every call. A
-merged pull request here is a squash merge that GitHub reports; the base branch
-never contains the task head, as after a real squash merge.
+answers `pr list` from a JSON file of pull requests and `issue view` from a map
+of issue states, and records every call. A merged pull request here is a squash
+merge that GitHub reports; the base branch never contains the task head, as
+after a real squash merge.
 Run: python3 -m unittest discover -s tools/work
 """
 from __future__ import annotations
@@ -48,6 +49,10 @@ FAKE_GH = textwrap.dedent(
                  and (wanted == "ALL" or p["state"] == wanted)]
         fields = arg("--json").split(",")
         print(json.dumps([{k: p[k] for k in fields} for p in pulls]))
+        sys.exit(0)
+    if args[:2] == ["issue", "view"]:
+        # A number no test set is an open issue.
+        print(json.dumps({"state": state.get("issues", {}).get(args[2], "OPEN")}))
         sys.exit(0)
     print("fake gh: unhandled " + " ".join(args), file=sys.stderr)
     sys.exit(1)
@@ -95,6 +100,7 @@ class CleanupFixture(unittest.TestCase):
         self.state_path = self.tmp / "state.json"
         self.gh_log = self.tmp / "gh.jsonl"
         self.pulls = []
+        self.issues = {}
         self.save_pulls()
         fake = self.tmp / "gh"
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
@@ -148,6 +154,19 @@ class CleanupFixture(unittest.TestCase):
             self.add_pull(branch, head, **pull)
         return path, branch, head
 
+    def claim_only_worktree(self, number: int, state: str = "OPEN") -> tuple:
+        """What an evidence-only task leaves: the worktree `work start` made, holding only its claim commit.
+
+        No pull request exists, and the fake GitHub reports the issue in `state`.
+        """
+        branch = f"chore/{number}-evidence"
+        claim = claims.create_claim(self.repo, REMOTE, BASE, branch, number, "session-a")
+        git(self.repo, "fetch", "-q", REMOTE)
+        path = self.root / branch.split("/", 1)[1]
+        git(self.repo, "worktree", "add", "-q", "--track", "-b", branch, str(path), f"{REMOTE}/{branch}")
+        self.issue_state(number, state)
+        return path, branch, claim.sha
+
     def add_pull(self, branch: str, head: str, **fields) -> None:
         pull = {"number": 100 + len(self.pulls), "headRefName": branch, "headRefOid": head, "baseRefName": BASE,
                 "isCrossRepository": False, "state": "MERGED", "url": "https://example.invalid/pull",
@@ -158,7 +177,13 @@ class CleanupFixture(unittest.TestCase):
 
     def save_pulls(self, failing=()) -> None:
         """failing: branches whose `gh pr list` exits non-zero."""
-        self.state_path.write_text(json.dumps({"pulls": self.pulls, "failing": list(failing)}))
+        self.state_path.write_text(json.dumps({"pulls": self.pulls, "failing": list(failing),
+                                               "issues": self.issues}))
+
+    def issue_state(self, number: int, state: str) -> None:
+        """The state fake GitHub reports for the issue; a number a test does not set is open."""
+        self.issues[number] = state
+        self.save_pulls()
 
     # ------------------------------------------------------------- observe
 
@@ -239,6 +264,116 @@ class MergedRemovalTests(CleanupFixture):
         self.assertIn(f"shell-cwd={path}", shell.stdout)
         self.assertIn("removed:", shell.stdout)
         self.assert_removed(path, branch)
+
+
+class ClosedClaimTests(CleanupFixture):
+    """Failure mode 70: an evidence-only task's claim, which never has a pull request."""
+
+    def test_a_closed_claim_with_nothing_but_its_claim_commit_is_removed(self):
+        # The base branch moving on adds nothing to this branch: the claim commit
+        # was made against the remote base tip of the time.
+        for number, base_moves_on in ((7, False), (8, True)):
+            with self.subTest(base_moves_on=base_moves_on):
+                path, branch, claim = self.claim_only_worktree(number, "CLOSED")
+                if base_moves_on:
+                    self.commit(self.repo, f"src/{number}-main.txt", "main moved\n")
+                    git(self.repo, "push", "-q", REMOTE, f"HEAD:{BASE}")
+                self.assertEqual(git(path, "rev-parse", "HEAD"), claim)
+                code, out = self.cleanup(path)
+                self.assertEqual(code, 0, out)
+                self.assertIn(f"#{number} closed, only its claim commit", out)
+                self.assertIn(str(path), self.released_in())
+                self.assert_removed(path, branch)
+
+    def test_an_open_issue_keeps_a_claim_only_worktree(self):
+        path, branch, head = self.claim_only_worktree(7)
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("#7 is OPEN", out)
+        self.assert_kept(path, branch, head)
+
+    def test_any_commit_beyond_the_claim_commit_keeps_the_worktree(self):
+        for number, extra in ((7, 1), (8, 2)):
+            with self.subTest(extra_commits=extra):
+                path, branch, claim = self.claim_only_worktree(number, "CLOSED")
+                for count in range(extra):
+                    head = self.commit(path, f"src/{number}-{count}.txt", "work\n")
+                code, out = self.cleanup(path)
+                self.assertEqual(code, 1, out)
+                # The count includes the claim commit itself.
+                self.assertIn(f"{extra + 1} commits lie beyond {REMOTE}/{BASE}", out)
+                self.assert_kept(path, branch, head, remote=claim)
+
+    def test_a_single_commit_that_is_not_the_claim_commit_keeps_the_worktree(self):
+        # A claim-style branch whose one commit carries no claim marker for its issue
+        # is not the claim `start` made (README.md, `start`).
+        branch = "chore/7-evidence"
+        path = self.root / "7-evidence"
+        git(self.repo, "worktree", "add", "-q", "-b", branch, str(path), BASE)
+        head = self.commit(path, "src/7.txt", "work\n")
+        git(path, "push", "-q", REMOTE, f"HEAD:refs/heads/{branch}")
+        self.issue_state(7, "CLOSED")
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("no claim marker for #7", out)
+        self.assert_kept(path, branch, head)
+
+    def test_local_data_or_an_operation_in_progress_keeps_a_closed_claim(self):
+        def marker(name):
+            def make(path):
+                git_path = git(path, "rev-parse", "--path-format=absolute", "--git-path", name)
+                Path(git_path).write_text("x\n")
+            return make
+
+        cases = [
+            ("modified", lambda p: self.write(p, "README.md", "edited\n"), "1 uncommitted or untracked"),
+            ("untracked", lambda p: self.write(p, "notes.txt", "x\n"), "1 uncommitted or untracked"),
+            ("ignored, not regenerable", lambda p: self.write(p, "keys/prod.secret", "x\n"),
+             "1 ignored and not regenerable"),
+            ("merge", marker("MERGE_HEAD"), "a merge is in progress"),
+        ]
+        for number, (name, make, reason) in enumerate(cases, start=10):
+            with self.subTest(case=name):
+                path, branch, head = self.claim_only_worktree(number, "CLOSED")
+                make(path)
+                code, out = self.cleanup(path)
+                self.assertEqual(code, 1, out)
+                self.assertIn(reason, out)
+                self.assert_kept(path, branch, head)
+
+    def test_a_missing_base_ref_proves_nothing(self):
+        path, branch, head = self.claim_only_worktree(7, "CLOSED")
+        git(self.repo, "update-ref", "-d", f"refs/remotes/{REMOTE}/{BASE}")
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("cannot compare", out)
+        self.assert_kept(path, branch, head)
+
+    # Failure mode 58 for this path: the lease still guards the remote claim branch.
+    def test_a_moved_remote_claim_branch_is_kept_and_reported(self):
+        path, branch, _ = self.claim_only_worktree(7, "CLOSED")
+        other = self.tmp / "other"
+        git(self.tmp, "clone", "-q", "-b", branch, str(self.remote), str(other))
+        git(other, "config", "user.name", "Agent")
+        git(other, "config", "user.email", "agent@example.invalid")
+        moved = self.commit(other, "src/more.txt", "more\n")
+        git(other, "push", "-q", REMOTE, f"HEAD:refs/heads/{branch}")
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 0, out)
+        self.assertFalse(path.exists())
+        self.assertEqual(self.local_branch(branch), "")
+        self.assertEqual(self.remote_branch(branch), moved)
+        self.assertIn("kept", out)
+
+    # Failure mode 60 for this path.
+    def test_a_dry_run_reports_a_closed_claim_and_changes_nothing(self):
+        path, branch, head = self.claim_only_worktree(7, "CLOSED")
+        code, out = self.cleanup(path, all_worktrees=True, dry_run=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("would remove", out)
+        self.assertIn("only its claim commit", out)
+        self.assertEqual(self.released_in(), [])
+        self.assert_kept(path, branch, head)
 
 
 class UnmergedTests(CleanupFixture):
