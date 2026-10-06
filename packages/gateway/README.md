@@ -2767,6 +2767,11 @@ bound, not a change to test selection, per-test concurrency assertions, or the
 15-second default timeout. Production scheduling is unchanged. Keep focused
 owners narrow while iterating and use the full configured suite for checkpoints.
 
+Tests own every remote boundary through injected fetchers, resolvers and HTTP
+stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
+connection immediately and fails the test that attempted it, so an unstubbed
+path cannot pass or hang depending on the host's network.
+
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 
 ```bash
