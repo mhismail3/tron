@@ -661,6 +661,17 @@ describe.sequential("Tron Home activations end to end", () => {
     expect(row.budgetOnNewSession).toBe(500_000);
     expect(row.spendOnNewSession).toBe(0);
     expect(row.spentOnFirstSession).toBeGreaterThan(0);
+
+    // The new session's memory opens and builds (#483). Its namespace was never
+    // created, which is not lost state, even though the first session's store
+    // set the workspace's episodic marker.
+    const freshSlot = await f.registry.acquire(reDesignated.sessionId);
+    f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply three"))]);
+    await freshSlot.prompt(longInput("lifecycle activation three"));
+    await waitUntil(() => !freshSlot.isBusy);
+    const context = await f.service.invoke(client, "home.context", {}) as unknown as { lastRefusalReason?: string; lastRefusalDetail?: string };
+    expect(context.lastRefusalReason, context.lastRefusalDetail).toBeUndefined();
+    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0) > 0);
   }, 120_000);
 
   it("refuses home.resumeMemory for a budget block and resumes on a raised budget", async () => {

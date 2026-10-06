@@ -86,9 +86,16 @@ state/episodic/<sourceSessionId>/
   live node whose children are missing or rebuilt refuses the store visibly
   (`invalid-store` / `unsafe-store`), and `episodic.store-refused` is raised.
   Nothing is silently skipped or migrated.
-- The workspace's feature marker records that this namespace was initialized, so
-  a **deleted namespace is lost state**: it refuses instead of restarting and
-  re-spending every compactor call.
+- The workspace's feature marker records that the shared `state/episodic`
+  container was initialized, so a **deleted container is lost state**: it refuses
+  instead of restarting and re-spending every compactor call. The marker describes
+  the container, never one session. Each session's namespace is created lazily
+  inside it, so a session without one, such as a new Home session after another
+  session's memory set the marker, starts fresh within its own token budget
+  (#483). Spend is recorded inside the namespace, so a surviving session whose
+  own namespace was deleted rebuilds from its source and may spend up to its
+  configured budget again (D5: repair within the memory budget; #420 owns
+  restore).
 - The version is `EPISODIC_STORE_VERSION` (1). There is no migration path: a
   store this owner cannot read is refused rather than guessed at.
 
