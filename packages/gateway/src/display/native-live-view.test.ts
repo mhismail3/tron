@@ -3,6 +3,7 @@ import { BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { NativeCaptureHostFailure } from "../machine/native-capture-client.js";
 import type { NativeLiveClient } from "./native-live-view.js";
 import { jpeg } from "../../test-fixtures/browser-live.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void;
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
@@ -36,7 +37,7 @@ describe("native producer through the shared live-view owner", () => {
     expect(view.schema).toBe("tron.native-live-view.v1");
     const a = f.views.open("session", view.viewId, view.generation, "phone");
     const b = f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(f.value.pull).toHaveBeenCalledOnce());
+    await waitFor(() => vi.mocked(f.value.pull).mock.calls.length === 1, "the first native frame pull");
     const delivery = f.views.acquireFrame("session", view.viewId, view.generation, a.leaseId, "phone", () => {});
     expect(delivery.frame).toMatchObject({ data: jpeg, sequence: 1, width: 1, height: 1 }); delivery.release();
     f.views.close(a.leaseId); expect(f.value.close).not.toHaveBeenCalled();
@@ -44,7 +45,7 @@ describe("native producer through the shared live-view owner", () => {
     expect(f.value.start).toHaveBeenCalledExactlyOnceWith(source.handle, expect.any(AbortSignal), undefined);
     expect(f.value.suspend).toHaveBeenCalled(); expect(f.value.close).not.toHaveBeenCalled();
     const resumed = f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(f.value.start).toHaveBeenCalledTimes(2));
+    await waitFor(() => vi.mocked(f.value.start).mock.calls.length === 2, "the resumed native start");
     expect(f.value.start).toHaveBeenLastCalledWith(source.handle, expect.any(AbortSignal), undefined);
     f.views.close(resumed.leaseId);
     expect(f.factory).toHaveBeenCalledOnce();
@@ -58,11 +59,11 @@ describe("native producer through the shared live-view owner", () => {
     const view = await selecting;
     expect(f.value.start).not.toHaveBeenCalled();
     const lease = f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(f.value.start).toHaveBeenCalledOnce());
+    await waitFor(() => vi.mocked(f.value.start).mock.calls.length === 1, "the cropped native start");
     expect(f.value.start).toHaveBeenCalledWith(source.handle, expect.any(AbortSignal), { x: 10, y: 20, width: 200, height: 150 });
     f.views.close(lease.leaseId); await f.views.joinRetirements();
     const resumed = f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(f.value.start).toHaveBeenCalledTimes(2));
+    await waitFor(() => vi.mocked(f.value.start).mock.calls.length === 2, "the resumed cropped native start");
     expect(f.value.start).toHaveBeenLastCalledWith(source.handle, expect.any(AbortSignal), { x: 10, y: 20, width: 200, height: 150 });
     f.views.close(resumed.leaseId);
   });
@@ -72,7 +73,7 @@ describe("native producer through the shared live-view owner", () => {
     f.value.start = vi.fn(async () => { throw new NativeCaptureHostFailure(status!, "start"); });
     f.value.suspend = vi.fn(async () => { throw new Error("private cleanup path /private/fixture"); });
     const view = await selected(f), lease = f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(f.value.close).toHaveBeenCalled());
+    await waitFor(() => vi.mocked(f.value.close).mock.calls.length > 0, "the failed start's native cleanup");
     let failure: unknown;
     try { f.views.acquireFrame("session", view.viewId, view.generation, lease.leaseId, "phone", () => {}); } catch (error) { failure = error; }
     expect(failure).toMatchObject({ code: "not_found", retryable: false, details: { liveViewFailure: reason } });
@@ -87,7 +88,7 @@ describe("native producer through the shared live-view owner", () => {
     try {
       const f = fixture(); f.value.pull = vi.fn(async () => undefined);
       const view = await selected(f), lease = f.views.open("session", view.viewId, view.generation, "phone");
-      await vi.waitFor(() => expect(f.value.pull).toHaveBeenCalled());
+      await waitFor(() => vi.mocked(f.value.pull).mock.calls.length > 0, "the first native frame pull");
       clock.mockReturnValue(5_010);
       const waiting = f.views.acquireFrame("session", view.viewId, view.generation, lease.leaseId, "phone", () => {});
       expect(waiting.frame).toEqual({ status: "waiting" }); waiting.release();
@@ -106,7 +107,7 @@ describe("native producer through the shared live-view owner", () => {
     const value = client(); value.start = vi.fn(() => start.promise); value.suspend = vi.fn(() => stop.promise);
     const f = fixture(value), view = await selected(f);
     const lease = f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(value.start).toHaveBeenCalled());
+    await waitFor(() => vi.mocked(value.start).mock.calls.length > 0, "the native start in flight");
     f.views.close(lease.leaseId); expect(value.suspend).toHaveBeenCalled();
     let settled = false; const joined = f.views.joinRetirements().then(() => { settled = true; });
     stop.resolve({ status: "joined" }); await Promise.resolve(); await Promise.resolve();
@@ -120,7 +121,7 @@ describe("native producer through the shared live-view owner", () => {
     const value = client(); value.pull = vi.fn(() => frame.promise);
     const f = fixture(value), view = await selected(f);
     f.views.open("session", view.viewId, view.generation, "phone");
-    await vi.waitFor(() => expect(value.pull).toHaveBeenCalled());
+    await waitFor(() => vi.mocked(value.pull).mock.calls.length > 0, "the frame pull before viewer revocation");
     f.views.closeViewerIdentity("phone");
     frame.resolve({ generation: "late", sequence: "1", readSequence: 1, width: 1, height: 1, jpeg });
     await f.views.joinRetirements();
@@ -133,7 +134,7 @@ describe("native producer through the shared live-view owner", () => {
     const opened = deferred<NativeLiveClient>(), value = client();
     const f = fixture(value); f.factory.mockImplementation(() => opened.promise);
     const catalog = f.views.catalogNative("session"); const rejected = expect(catalog).rejects.toThrow(/ended/);
-    await vi.waitFor(() => expect(f.factory).toHaveBeenCalled());
+    await waitFor(() => f.factory.mock.calls.length > 0, "the native client factory call");
     f.views.beginSessionLoad("session"); opened.resolve(value);
     await rejected; await f.views.joinRetirements(); expect(value.close).toHaveBeenCalled();
     await expect(f.views.registerNative("session", source.handle)).rejects.toThrow(/List native windows/);
@@ -146,7 +147,7 @@ describe("native producer through the shared live-view owner", () => {
     f.factory.mockResolvedValue(next);
     const abort = new AbortController(), reading = f.views.catalogNative("session", abort.signal);
     const rejected = expect(reading).rejects.toThrow(/ended/);
-    await vi.waitFor(() => expect(next.catalog).toHaveBeenCalled());
+    await waitFor(() => vi.mocked(next.catalog).mock.calls.length > 0, "the aborted catalog read");
     abort.abort(); catalog.resolve([source]); await rejected;
     expect(next.close).toHaveBeenCalled(); expect(f.value.close).not.toHaveBeenCalled();
     expect(f.views.describe("session", view.viewId, view.generation)).toEqual(view);

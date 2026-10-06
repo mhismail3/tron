@@ -2833,10 +2833,10 @@ test installed: a file that fakes timers advances them itself. A wait that a
 hook runs (`beforeEach`/`afterEach` and the cleanup callbacks they await) passes
 `HOOK_HANG_BOUND_MS` (5 s), because Vitest's 10-second `hookTimeout` would
 truncate the label. A call site with its own measurement budget passes its own
-`boundMs` and says why. Waits converted by #433 go through this helper; several
-of those files still carry `vi.waitFor` budgets and file-local poll helpers that
-were outside that change (94 `vi.waitFor` call sites across 23 files), and the
-follow-up list is recorded on #433 rather than claimed as converted here.
+`boundMs` and says why. Every Gateway wait converted by #433 and #460 goes
+through this helper: `vi.waitFor`'s per-call speed budgets are gone, and a wait
+under fake timers advances that clock itself, because the helper never moves a
+clock a test owns.
 
 A bound tuned to host speed turns unrelated CPU contention (parallel agent
 builds, hosted runners) into a false failure that lands on a different test each

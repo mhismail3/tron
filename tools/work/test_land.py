@@ -1,4 +1,6 @@
-"""Isolated checks for land and steward failure modes 32-42 and 64-66 in README.md.
+"""Isolated checks for land and steward failure modes 32-42, 64-66, 71-78 in README.md.
+
+The stacked-claim cases (75-78) also drive `start`, since a claim's base is set there.
 
 Real temporary repositories with a local bare remote. GitHub is a fake `gh`
 (WORK_GH) that keeps pull request, check, status, issue and Project state in a
@@ -8,9 +10,11 @@ Run: python3 -m unittest discover -s tools/work
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +22,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+import acceptance
 import claim as claims
 import dashboard
 import land
@@ -31,6 +36,70 @@ BRANCH = "feat/7-add-the-widget"
 SESSION = "session-a"
 REPO = "acme/widget"
 STATUSES = ["Proposed", "Ready", "In progress", "In review", "Needs you", "Blocked", "Done"]
+# The fixture's acceptance registry: two journeys and the report each one leaves,
+# shaped exactly like the declaration a real `.github/work.json` holds.
+PAIR = "pair-and-chat"
+WRONG_CODE = "wrong-code"
+REPORT_PATH = "results/latest-ui/report.json"
+
+# The stand-in for a registered journey: it writes the report its spec names into
+# the evidence directory land hands the run, records every step it took, and can
+# be made to run long enough for land's bound or an interrupt to reach it, so
+# every report field and every stop path land owns is reachable from a test.
+FAKE_JOURNEY = textwrap.dedent(
+    """\
+    #!/usr/bin/env python3
+    import json, os, signal, subprocess, sys, time
+    from pathlib import Path
+    journey = sys.argv[1]
+    spec = json.loads(Path(os.environ["FAKE_ACCEPTANCE_SPEC"]).read_text()).get(journey, {})
+    runs = Path(os.environ["FAKE_ACCEPTANCE_RUNS"])
+
+    def note(what):
+        with runs.open("a") as handle:
+            handle.write(f"{journey} {what}\\n")
+
+    note("started")
+    if spec.get("exit"):
+        sys.exit(spec["exit"])
+    if spec.get("signal_parent"):
+        # The journey signals land's own process the way a terminal Ctrl-C does,
+        # then winds down on its own. It replaces its shell (`exec` in the
+        # fixture's command), so its parent is land's process.
+        time.sleep(spec.get("signal_after", 0.3))
+        os.kill(os.getppid(), signal.SIGINT)
+        time.sleep(spec.get("wound_down_after", 1.0))
+        note("wound down")
+    if spec.get("sleep"):
+        if spec.get("trap_sigint"):
+            def wind_down(*_):
+                note("cleanup")
+                sys.exit(130)
+            signal.signal(signal.SIGINT, wind_down)
+        time.sleep(spec["sleep"])
+        note("wound down")
+    if spec.get("report", True):
+        # The same relative report path the registry declares (REPORT_PATH).
+        report_dir = Path(os.environ["FAKE_ACCEPTANCE_EVIDENCE"]) / "results/latest-ui"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        revision = spec.get("revision", "HEAD")
+        if revision == "HEAD":
+            revision = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                                      check=True).stdout.strip()
+        report = {
+            "schema": "tron.ios-e2e-ui-journey.v1",
+            "journey": spec.get("journey", journey),
+            "journey_status": spec.get("status", 0),
+            "journey_seconds": spec.get("seconds", 9),
+            "evidence_complete": spec.get("evidence_complete", True),
+            "source": {"revision": revision, "dirty": spec.get("dirty", False),
+                       "source_fingerprint": spec.get("fingerprint", "ab" * 32)},
+            "artifacts": [{"path": "Journeys.xcresult", "kind": "tree-sha256", "sha256": "cd" * 32}],
+        }
+        (report_dir / "report.json").write_text(spec.get("raw") or json.dumps(report, indent=2, sort_keys=True) + "\\n")
+        note(f"report {revision}")
+    """
+)
 
 FAKE_GH = textwrap.dedent(
     """\
@@ -115,7 +184,8 @@ FAKE_GH = textwrap.dedent(
                 sha = head_of(p)
                 nodes.append({"number": p["number"], "title": p["title"], "body": p["body"],
                               "url": "https://github.com/%s/pull/%d" % (repo, p["number"]),
-                              "headRefName": p["headRefName"], "isCrossRepository": p.get("fork", False),
+                              "headRefName": p["headRefName"], "baseRefName": p.get("base") or state["base"],
+                              "isCrossRepository": p.get("fork", False),
                               "reviewThreads": {"nodes": [{"isResolved": r} for r in p.get("threads", [])]},
                               "commits": {"nodes": [{"commit": {
                                   "oid": sha, "committedDate": "2026-09-30T00:00:00Z",
@@ -161,7 +231,7 @@ FAKE_GH = textwrap.dedent(
         wanted = (arg("--state") or "open").upper()
         pulls = [p for p in state["pulls"] if p["state"] == wanted and p["headRefName"] == arg("--head")]
         done([{"number": p["number"], "title": p["title"], "body": p["body"], "isCrossRepository": p.get("fork", False),
-               "headRefOid": head_of(p), "baseRefName": p.get("base", state["base"]),
+               "headRefOid": head_of(p), "baseRefName": p.get("base") or state["base"],
                "mergeCommit": p["mergeCommit"], "url": "https://github.com/%s/pull/%d" % (repo, p["number"])}
               for p in pulls])
     if command == ["pr", "create"]:
@@ -182,7 +252,7 @@ FAKE_GH = textwrap.dedent(
             git("update-ref", "refs/heads/" + state["base"], move)
         sha = head_of(p)
         done({"state": p["state"], "headRefOid": sha, "mergeCommit": p["mergeCommit"],
-              "statusCheckRollup": contexts(sha)})
+              "baseRefName": p.get("base") or state["base"], "statusCheckRollup": contexts(sha)})
     if command == ["pr", "merge"]:
         p = pull(args[2])
         if p["state"] != "OPEN":
@@ -192,14 +262,20 @@ FAKE_GH = textwrap.dedent(
             fail("Head branch was modified. Review and try the merge again.")
         if state.get("mergeNoop"):
             done("")
-        base = ref(state["base"])
+        # A squash onto the pull request's own base, as GitHub merges it.
+        target = p.get("base") or state["base"]
+        base = ref(target)
         tree = git("merge-tree", "--write-tree", base, head).splitlines()[0]
         commit = git("commit-tree", tree, "-p", base, "-m", arg("--subject") + "\\n\\n" + arg("--body"))
-        git("update-ref", "refs/heads/" + state["base"], commit, base)
+        git("update-ref", "refs/heads/" + target, commit, base)
         p.update(state="MERGED", headRefOid=head, mergeCommit={"oid": commit}, squash=[arg("--subject"), arg("--body")])
         number = re.search(r"#(\\d+)", p["body"]).group(1)
-        if state.get("closeAnyway") or (state.get("closeOnMerge") and ("Closes #" + number) in p["body"]):
+        # GitHub applies `Closes #N` only to merges into the default branch.
+        if state.get("closeAnyway") or (state.get("closeOnMerge") and target == state["base"]
+                                        and ("Closes #" + number) in p["body"]):
             state["issues"][number]["state"] = "CLOSED"
+        for reopened in state.get("reopenOnMerge", []):
+            state["issues"][reopened]["state"] = "OPEN"
         if state.get("pushAfterMerge"):
             git("update-ref", "refs/heads/" + p["headRefName"], state["pushAfterMerge"])
         if state.get("deleteOnMerge"):
@@ -286,6 +362,21 @@ class LandFixture(unittest.TestCase):
         self.summary = self.tmp / "summary.md"
         self.summary.write_text("Adds the widget.\n")
 
+        # The acceptance registry's journeys are real commands, so the fixture's
+        # are scripts that write the report each test asks for.
+        self.acceptance_spec = self.tmp / "acceptance-reports.json"
+        self.acceptance_runs = self.tmp / "acceptance-runs.txt"
+        journey_script = self.tmp / "journey"
+        journey_script.write_text(FAKE_JOURNEY.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
+        journey_script.chmod(0o755)
+        self.config["acceptance"] = {
+            "evidenceEnv": "FAKE_ACCEPTANCE_EVIDENCE",
+            "journeys": {name: {"journey": name, "command": f"exec {journey_script} {{journey}}",
+                                "report": REPORT_PATH, "timeoutSeconds": 60}
+                         for name in (PAIR, WRONG_CODE)},
+        }
+        self.spec({PAIR: {}, WRONG_CODE: {}})
+
         self.state_path = self.tmp / "state.json"
         self.gh_log = self.tmp / "gh.jsonl"
         self.set_state(
@@ -297,7 +388,9 @@ class LandFixture(unittest.TestCase):
         fake = self.tmp / "gh"
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         fake.chmod(0o755)
-        env = {"WORK_GH": str(fake), "FAKE_GH_STATE": str(self.state_path), "FAKE_GH_LOG": str(self.gh_log)}
+        env = {"WORK_GH": str(fake), "FAKE_GH_STATE": str(self.state_path), "FAKE_GH_LOG": str(self.gh_log),
+               "FAKE_ACCEPTANCE_SPEC": str(self.acceptance_spec),
+               "FAKE_ACCEPTANCE_RUNS": str(self.acceptance_runs)}
         saved = {key: os.environ.get(key) for key in env}
         os.environ.update(env)
         self.addCleanup(self._restore, saved)
@@ -382,6 +475,43 @@ class LandFixture(unittest.TestCase):
     def issue(self) -> dict:
         return self.state()["issues"][str(NUMBER)]
 
+    # ------------------------------------------------------- acceptance
+
+    def spec(self, reports: dict) -> None:
+        """What each fake journey's report says; a journey absent from it passes at HEAD."""
+        self.acceptance_spec.write_text(json.dumps(
+            {journey: {"revision": "HEAD", "journey": journey, **values}
+             for journey, values in reports.items()}))
+
+    def journey_timeout(self, journey: str, seconds: int) -> None:
+        self.config["acceptance"]["journeys"][journey]["timeoutSeconds"] = seconds
+
+    def journey_runs(self) -> list:
+        """Every step the fake journeys recorded, in order."""
+        if not self.acceptance_runs.exists():
+            return []
+        return self.acceptance_runs.read_text().splitlines()
+
+    def passing_report(self, journey: str, head: str) -> dict:
+        """A report land would accept, for a run that did not write it."""
+        return {"schema": "tron.ios-e2e-ui-journey.v1", "journey": journey, "journey_status": 0,
+                "journey_seconds": 9, "evidence_complete": True,
+                "source": {"revision": head, "dirty": False, "source_fingerprint": "ab" * 32},
+                "artifacts": []}
+
+    def acceptance_evidence(self, head: str) -> Path:
+        """The evidence directory land gives the journeys of one head."""
+        return Path(git(self.repo, "rev-parse", "--absolute-git-dir")) / "work" / "acceptance" / head
+
+    def kept_report(self, journey: str, head: str) -> bytes:
+        return (self.acceptance_evidence(head) / f"{journey}.report.json").read_bytes()
+
+    def assert_nothing_published(self) -> None:
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+        self.assertEqual(self.issue()["state"], "OPEN")
+
     # ------------------------------------------------------------------ land
 
     # Waiting runs on a fake clock that only sleeping advances.
@@ -392,9 +522,11 @@ class LandFixture(unittest.TestCase):
     def clock(self) -> float:
         return self.now
 
-    def land(self, session: str = SESSION, title=None, summary=True, validation=None, sleep=None) -> int:
+    def land(self, session: str = SESSION, title=None, summary=True, validation=None, irreducible=None,
+             acceptance=None, sleep=None) -> int:
         return land.land(Gh(self.repo), self.repo, self.config, session, title,
-                         self.summary if summary else None, validation, sleep=sleep or self.sleep, clock=self.clock)
+                         self.summary if summary else None, validation, irreducible, acceptance,
+                         sleep=sleep or self.sleep, clock=self.clock)
 
 
 class ClaimOwnerTests(LandFixture):
@@ -575,9 +707,11 @@ class PublicTextTests(LandFixture):
         for field in ("summary", "title", "validation"):
             with self.subTest(field=field):
                 self.summary.write_text("FORBIDDEN summary\n" if field == "summary" else "Fine.\n")
+                handoff = field == "validation"
                 with self.assertRaises(land.LandError) as raised:
                     self.land(title="FORBIDDEN title" if field == "title" else None,
-                              validation="FORBIDDEN action" if field == "validation" else None)
+                              validation="FORBIDDEN action" if handoff else None,
+                              irreducible="a physical device" if handoff else None)
                 self.assertIn(field, str(raised.exception))
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.remote_head(), self.claim_sha)
@@ -601,7 +735,8 @@ class IssueOutcomeTests(LandFixture):
 
     def test_validation_keeps_the_issue_open_even_when_github_closes_it(self):
         self.set_state(closeAnyway=True)
-        self.land(validation="Restart the dev Gateway, then check its status.")
+        self.land(validation="Restart the dev Gateway, then check its status.",
+                  irreducible="a physical device")
         pull = self.state()["pulls"][0]
         self.assertTrue(pull["body"].startswith("Refs #7\n"))
         self.assertNotIn("Closes #7", pull["body"])
@@ -714,20 +849,53 @@ class StaleRunTests(LandFixture):
 
 
 class HandoffTests(LandFixture):
-    # Failure mode 40.
+    # Failure modes 40 and 73.
+    IRREDUCIBLE = "the user's real X consent page"
+
     def test_action_text_label_and_status_reach_the_issue(self):
         action = "Run `scripts/example restart`, then check:\n\n- status names this branch"
-        self.land(validation=action)
+        self.land(validation=action, irreducible=self.IRREDUCIBLE)
         issue = self.issue()
         self.assertIn(action, issue["comments"][-1])
+        self.assertIn(f"Irreducible: {self.IRREDUCIBLE}", issue["comments"][-1])
         self.assertIn("needs-user-validation", issue["labels"])
         self.assertEqual((issue["state"], issue["status"]), ("OPEN", "Needs you"))
+        pull = self.state()["pulls"][0]
+        self.assertTrue(pull["body"].startswith("Refs #7\n"))
+        self.assertIn(action, pull["body"])
+        self.assertIn(f"Irreducible: {self.IRREDUCIBLE}", pull["body"])
+
+    def test_a_handoff_that_names_no_irreducible_part_is_refused(self):
+        cases = {"validation without its irreducible part": (dict(validation="Restart the Gateway."),
+                                                              "--irreducible"),
+                 "an irreducible part without validation": (dict(irreducible="a physical device"),
+                                                            "--needs-user-validation"),
+                 "a blank irreducible part": (dict(validation="Restart the Gateway.", irreducible="  "),
+                                               "--irreducible"),
+                 "a blank validation text": (dict(validation="\t\n", irreducible="a physical device"),
+                                             "--needs-user-validation")}
+        for name, (kwargs, named) in cases.items():
+            with self.subTest(case=name):
+                with self.assertRaises(land.LandError) as raised:
+                    self.land(**kwargs)
+                self.assertIn(named, str(raised.exception))
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+
+    def test_a_blank_handoff_is_no_handoff_at_all(self):
+        # Both values blank means neither flag named anything, so land lands as
+        # it does without them.
+        self.assertEqual(self.land(validation="   ", irreducible="\t"), 0)
+        pull = self.state()["pulls"][0]
+        self.assertTrue(pull["body"].startswith("Closes #7\n"))
+        self.assertNotIn("Maintainer validation", pull["body"])
+        self.assertEqual(self.issue()["state"], "CLOSED")
 
     def test_a_failure_after_the_merge_keeps_the_action_text(self):
         action = "Run `scripts/example restart`, then check that status names this branch."
         self.set_state(failIssue=["comment"])
         with self.assertRaises(land.LandError) as raised:
-            self.land(validation=action)
+            self.land(validation=action, irreducible=self.IRREDUCIBLE)
         pull = self.state()["pulls"][0]
         self.assertEqual(pull["state"], "MERGED")
         # The pull request body was on GitHub before the merge.
@@ -737,15 +905,185 @@ class HandoffTests(LandFixture):
         self.assertFalse(any(action in comment for comment in self.issue()["comments"]))
 
 
+class AcceptanceLandingTests(LandFixture):
+    # Failure modes 71 and 72.
+    def test_a_passing_journey_reaches_the_pull_request_as_its_report_digest(self):
+        self.assertEqual(self.land(acceptance=PAIR), 0)
+        head = git(self.repo, "rev-parse", "HEAD")
+        digest = hashlib.sha256(self.kept_report(PAIR, head)).hexdigest()
+        body = self.state()["pulls"][0]["body"]
+        self.assertIn("### Acceptance journeys", body)
+        self.assertIn(f"report sha256 `{digest}`", body)
+        self.assertIn(PAIR, body)
+        self.assertIn(f"source `{head}`", body)
+        self.assertNotIn(str(self.tmp), body)
+        # The registered journey is what the command received and what the report names.
+        self.assertEqual(self.journey_runs(), [f"{PAIR} started", f"{PAIR} report {head}"])
+        self.assertEqual(len(self.merges()), 1)
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+
+    def test_each_journey_is_checked_against_the_report_its_own_run_left(self):
+        # Both runs share the head's evidence directory, so the second one
+        # replaces the report path the first one left behind.
+        self.spec({PAIR: {}, WRONG_CODE: {"revision": self.claim_sha}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=f"{PAIR},{WRONG_CODE}")
+        self.assertIn(WRONG_CODE, str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_from_another_head_is_refused(self):
+        self.spec({PAIR: {"revision": self.claim_sha}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn(self.claim_sha[:12], str(raised.exception))
+        self.assertIn(git(self.repo, "rev-parse", "HEAD")[:12], str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_that_is_not_from_a_completed_clean_run_is_refused(self):
+        cases = {"a dirty run": ({"dirty": True}, "ran from a dirty worktree"),
+                 "incomplete evidence": ({"evidence_complete": False}, "did not leave complete evidence"),
+                 "a failed journey": ({"status": 1}, "reported status 1"),
+                 "an unreadable report": ({"raw": "not json"}, "unreadable report"),
+                 "no source fingerprint": ({"fingerprint": ""}, "names no source fingerprint"),
+                 "a report for another journey": ({"journey": "TronMobileUITests/Other/x"},
+                                                  "not the registered journey")}
+        for name, (spec, message) in cases.items():
+            with self.subTest(case=name):
+                self.spec({PAIR: spec})
+                with self.assertRaises(acceptance.AcceptanceError) as raised:
+                    self.land(acceptance=PAIR)
+                self.assertIn(message, str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_journey_that_writes_no_report_is_refused(self):
+        # A fresh evidence directory: no earlier run's report is there to be
+        # taken for this run's.
+        self.spec({PAIR: {"report": False}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("left no report", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_an_earlier_run_left_is_refused(self):
+        # The declared path resolves to a file this run did not write. The
+        # planted report is one land would otherwise accept, so only the run's
+        # own write can qualify it.
+        head = git(self.repo, "rev-parse", "HEAD")
+        stale = self.acceptance_evidence(head) / REPORT_PATH
+        stale.parent.mkdir(parents=True)
+        stale.write_text(json.dumps(self.passing_report(PAIR, head)))
+        self.spec({PAIR: {"report": False}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("left no new report", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_journey_command_that_fails_is_refused(self):
+        self.spec({PAIR: {"exit": 3}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("failed (exit 3)", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_journey_that_passes_its_bound_is_interrupted_and_winds_down_itself(self):
+        self.journey_timeout(PAIR, 1)
+        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "report": False}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        message = str(raised.exception)
+        self.assertIn("passed its 1s bound", message)
+        self.assertIn("interrupted (exit 130)", message)
+        # SIGINT reached the journey and its own wind-down ran; land never killed it.
+        self.assertIn(f"{PAIR} cleanup", self.journey_runs())
+        self.assertNotIn(f"{PAIR} wound down", self.journey_runs())
+        self.assert_nothing_published()
+
+    def test_an_interrupted_land_waits_for_the_journey_to_wind_down(self):
+        # The journey signals land's process the way a terminal interrupt does and
+        # then winds down on its own. land must wait for that wind-down and
+        # re-raise; the interrupt path of subprocess.run would kill it instead.
+        # A backgrounded verify inherits SIGINT ignored (POSIX gives an
+        # asynchronous job in a non-interactive shell SIG_IGN), so this test
+        # listens for the interrupt it delivers either way: its subject is
+        # land's own handler path, not the shell's disposition.
+        inherited = signal.getsignal(signal.SIGINT)
+        if inherited is signal.SIG_IGN:
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+        self.addCleanup(signal.signal, signal.SIGINT, inherited)
+        self.spec({PAIR: {"signal_parent": True, "report": False}})
+        with self.assertRaises(KeyboardInterrupt):
+            self.land(acceptance=PAIR)
+        self.assertIn(f"{PAIR} wound down", self.journey_runs())
+        self.assert_nothing_published()
+
+    def test_the_journeys_run_against_the_head_that_is_pushed_after_a_base_move(self):
+        before = git(self.repo, "rev-parse", "HEAD")
+        moved = self.base_commit("lib/new.txt", "from base\n")
+        self.set_state(pendingViews=1, baseMoves={"1": moved})
+        self.assertEqual(self.land(acceptance=PAIR), 0)
+        head = git(self.repo, "rev-parse", "HEAD")
+        self.assertNotEqual(head, before)
+        # Round 1 proved the head it ran against; round 2 proved the head that
+        # was verified, pushed and cited, which is where its evidence lives.
+        self.assertIn(f"{PAIR} report {before}", self.journey_runs())
+        self.assertIn(f"{PAIR} report {head}", self.journey_runs())
+        body = self.state()["pulls"][0]["body"]
+        digest = hashlib.sha256(self.kept_report(PAIR, head)).hexdigest()
+        self.assertIn(f"source `{head}`", body)
+        self.assertIn(f"report sha256 `{digest}`", body)
+        [merge] = self.merges()
+        self.assertEqual(merge[merge.index("--match-head-commit") + 1], head)
+
+    def test_a_report_the_scrub_refuses_stops_before_any_github_write(self):
+        self.spec({PAIR: {"fingerprint": "FORBIDDEN fingerprint"}})
+        with self.assertRaises(land.LandError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("acceptance evidence", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_an_unknown_journey_id_is_refused_with_the_registered_ids(self):
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=f"{PAIR},typo")
+        message = str(raised.exception)
+        self.assertIn("typo", message)
+        self.assertIn(WRONG_CODE, message)
+        self.assert_nothing_published()
+        self.assertFalse(self.acceptance_evidence(git(self.repo, "rev-parse", "HEAD")).exists())
+
+    def test_an_empty_journey_id_is_refused(self):
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=f"{PAIR},")
+        self.assertIn("comma-separated", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_repository_without_a_usable_registry_refuses(self):
+        journeys = self.config["acceptance"]["journeys"]
+        cases = {"no acceptance section": (None, "registers no acceptance journeys"),
+                 "no journeys": ({"evidenceEnv": "FAKE_ACCEPTANCE_EVIDENCE", "journeys": {}},
+                                 "registers no acceptance journeys"),
+                 "no evidence variable": ({"journeys": journeys}, "evidenceEnv")}
+        for name, (section, named) in cases.items():
+            with self.subTest(case=name):
+                if section is None:
+                    self.config.pop("acceptance", None)
+                else:
+                    self.config["acceptance"] = section
+                with self.assertRaises(acceptance.AcceptanceError) as raised:
+                    self.land(acceptance=PAIR)
+                self.assertIn(named, str(raised.exception))
+        self.assert_nothing_published()
+
+
 class ResumeTests(LandFixture):
     # Failure mode 65.
     ACTION = "Run `scripts/example restart`, then check that status names this branch."
+    IRREDUCIBLE = "the maintainer's own route to the Gateway"
 
     def stopped_after_merge(self, failing: list, validation=None) -> None:
         """Land until GitHub reports MERGED, then stop as an outage would."""
         self.set_state(failIssue=failing)
         with self.assertRaises(land.LandError):
-            self.land(validation=validation)
+            self.land(validation=validation, irreducible=self.IRREDUCIBLE if validation else None)
         self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
         self.set_state(failIssue=[])
         self.before = len(self.calls())
@@ -788,13 +1126,13 @@ class ResumeTests(LandFixture):
 
     def test_rerun_with_the_same_text_finishes_the_handoff(self):
         self.stopped_after_merge(["comment"], validation=self.ACTION)
-        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.assertEqual(self.land(validation=self.ACTION, irreducible=self.IRREDUCIBLE), 0)
         self.assertEqual(sum(self.ACTION in comment for comment in self.issue()["comments"]), 1)
         self.assertEqual(self.issue()["status"], "Needs you")
         self.assert_nothing_redone()
 
     def test_rerun_after_a_finished_handoff_keeps_the_maintainers_close(self):
-        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.assertEqual(self.land(validation=self.ACTION, irreducible=self.IRREDUCIBLE), 0)
         self.set_state(issues={str(NUMBER): dict(self.issue(), state="CLOSED", status="Done")})
         before = len(self.calls())
         self.assertEqual(self.land(summary=False), 0)
@@ -813,7 +1151,7 @@ class ResumeTests(LandFixture):
         self.stopped_after_merge(["close"])
         cases = {
             "another session": dict(session="session-b"),
-            "validation the merge did not ask for": dict(validation=self.ACTION),
+            "validation the merge did not ask for": dict(validation=self.ACTION, irreducible=self.IRREDUCIBLE),
         }
         for name, kwargs in cases.items():
             with self.subTest(case=name):
@@ -826,7 +1164,7 @@ class ResumeTests(LandFixture):
     def test_a_contradicting_validation_text_is_refused(self):
         self.stopped_after_merge(["comment"], validation=self.ACTION)
         with self.assertRaises(land.LandError):
-            self.land(validation="Something else entirely.")
+            self.land(validation="Something else entirely.", irreducible=self.IRREDUCIBLE)
         self.assertFalse(any(self.ACTION in comment for comment in self.issue()["comments"]))
 
     def test_a_merge_at_an_older_head_or_from_a_fork_is_not_resumed(self):
@@ -1033,6 +1371,256 @@ class MediaLandingTests(LandFixture):
             self.land()
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.merges(), [])
+
+
+HELD_NUMBER = 9
+HELD = "feat/9-hold-the-thing"
+HELD_SESSION = "session-h"
+
+
+class StackedFixture(LandFixture):
+    """#7 (BRANCH) is claimed on HELD, #9's claim branch, which itself lands into main."""
+
+    def setUp(self):
+        super().setUp()
+        self.held = self._clone("held")
+        claims.create_claim(self.held, REMOTE, BASE, HELD, HELD_NUMBER, HELD_SESSION)
+        git(self.held, "fetch", "-q", REMOTE)
+        git(self.held, "checkout", "-q", "-b", HELD, "--track", f"{REMOTE}/{HELD}")
+        self.commit(self.held, "lib/held.txt", "held\n")
+        git(self.held, "push", "-q", REMOTE, f"HEAD:{HELD}")
+        # Claim #7 again, this time on the held branch.
+        git(self.repo, "push", "-q", REMOTE, f":refs/heads/{BRANCH}")
+        git(self.repo, "checkout", "-q", "--detach")
+        git(self.repo, "branch", "-q", "-D", BRANCH)
+        self.claim_sha = claims.create_claim(self.repo, REMOTE, HELD, BRANCH, NUMBER, SESSION).sha
+        git(self.repo, "fetch", "-q", REMOTE)
+        git(self.repo, "checkout", "-q", "-b", BRANCH, "--track", f"{REMOTE}/{BRANCH}")
+        self.commit(self.repo, "app/a.txt", "two\n")
+        self.add_issue(HELD_NUMBER, "[Task]: Hold the thing", status="Needs you")
+
+    def add_issue(self, number: int, title: str, status: str = "Ready", state: str = "OPEN") -> None:
+        issues = self.state()["issues"]
+        issues[str(number)] = {"title": title, "state": state, "labels": ["task"], "status": status,
+                               "inProject": True, "comments": []}
+        self.set_state(issues=issues)
+
+    def remote_file(self, branch: str, relative: str) -> str:
+        git(self.repo, "fetch", "-q", REMOTE)
+        shown = subprocess.run(["git", "show", f"{REMOTE}/{branch}:{relative}"], cwd=self.repo,
+                               capture_output=True, text=True)
+        return shown.stdout.strip() if shown.returncode == 0 else ""
+
+    def receipt_checks(self, head: str) -> list:
+        work = Path(git(self.repo, "rev-parse", "--absolute-git-dir")) / "work" / "receipts"
+        return sorted(json.loads((work / f"{head}.json").read_text())["checks"])
+
+    def close_issue(self, number: int) -> None:
+        issues = self.state()["issues"]
+        issues[str(number)]["state"] = "CLOSED"
+        self.set_state(issues=issues)
+
+    def reopen_issue(self, number: int) -> None:
+        issues = self.state()["issues"]
+        issues[str(number)]["state"] = "OPEN"
+        self.set_state(issues=issues)
+
+    def land_held(self) -> int:
+        return land.land(Gh(self.held), self.held, self.config, HELD_SESSION, None, self.summary, None,
+                         sleep=self.sleep, clock=self.clock)
+
+
+class StackedLandTests(StackedFixture):
+    # Failure mode 75: verify diffs against, land merges from, opens its pull
+    # request into, merges into and reports the claim's own base, never main.
+    def test_a_stacked_claim_verifies_against_and_lands_into_its_base(self):
+        main_move = self.advance_base("lib/main-only.txt", "main\n")
+        git(self.held, "pull", "-q", "--no-rebase", REMOTE, HELD)
+        self.commit(self.held, "lib/later.txt", "later\n")
+        git(self.held, "push", "-q", REMOTE, f"HEAD:{HELD}")
+        self.assertEqual(self.land(), 0)
+        [merge] = self.merges()
+        head = merge[merge.index("--match-head-commit") + 1]
+        pull = self.state()["pulls"][0]
+        self.assertEqual((pull["base"], pull["state"]), (HELD, "MERGED"))
+        self.assertIn(f"`{REMOTE}/{HELD}`", pull["body"])
+        # Only #7's own change is in its diff: the held branch's paths need no check.
+        self.assertEqual(self.receipt_checks(head), ["app", "policy"])
+        self.assertNotEqual(subprocess.run(["git", "merge-base", "--is-ancestor", main_move, head],
+                                           cwd=self.repo).returncode, 0, "main's move reached the stacked claim")
+        self.assertEqual(self.remote_file(HELD, "app/a.txt"), "two")
+        self.assertEqual(self.remote_file(HELD, "lib/later.txt"), "later")
+        self.assertEqual(self.remote_file(BASE, "app/a.txt"), "one")
+        # GitHub's "Closes #7" does not apply off the default branch; land closes it and names the base.
+        issue = self.issue()
+        self.assertEqual((issue["state"], issue["status"]), ("CLOSED", "Done"))
+        self.assertTrue(issue["comments"][-1].startswith("Landed in #100 as"), issue["comments"][-1])
+        self.assertIn(f"into `{HELD}`", issue["comments"][-1])
+        self.assertEqual(self.remote_head(), "")
+
+    # Failure mode 75: a land stopped after its merge into the base resumes.
+    def test_a_stacked_land_stopped_after_its_merge_resumes(self):
+        self.set_state(failIssue=["close"])
+        with self.assertRaises(land.LandError):
+            self.land()
+        self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
+        self.set_state(failIssue=[])
+        self.assertEqual(self.land(summary=False), 0)
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+        self.assertEqual(len(self.merges()), 1)
+
+    # Failure mode 77: a base is not landed while an open claim is stacked on it;
+    # a stacked claim whose issue is closed no longer counts.
+    def test_a_base_with_an_open_stacked_claim_does_not_land(self):
+        with self.assertRaises(land.LandError) as raised:
+            self.land_held()
+        self.assertIn(f"#{NUMBER}", str(raised.exception))
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.merges(), [])
+        issues = self.state()["issues"]
+        issues[str(NUMBER)]["state"] = "CLOSED"
+        self.set_state(issues=issues)
+        self.assertEqual(self.land_held(), 0)
+        self.assertEqual(self.state()["pulls"][-1]["base"], BASE)
+        self.assertEqual(self.remote_file(BASE, "lib/held.txt"), "held")
+
+    # Failure mode 77: a claim stacked while its base waits for checks stops the merge.
+    def test_a_claim_stacked_during_the_wait_stops_the_merge(self):
+        self.close_issue(NUMBER)
+        self.set_state(pendingViews=1)
+
+        def stacked_meanwhile(seconds: float) -> None:
+            self.sleep(seconds)
+            self.reopen_issue(NUMBER)
+
+        with self.assertRaises(land.LandError) as raised:
+            land.land(Gh(self.held), self.held, self.config, HELD_SESSION, None, self.summary, None,
+                      sleep=stacked_meanwhile, clock=self.clock)
+        self.assertIn(f"#{NUMBER}", str(raised.exception))
+        self.assertEqual(self.merges(), [])
+        self.assertNotEqual(self.remote_head(HELD), "")
+
+    # Failure mode 77: a claim stacked after the merge keeps its base branch.
+    def test_a_claim_stacked_after_the_merge_keeps_its_base_branch(self):
+        self.close_issue(NUMBER)
+        self.set_state(reopenOnMerge=[str(NUMBER)])
+        self.assertEqual(self.land_held(), 0)
+        self.assertEqual(self.state()["pulls"][-1]["state"], "MERGED")
+        self.assertNotEqual(self.remote_head(HELD), "", "the base of an open claim was deleted")
+
+    # Failure mode 78: a pull request retargeted during the wait is not merged.
+    def test_a_pull_request_retargeted_during_the_wait_is_not_merged(self):
+        self.set_state(pendingViews=1)
+
+        def retargeted_meanwhile(seconds: float) -> None:
+            self.sleep(seconds)
+            pulls = self.state()["pulls"]
+            pulls[0]["base"] = BASE
+            self.set_state(pulls=pulls)
+
+        with self.assertRaises(land.LandError) as raised:
+            self.land(sleep=retargeted_meanwhile)
+        self.assertIn(HELD, str(raised.exception))
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.remote_file(BASE, "app/a.txt"), "one")
+
+    # Failure mode 78: an open pull request into another base is never merged.
+    def test_an_open_pull_request_into_another_base_is_refused(self):
+        self.set_state(pulls=[{"number": 100, "headRefName": BRANCH, "title": "feat: Add the widget",
+                               "body": "Closes #7\n", "base": BASE, "state": "OPEN", "headRefOid": None,
+                               "mergeCommit": None}])
+        with self.assertRaises(land.LandError) as raised:
+            self.land()
+        self.assertIn(HELD, str(raised.exception))
+        self.assert_nothing_published()
+
+
+class StackedStewardTests(StackedFixture):
+    def open_pull(self, base: str) -> str:
+        git(self.repo, "push", "-q", REMOTE, f"HEAD:{BRANCH}")
+        head = git(self.repo, "rev-parse", "HEAD")
+        self.set_state(pulls=[{"number": 100, "headRefName": BRANCH, "title": "feat: Add the widget",
+                               "body": "Closes #7\n", "base": base, "state": "OPEN", "headRefOid": None,
+                               "mergeCommit": None}],
+                       statuses={head: {"test/verify": "SUCCESS"}})
+        return head
+
+    def steward_land(self) -> int:
+        clone = self._clone("steward")
+        return land.steward(Gh(clone), clone, self.config, NUMBER)
+
+    # Failure mode 75: the steward checks and merges against the claim's base.
+    def test_a_stacked_pull_request_lands_into_its_base(self):
+        self.open_pull(HELD)
+        self.assertEqual(self.steward_land(), 0)
+        self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
+        self.assertEqual(self.remote_file(HELD, "app/a.txt"), "two")
+        self.assertEqual(self.remote_file(BASE, "app/a.txt"), "one")
+
+    # Failure mode 78.
+    def test_a_pull_request_into_another_base_is_refused(self):
+        self.open_pull(BASE)
+        with self.assertRaises(land.LandError) as raised:
+            self.steward_land()
+        self.assertIn(HELD, str(raised.exception))
+        self.assertEqual(self.merges(), [])
+
+    # Failure mode 77.
+    def test_a_base_with_an_open_stacked_claim_is_not_landed(self):
+        git(self.held, "push", "-q", REMOTE, f"HEAD:{HELD}")
+        head = git(self.held, "rev-parse", "HEAD")
+        self.set_state(pulls=[{"number": 100, "headRefName": HELD, "title": "feat: Hold the thing",
+                               "body": "Closes #9\n", "base": BASE, "state": "OPEN", "headRefOid": None,
+                               "mergeCommit": None}],
+                       statuses={head: {"test/verify": "SUCCESS"}})
+        clone = self._clone("steward")
+        with self.assertRaises(land.LandError) as raised:
+            land.steward(Gh(clone), clone, self.config, HELD_NUMBER)
+        self.assertIn(f"#{NUMBER}", str(raised.exception))
+        self.assertEqual(self.merges(), [])
+
+
+class StackedStartTests(StackedFixture):
+    def start(self, number: int, base=None) -> None:
+        if not hasattr(self, "primary"):
+            self.primary = self._clone("primary")
+        start.run(Gh(self.primary), self.primary, self.config, number, SESSION, base)
+
+    def claims_of(self, number: int) -> list:
+        return claims.existing_claims(self.held, REMOTE, BASE, number)
+
+    # Failure mode 75: start bases the claim on the fetched base tip and records it.
+    def test_a_claim_starts_from_an_open_claim_branch_and_records_it(self):
+        self.add_issue(8, "[Task]: Stack the next thing")
+        self.start(8, base=HELD)
+        [claim] = self.claims_of(8)
+        self.assertEqual((claim.session, claim.base), (SESSION, HELD))
+        held_tip = git(self.held, "rev-parse", "HEAD")
+        self.assertEqual(git(self.held, "rev-parse", f"{claim.sha}^"), held_tip)
+        self.assertIn(f"`{HELD}`", self.state()["issues"]["8"]["comments"][-1])
+
+    # Failure mode 76: only the configured base or an open issue's claim branch is a base.
+    def test_an_ineligible_base_is_refused_before_any_claim(self):
+        self.add_issue(8, "[Task]: Stack the next thing")
+        self.add_issue(10, "[Task]: Manual branch")
+        self.add_issue(11, "[Task]: Finished", state="CLOSED")
+        git(self.seed, "push", "-q", REMOTE, f"{REMOTE}/{BASE}:refs/heads/release")
+        git(self.seed, "push", "-q", REMOTE, f"{REMOTE}/{BASE}:refs/heads/feat/10-manual")
+        claims.create_claim(self.held, REMOTE, BASE, "feat/11-finished", 11, HELD_SESSION)
+        for base in ("release", "feat/12-missing", "feat/10-manual", "feat/11-finished", "feat/8-itself"):
+            with self.subTest(base=base):
+                with self.assertRaises(claims.ClaimError):
+                    self.start(8, base=base)
+                self.assertEqual(self.claims_of(8), [])
+        self.assertEqual(self.writes(), [])
+
+    # Failure mode 76: a claim's base is fixed for its life.
+    def test_a_resumed_claim_keeps_its_base(self):
+        with self.assertRaises(claims.ClaimError):
+            self.start(NUMBER, base=BASE)
+        self.start(NUMBER)
+        [claim] = self.claims_of(NUMBER)
+        self.assertEqual(claim.base, HELD)
 
 
 if __name__ == "__main__":

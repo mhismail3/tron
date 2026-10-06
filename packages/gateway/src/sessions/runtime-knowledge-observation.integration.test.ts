@@ -10,6 +10,7 @@ import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeObservationService, type ObservationModelInput } from "../knowledge/knowledge-observation.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 describe.sequential("canonical conversation observation", () => {
   const cleanup: Array<() => Promise<void>> = [];
@@ -50,7 +51,7 @@ describe.sequential("canonical conversation observation", () => {
     await slot.setModel(model.provider, model.id);
 
     await slot.prompt("SYNTHETIC_EARLIER_PRIVATE_TURN");
-    await vi.waitFor(() => expect(slot.isBusy).toBe(false));
+    await waitFor(() => !slot.isBusy, "the first turn to settle");
     expect((await store.status()).state).toBe("uninitialized");
     expect(infer).not.toHaveBeenCalled();
     const config = await store.config();
@@ -60,7 +61,7 @@ describe.sequential("canonical conversation observation", () => {
       observation: { ...config.observation, enabled: true, model: `${model.provider}/${model.id}` },
     });
     const turn = await slot.prompt("I prefer concise replies.");
-    await vi.waitFor(async () => expect((await store.list({ kind: "observation" })).records).toHaveLength(1), { timeout: 5_000 });
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");
     expect(infer).toHaveBeenCalledTimes(1);
     const input = infer.mock.calls[0]![0];
     expect(input.sourceText).toContain("I prefer concise replies.");

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelReleaseDateCatalog } from "./model-release-date-catalog.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes guarded here: 1) a model-list lookup performs network I/O; 2) fetched dates fail to override baseline or aliases; 3) concurrent callers duplicate requests; 4) freshness/force behavior regresses; 5) a 304 damages persisted dates; 6) failed or invalid responses replace prior dates; 7) corrupt persistence crashes startup; 8) persisted dates disappear after restart; 9) calendar-invalid dates enter the overlay; 10) newly served providers remain conditionally stale; 11) PI_OFFLINE is ignored.
 describe("ModelReleaseDateCatalog", () => {
@@ -47,7 +48,7 @@ describe("ModelReleaseDateCatalog", () => {
     vi.stubGlobal("fetch", fetcher);
     const one = catalog.refresh({ force: true });
     const two = catalog.refresh({ force: true });
-    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    await waitFor(() => fetcher.mock.calls.length === 1, "the single shared release-date fetch");
     resolve(response(catalogData, { etag: '"release-1"' }));
     await Promise.all([one, two]);
     await catalog.refresh();
@@ -96,7 +97,7 @@ describe("ModelReleaseDateCatalog", () => {
     }));
     vi.stubGlobal("fetch", fetcher);
     const refresh = timed.refresh({ force: true });
-    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    await waitFor(() => fetcher.mock.calls.length === 1, "the release-date fetch to start");
     await vi.advanceTimersByTimeAsync(60_000);
     await expect(refresh).resolves.toMatchObject({ updated: 0, error: expect.stringContaining("timed out") });
     vi.useRealTimers();

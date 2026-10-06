@@ -10,6 +10,7 @@ import { BrowserSocket, jpeg, registration } from "../../test-fixtures/browser-l
 import { GatewayServer } from "./server.js";
 import type { NativeLiveClient } from "../display/native-live-view.js";
 import { NativeCaptureHostFailure } from "../machine/native-capture-client.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [], servers: GatewayServer[] = [], requests: ClientRequest[] = [];
 afterEach(async () => {
@@ -76,11 +77,11 @@ describe("authenticated disposable live-view HTTP", () => {
     const body = JSON.parse(opened.data.toString());
     expect(body.descriptor.schema).toBe("tron.native-live-view.v1");
     const leaseHeaders = { ...identity, "x-tron-live-lease": body.leaseId };
-    await vi.waitFor(async () => {
+    await waitFor(async () => {
       const frame = await send(f.port, f.device.token, "GET", `${path}/frame`, leaseHeaders).result;
-      expect(frame.status).toBe(200); expect(frame.data).toEqual(jpeg);
-      expect(frame.headers["content-type"]).toBe("image/jpeg"); expect(frame.headers["cache-control"]).toBe("no-store");
-    });
+      return frame.status === 200 && frame.data.equals(jpeg)
+        && frame.headers["content-type"] === "image/jpeg" && frame.headers["cache-control"] === "no-store";
+    }, "the authenticated native live-view frame");
     expect(f.sockets).toHaveLength(0);
     await f.devices.revoke(f.device.deviceId, () => f.server.disconnectDevice(f.device.deviceId));
     await f.views.joinRetirements(); expect(native.suspend).toHaveBeenCalled();
@@ -100,7 +101,7 @@ describe("authenticated disposable live-view HTTP", () => {
     const opened = await send(f.port, f.device.token, "POST", path, identity).result;
     expect(opened.status).toBe(200);
     const { leaseId } = JSON.parse(opened.data.toString());
-    await vi.waitFor(() => expect(native.close).toHaveBeenCalled());
+    await waitFor(() => vi.mocked(native.close).mock.calls.length > 0, "the failed native start's cleanup");
     const result = await send(f.port, f.device.token, "GET", `${path}/frame`, { ...identity, "x-tron-live-lease": leaseId }).result;
     expect(result.status).toBe(404);
     expect(JSON.parse(result.data.toString())).toEqual({ error: { code: "not_found", message: "Native live capture ended", retryable: false, details: { liveViewFailure: "source_unavailable" } } });
@@ -116,13 +117,13 @@ describe("authenticated disposable live-view HTTP", () => {
     expect(opened.status).toBe(200);
     const { leaseId } = JSON.parse(opened.data.toString());
     const socket = f.sockets[0]!; socket.open();
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast"), "the screencast start command");
     socket.frame(7);
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const delivery = f.views.acquireFrame(registration.sessionId, registration.viewId, registration.generation, leaseId, f.device.deviceId, () => {});
       delivery.release();
-      expect(delivery.frame).toHaveProperty("data");
-    });
+      return "data" in delivery.frame;
+    }, "the delivered browser frame");
     const frame = await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result;
     expect(frame.status).toBe(200); expect(frame.data).toEqual(jpeg);
     expect(frame.headers["content-type"]).toBe("image/jpeg");
@@ -142,9 +143,9 @@ describe("authenticated disposable live-view HTTP", () => {
     const opened = await send(f.port, f.device.token, "POST").result;
     const { leaseId } = JSON.parse(opened.data.toString());
     const socket = f.sockets[0]!; socket.open();
-    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    await waitFor(() => socket.commands.some((command) => command.method === "Page.startScreencast"), "the screencast start command");
     socket.frame(1);
-    await vi.waitFor(async () => expect((await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result).status).toBe(200));
+    await waitFor(async () => (await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result).status === 200, "the delivered frame response");
     let held!: ServerResponse;
     let reached!: () => void;
     const writing = new Promise<void>((resolve) => { reached = resolve; });

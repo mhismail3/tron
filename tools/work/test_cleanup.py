@@ -1,4 +1,4 @@
-"""Isolated checks for cleanup failure modes 53-62, 66 and 70 in README.md.
+"""Isolated checks for cleanup failure modes 53-62, 66, 70 and 75 in README.md.
 
 Real temporary repositories: a local bare remote, a primary clone, and linked
 task worktrees under the configured root. GitHub is a fake `gh` (WORK_GH) that
@@ -243,6 +243,48 @@ class CleanupFixture(unittest.TestCase):
         self.assertNotIn(str(path), self.released_in())
 
 
+class StackedRemovalTests(CleanupFixture):
+    """Failure mode 75: a stacked claim is proven done by a merge into its own base, not main."""
+
+    def stacked_task(self, merged_into: str) -> tuple:
+        claims.create_claim(self.repo, REMOTE, BASE, "feat/9-held", 9, "session-h")
+        branch = "feat/7-stacked"
+        claims.create_claim(self.repo, REMOTE, "feat/9-held", branch, 7, "session-a")
+        git(self.repo, "fetch", "-q", REMOTE)
+        path = self.root / "7-stacked"
+        git(self.repo, "worktree", "add", "-q", "--track", "-b", branch, str(path), f"{REMOTE}/{branch}")
+        head = self.commit(path, "src/7.txt", "work\n")
+        git(path, "push", "-q", REMOTE, f"HEAD:refs/heads/{branch}")
+        self.add_pull(branch, head, baseRefName=merged_into)
+        return path, branch, head
+
+    def test_a_stacked_task_merged_into_its_base_is_removed(self):
+        path, branch, _ = self.stacked_task("feat/9-held")
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 0, out)
+        self.assert_removed(path, branch)
+
+    def test_the_base_of_an_open_stacked_claim_is_kept(self):
+        # #9 closed without merging, leaving only its claim commit, while #7 still starts from it.
+        held, held_branch, held_claim = self.claim_only_worktree(9, state="CLOSED")
+        claims.create_claim(self.repo, REMOTE, held_branch, "feat/7-stacked", 7, "session-a")
+        code, out = self.cleanup(held)
+        self.assertEqual(code, 1, out)
+        self.assertIn("#7", out)
+        self.assert_kept(held, held_branch, held_claim)
+        self.issue_state(7, "CLOSED")
+        code, out = self.cleanup(held)
+        self.assertEqual(code, 0, out)
+        self.assert_removed(held, held_branch)
+
+    def test_a_stacked_task_merged_only_into_main_is_kept(self):
+        path, branch, head = self.stacked_task(BASE)
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("feat/9-held", out)
+        self.assert_kept(path, branch, head)
+
+
 class MergedRemovalTests(CleanupFixture):
     # Failure mode 61: assert_removed also checks the branch's tracking settings are gone.
     def test_a_squash_merged_task_is_released_and_removed_with_both_branches(self):
@@ -365,7 +407,7 @@ class ClosedClaimTests(CleanupFixture):
                 git(path, "commit", "-q", "--amend", "--no-edit")
                 amended = git(path, "rev-parse", "HEAD")
                 self.assertNotEqual(amended, claim)
-                self.assertEqual(claims.claim_session(path, f"{REMOTE}/{BASE}", amended, number), "session-a")
+                self.assertEqual(claims.claim_commit(path, f"{REMOTE}/{BASE}", amended, number).session, "session-a")
                 if pushed:
                     git(path, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{claim}",
                         REMOTE, f"HEAD:refs/heads/{branch}")

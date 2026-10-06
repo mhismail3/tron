@@ -12,6 +12,7 @@ from pathlib import Path
 
 from claim import (
     ClaimError,
+    claim_base,
     claim_comment,
     create_claim,
     existing_claims,
@@ -119,6 +120,38 @@ class ClaimOwnerTests(RemoteFixture):
         self.assertEqual([(c.branch, c.session) for c in claims], [("feat/9-manual", None)])
 
 
+class StackedClaimTests(RemoteFixture):
+    # Failure mode 75: a claim records the branch it starts from, and the search
+    # for its claim commit still finds this issue's commit when the base branch
+    # beneath it carries another issue's claim commit.
+    def test_a_stacked_claim_starts_from_and_records_its_base(self):
+        create_claim(self.a, REMOTE, BASE, "feat/9-held", 9, "session-h")
+        git(self.a, "fetch", "-q", REMOTE)
+        git(self.a, "checkout", "-q", "-b", "feat/9-held", f"{REMOTE}/feat/9-held")
+        git(self.a, "commit", "-q", "--allow-empty", "-m", "held work")
+        git(self.a, "push", "-q", REMOTE, "HEAD:feat/9-held")
+        held_tip = git(self.a, "rev-parse", "HEAD")
+        result = create_claim(self.b, REMOTE, "feat/9-held", "feat/7-stacked", 7, "session-b")
+        self.assertEqual(result.base, held_tip)
+        self.assertEqual(git(self.b, "rev-parse", f"{result.sha}^"), held_tip)
+        [claim] = existing_claims(self.b, REMOTE, BASE, 7)
+        self.assertEqual((claim.session, claim.base), ("session-b", "feat/9-held"))
+        self.assertEqual(claim_base(self.b, REMOTE, BASE, f"{REMOTE}/feat/7-stacked", 7), "feat/9-held")
+        [held] = existing_claims(self.b, REMOTE, BASE, 9)
+        self.assertEqual((held.session, held.base), ("session-h", BASE))
+
+    # Failure mode 75: a claim made before claims recorded a base keeps the configured one.
+    def test_a_claim_without_a_recorded_base_keeps_the_configured_base(self):
+        tip = git(self.seed, "rev-parse", "HEAD")
+        tree = git(self.seed, "rev-parse", f"{tip}^{{tree}}")
+        old = git(self.seed, "commit-tree", tree, "-p", tip, "-m",
+                  "chore: claim #5\n\nWork-Claim-Issue: 5\nWork-Claim-Session: session-old\n")
+        git(self.seed, "push", "-q", REMOTE, f"{old}:refs/heads/feat/5-old")
+        [claim] = existing_claims(self.a, REMOTE, BASE, 5)
+        self.assertEqual((claim.session, claim.base), ("session-old", None))
+        self.assertEqual(claim_base(self.a, REMOTE, BASE, f"{REMOTE}/feat/5-old", 5), BASE)
+
+
 def issue(**overrides):
     base = {
         "state": "OPEN",
@@ -169,8 +202,8 @@ class CommentTests(unittest.TestCase):
     # Failure mode 11: the public comment never carries an absolute path.
     def test_absolute_worktree_path_is_refused(self):
         with self.assertRaises(ClaimError):
-            claim_comment("s", "fix/1-x", "/private/tmp/wt", "abc")
-        body = claim_comment("s", "fix/1-x", "tron-worktrees/1-x", "abc")
+            claim_comment("s", "fix/1-x", "/private/tmp/wt", "main", "abc")
+        body = claim_comment("s", "fix/1-x", "tron-worktrees/1-x", "main", "abc")
         self.assertIn("tron-worktrees/1-x", body)
         self.assertNotIn("/private", body)
 

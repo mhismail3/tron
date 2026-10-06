@@ -198,7 +198,7 @@ describe("KnowledgeService integration", () => {
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
     const reflection = service.invoke({ operation: "knowledge.reflect", request: { commandId: "service-reflect-queued", sessionId: range.sessionId, sourceRevisionIds: [source.records[0]!.revisionId] } }).then(() => false, () => true);
     const changed = store.configure("service-reflect-queued-change", { ...configured, currentInterests: ["changed"] });
-    try { await vi.waitFor(() => expect((store as unknown as { mutex: { waiting: Set<unknown> } }).mutex.waiting.size).toBe(2)); }
+    try { await waitFor(() => (store as unknown as { mutex: { waiting: Set<unknown> } }).mutex.waiting.size === 2, "both publications to queue behind the blocker"); }
     finally { release.resolve(); }
     await blocker; await changed;
     expect(await reflection).toBe(true);
@@ -217,7 +217,7 @@ describe("KnowledgeService integration", () => {
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
     const cancellation = new AbortController();
     const reflection = service.invoke({ operation: "knowledge.reflect", request: { commandId: "service-reflect-cancelled", sessionId: range.sessionId, sourceRevisionIds: [source.records[0]!.revisionId] } }, cancellation.signal).then(() => false, () => true);
-    try { await vi.waitFor(() => expect((store as unknown as { mutex: { waiting: Set<unknown> } }).mutex.waiting.size).toBe(1)); cancellation.abort(); }
+    try { await waitFor(() => (store as unknown as { mutex: { waiting: Set<unknown> } }).mutex.waiting.size === 1, "the reflection to queue behind the blocker"); cancellation.abort(); }
     finally { release.resolve(); }
     await blocker;
     expect(await reflection).toBe(true);
