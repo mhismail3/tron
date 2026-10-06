@@ -333,7 +333,9 @@ JS
 # module: pty.node"), which hides the dlopen cause - a Gateway-spawned shell's
 # bundled runtime is team-signed and refuses the ad hoc-signed prebuild's
 # library validation - so load the prebuild directly and report that error
-# before a fixture is started (#445).
+# before a fixture is started (#445). A checkout whose dependencies are not
+# installed yet has nothing to check: install_gateway_if_needed installs them,
+# and the fixture start that follows preflights them.
 check_gateway_native_modules() {
   [[ -d "$gateway_dir/node_modules/node-pty" ]] || return 0
   local error
