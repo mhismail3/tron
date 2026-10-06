@@ -14,24 +14,15 @@ export interface HistoryPage {
   totalEntries: number;
 }
 
-/** Canonical entries the history feed publishes. Pi's model-attributed usage
- * record (cache warming) carries no authored content, so it stays canonical JSONL
- * without a preview row or tree node (#470). */
-type PublishedHistoryEntry = Exclude<SessionEntry, { type: "usage" }>;
-
-function isPublishedHistoryEntry(entry: SessionEntry): entry is PublishedHistoryEntry {
-  return entry.type !== "usage";
-}
-
 /** Node kind per canonical entry type. `satisfies Record<…>` fails the build when
  * the pinned SDK adds or removes an entry type, so a new type must be classified
  * here instead of publishing its raw name as a node kind, and it types every
  * value as a declared `SessionTreeNode` kind. */
 const kindNames = {
-  message: "message", label: "label", compaction: "compaction",
+  message: "message", label: "label", compaction: "compaction", usage: "usage",
   thinking_level_change: "thinkingChange", model_change: "modelChange", branch_summary: "branchSummary",
   custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo", context_edit: "contextEdit",
-} satisfies Record<PublishedHistoryEntry["type"], SessionTreeNode["kind"]>;
+} satisfies Record<SessionEntry["type"], SessionTreeNode["kind"]>;
 
 /** One content block as it appears in canonical JSONL: Pi's own block shapes,
  * plus the tolerated `text` an older or foreign writer may have persisted on a
@@ -60,6 +51,21 @@ function* contentBlocks(content: string | Array<PersistedContentBlock>): Generat
       }
     }
   }
+}
+
+/** Human preview for Pi's model-attributed usage record (cache warming). */
+const USAGE_ENTRY_PREVIEW = "Cache warmed";
+
+/** Bounded usage counters for the history entry metadata, shared by assistant
+ * messages and Pi's own usage records. */
+function boundedUsageCounters(usage: unknown): Record<string, JsonValue> {
+  const counters: Record<string, JsonValue> = {};
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return counters;
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
+    const value = (usage as Record<string, unknown>)[key];
+    if (typeof value === "number" && Number.isFinite(value)) counters[key] = value;
+  }
+  return counters;
 }
 
 function* entryBlocks(entry: SessionEntry): Generator<string> {
@@ -92,7 +98,10 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
       yield `Replacement: ${JSON.stringify(entry.replacement)}`;
       return;
     case "usage":
-      // Model-attributed usage is canonical metadata, never authored content.
+      // Model-attributed usage is canonical metadata with no authored content; a
+      // detail read says what the record is, and the metadata carries the
+      // bounded provider/model/counter facts.
+      yield USAGE_ENTRY_PREVIEW;
       return;
     default: {
       // Unreachable for the pinned SDK: every entry type is classified above.
@@ -109,6 +118,7 @@ function entryPreview(entry: SessionEntry): string {
   if (entry.type === "message" && entry.message.role === "system") return "System context message";
   if (entry.type === "custom") return entry.customType.slice(0, 240);
   if (entry.type === "context_edit") return `Model context edit: ${entry.targetId}`;
+  if (entry.type === "usage") return USAGE_ENTRY_PREVIEW;
   if (entry.type === "message" || entry.type === "custom_message") {
     const message = entry.type === "message" ? entry.message : entry;
     if ("role" in message && message.role === "bashExecution") return message.command.slice(0, 240);
@@ -144,7 +154,7 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
   let end = cursor ? cursor.direction === "older" ? cursor.ordinal : Math.min(entries.length, cursor.ordinal + 1 + HISTORY_PAGE_SIZE) : entries.length;
   const start = cursor?.direction === "newer" ? cursor.ordinal + 1 : Math.max(0, end - HISTORY_PAGE_SIZE);
   end = Math.max(start, end);
-  const selected = entries.slice(start, end).filter(isPublishedHistoryEntry);
+  const selected = entries.slice(start, end);
   const wanted = new Set(selected.map(e => e.id));
   const childCounts = new Map<string, number>();
   // Metadata only: no getTree() recursion, body flattening or durable index.
@@ -222,12 +232,7 @@ export function historyEntry(manager: SessionManager, runtimeGeneration: string,
     if (message.role === "assistant") {
       metadata.provider = message.provider; metadata.model = message.model;
       metadata.stopReason = message.stopReason;
-      const usage: Record<string, JsonValue> = {};
-      for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
-        const value = message.usage?.[key];
-        if (typeof value === "number" && Number.isFinite(value)) usage[key] = value;
-      }
-      metadata.usage = usage;
+      metadata.usage = boundedUsageCounters(message.usage);
       if (message.errorMessage) metadata.error = message.errorMessage;
     }
     if (message.role === "toolResult") { metadata.tool = message.toolName; metadata.toolCallId = message.toolCallId; metadata.isError = message.isError; }
@@ -237,6 +242,11 @@ export function historyEntry(manager: SessionManager, runtimeGeneration: string,
   if (entry.type === "compaction") { metadata.tokensBefore = entry.tokensBefore; metadata.firstKeptEntryId = entry.firstKeptEntryId; }
   if (entry.type === "label") metadata.targetEntryId = entry.targetId;
   if (entry.type === "custom" || entry.type === "custom_message") metadata.customType = entry.customType;
+  if (entry.type === "usage") {
+    metadata.kind = entry.kind; metadata.provider = entry.provider; metadata.model = entry.model;
+    metadata.usage = boundedUsageCounters(entry.usage);
+    if (entry.note !== undefined) metadata.note = entry.note;
+  }
   // Scalar metadata is deliberately separate from content and remains bounded
   // even for malformed/custom producers. Do not send tool arguments, image
   // bytes or arbitrary extension details through this side channel.

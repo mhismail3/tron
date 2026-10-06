@@ -2288,9 +2288,10 @@ is explicitly marked with `<field>Truncated`; content paging does not discard au
 identified without turning base64 into message text. Pi 0.87 context-edit entries are retained as
 `contextEdit` history evidence (target and replacement) but do not fabricate a chat row; system-message
 entries are retained as `systemMessage` history evidence and likewise stay out of the chat transcript.
-Pi's model-attributed `usage` entries (cache warming) stay canonical JSONL without a chat row, an outline
-node or a history preview: they carry no authored content, so all three projections skip them, while the
-history feed's cursor ordinals keep counting them. The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
+Pi's model-attributed `usage` entries (cache warming) stay canonical JSONL without a chat row or an outline
+node, and the history feed publishes them under their own declared `usage` kind with a `Cache warmed`
+preview: the feed is a contiguous canonical window, so every entry in an ordinal span keeps a row and the
+older/newer cursors still name its boundary nodes. The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
 Complete raw producer metadata/media remain in the canonical JSONL export. `history.test.ts`, `gateway-history.test.ts`, and the focused runtime registry
 integration case protect beyond-cap traversal, ordering, text/wire bounds, Unicode, subscription admission
 and runtime fencing. Using these APIs requires a user-initiated Mac Gateway update; source validation never

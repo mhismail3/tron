@@ -1802,6 +1802,40 @@ function validateProjectedTreeNode(node: SessionTreeNode): void {
   }
 }
 
+/** Outline node kind for one canonical entry. The outline publishes
+ * `contextEdit`, `sessionInfo` and `usage` evidence without a chat row, a system
+ * message as `systemMessage`, and every other entry under its projected row's
+ * kind; an entry whose producer asked to stay hidden (a non-displayed custom
+ * message) keeps the session-metadata kind it already had. Every SDK entry type
+ * is classified, so a new type fails this switch instead of silently becoming
+ * `sessionInfo` (#470). */
+function outlineNodeKind(entry: SessionEntry, item: TranscriptItem | undefined): SessionTreeNode["kind"] {
+  switch (entry.type) {
+    case "context_edit": return "contextEdit";
+    case "session_info": return "sessionInfo";
+    // Omitted from the outline; classified so the union stays exhaustive.
+    case "usage": return "usage";
+    case "message":
+      if (entry.message.role === "system") return "systemMessage";
+      return entry.message.role === "custom" && !entry.message.display ? "sessionInfo" : rowKind(item);
+    case "custom_message":
+      return entry.display ? rowKind(item) : "sessionInfo";
+    case "custom": case "compaction": case "branch_summary": case "model_change":
+    case "thinking_level_change": case "label":
+      return rowKind(item);
+    default: {
+      const unclassified: never = entry;
+      return "sessionInfo";
+    }
+  }
+}
+
+/** A visible outline entry of these types projects a row; the fallback is the
+ * pre-existing session-metadata label for the producer-hidden ones. */
+function rowKind(item: TranscriptItem | undefined): SessionTreeNode["kind"] {
+  return item?.kind ?? "sessionInfo";
+}
+
 function projectedTreeNode(
   node: PiSessionTreeNode,
   blobs: BlobStore,
@@ -1814,9 +1848,7 @@ function projectedTreeNode(
     id: node.entry.id,
     parentId: node.entry.parentId,
     timestamp: node.entry.timestamp,
-    kind: node.entry.type === "context_edit" ? "contextEdit"
-      : node.entry.type === "message" && node.entry.message.role === "system" ? "systemMessage"
-      : item?.kind ?? "sessionInfo",
+    kind: outlineNodeKind(node.entry, item),
     ...(node.label ? { label: node.label } : {}),
     preview: preview(item, node.entry),
     ...(item?.kind === "message" ? { role: item.role } : {}),
