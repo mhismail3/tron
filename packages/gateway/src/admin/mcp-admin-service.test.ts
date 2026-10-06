@@ -141,7 +141,9 @@ describe("McpAdminService", () => {
     const owner: McpCredentialOwner = { async store() { return "account"; }, async remove() {} };
     const release = await lockfile.lock(config, { realpath: false });
     try {
-      const service = new McpAdminService(root, cliPath, owner);
+      // 10s: under vitest's 15s test timeout, so a hanging Pi fails here and the
+      // finally block still runs instead of the worker being abandoned.
+      const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
       await expect(service.storeBearer({ scope: "global" }, "fixture", "token"))
         .rejects.toMatchObject({ code: "busy", retryable: true });
     } finally { await release(); await rm(root, { recursive: true, force: true }); }
@@ -208,7 +210,7 @@ describe("McpAdminService", () => {
       );
       await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp`, headers: { Authorization: piCommand } } } }));
       // The bounded production path: it owns the CLI's timeout and kills the
-      // process group, so a hanging Pi cannot leak the child or the fixture.
+      // process group, so a hanging Pi is cut off inside this test's own budget.
       vi.stubEnv("PI_CODING_AGENT_DIR", root);
       const listed = await service.list({ scope: "global" }) as { servers: Array<{ name: string; state: string }> };
       expect(listed.servers).toEqual([expect.objectContaining({ name: "fixture", state: "connected" })]);

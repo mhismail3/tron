@@ -23,11 +23,11 @@
  * other runtime, step, state and key, and fails when the entry is stale. The
  * list is absent on the pinned 0.99.1 layer.
  *
- * `TRON_PI_ROLLBACK_MCP_FAULT=candidate-needs-auth` (or `candidate-failed`) is a
- * negative-control injection that makes the fixture refuse the candidate
- * runtime's requests, proving the matrix still fails when the candidate, rather
- * than the rollback, is the runtime that cannot resolve the credential. It is
- * never set in a normal run.
+ * `TRON_PI_ROLLBACK_MCP_FAULT=candidate-needs-auth` (or `candidate-failed`,
+ * `candidate-tools`) is a negative-control injection that makes the fixture
+ * refuse the candidate runtime's requests, or offer it a different tool list,
+ * proving the matrix still fails when the candidate, rather than the rollback, is
+ * the runtime that changed. It is never set in a normal run.
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -44,6 +44,30 @@ const PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const MCP_SERVER = "probe-mcp-server";
 const MCP_ACCESS_TOKEN = "probe-mcp-access-token";
 const MCP_FAULT = process.env.TRON_PI_ROLLBACK_MCP_FAULT ?? "";
+/** Live child process groups, so a signal can take them down before exiting. */
+const liveChildren = new Set();
+
+function killLiveChildren() {
+  for (const pid of liveChildren) {
+    try { process.kill(-pid, "SIGKILL"); }
+    catch { /* already gone */ }
+  }
+  liveChildren.clear();
+}
+
+/**
+ * On an interrupt, take every live child process group down before exiting: the
+ * children lead their own groups, so a terminal Ctrl-C would otherwise reach only
+ * this process and leave a probe, or an `npm install`, running orphaned.
+ */
+function installSignalCleanup() {
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+    process.once(signal, () => {
+      killLiveChildren();
+      process.exit(code);
+    });
+  }
+}
 
 /**
  * Run one child to completion without blocking this process: the MCP fixture is
@@ -68,6 +92,7 @@ async function run(command, args, options = {}) {
     try { process.kill(-child.pid, "SIGKILL"); }
     catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
   };
+  liveChildren.add(child.pid);
   const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeoutMs);
   let status;
   try {
@@ -77,6 +102,7 @@ async function run(command, args, options = {}) {
     });
   } finally {
     clearTimeout(timer);
+    liveChildren.delete(child.pid);
   }
   if (timedOut) throw new Error(`${command} ${args.join(" ")} did not finish within ${timeoutMs}ms`);
   if (status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${stderr.trim() || `exit ${status}`}`);
@@ -177,7 +203,8 @@ async function startMcpFixture() {
     if (request?.method === "notifications/initialized") { res.writeHead(202); res.end(); return; }
     if (request?.method === "tools/list") {
       res.writeHead(200, headers);
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { tools: [{ name: "probe-tool", description: "probe", inputSchema: { type: "object", properties: {} } }] } }));
+      const names = fault === "tools" ? ["probe-tool-extra"] : ["probe-tool"];
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { tools: names.map((name) => ({ name, description: "probe", inputSchema: { type: "object", properties: {} } })) } }));
       return;
     }
     res.writeHead(200, headers);
@@ -277,8 +304,8 @@ function assertMcpSequence(states, direction, versions, rollbackVersion, mcpUrl,
   if (!isDeepStrictEqual(appended.config, written.config) || !isDeepStrictEqual(final.config, written.config)) {
     throw new Error(`${direction} MCP config changed across the rollback: ${JSON.stringify(written.config)} -> ${JSON.stringify(appended.config)} -> ${JSON.stringify(final.config)}`);
   }
-  // `mcp.json` is not the accepted store, so its resolution must round-trip
-  // whichever state the credential is in.
+  // Every step must still resolve the server the same way; only the accepted
+  // step's credential state may differ from the others.
   const resolution = (state) => {
     const { name, enabled, exposure, transport } = server(state);
     return { name, enabled, exposure, transport };
@@ -286,11 +313,24 @@ function assertMcpSequence(states, direction, versions, rollbackVersion, mcpUrl,
   if (!isDeepStrictEqual(resolution(appended), resolution(written)) || !isDeepStrictEqual(resolution(final), resolution(written))) {
     throw new Error(`${direction} MCP server resolution changed across the rollback: ${JSON.stringify(written.servers)} -> ${JSON.stringify(appended.servers)} -> ${JSON.stringify(final.servers)}`);
   }
-  if (entry === undefined) {
-    if (!isDeepStrictEqual(appended.servers, written.servers) || !isDeepStrictEqual(final.servers, written.servers)) {
-      throw new Error(`${direction} MCP server resolution changed across the rollback: ${JSON.stringify(written.servers)} -> ${JSON.stringify(appended.servers)} -> ${JSON.stringify(final.servers)}`);
+  const names = (state) => state.servers.map((entry) => entry.name).sort();
+  if (!isDeepStrictEqual(names(appended), names(written)) || !isDeepStrictEqual(names(final), names(written))) {
+    throw new Error(`${direction} MCP server list changed across the rollback: ${JSON.stringify(names(written))} -> ${JSON.stringify(names(appended))} -> ${JSON.stringify(names(final))}`);
+  }
+  // Every connected step must report the first step's whole server record, tools
+  // and error included: a candidate that connects but offers different tools is a
+  // regression, not part of an accepted credential delta. Only the single step the
+  // entry names is relaxed.
+  const reference = server(written);
+  for (const [index, state] of states.entries()) {
+    if (!state.supported || server(state).state !== "connected") continue;
+    if (!isDeepStrictEqual(server(state), reference)) {
+      throw new Error(`${direction} MCP server record changed on connected step ${index + 1}: ${JSON.stringify(reference)} -> ${JSON.stringify(server(state))}`);
     }
-    if (!isDeepStrictEqual(final.credentialsBefore, written.credentialsBefore)) {
+  }
+  if (entry === undefined) {
+    if (!isDeepStrictEqual(appended.credentialsAfter, written.credentialsBefore) || !isDeepStrictEqual(final.credentialsBefore, written.credentialsBefore)
+      || !isDeepStrictEqual(final.credentialsAfter, written.credentialsBefore)) {
       throw new Error(`${direction} MCP credential store keys changed across the rollback: [${written.credentialsBefore.join(", ")}] -> [${appended.credentialsBefore.join(", ")}] -> [${final.credentialsBefore.join(", ")}]`);
     }
     return report;
@@ -303,8 +343,8 @@ function assertMcpSequence(states, direction, versions, rollbackVersion, mcpUrl,
   if (!isDeepStrictEqual(written.credentialsBefore, [fromKey])) {
     throw new Error(`${direction} MCP credential store did not start from the accepted key "${fromKey}": [${written.credentialsBefore.join(", ")}] — ${observed}`);
   }
-  if (!isDeepStrictEqual(appended.credentialsAfter, [toKey]) || !isDeepStrictEqual(final.credentialsBefore, [toKey])) {
-    throw new Error(`${direction} MCP credential store did not move to the accepted key "${toKey}": [${appended.credentialsAfter.join(", ")}] -> [${final.credentialsBefore.join(", ")}] — ${observed}`);
+  if (!isDeepStrictEqual(appended.credentialsAfter, [toKey]) || !isDeepStrictEqual(final.credentialsBefore, [toKey]) || !isDeepStrictEqual(final.credentialsAfter, [toKey])) {
+    throw new Error(`${direction} MCP credential store did not keep the accepted key "${toKey}": [${appended.credentialsAfter.join(", ")}] -> [${final.credentialsBefore.join(", ")}] -> [${final.credentialsAfter.join(", ")}] — ${observed}`);
   }
   return report;
 }
@@ -360,7 +400,10 @@ export async function runRollbackCheck({ gatewayDir = resolve(dirname(fileURLToP
     // Each action is a separate Node process, so module caches and open files
     // cannot mask a format or migration incompatibility. The candidate's steps
     // are the ones the fault injection refuses.
-    const candidateFault = MCP_FAULT === "candidate-needs-auth" ? "needs-auth" : MCP_FAULT === "candidate-failed" ? "failed" : "";
+    // The injection names the fault the fixture applies (`tools`, `needs-auth`,
+    // `failed`); the environment variable names the step it applies to.
+    const candidateFault = MCP_FAULT.startsWith("candidate-") && ["needs-auth", "failed", "tools"].includes(MCP_FAULT.slice("candidate-".length))
+      ? MCP_FAULT.slice("candidate-".length) : "";
     const asCandidate = async (work) => {
       mcp.setFault(candidateFault);
       try { return await work(); } finally { mcp.setFault(""); }
@@ -384,6 +427,7 @@ export async function runRollbackCheck({ gatewayDir = resolve(dirname(fileURLToP
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
+    installSignalCleanup();
     const gatewayDir = process.argv[2] ? resolve(process.argv[2]) : resolve(dirname(fileURLToPath(import.meta.url)), "..");
     const result = await runRollbackCheck({ gatewayDir });
     console.log(`Pi SDK rollback compatibility passed (${result.rollbackVersion} -> ${result.currentVersion}; isolated JSONL/settings/auth subprocesses; ${result.mcp.description})`);

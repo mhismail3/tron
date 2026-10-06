@@ -255,10 +255,10 @@ fails instead of passing as unsupported. A store whose re-keying the maintainer
 has accepted as a one-way rollback delta is listed in `pi-sdk-baseline.json`
 under `knownOneWayDeltas`: an exact `{store, from, to, reason, rollbackState,
 credentialKey}` entry that names the one observation it accepts, so every other
-runtime, step, state and key still fails, and an entry whose delta is not
-observed fails as stale. The committed
-`pi-sdk-baseline.json` records only the prior runtime used for rollback verification; `package.json` remains
-current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
+runtime, step, state, tool list and key still fails, and an entry whose delta is
+not observed fails as stale. The committed `pi-sdk-baseline.json` records the
+prior runtime used for rollback verification and any accepted one-way delta for
+that version range; `package.json` remains current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi
 family, without treating unrelated lockfile churn as an SDK change. CI runs the
 networked rollback matrix and hosted iOS/Gateway boundary only when that graph
