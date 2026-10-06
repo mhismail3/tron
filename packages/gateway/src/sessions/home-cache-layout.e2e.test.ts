@@ -220,8 +220,18 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     expect(sampleMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.sessionId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
-    const memory = (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory;
-    expect(memory.episodic?.tokens.sinceOpen.cacheRead).toBe(CACHE_READ * summarizer.length);
+    // The memory keeps building merges after the last turn. A tree over N
+    // messages is complete at exactly sum(floor(N / 2^l)) nodes, and nothing can
+    // start after that, so the count and the usage are read at that end state.
+    const statusOf = async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory.episodic!;
+    const complete = (messages: number) => { let total = 0; for (let span = 1; span <= messages; span *= 2) total += Math.floor(messages / span); return total; };
+    await waitFor(async () => {
+      const episodic = await statusOf();
+      return episodic.pump.busy === 0 && episodic.nodes.total === complete(episodic.messages);
+    }, "the memory's tree to complete");
+    const settled = await statusOf();
+    const settledCalls = f.requests.filter((request) => request.kind === "summarizer").length;
+    expect(settled.tokens.sinceOpen.cacheRead).toBe(CACHE_READ * settledCalls);
 
     // C10: an ordinary session on the same endpoint keeps pi-ai's own layout.
     const ordinary = await f.registry.create(f.root);
