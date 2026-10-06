@@ -56,7 +56,12 @@ async function fixture(reply: () => Reply) {
     baseUrl: `http://127.0.0.1:${local.port}/v1`, api: "openai-completions", apiKey: "local-test-key",
     compat: { supportsReasoningEffort: true },
     models: [
-      { id: "reasoner", name: "Reasoner", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536 },
+      // Can turn reasoning off, mapped to the wire value "none" (as OpenAI's models are).
+      { id: "reasoner", name: "Reasoner", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536,
+        thinkingLevelMap: { off: "none", low: "low", high: "high" } },
+      // Cannot turn reasoning off (as DeepSeek v4.1 Flash on OpenCode Go): its lowest level is low.
+      { id: "always-reasons", name: "Always reasons", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536,
+        thinkingLevelMap: { off: null, minimal: null, low: "low", high: "high" } },
       { id: "plain", name: "Plain", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536 },
     ],
   } } }));
@@ -65,20 +70,23 @@ async function fixture(reply: () => Reply) {
 }
 
 describe("the episodic summarizer on a reasoning model", () => {
-  // B1, B2 and B4: a bounded effort only for a reasoning model, and an output
-  // ceiling with room for reasoning plus the line.
-  it("asks a reasoning model for a bounded effort, and a plain model for none", async () => {
+  // B1, B2 and B4, and #485: reasoning off wherever a model supports it, else its
+  // least; no reasoning parameter for a plain model; a ceiling with room for any
+  // reasoning plus the line.
+  it("asks each model for the least reasoning it supports, and a plain model for none", async () => {
     const f = await fixture(() => "line");
     const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "<chat>\nuser: earlier\n</chat>", "Compress this message.",
       new AbortController().signal, "tron-episodic:test");
     const reasoned = await createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "reasoner")!)(request);
+    const always = await createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!)(request);
     const plain = await createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "plain")!)(request);
-    const [reasonerBody, plainBody] = f.bodies;
+    const [reasonerBody, alwaysBody, plainBody] = f.bodies;
     expect(reasoned.content.filter((part) => part.type === "text").map((part) => part.text).join("")).toBe("user: a summarized line");
-    expect(plain.stopReason).toBe("stop");
-    expect(reasonerBody!.reasoning_effort).toBe("low");
+    expect([always.stopReason, plain.stopReason]).toEqual(["stop", "stop"]);
+    expect(reasonerBody!.reasoning_effort).toBe("none");
+    expect(alwaysBody!.reasoning_effort).toBe("low");
     expect(plainBody!.reasoning_effort).toBeUndefined();
-    for (const body of [reasonerBody!, plainBody!]) {
+    for (const body of [reasonerBody!, alwaysBody!, plainBody!]) {
       expect(body.max_completion_tokens ?? body.max_tokens).toBe(COMPACTOR_MAX_TOKENS);
     }
     expect(COMPACTOR_MAX_TOKENS).toBeGreaterThanOrEqual(8_192);
@@ -98,7 +106,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!,
       budget: createEpisodicTokenBudget(10_000_000),
-      summarizer: createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "reasoner")!),
+      summarizer: createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!),
       sleep: async () => {},
     });
     cleanups.push(async () => { await memory.dispose(); });

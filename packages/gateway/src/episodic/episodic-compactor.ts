@@ -1,5 +1,5 @@
-import type { Api, AssistantMessage, Message, Model, Usage } from "@earendil-works/pi-ai";
-import { isRetryableAssistantError } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, isRetryableAssistantError } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 import { cutBytes } from "./episodic-tree.js";
@@ -78,9 +78,12 @@ non-ASCII characters cost 2-4 bytes.`;
  * a runaway reply stays bounded. It is also what a call reserves for its output. */
 export const COMPACTOR_MAX_TOKENS = 8_192;
 
-/** The effort asked of a reasoning model. The recipe used a mid effort; low keeps
- * the readiness wait short, and pi-ai clamps it to what each model supports. */
-export const COMPACTOR_REASONING = "low";
+/** The reasoning asked of a model: off (maintainer decision on #485), clamped
+ * to the least each model supports, so a model that cannot turn reasoning off
+ * runs at its lowest level. Measured on #467: with reasoning off,
+ * DeepSeek v4 Flash finished the size loop in 3-5 s, while v4.1 Flash, which
+ * has no off, reasoned through its whole output at low. */
+export const COMPACTOR_REASONING: ModelThinkingLevel = "off";
 
 /** Why a reply wrote no line: a reasoning model that stopped on the output
  * ceiling with only reasoning gets a reason that names it. */
@@ -168,11 +171,17 @@ export function createModelRuntimeSummarizer(runtime: ModelRuntime, model: Model
         : first ? [turnToMessage(first, model)] : []),
       ...rest.map(turn => turnToMessage(turn, model)),
     ];
+    // pi-ai's `reasoning` option names a level; leaving it out is pi-ai's off,
+    // which its request builders send as the model's off value where the API can
+    // express one. GitHub Copilot's Responses API is the exception: pi-ai sends no
+    // effort there, so its default applies. A model that cannot turn reasoning off
+    // would otherwise reason at its default, which ran through the whole output on
+    // #467, so it gets its least level instead.
+    const reasoning = model.reasoning ? clampThinkingLevel(model, COMPACTOR_REASONING) : "off";
     return runtime.completeSimple(model, { systemPrompt: request.system, messages }, {
       signal: request.signal,
       maxTokens: COMPACTOR_MAX_TOKENS,
-      // Only a reasoning model is asked for an effort (#480); pi-ai clamps it.
-      ...(model.reasoning ? { reasoning: COMPACTOR_REASONING } : {}),
+      ...(reasoning === "off" ? {} : { reasoning }),
       sessionId: request.cacheKey,
       onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
         ? markAnthropicPieces(payload, 0, pieces.length - 1) : undefined,
