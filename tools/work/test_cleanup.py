@@ -264,6 +264,19 @@ class StackedRemovalTests(CleanupFixture):
         self.assertEqual(code, 0, out)
         self.assert_removed(path, branch)
 
+    def test_the_base_of_an_open_stacked_claim_is_kept(self):
+        # #9 closed without merging, leaving only its claim commit, while #7 still starts from it.
+        held, held_branch, held_claim = self.claim_only_worktree(9, state="CLOSED")
+        claims.create_claim(self.repo, REMOTE, held_branch, "feat/7-stacked", 7, "session-a")
+        code, out = self.cleanup(held)
+        self.assertEqual(code, 1, out)
+        self.assertIn("#7", out)
+        self.assert_kept(held, held_branch, held_claim)
+        self.issue_state(7, "CLOSED")
+        code, out = self.cleanup(held)
+        self.assertEqual(code, 0, out)
+        self.assert_removed(held, held_branch)
+
     def test_a_stacked_task_merged_only_into_main_is_kept(self):
         path, branch, head = self.stacked_task(BASE)
         code, out = self.cleanup(path)

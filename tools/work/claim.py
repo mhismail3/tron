@@ -190,6 +190,14 @@ def all_claims(repo: Path, remote: str, default_base: str) -> List[Claim]:
     return _read_claims(repo, remote, default_base, heads)
 
 
+def stacked_on(repo: Path, remote: str, default_base: str, branch: str) -> List[Claim]:
+    """Remote claims whose recorded base is `branch`: deleting `branch` leaves them nothing to land into.
+
+    Callers decide which of them still count, by their issues' state.
+    """
+    return [c for c in all_claims(repo, remote, default_base) if c.base == branch and c.branch != branch]
+
+
 def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, session: str) -> ClaimResult:
     """Claim `number` as `branch`, starting from the fetched tip of `base` and recording it."""
     _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")

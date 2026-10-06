@@ -136,10 +136,20 @@ at once.
 - A claim's base is fixed for its life. A resumed `start` with a different
   `--base` is refused.
 - `land` and `steward --land` refuse a pull request whose base is not the
-  claim's base.
-- `land` and `steward --land` refuse to land a branch that an open issue's
-  claim starts from, because landing deletes the branch that claim lands into.
-  A stacked claim whose issue is closed does not count.
+  claim's base. The base is read again right before the merge, so a pull
+  request retargeted while checks ran is not merged. GitHub's merge call takes
+  no expected base, so a retarget in the moment between that read and the
+  merge is not caught.
+- A branch that an open issue's claim starts from is never deleted, because
+  that claim lands into it. A stacked claim whose issue is closed does not
+  count.
+  - `land` and `steward --land` refuse to land such a branch. `land` checks
+    before it verifies and again right before the merge, because a claim can
+    start during the wait.
+  - After the merge, `land` keeps the branch, and says why, if a claim started
+    from it in the meantime.
+  - `cleanup` keeps such a worktree and its branch, checking again after its
+    release commands.
 - GitHub applies `Closes #N` only to merges into the default branch, so `land`
   closes a stacked claim's issue itself, with a comment naming the branch it
   landed into.
@@ -166,12 +176,15 @@ repositories, local bare remotes and the fake `gh`.
     `claim.baseBranch` or an open issue's claim branch carrying its claim
     commit, refuses the issue's own branch, and refuses a resumed claim with a
     different base, all before any claim or GitHub write.
-77. **A base lands under open stacked claims.** `land` and `steward --land`
-    refuse, naming the stacked claims, before any GitHub write. A stacked claim
-    whose issue is closed does not block.
+77. **The base of an open stacked claim is deleted.** `land` and `steward
+    --land` refuse, naming the stacked claims. `land` refuses both before any
+    GitHub write and right before the merge, for a claim started during the
+    wait. After a merge, `land` keeps the branch if a claim started from it
+    meanwhile. `cleanup` keeps such a branch, whether its worktree is merged or
+    claim-only. A stacked claim whose issue is closed does not block.
 78. **A pull request into another base is merged.** `land` refuses an open
-    pull request into another base before any GitHub write, and `steward
-    --land` before merging.
+    pull request into another base before any GitHub write, and the shared
+    merge step refuses one retargeted since, for `land` and `steward --land`.
 
 ### Warm-worktree failure modes
 

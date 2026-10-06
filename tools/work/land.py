@@ -176,7 +176,8 @@ def _merged_pull(gh: Gh, branch: str, head: str, base: str) -> Optional[dict]:
 
 
 def _view(gh: Gh, number: int) -> dict:
-    return json.loads(gh.run("pr", "view", str(number), "--json", "state,headRefOid,mergeCommit,statusCheckRollup"))
+    return json.loads(gh.run("pr", "view", str(number), "--json",
+                             "state,headRefOid,baseRefName,mergeCommit,statusCheckRollup"))
 
 
 # ------------------------------------------------------------- public text
@@ -303,10 +304,16 @@ def _handoff(pull: int, merge_sha: str, action: str) -> str:
 # ------------------------------------------------------------ merge + after
 
 
-def merge(gh: Gh, pull: int, title: str, number: int, head: str, keyword: str,
+def merge(gh: Gh, pull: int, title: str, number: int, head: str, keyword: str, base: str,
           sleep: Callable[[float], None], poll: float) -> str:
-    """Squash-merge exactly `head` and return the merge commit once GitHub reports MERGED."""
+    """Squash-merge exactly `head` into `base` and return the merge commit once GitHub reports MERGED."""
     subject = title if f"(#{number})" in title else f"{title} (#{number})"
+    # The base is read again at the merge: a pull request retargeted while checks
+    # ran must not land elsewhere. GitHub's merge call takes no expected base, so
+    # a retarget in the moment between this read and the merge is not caught.
+    current = _view(gh, pull)["baseRefName"]
+    if current != base:
+        raise LandError(f"#{pull} now merges into {current}, but its claim lands into {base}; nothing was merged")
     # --match-head-commit: GitHub refuses if the branch moved since it was checked.
     # Never --delete-branch: gh then checks out the base branch, which fails in a linked worktree.
     gh.run("pr", "merge", str(pull), "--squash", "--subject", subject, "--body", f"{keyword} #{number}",
@@ -400,8 +407,12 @@ def _finish_issue(gh: Gh, root: Path, config: dict, repository: str, issue: dict
                   head: str, branch: str, action: Optional[str], base: str) -> None:
     state = _finish_issue_state(gh, config, repository, issue, pull, merge_sha, action, base)
     print(f"issue:    #{issue['number']} {state}")
-    print(f"branch:   {config['claim']['remote']}/{branch} "
-          f"{delete_branch(root, config['claim']['remote'], branch, head)}")
+    # A claim may have started from this branch after the last check before the merge.
+    owner, name = repository.split("/", 1)
+    stacked = _open_stacked(gh, root, config, owner, name, branch)
+    deleted = (f"kept: open claim(s) start from it: {_named(stacked)}" if stacked
+               else delete_branch(root, config["claim"]["remote"], branch, head))
+    print(f"branch:   {config['claim']['remote']}/{branch} {deleted}")
 
 
 def _finish_issue_state(gh: Gh, config: dict, repository: str, issue: dict, pull: int, merge_sha: str,
@@ -585,7 +596,9 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         if not _is_ancestor(root, _fetch_base(root, remote, base), head):
             print(f"moved:    {remote}/{base} moved during round {round_number}; updating again")
             continue
-        merge_sha = merge(gh, pull["number"], title, number, head, keyword, sleep, settings["pollSeconds"])
+        # Checked again here: a claim may have started from this branch during the wait.
+        _refuse_stacked(gh, root, config, owner, name, branch)
+        merge_sha = merge(gh, pull["number"], title, number, head, keyword, base, sleep, settings["pollSeconds"])
         print(f"merged:   #{pull['number']} as {merge_sha}")
         break
     else:
@@ -597,22 +610,27 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     return 0
 
 
+def _open_stacked(gh: Gh, root: Path, config: dict, owner: str, name: str, branch: str) -> List[claims.Claim]:
+    """Claims of open issues that start from `branch`; a stacked claim whose issue is closed no longer counts."""
+    rules = config["claim"]
+    return [c for c in claims.stacked_on(root, rules["remote"], rules["baseBranch"], branch)
+            if start.load_issue(gh, owner, name, claims.claimed_issue(c.branch), rules,
+                                config["project"]["title"])["state"] == "OPEN"]
+
+
+def _named(stacked: List[claims.Claim]) -> str:
+    return ", ".join(f"#{claims.claimed_issue(c.branch)} ({c.branch})" for c in stacked)
+
+
 def _refuse_stacked(gh: Gh, root: Path, config: dict, owner: str, name: str, branch: str) -> None:
     """Refuse to land `branch` while an open issue's claim starts from it (README.md, failure mode 77).
 
     Landing deletes the remote branch, which would leave those claims nothing to land into.
-    A stacked claim whose issue is closed no longer counts.
     """
-    rules = config["claim"]
-    stacked = [c for c in claims.all_claims(root, rules["remote"], rules["baseBranch"])
-               if c.base == branch and c.branch != branch]
-    blocking = [c for c in stacked
-                if start.load_issue(gh, owner, name, claims.claimed_issue(c.branch), rules,
-                                    config["project"]["title"])["state"] == "OPEN"]
-    if blocking:
-        raise LandError(f"{len(blocking)} open claim(s) start from {branch}: "
-                        + ", ".join(f"#{claims.claimed_issue(c.branch)} ({c.branch})" for c in blocking)
-                        + "; land them into it, or close their issues, first")
+    stacked = _open_stacked(gh, root, config, owner, name, branch)
+    if stacked:
+        raise LandError(f"{len(stacked)} open claim(s) start from {branch}: {_named(stacked)}; "
+                        "land them into it, or close their issues, first")
 
 
 def _resume(gh: Gh, root: Path, config: dict, branch: str, number: int, session: str, head: str, pull: dict,
@@ -739,7 +757,7 @@ def steward(gh: Gh, repo: Path, config: dict, number: Optional[int]) -> int:
     if issue["state"] != "OPEN":
         raise LandError(f"#{number} is closed")
     _refuse_stacked(gh, root, config, owner, name, branch)
-    merge_sha = merge(gh, row["pr"], row["title"], number, head, keyword, time.sleep,
+    merge_sha = merge(gh, row["pr"], row["title"], number, head, keyword, base, time.sleep,
                       config["land"]["pollSeconds"])
     print(f"merged:   #{row['pr']} as {merge_sha}")
     after_merge(gh, root, config, issue, row["pr"], merge_sha, head, branch, action, resumable=False, base=base)

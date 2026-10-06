@@ -252,7 +252,7 @@ FAKE_GH = textwrap.dedent(
             git("update-ref", "refs/heads/" + state["base"], move)
         sha = head_of(p)
         done({"state": p["state"], "headRefOid": sha, "mergeCommit": p["mergeCommit"],
-              "statusCheckRollup": contexts(sha)})
+              "baseRefName": p.get("base") or state["base"], "statusCheckRollup": contexts(sha)})
     if command == ["pr", "merge"]:
         p = pull(args[2])
         if p["state"] != "OPEN":
@@ -270,8 +270,12 @@ FAKE_GH = textwrap.dedent(
         git("update-ref", "refs/heads/" + target, commit, base)
         p.update(state="MERGED", headRefOid=head, mergeCommit={"oid": commit}, squash=[arg("--subject"), arg("--body")])
         number = re.search(r"#(\\d+)", p["body"]).group(1)
-        if state.get("closeAnyway") or (state.get("closeOnMerge") and ("Closes #" + number) in p["body"]):
+        # GitHub applies `Closes #N` only to merges into the default branch.
+        if state.get("closeAnyway") or (state.get("closeOnMerge") and target == state["base"]
+                                        and ("Closes #" + number) in p["body"]):
             state["issues"][number]["state"] = "CLOSED"
+        for reopened in state.get("reopenOnMerge", []):
+            state["issues"][reopened]["state"] = "OPEN"
         if state.get("pushAfterMerge"):
             git("update-ref", "refs/heads/" + p["headRefName"], state["pushAfterMerge"])
         if state.get("deleteOnMerge"):
@@ -1411,6 +1415,16 @@ class StackedFixture(LandFixture):
         work = Path(git(self.repo, "rev-parse", "--absolute-git-dir")) / "work" / "receipts"
         return sorted(json.loads((work / f"{head}.json").read_text())["checks"])
 
+    def close_issue(self, number: int) -> None:
+        issues = self.state()["issues"]
+        issues[str(number)]["state"] = "CLOSED"
+        self.set_state(issues=issues)
+
+    def reopen_issue(self, number: int) -> None:
+        issues = self.state()["issues"]
+        issues[str(number)]["state"] = "OPEN"
+        self.set_state(issues=issues)
+
     def land_held(self) -> int:
         return land.land(Gh(self.held), self.held, self.config, HELD_SESSION, None, self.summary, None,
                          sleep=self.sleep, clock=self.clock)
@@ -1469,6 +1483,46 @@ class StackedLandTests(StackedFixture):
         self.assertEqual(self.land_held(), 0)
         self.assertEqual(self.state()["pulls"][-1]["base"], BASE)
         self.assertEqual(self.remote_file(BASE, "lib/held.txt"), "held")
+
+    # Failure mode 77: a claim stacked while its base waits for checks stops the merge.
+    def test_a_claim_stacked_during_the_wait_stops_the_merge(self):
+        self.close_issue(NUMBER)
+        self.set_state(pendingViews=1)
+
+        def stacked_meanwhile(seconds: float) -> None:
+            self.sleep(seconds)
+            self.reopen_issue(NUMBER)
+
+        with self.assertRaises(land.LandError) as raised:
+            land.land(Gh(self.held), self.held, self.config, HELD_SESSION, None, self.summary, None,
+                      sleep=stacked_meanwhile, clock=self.clock)
+        self.assertIn(f"#{NUMBER}", str(raised.exception))
+        self.assertEqual(self.merges(), [])
+        self.assertNotEqual(self.remote_head(HELD), "")
+
+    # Failure mode 77: a claim stacked after the merge keeps its base branch.
+    def test_a_claim_stacked_after_the_merge_keeps_its_base_branch(self):
+        self.close_issue(NUMBER)
+        self.set_state(reopenOnMerge=[str(NUMBER)])
+        self.assertEqual(self.land_held(), 0)
+        self.assertEqual(self.state()["pulls"][-1]["state"], "MERGED")
+        self.assertNotEqual(self.remote_head(HELD), "", "the base of an open claim was deleted")
+
+    # Failure mode 78: a pull request retargeted during the wait is not merged.
+    def test_a_pull_request_retargeted_during_the_wait_is_not_merged(self):
+        self.set_state(pendingViews=1)
+
+        def retargeted_meanwhile(seconds: float) -> None:
+            self.sleep(seconds)
+            pulls = self.state()["pulls"]
+            pulls[0]["base"] = BASE
+            self.set_state(pulls=pulls)
+
+        with self.assertRaises(land.LandError) as raised:
+            self.land(sleep=retargeted_meanwhile)
+        self.assertIn(HELD, str(raised.exception))
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.remote_file(BASE, "app/a.txt"), "one")
 
     # Failure mode 78: an open pull request into another base is never merged.
     def test_an_open_pull_request_into_another_base_is_refused(self):

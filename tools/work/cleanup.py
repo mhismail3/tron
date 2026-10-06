@@ -253,10 +253,24 @@ def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], L
     return None, reasons
 
 
+def _stacked_blockers(gh: Gh, tree: Worktree, settings: Settings) -> List[str]:
+    """Removal deletes the remote branch: keep it while an open issue's claim starts from it (failure mode 77)."""
+    try:
+        stacked = claims.stacked_on(settings.primary, settings.remote, settings.base, tree.branch)
+    except claims.ClaimError as error:
+        return [f"cannot prove no open claim starts from it: {error}"]
+    open_issues = [c for c in stacked if _issue_state(gh, claims.claimed_issue(c.branch)) == "OPEN"]
+    if not open_issues:
+        return []
+    return ["open claim(s) start from it: "
+            + ", ".join(f"#{claims.claimed_issue(c.branch)} ({c.branch})" for c in open_issues)]
+
+
 def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
     """(how the worktree is provably done, every reason it must stay)."""
     done, reasons = _done(gh, tree, settings)
-    return done, reasons + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+    return done, (reasons + _stacked_blockers(gh, tree, settings) + _local_blockers(tree, settings)
+                  + _process_blockers(tree.path, settings))
 
 
 # ------------------------------------------------------------------ removal
@@ -340,8 +354,10 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
         failure = _release(tree.path, entry)
         if failure:
             return False, f"release command {failure}"
-    # The release commands take time; everything local is proven again right before removing.
-    reasons = _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+    # The release commands take time; everything local is proven again right before removing,
+    # and so is that no open claim started from the branch meanwhile.
+    reasons = (_local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+               + _stacked_blockers(gh, tree, settings))
     if done.claim_only:
         # A merged pull request cannot unmerge; an issue a claim proved spent can reopen.
         number = claims.claimed_issue(tree.branch)
