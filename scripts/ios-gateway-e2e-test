@@ -16,6 +16,74 @@ source "$repo_root/config/ci-toolchain.env"
 # repository-pinned helpers such as XcodeGen but never owns Node or npm. The
 # cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR).
 export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
+
+# The fixture's Node is the repository-pinned one, resolved the way
+# scripts/tron dev and packages/mac-app/scripts/bundle-gateway.sh resolve it, and
+# never taken from this shell's PATH first: a shell spawned by the Stable or
+# Debug Gateway carries that Gateway's bundled, team-signed runtime there, and
+# its library validation refuses the ad hoc-signed node-pty prebuild (#445). The
+# pinned nvm directory and Homebrew are tried first; a shell that provides none
+# of them (hosted CI's setup-node toolchain) falls back to PATH, and the
+# preflight below proves the Node finally chosen can load the Gateway's native
+# modules.
+NODE_VERSION_FILE="$repo_root/.node-version"
+[[ -f "$NODE_VERSION_FILE" ]] || { echo "error: missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 127; }
+NODE_VERSION="$(<"$NODE_VERSION_FILE")"
+[[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: canonical Node version must be one strict x.y.z line" >&2; exit 127; }
+node_matches_pin() {
+  local candidate="$1" actual
+  [[ -x "$candidate" ]] || return 1
+  actual="$("$candidate" --version 2>/dev/null || true)"
+  [[ "$actual" == "v${NODE_VERSION}" ]]
+}
+node_toolchain_matches_pin() {
+  local candidate="$1"
+  node_matches_pin "$candidate" && [[ -x "$(dirname "$candidate")/npm" ]]
+}
+resolve_pinned_node() {
+  local candidate nvm_node
+  if [[ -n "${TRON_NODE_BIN:-}" ]]; then
+    candidate="$TRON_NODE_BIN"
+    [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate" \
+      || { echo "error: TRON_NODE_BIN does not provide exact Node v${NODE_VERSION} with sibling npm" >&2; exit 127; }
+    printf '%s\n' "$candidate"; return
+  fi
+  nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
+  if [[ "$nvm_node" == /* ]] && node_toolchain_matches_pin "$nvm_node"; then printf '%s\n' "$nvm_node"; return; fi
+  for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
+    if node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
+  done
+  candidate="$(command -v node 2>/dev/null || true)"
+  if [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
+  echo "error: unable to find exact Node v${NODE_VERSION} with sibling npm; checked TRON_NODE_BIN, the pinned nvm directory, Homebrew, and PATH" >&2
+  exit 127
+}
+NODE_BIN=""
+NPM_BIN=""
+fixture_environment=()
+# The two detached fixture processes run under the minimal environment a Gateway
+# gets from launchd, never this shell's, and under the same allow-list
+# `scripts/tron dev` re-executes itself with (#144). A caller spawned by the
+# Stable or Debug Gateway carries that Gateway's PATH, its TRON_GATEWAY_* values,
+# its payload identity and its PI_* store paths; none of it may reach the
+# fixture, which binds its own home, state, agent directory and listener.
+build_fixture_environment() {
+  fixture_environment=("PATH=$(dirname "$NODE_BIN"):/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
+  local name
+  for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING; do
+    [[ -n "${!name:-}" ]] && fixture_environment+=("$name=${!name}")
+  done
+}
+require_gateway_node() {
+  [[ -n "$NODE_BIN" ]] && return 0
+  NODE_BIN="$(resolve_pinned_node)"
+  NPM_BIN="$(dirname "$NODE_BIN")/npm"
+  [[ -x "$NPM_BIN" ]] || { echo "error: missing npm sibling of the pinned Node: $NPM_BIN" >&2; exit 127; }
+  # npm's launcher runs `/usr/bin/env node`; only the resolved directory moves to
+  # the front, so every child of this harness uses this exact toolchain.
+  export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
+  build_fixture_environment
+}
 identity_owner="$repo_root/scripts/ios-test-build-identity.py"
 # Keyed by worktree as scripts/tron-ios-test keys its products, so two worktrees
 # never share a Gateway pid, state.env, npm lock hash, log or test products.
@@ -131,6 +199,9 @@ Environment:
                                 $TMPDIR/tron-ios-gateway-e2e-UID-WORKTREE_KEY)
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData (default: this
                                 worktree's $TMPDIR/tron-ios-gateway-e2e-derived-UID-WORKTREE_KEY)
+  TRON_NODE_BIN                 exact repository-pinned Node to run the fixture with, as
+                                scripts/tron dev takes it (default: the pinned nvm
+                                directory, Homebrew, then PATH)
 
 The fixture and DerivedData are this worktree's: stop and clean touch no other
 worktree's fixture or DerivedData (clean also deletes the simulator of the
@@ -148,7 +219,41 @@ USAGE
 }
 
 manifest_pi_version() {
-  node -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
+  "$NODE_BIN" -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
+}
+
+# node-pty's own search order (its lib/utils.js loadNativeModule): the package
+# root and its lib/, for the release build, the debug build and the prebuild.
+gateway_native_preflight() {
+  cat <<'JS'
+const fs = require("node:fs");
+const path = require("node:path");
+const packageRoot = path.join(path.resolve(process.argv[2]), "node_modules", "node-pty");
+const directories = ["build/Release", "build/Debug", `prebuilds/${process.platform}-${process.arch}`];
+const failures = [];
+for (const directory of directories) {
+  for (const relative of ["..", "."]) {
+    const file = path.resolve(packageRoot, "lib", relative, directory, "pty.node");
+    if (!fs.existsSync(file)) continue;
+    try { require(file); process.exit(0); } catch (error) { failures.push(`${file}: ${error.message ?? error}`); }
+  }
+}
+process.stderr.write(failures.length ? failures.join("\n") + "\n" : `no node-pty native module under ${packageRoot}\n`);
+process.exit(1);
+JS
+}
+
+# The Node that runs the fixture must be able to load the Gateway's native
+# modules. node-pty reports only its last attempt ("Failed to load native
+# module: pty.node"), which hides the dlopen cause - a Gateway-spawned shell's
+# bundled runtime is team-signed and refuses the ad hoc-signed prebuild's
+# library validation - so load the prebuild directly and report that error
+# before a fixture is started (#445).
+check_gateway_native_modules() {
+  [[ -d "$gateway_dir/node_modules/node-pty" ]] || return 0
+  local error
+  error="$(gateway_native_preflight | "$NODE_BIN" - "$gateway_dir" 2>&1)" \
+    || die "the selected Node cannot load the Gateway's node-pty native module ($NODE_BIN): $error"
 }
 
 provision_test_simulator() {
@@ -251,18 +356,16 @@ load_state() {
 }
 
 install_gateway_if_needed() {
+  require_gateway_node
   "$repo_root/scripts/verify-ci-toolchain.sh" node
-  local node_bin npm_bin lock_hash installed_hash=""
-  node_bin="$(command -v node || true)"; npm_bin="$(command -v npm || true)"
-  [[ -n "$node_bin" && -n "$npm_bin" && "$(cd "$(dirname "$node_bin")" && pwd -P)" == "$(cd "$(dirname "$npm_bin")" && pwd -P)" ]] \
-    || die "Gateway E2E requires npm from the repository-pinned Node bin directory"
+  local lock_hash installed_hash=""
   lock_hash="$(shasum -a 256 "$gateway_dir/package-lock.json" | awk '{print $1}')"
   [[ -s "$run_root/npm-lock.sha256" ]] && installed_hash="$(<"$run_root/npm-lock.sha256")"
   if [[ ! -d "$gateway_dir/node_modules" || "$installed_hash" != "$lock_hash" ]]; then
-    npm --prefix "$gateway_dir" ci
+    "$NPM_BIN" --prefix "$gateway_dir" ci
     printf '%s\n' "$lock_hash" >"$run_root/npm-lock.sha256"
   fi
-  npm --prefix "$gateway_dir" run build
+  "$NPM_BIN" --prefix "$gateway_dir" run build
 }
 
 write_fixture_extension() {
@@ -335,6 +438,8 @@ detach() {
 
 start_fresh_fixture() {
   stop_gateway
+  require_gateway_node
+  check_gateway_native_modules
   local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/workspace" port code pi_version
   rm -rf "$tron_home" "$agent_dir" "$gateway_home"
   mkdir -p "$tron_home/gateway" "$workspace"
@@ -366,12 +471,13 @@ PY
 )"
 
   local spawned_pid
-  HOME="$gateway_home" TRON_DATA_DIR="$tron_home" PI_CODING_AGENT_DIR="$agent_dir" \
-    PI_SUBAGENTS_TEMP_ROOT="$gateway_home/internal/subagents" \
-    TRON_MACHINE_GROUP_ID=tron-ios-e2e \
-    TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
-    TRON_GATEWAY_LAN_ENDPOINT="$e2e_lan_endpoint" \
-    detach nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null
+  detach nohup /usr/bin/env -i "${fixture_environment[@]}" \
+    "HOME=$gateway_home" "TRON_DATA_DIR=$tron_home" "PI_CODING_AGENT_DIR=$agent_dir" \
+    "PI_SUBAGENTS_TEMP_ROOT=$gateway_home/internal/subagents" \
+    "TRON_MACHINE_GROUP_ID=tron-ios-e2e" \
+    "TRON_GATEWAY_HOST=127.0.0.1" "TRON_GATEWAY_PORT=$port" \
+    "TRON_GATEWAY_LAN_ENDPOINT=$e2e_lan_endpoint" \
+    "$NODE_BIN" "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null
   spawned_pid="$!"
   echo "$spawned_pid" >"$pid_file"
 
@@ -399,14 +505,15 @@ PY
 )"
   pi_version="$(manifest_pi_version)"
   local proxy_token proxy_pid upstream_port="$port"
-  proxy_token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-  TRON_E2E_UPSTREAM_PORT="$upstream_port" TRON_E2E_UPSTREAM_PID="$(<"$pid_file")" \
-    TRON_E2E_GATEWAY_ENTRY="$gateway_dir/dist/index.js" TRON_E2E_GATEWAY_HOME="$gateway_home" \
-    TRON_E2E_TRON_HOME="$tron_home" TRON_E2E_AGENT_DIR="$agent_dir" \
-    TRON_E2E_GATEWAY_LOG="$log_file" TRON_E2E_GATEWAY_PID_FILE="$pid_file" \
-    TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
-    TRON_E2E_LAN_ENDPOINT="$e2e_lan_endpoint" \
-    detach nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null
+  proxy_token="$("$NODE_BIN" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+  detach nohup /usr/bin/env -i "${fixture_environment[@]}" "HOME=$gateway_home" \
+    "TRON_E2E_UPSTREAM_PORT=$upstream_port" "TRON_E2E_UPSTREAM_PID=$(<"$pid_file")" \
+    "TRON_E2E_GATEWAY_ENTRY=$gateway_dir/dist/index.js" "TRON_E2E_GATEWAY_HOME=$gateway_home" \
+    "TRON_E2E_TRON_HOME=$tron_home" "TRON_E2E_AGENT_DIR=$agent_dir" \
+    "TRON_E2E_GATEWAY_LOG=$log_file" "TRON_E2E_GATEWAY_PID_FILE=$pid_file" \
+    "TRON_E2E_PROXY_TOKEN=$proxy_token" "TRON_E2E_PROXY_READY=$proxy_ready" \
+    "TRON_E2E_LAN_ENDPOINT=$e2e_lan_endpoint" \
+    "$NODE_BIN" "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null
   proxy_pid="$!"
   echo "$proxy_pid" >"$proxy_pid_file"
   for _ in {1..100}; do
