@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants, readFileSync } from "node:fs";
-import { appendFile, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,6 +176,30 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 }
 
 describe("episodic memory crash recovery", () => {
+  it("refuses a waiter instead of stranding it when the pump dies unexpectedly", async () => {
+    // The pump classifies every failure it can name, but an unexpected one (a
+    // store write the filesystem refuses, say) escapes it. Without the owner's
+    // own settlement the pump would be dead, the memory unblocked and every
+    // waiter waiting for a node that can never come — and a turn loop only waits
+    // on `whenReady`, so that is a Home turn that hangs until the user stops it.
+    const fx = await fixture("pump-death", 4);
+    const memory = await openMemory(fx);
+    let fail!: (error: unknown) => void;
+    const dying = new Promise<void>((_resolve, reject) => { fail = reject; });
+    // The one failure the owner cannot classify. Reached here by injecting it at
+    // the pump boundary rather than by breaking a real filesystem, because every
+    // store boundary this module owns classifies its own failures by design.
+    (memory as unknown as { pump: () => Promise<void> }).pump = () => dying;
+    await memory.entriesIngested(fx.sessionId);
+    const cut = memory.status().messages;
+    expect(cut).toBeGreaterThan(0);
+    const waiting = memory.whenReady(cut).then(() => "resolved", (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`);
+    fail(new Error("store write failed"));
+    expect(await waiting).toContain("rejected");
+    expect(memory.status().blocked?.reason).toBe("permanent-failure");
+    await memory.dispose();
+  }, 120_000);
+
   it("keeps the token spend a killed child had already recorded", async () => {
     // Spend is the one piece of a memory that no restart may hand back: a budget
     // bounded in name is unbounded in practice if a crash resets it. The child is

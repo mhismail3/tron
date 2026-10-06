@@ -536,7 +536,26 @@ export class EpisodicMemory {
   private async drain(): Promise<void> {
     if (this.closed || this.blocked) return;
     if (!this.draining) {
-      this.draining = this.pump().finally(() => { this.draining = null; });
+      this.draining = (async () => {
+        try {
+          await this.pump();
+        } catch (error) {
+          // The pump handles every failure it can classify; anything that
+          // escapes it (a store append that fails on I/O, say) would otherwise
+          // leave the pump dead, the memory unblocked and every waiter waiting
+          // for a node that can never come. For a caller that never awaits the
+          // drain — the turn loop, which only waits on `whenReady` — an
+          // unexpected failure of the owner's own loop is a permanent failure,
+          // so it blocks with the reason and releases the waiters. The
+          // settlement runs in a `finally`: a block that cannot be persisted
+          // still must not strand a waiter.
+          try {
+            await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
+          } finally {
+            this.settleWaiters();
+          }
+        }
+      })().finally(() => { this.draining = null; });
     }
     await this.draining;
   }
