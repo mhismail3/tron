@@ -16,6 +16,7 @@ import { GatewayServer, HTTP_HEADERS_TIMEOUT_MS, HTTP_LISTENER_LIMITS } from "./
 import { LanEndpoint, lanPin, selfSignedCertificate } from "./lan-endpoint.js";
 import type { LanAddress } from "../config.js";
 import { PROTOCOL_VERSION } from "../version.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes this file exists to catch (real TCP, TLS and WebSocket sockets;
 // the fixture's "LAN address" is a loopback address, because that is the only
@@ -113,19 +114,8 @@ function records(log: ReturnType<typeof vi.fn>, event: string): LoggedRecord[] {
     : []);
 }
 
-async function waitFor<T>(observe: () => T | undefined, label: string, timeoutMs = 5_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = observe();
-    if (value !== undefined) return value;
-    if (Date.now() >= deadline) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 async function waitForRecord(log: ReturnType<typeof vi.fn>, event: string, field: string, value: string): Promise<LoggedRecord> {
-  return waitFor(() => records(log, event).find((record) => messageFields(record.message)[field] === value),
-    `${event} with ${field}=${value}`);
+  return waitFor(() => records(log, event).find((record) => messageFields(record.message)[field] === value), `${event} with ${field}=${value}`);
 }
 
 interface Response {
@@ -147,7 +137,7 @@ function receive(incoming: IncomingMessage, resolve: (response: Response) => voi
  * being the one on disk: `ca` is that certificate and the hostname check is
  * waived, so a served pair that differs from the file fails the chain. */
 async function lanRequest(host: string, port: number, path: string, certificate: string, init: { method?: string; body?: string; bearer?: string } = {}): Promise<Response> {
-  return bounded(new Promise((resolve, reject) => {
+  return awaitsWithin(new Promise((resolve, reject) => {
     const outgoing = httpsRequest({
       host, port, path, method: init.method ?? "GET", agent: false,
       ca: certificate, checkServerIdentity: () => undefined,
@@ -164,7 +154,7 @@ async function lanRequest(host: string, port: number, path: string, certificate:
 /** Whether a TLS client completes a handshake on this address and port. A plain
  * HTTP listener answers with a non-TLS response, which fails it. */
 async function tlsReaches(host: string, port: number): Promise<boolean> {
-  return bounded(new Promise<boolean>((resolve) => {
+  return awaitsWithin(new Promise<boolean>((resolve) => {
     const socket = tlsConnect({ host, port, rejectUnauthorized: false });
     socket.once("secureConnect", () => { socket.destroy(); resolve(true); });
     socket.once("error", () => resolve(false));
@@ -173,14 +163,14 @@ async function tlsReaches(host: string, port: number): Promise<boolean> {
 
 async function openTls(host: string, port: number): Promise<TLSSocket> {
   const socket = tlsConnect({ host, port, rejectUnauthorized: false });
-  await bounded(new Promise<void>((resolve, reject) => { socket.once("secureConnect", resolve); socket.once("error", reject); }), "TLS connect");
+  await awaitsWithin(new Promise<void>((resolve, reject) => { socket.once("secureConnect", resolve); socket.once("error", reject); }), "TLS connect");
   return socket;
 }
 
 /** A plain HTTP response, or null when the request never got one: the contrast
  * that shows the lane is TLS-only. */
 async function plainHttp(host: string, port: number, path: string, method = "GET", body?: string): Promise<Response | null> {
-  return bounded(new Promise<Response | null>((resolve, reject) => {
+  return awaitsWithin(new Promise<Response | null>((resolve, reject) => {
     const outgoing = httpRequest({
       host, port, path, method, agent: false,
       ...(body === undefined ? {} : { headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }),
@@ -270,7 +260,7 @@ async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<Gate
 
 /** The first frame the Gateway sends on an opened socket: its hello answer. */
 function gatewayHello(socket: WebSocket): Promise<Record<string, unknown>> {
-  return bounded(new Promise((resolve) => {
+  return awaitsWithin(new Promise((resolve) => {
     socket.once("message", (data: Buffer) => resolve(JSON.parse(data.toString("utf8")) as Record<string, unknown>));
   }), "gateway hello frame");
 }
@@ -473,7 +463,7 @@ describe("LAN endpoint", () => {
     const hello = JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "lan", epoch: "1" } });
     const socket = new WebSocket(`wss://[::1]:${fixture.port}/v1/socket`, { headers: { authorization: `Bearer ${token}` }, rejectUnauthorized: false });
     cleanups.push(async () => { socket.terminate(); });
-    await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "LAN socket open");
+    await awaitsWithin(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "LAN socket open");
     socket.send(hello);
     const opened = await waitFor(() => records(fixture.log, "http.upgrade").find((record) => record.fields.outcome === "opened"), "lane upgrade opened");
     expect(opened.fields.transport).toBe("lan");
@@ -482,7 +472,7 @@ describe("LAN endpoint", () => {
 
     const primary = new WebSocket(`ws://127.0.0.1:${fixture.port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     cleanups.push(async () => { primary.terminate(); });
-    await bounded(new Promise<void>((resolve, reject) => { primary.once("open", resolve); primary.once("error", reject); }), "primary socket open");
+    await awaitsWithin(new Promise<void>((resolve, reject) => { primary.once("open", resolve); primary.once("error", reject); }), "primary socket open");
     primary.send(hello);
     const primaryOpened = await waitFor(() => records(fixture.log, "http.upgrade").filter((record) => record.fields.outcome === "opened")[1], "primary upgrade opened");
     expect(primaryOpened.fields.transport).toBe("primary");
@@ -524,7 +514,7 @@ describe("LAN endpoint", () => {
     for (const url of [`wss://[::1]:${fixture.port}/v1/socket`, `ws://127.0.0.1:${fixture.port}/v1/socket`]) {
       const socket = new WebSocket(url, { headers: { authorization: `Bearer ${token}` }, rejectUnauthorized: false });
       cleanups.push(async () => { socket.terminate(); });
-      await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "socket open");
+      await awaitsWithin(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "socket open");
       socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "advertise", epoch: "1" } }));
       expect(await gatewayHello(socket)).toMatchObject({
         type: "hello", lanEndpoints: expectedEndpoints, lanPin: expectedPin,
@@ -539,7 +529,7 @@ describe("LAN endpoint", () => {
     const token = await localToken(fixture.root);
     const socket = new WebSocket(`ws://127.0.0.1:${fixture.port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     cleanups.push(async () => { socket.terminate(); });
-    await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "primary socket open");
+    await awaitsWithin(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "primary socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "off", epoch: "1" } }));
     const hello = await gatewayHello(socket);
     // An empty list is the lane's current truth: the phone replaces what it
@@ -569,7 +559,7 @@ describe("LAN endpoint", () => {
     partial.write("GET /health HTTP/1.1\r\nHost: localhost\r\n");
     // Node enforces both bounds on its own timers, so this wait is real; the
     // slack is for a machine that is busy with other sessions.
-    await bounded(Promise.all([once(bare, "close"), answered]),
+    await awaitsWithin(Promise.all([once(bare, "close"), answered]),
       "lane admission bound", HTTP_HEADERS_TIMEOUT_MS + 15_000);
     expect(await answered).toContain("408");
   }, 45_000);
@@ -590,7 +580,7 @@ describe("LAN endpoint", () => {
       createConnection: () => handed,
     });
     cleanups.push(async () => { socket.terminate(); });
-    await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "handed lane upgrade open");
+    await awaitsWithin(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "handed lane upgrade open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "accept", epoch: "1" } }));
     const opened = await waitFor(() => records(fixture.log, "http.upgrade")
       .find((record) => record.fields.transport === "lan" && record.fields.outcome === "opened"), "lane upgrade opened");

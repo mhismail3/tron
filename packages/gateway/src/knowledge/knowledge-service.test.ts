@@ -7,6 +7,7 @@ import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -25,13 +26,11 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 /** Generation is owned background work, so a caller observes it instead of
  * holding a request open for it. */
 async function waitForJob(service: KnowledgeService, commandId: string) {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  return waitFor(async () => {
     const listed = await service.invoke({ operation: "knowledge.curation.jobs", request: { commandId } }) as { jobs: Array<{ status: string; revisionId?: string; code?: string }> };
     const job = listed.jobs[0];
-    if (job && job.status !== "running") return job;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error("Summary job did not settle");
+    return job && job.status !== "running" ? job : undefined;
+  }, "the summary job to settle");
 }
 
 describe("KnowledgeService integration", () => {

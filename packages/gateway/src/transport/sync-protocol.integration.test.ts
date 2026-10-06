@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS } from "./server.js";
 import { DeviceStore } from "../security/device-store.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -100,20 +101,20 @@ describe("two-phase session synchronization protocol", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const request = (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
       socket.send(JSON.stringify({ type: "request", id, method, params: { sessionId, ...extra } }));
     };
     const waitStarted = async (sessionId: string, count: number): Promise<void> => {
-      while ((startedCounts.get(sessionId) ?? 0) < count) await new Promise((resolve) => setTimeout(resolve, 1));
+      await waitFor(() => (startedCounts.get(sessionId) ?? 0) >= count, `the first ${count} opens of ${sessionId}`);
     };
     // Frames on one socket are admitted in order, so a later frame's answer
     // proves every frame before it was already admitted. The probe is a
     // `session.sync` for a token no synchronization owns, which fails closed.
     const awaitAdmitted = async (id: string): Promise<void> => {
       request(id, "session.sync", "same", { syncToken: "not-a-token" });
-      while (!frames.some((frame) => frame.id === id)) await new Promise((resolve) => setTimeout(resolve, 1));
+      await waitFor(() => frames.some((frame) => frame.id === id), "the id response frame");
       expect(frames.find((frame) => frame.id === id).error.code).toBe("conflict");
     };
     request("open-1", "session.open", "same");
@@ -124,15 +125,14 @@ describe("two-phase session synchronization protocol", () => {
     request("open-2", "session.open", "same");
     await awaitAdmitted("join-fence");
     openResolvers.get("same")?.();
-    while (!frames.some((frame) => frame.id === "open-1")
-      || !frames.some((frame) => frame.id === "open-2")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-1") && frames.some((frame) => frame.id === "open-2"), "both open responses");
     const first = frames.find((frame) => frame.id === "open-1");
     const joinedOpen = frames.find((frame) => frame.id === "open-2");
     expect(startedCounts.get("same")).toBe(1);
     expect(joinedOpen.error).toBeUndefined();
     expect(joinedOpen.result).toEqual(first.result);
     request("sync-1", "session.sync", "same", { syncToken: first.result.syncToken });
-    while (!frames.some((frame) => frame.id === "sync-1")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "sync-1"), "the sync-1 response frame");
 
     // A sequential re-open replaces the installed subscription instead of
     // conflicting, so a reconnecting client always converges on one owner. The
@@ -141,15 +141,15 @@ describe("two-phase session synchronization protocol", () => {
     request("open-3", "session.open", "same");
     await waitStarted("same", 2);
     openResolvers.get("same")?.();
-    while (!frames.some((frame) => frame.id === "open-3")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-3"), "the open-3 response frame");
     const replaced = frames.find((frame) => frame.id === "open-3");
     expect(replaced.error).toBeUndefined();
     expect(replaced.result.syncToken).not.toBe(first.result.syncToken);
     request("close-stale", "session.close", "same", { subscriptionToken: first.result.subscriptionToken });
-    while (!frames.some((frame) => frame.id === "close-stale")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "close-stale"), "the close-stale response frame");
     expect(frames.find((frame) => frame.id === "close-stale").result).toEqual({ closed: false });
     request("sync-3", "session.sync", "same", { syncToken: replaced.result.syncToken });
-    while (!frames.some((frame) => frame.id === "sync-3")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "sync-3"), "the sync-3 response frame");
     expect(frames.find((frame) => frame.id === "sync-3").result).toEqual({ synchronized: true });
 
     request("open-a", "session.open", "a");
@@ -158,13 +158,13 @@ describe("two-phase session synchronization protocol", () => {
     await waitStarted("b", 1);
     openResolvers.get("b")?.();
     openResolvers.get("a")?.();
-    while (!frames.some((frame) => frame.id === "open-a") && !frames.some((frame) => frame.id === "open-b")) await new Promise((resolve) => setTimeout(resolve, 1));
-    while (!frames.some((frame) => frame.id === "open-a") || !frames.some((frame) => frame.id === "open-b")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-a") || frames.some((frame) => frame.id === "open-b"), "either open response");
+    await waitFor(() => frames.some((frame) => frame.id === "open-a") && frames.some((frame) => frame.id === "open-b"), "both open responses");
     const openA = frames.find((frame) => frame.id === "open-a");
     const openB = frames.find((frame) => frame.id === "open-b");
     request("sync-b", "session.sync", "b", { syncToken: openB.result.syncToken });
     request("sync-a", "session.sync", "a", { syncToken: openA.result.syncToken });
-    while (!frames.some((frame) => frame.id === "sync-a") || !frames.some((frame) => frame.id === "sync-b")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "sync-a") && frames.some((frame) => frame.id === "sync-b"), "both synchronization answers");
     expect(frames.filter((frame) => frame.id === "sync-a")).toHaveLength(1);
     expect(frames.filter((frame) => frame.id === "sync-b")).toHaveLength(1);
 
@@ -172,22 +172,22 @@ describe("two-phase session synchronization protocol", () => {
     request("open-fail", "session.open", "failure");
     await waitStarted("failure", 1);
     openResolvers.get("failure")?.();
-    while (!frames.some((frame) => frame.id === "open-fail")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-fail"), "the open-fail response frame");
     request("open-after-fail", "session.open", "failure");
     await waitStarted("failure", 2);
     openResolvers.get("failure")?.();
-    while (!frames.some((frame) => frame.id === "open-after-fail")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-after-fail"), "the open-after-fail response frame");
 
     oversizedNext.value = true;
     request("open-large", "session.open", "large");
     await waitStarted("large", 1);
     openResolvers.get("large")?.();
-    while (!frames.some((frame) => frame.id === "open-large")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-large"), "the open-large response frame");
     expect(frames.find((frame) => frame.id === "open-large").error.code).toBe("response_too_large");
     request("open-after-large", "session.open", "large");
     await waitStarted("large", 2);
     openResolvers.get("large")?.();
-    while (!frames.some((frame) => frame.id === "open-after-large")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-after-large"), "the open-after-large response frame");
     expect(frames.filter((frame) => frame.id).map((frame) => frame.id).length).toBe(new Set(frames.filter((frame) => frame.id).map((frame) => frame.id)).size);
 
     // Technical clients may keep independent subscriptions, but a mobile
@@ -198,13 +198,13 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
     mobile.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
-    while (!mobileFrames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => mobileFrames.some((frame) => frame.type === "hello"), "the hello frame");
     const mobileOpenSync = async (prefix: string, sessionId: string) => {
       const expectedCount = (startedCounts.get(sessionId) ?? 0) + 1;
       mobile.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));
       await waitStarted(sessionId, expectedCount);
       openResolvers.get(sessionId)?.();
-      while (!mobileFrames.some((frame) => frame.id === `${prefix}-open`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      await waitFor(() => mobileFrames.some((frame) => frame.id === `${prefix}-open`), "the `${prefix}-open` response frame");
       const opened = mobileFrames.find((frame) => frame.id === `${prefix}-open`);
       expect(opened.ok).toBe(true);
       if (prefix === "mobile-c") {
@@ -214,7 +214,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
         expect(sessions.setPresentationVisibility).not.toHaveBeenCalled();
       }
       mobile.send(JSON.stringify({ type: "request", id: `${prefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
-      while (!mobileFrames.some((frame) => frame.id === `${prefix}-sync`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      await waitFor(() => mobileFrames.some((frame) => frame.id === `${prefix}-sync`), "the `${prefix}-sync` response frame");
       return opened.result.subscriptionToken;
     };
     await mobileOpenSync("mobile-a", "a");
@@ -226,7 +226,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
       method: "session.presentation.set",
       params: { sessionId: "c", subscriptionToken: mobileCToken, revision: 1, visible: true },
     }));
-    while (!mobileFrames.some((frame) => frame.id === "mobile-c-visible")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => mobileFrames.some((frame) => frame.id === "mobile-c-visible"), "the mobile-c-visible response frame");
     expect(mobileFrames.find((frame) => frame.id === "mobile-c-visible").result).toEqual({ revision: 1, visible: true });
     expect(sessions.setPresentationVisibility).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: "c",
@@ -245,14 +245,14 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
       revision: 1,
       visible: true,
     });
-    while (!frames.some((frame) => frame.id === "technical-visible")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "technical-visible"), "the technical-visible response frame");
     expect(frames.find((frame) => frame.id === "technical-visible").error.code).toBe("invalid_request");
 
 const mobileEventStart = mobileFrames.length;
     gateway.broadcastSession("a", "session.progress", { runtimeGeneration: "generation-a", eventSequence: 200, revision: 200, data: { message: "a" } } as any);
     gateway.broadcastSession("b", "session.progress", { runtimeGeneration: "generation-b", eventSequence: 200, revision: 200, data: { message: "b" } } as any);
     gateway.broadcastSession("c", "session.progress", { runtimeGeneration: "generation-c", eventSequence: 200, revision: 200, data: { message: "c" } } as any);
-    while (!mobileFrames.slice(mobileEventStart).some((frame) => frame.sessionId === "c")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => mobileFrames.slice(mobileEventStart).some((frame) => frame.sessionId === "c"), "the frame for session c");
     expect(mobileFrames.slice(mobileEventStart).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["c"]);
     gateway.rekeySession("c", "canonical-c");
     mobile.send(JSON.stringify({ type: "request", id: "alias-visible", method: "session.presentation.set",
@@ -362,23 +362,19 @@ describe("synchronization catch-up overflow recovery", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const openAndSync = async (idPrefix: string, sessionId: string) => {
       socket.send(JSON.stringify({ type: "request", id: `${idPrefix}-open`, method: "session.open", params: { sessionId } }));
-      while (!frames.some((frame) => frame.id === `${idPrefix}-open`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      await waitFor(() => frames.some((frame) => frame.id === `${idPrefix}-open`), "the `${idPrefix}-open` response frame");
       const opened = frames.find((frame) => frame.id === `${idPrefix}-open`);
       expect(opened.ok).toBe(true);
       socket.send(JSON.stringify({ type: "request", id: `${idPrefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
-      while (!frames.some((frame) => frame.id === `${idPrefix}-sync`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      await waitFor(() => frames.some((frame) => frame.id === `${idPrefix}-sync`), "the `${idPrefix}-sync` response frame");
     };
 
     await openAndSync("ordered", "ordered");
-    const orderedDeadline = Date.now() + 5_000;
-    while (!frames.some((frame) => frame.topic === "session.progress")) {
-      if (Date.now() >= orderedDeadline) throw new Error("quarantined flush timed out");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitFor(() => frames.some((frame) => frame.topic === "session.progress"), "the session.progress event");
     const progressFrames = frames.filter((frame) => frame.topic === "session.progress");
     expect(progressFrames).toHaveLength(1);
     expect(progressFrames[0].payload).toMatchObject({ eventSequence: 2, data: { message: "buffered" } });
@@ -395,14 +391,8 @@ describe("synchronization catch-up overflow recovery", () => {
     } as any);
     releaseRecovery?.();
     await liveSync;
-    const deadline = Date.now() + 5_000;
-    // The recovered live event is written after the rebaseline frame; wait for
-    // both so the ordering assertions below never race the socket.
-    while (!frames.some((frame) => frame.topic === "session.rebaseline")
-      || !frames.some((frame) => frame.topic === "session.progress" && frame.payload?.eventSequence === 100)) {
-      if (Date.now() >= deadline) throw new Error("recovery snapshot or recovered event timed out");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitFor(() => frames.some((frame) => frame.topic === "session.rebaseline")
+      && frames.some((frame) => frame.topic === "session.progress" && frame.payload?.eventSequence === 100), "the recovery snapshot and the recovered event");
     const recovery = frames.find((frame) => frame.topic === "session.rebaseline");
     expect(recovery.sessionId).toBe("live");
     expect(recovery.payload).toMatchObject({
@@ -418,10 +408,7 @@ describe("synchronization catch-up overflow recovery", () => {
     expect(recoveredEventIndex).toBeGreaterThan(recoveryIndex);
 
     await openAndSync("missing", "gone");
-    while (!frames.some((frame) => frame.topic === "transport.resyncRequired")) {
-      if (Date.now() >= deadline) throw new Error("resyncRequired timed out");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitFor(() => frames.some((frame) => frame.topic === "transport.resyncRequired"), "the transport.resyncRequired event");
     const resync = frames.find((frame) => frame.topic === "transport.resyncRequired");
     expect(resync.sessionId).toBe("gone");
     expect(resync.payload).toMatchObject({ reason: "subscription catch-up overflow" });
@@ -436,18 +423,10 @@ describe("synchronization catch-up overflow recovery", () => {
     gateway.broadcastSession("gone", "session.progress", {
       runtimeGeneration: "generation-gone", eventSequence: 501, revision: 501,
     } as any);
-    const reopenedDeadline = Date.now() + 5_000;
-    while (!frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "gone" && frame.payload.eventSequence === 501)) {
-      if (Date.now() >= reopenedDeadline) throw new Error("authoritative reopen did not restore event delivery");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "gone" && frame.payload.eventSequence === 501), "the reopened session's restored event");
 
     await openAndSync("oversized", "oversized");
-    const oversizedResyncDeadline = Date.now() + 5_000;
-    while (!frames.some((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "oversized")) {
-      if (Date.now() >= oversizedResyncDeadline) throw new Error("oversized recovery resync timed out");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitFor(() => frames.some((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "oversized"), "the oversized session's resync request");
     expect(frames.filter((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "oversized")).toHaveLength(1);
     expect(frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "oversized")).toBe(false);
     const fallbackEnd = frames.length;
@@ -458,13 +437,9 @@ describe("synchronization catch-up overflow recovery", () => {
     expect(frames.slice(fallbackEnd).some((frame) => frame.topic === "session.progress" && frame.sessionId === "oversized")).toBe(false);
 
     socket.send(JSON.stringify({ type: "request", id: "open-timeout", method: "session.open", params: { sessionId: "timeout" } }));
-    const timeoutDeadline = Date.now() + 5_000;
-    while (!frames.some((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "timeout")) {
-      if (Date.now() >= timeoutDeadline) throw new Error("synchronization timeout did not fire");
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
+    await waitFor(() => frames.some((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "timeout"), "the timed-out synchronization's resync request");
     releaseTimedOutOpen?.();
-    while (!frames.some((frame) => frame.id === "open-timeout")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.id === "open-timeout"), "the open-timeout response frame");
     expect(frames.find((frame) => frame.id === "open-timeout").ok).toBe(false);
     socket.close();
   });
@@ -539,17 +514,10 @@ describe("connection-wide synchronization ownership", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    const waitFor = async (predicate: () => boolean) => {
-      const deadline = Date.now() + 5_000;
-      while (!predicate()) {
-        if (Date.now() >= deadline) throw new Error("frame timed out");
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-    };
-    await waitFor(() => frames.some((frame) => frame.type === "hello"));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     const request = async (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
       socket.send(JSON.stringify({ type: "request", id, method, params: { sessionId, ...extra } }));
-      await waitFor(() => frames.some((frame) => frame.id === id));
+      await waitFor(() => frames.some((frame) => frame.id === id), "the response frame");
       return frames.find((frame) => frame.id === id);
     };
     const event = (sessionId: string, sequence: number) => ({
@@ -561,7 +529,7 @@ describe("connection-wide synchronization ownership", () => {
     await pendingOpenStarted;
     gateway.rekeySession("pending-before", "pending-after");
     releasePendingOpen?.();
-    await waitFor(() => frames.some((frame) => frame.id === "pending-open"));
+    await waitFor(() => frames.some((frame) => frame.id === "pending-open"), "the pending open response");
     const pendingOpened = frames.find((frame) => frame.id === "pending-open");
     expect(pendingOpened.ok).toBe(true);
     expect(sessions.subscribe).toHaveBeenCalledWith(expect.any(String), "pending-after");
@@ -572,17 +540,17 @@ describe("connection-wide synchronization ownership", () => {
     const openedB = await request("open-b", "session.open", "b");
     gateway.broadcastSession("b", "session.progress", event("b", 2) as any);
     await request("sync-b", "session.sync", "b", { syncToken: openedB.result.syncToken });
-    await waitFor(() => frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "b"));
+    await waitFor(() => frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "b"), "session b's rebaseline frame");
     expect(frames.filter((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "b")).toHaveLength(0);
     await request("sync-a", "session.sync", "a", { syncToken: openedA.result.syncToken });
-    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "a"));
+    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "a"), "session a's progress frame");
 
     // The first commit releases its exact admission, so a new same-sized
     // quarantine succeeds instead of inheriting b's aggregate overflow.
     const openedC = await request("open-c", "session.open", "c");
     gateway.broadcastSession("c", "session.progress", event("c", 2) as any);
     await request("sync-c", "session.sync", "c", { syncToken: openedC.result.syncToken });
-    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "c"));
+    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "c"), "session c's progress frame");
     expect(frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "c")).toBe(false);
 
     const openedBefore = await request("open-before", "session.open", "before");
@@ -593,7 +561,7 @@ describe("connection-wide synchronization ownership", () => {
     gateway.broadcastSession("before", "session.progress", event("before", 2) as any);
     gateway.broadcastSession("after", "session.progress", event("after", 2) as any);
     gateway.broadcastTerminal("terminal-before", "terminal.output", { data: "must be detached" } as any);
-    await waitFor(() => frames.slice(afterEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === "after"));
+    await waitFor(() => frames.slice(afterEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === "after"), "the events after the marker");
     expect(frames.slice(afterEvents).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["after"]);
     expect(frames.slice(afterEvents).some((frame) => frame.topic === "terminal.output")).toBe(false);
 
@@ -613,7 +581,7 @@ describe("connection-wide synchronization ownership", () => {
     const staleCloseEvents = frames.length;
     gateway.broadcastSession(staleChildID, "session.progress", event(staleChildID, 2) as any);
     await waitFor(() => frames.slice(staleCloseEvents).some((frame) =>
-      frame.topic === "session.progress" && frame.sessionId === staleChildID));
+      frame.topic === "session.progress" && frame.sessionId === staleChildID), "the stale child's progress frame");
 
     // Repeated forks retain only a bounded recent alias window. The immediate
     // predecessor must still route close controls to the current runtime.
@@ -630,7 +598,7 @@ describe("connection-wide synchronization ownership", () => {
     expect(connection.rekeyedSessionIds.size).toBeLessThanOrEqual(MAXIMUM_REKEYED_SESSION_IDS);
     const repeatedForkEvents = frames.length;
     gateway.broadcastSession(currentSessionId, "session.progress", event(currentSessionId, 3) as any);
-    await waitFor(() => frames.slice(repeatedForkEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === currentSessionId));
+    await waitFor(() => frames.slice(repeatedForkEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === currentSessionId), "the repeated fork's progress frame");
     const closed = await request("close-current-rekey", "session.close", previousSessionId, { subscriptionToken: openedBefore.result.subscriptionToken });
     expect(closed.result).toEqual({ closed: true });
     const closedEvents = frames.length;
@@ -645,7 +613,7 @@ describe("connection-wide synchronization ownership", () => {
     const pendingStart = frames.length;
     gateway.broadcastSession("pending-after", "session.progress", event("pending-after", 2) as any);
     await request("sync-pending", "session.sync", "pending", { syncToken: openedPending.result.syncToken });
-    await waitFor(() => frames.slice(pendingStart).some((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after"));
+    await waitFor(() => frames.slice(pendingStart).some((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after"), "the pending session's progress frame");
     expect(frames.slice(pendingStart).filter((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after")).toHaveLength(1);
     socket.close();
   });
@@ -719,7 +687,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const connection = [...(gateway as unknown as {
       clients: Map<string, {
@@ -874,19 +842,12 @@ describe("disposable read cancellation", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const connection = [...(gateway as unknown as {
       clients: Map<string, { synchronizations: Map<string, unknown> }>;
     }).clients.values()][0]!;
     const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
-    const waitFor = async (predicate: () => boolean, what: string): Promise<void> => {
-      const deadline = Date.now() + 5_000;
-      while (!predicate()) {
-        if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
-        await tick();
-      }
-    };
     const answered = (id: string): any => frames.find((frame) => frame.id === id);
     const open = (id: string, sessionId: string): void => {
       socket.send(JSON.stringify({ type: "request", id, method: "session.open", params: { sessionId } }));
@@ -901,7 +862,7 @@ describe("disposable read cancellation", () => {
     // synchronization with a token this fixture refuses, which always answers.
     const awaitAdmitted = async (id: string): Promise<void> => {
       sync(id, "not-a-token");
-      while (!answered(id)) await tick();
+      await waitFor(() => answered(id) !== undefined, `an answer to ${id}`);
     };
 
     open("open-1", "slow");
@@ -1088,16 +1049,9 @@ describe("mobile presentation slot", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
-    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
-    const waitFor = async (predicate: () => boolean, what: string): Promise<void> => {
-      const deadline = Date.now() + 5_000;
-      while (!predicate()) {
-        if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
-        await tick();
-      }
-    };
     const answered = (id: string): any => frames.find((frame) => frame.id === id);
     const page = (prefix: string, sessionId: string): void => {
       socket.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));

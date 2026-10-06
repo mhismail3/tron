@@ -9,6 +9,7 @@ import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -20,27 +21,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("probe did not bind");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-}
-
-async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out`)), 5_000);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** One encoded frame for the queue-level cases: a byte-counted payload with the
@@ -322,9 +302,9 @@ describe("WebSocket connection and outbound capacity", () => {
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     expect(socket.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"));
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "the connection opened record");
     const connection = [...(gateway as any).clients.values()][0];
-    await waitUntil(() => connection.outbound.snapshot().completedFrames === 1); // hello
+    await waitFor(() => connection.outbound.snapshot().completedFrames === 1, "the first completed frame"); // hello
 
     const prepareBroadcastFrame = vi.spyOn(gateway as any, "prepareBroadcastFrame");
     const sendOutcome = vi.spyOn(gateway as any, "sendOutcome");
@@ -340,7 +320,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const queuedBytes = prepareBroadcastFrame.mock.results
       .reduce((sum, result) => sum + (result.value as { outputBytes: number }).outputBytes, 0);
     expect(connection.outbound.snapshot()).toMatchObject({ acceptedFrames: 13, completedFrames: 1, byteHighWater: queuedBytes });
-    await waitUntil(() => sequences.length === 12);
+    await waitFor(() => sequences.length === 12, "twelve sequenced frames");
     expect(sequences).toEqual(expected);
     expect(prepareBroadcastFrame).toHaveBeenCalledTimes(12);
     const broadcastFrames = sendOutcome.mock.calls
@@ -348,7 +328,7 @@ describe("WebSocket connection and outbound capacity", () => {
       .map(([, , prepared]) => prepared);
     expect(broadcastFrames).toHaveLength(12);
     expect(broadcastFrames).toEqual(prepareBroadcastFrame.mock.results.map((result) => result.value));
-    await waitUntil(() => connection.outbound.snapshot().completedFrames === 13);
+    await waitFor(() => connection.outbound.snapshot().completedFrames === 13, "the thirteenth completed frame");
     expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false, byteHighWater: queuedBytes });
     expect(connection.lastWriteProgressAt).not.toBeNull();
     expect(socket.readyState).toBe(WebSocket.OPEN);
@@ -365,7 +345,7 @@ describe("WebSocket connection and outbound capacity", () => {
     cleanups.push(async () => {
       finishCommand();
       for (const peer of peers) if (peer.readyState !== WebSocket.CLOSED) peer.terminate();
-      try { await bounded(gateway?.close() ?? Promise.resolve(), "overload gateway disposal"); }
+      try { await awaitsWithin(gateway?.close() ?? Promise.resolve(), "overload gateway disposal"); }
       finally { await rm(root, { recursive: true, force: true }); }
     });
     const devices = new DeviceStore(root, "machine");
@@ -399,15 +379,15 @@ describe("WebSocket connection and outbound capacity", () => {
       peers.push(peer);
       const frames: any[] = [];
       peer.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
-      await bounded(new Promise<void>((resolve, reject) => { peer.once("open", resolve); peer.once("error", reject); }), "overload peer open");
+      await awaitsWithin(new Promise<void>((resolve, reject) => { peer.once("open", resolve); peer.once("error", reject); }), "overload peer open");
       peer.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-      await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "overload peer hello");
+      await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
       return { peer, frames };
     };
     const target = await open();
     const healthy = await open();
     target.peer.send(JSON.stringify({ type: "request", id: "accepted", method: "accepted-command", params: {} }));
-    await bounded(waitUntil(() => acceptedContext !== undefined), "command admission");
+    await waitFor(() => acceptedContext !== undefined, "the accepted context");
     const connection = (gateway as any).clients.get(acceptedContext.id);
     // Leave a real socket OPEN but suppress close progress. New messages can
     // still arrive; the transport admission fence, not ws.readyState, must win.
@@ -422,18 +402,18 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(sessions.subscribe).not.toHaveBeenCalled();
     target.peer.send(JSON.stringify({ type: "request", id: "late", method: "late-command", params: {} }));
     healthy.peer.send(JSON.stringify({ type: "request", id: "healthy", method: "system.info", params: {} }));
-    await bounded(waitUntil(() => healthy.frames.some((frame) => frame.id === "healthy")), "unrelated peer response");
+    await waitFor(() => healthy.frames.some((frame) => frame.id === "healthy"), "the healthy client's frame");
     finishCommand();
-    await bounded(waitUntil(() => completedCommands === 1), "accepted command settlement");
-    await bounded(closed, "bounded stalled close");
-    await bounded(waitUntil(() => (gateway as any).clients.size === 1), "overload capacity release");
+    await waitFor(() => completedCommands === 1, "the completed command");
+    await awaitsWithin(closed, "bounded stalled close");
+    await waitFor(() => (gateway as any).clients.size === 1, "the single connected client");
     expect(invoke.mock.calls.map((call) => call[1])).toEqual(["accepted-command", "system.info"]);
     expect(completedCommands).toBe(1);
     // The command finished; only its response was undeliverable. The log must
     // not report the accepted work itself as failed.
     const completion = () => logger.log.mock.calls.find((call) =>
       call[2]?.event === "rpc.completed" && call[2]?.method === "accepted-command");
-    await bounded(waitUntil(() => completion() !== undefined), "accepted command completion log");
+    await waitFor(() => completion() !== undefined, "the completion");
     expect(completion()?.[2]).toMatchObject({ outcome: "connectionClosed" });
     expect(completion()?.[1]).toContain("(connectionClosed)");
     expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
@@ -454,7 +434,7 @@ describe("WebSocket connection and outbound capacity", () => {
       // failed assertions must not strand the service behind this gate.
       releaseCleanup();
       try {
-        await bounded(gateway?.close() ?? Promise.resolve(), "self-revoke gateway close");
+        await awaitsWithin(gateway?.close() ?? Promise.resolve(), "self-revoke gateway close");
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -492,7 +472,7 @@ describe("WebSocket connection and outbound capacity", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     const response = new Promise<Record<string, unknown>>((resolve) => socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
       if (frame.type === "response" && frame.id === "self-revoke") resolve(frame);
@@ -504,7 +484,7 @@ describe("WebSocket connection and outbound capacity", () => {
       method: "device.revoke",
       params: { deviceId: paired.deviceId, commandId: "self-revoke-command" },
     }));
-    await waitUntil(() => removeDevice.mock.calls.length === 1);
+    await waitFor(() => removeDevice.mock.calls.length === 1, "the device removal");
     expect(frames.some((frame) => frame.id === "self-revoke")).toBe(false);
     // A post-cut request is handled by the revoked fence, not by GatewayService;
     // its response must not be admitted alongside the exact self acknowledgement.
@@ -512,8 +492,8 @@ describe("WebSocket connection and outbound capacity", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(frames.some((frame) => frame.id === "late-after-revoke")).toBe(false);
     releaseCleanup();
-    await expect(bounded(response, "self-revoke response")).resolves.toMatchObject({ ok: true, result: { revoked: true } });
-    expect(await bounded(closed, "self-revoke close")).toBe(1008);
+    await expect(awaitsWithin(response, "self-revoke response")).resolves.toMatchObject({ ok: true, result: { revoked: true } });
+    expect(await awaitsWithin(closed, "self-revoke close")).toBe(1008);
     expect(frames.findIndex((frame) => frame.id === "self-revoke")).toBeGreaterThan(-1);
   });
 
@@ -527,7 +507,7 @@ describe("WebSocket connection and outbound capacity", () => {
         if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
       }
       try {
-        await bounded(gateway?.close() ?? Promise.resolve(), "stalled self-revoke gateway close");
+        await awaitsWithin(gateway?.close() ?? Promise.resolve(), "stalled self-revoke gateway close");
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -562,9 +542,9 @@ describe("WebSocket connection and outbound capacity", () => {
     target = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
     const frames: any[] = [];
     target.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
-    await bounded(new Promise<void>((resolve) => target?.once("open", () => resolve())), "stalled self-revoke open");
+    await awaitsWithin(new Promise<void>((resolve) => target?.once("open", () => resolve())), "stalled self-revoke open");
     target.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "stalled self-revoke hello");
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     // Keep one earlier frame permanently in the real connection-local queue.
     // The self-revoke response must not overtake it, but the bounded fallback
@@ -584,22 +564,22 @@ describe("WebSocket connection and outbound capacity", () => {
       params: { deviceId: paired.deviceId, commandId: "stalled-self-revoke-command" },
     }));
     if (state === "CLOSING") {
-      await waitUntil(() => connection.revokeCloseScheduled);
+      await waitFor(() => connection.revokeCloseScheduled, "the revocation close");
       // Receive the close frame but deliberately omit the peer's reply. The
       // revocation deadline must not fall back to ws's longer close timeout.
       vi.spyOn(target, "close").mockImplementation(() => {});
       connection.socket.close(1008, "stalled close handshake");
       expect(connection.socket.readyState).toBe(WebSocket.CLOSING);
     }
-    await expect(bounded(closed, "stalled self-revoke close")).resolves.toBe(state === "OPEN" ? 1006 : 1008);
-    await bounded(waitUntil(() => (gateway as any).clients.size === 0), "stalled self-revoke capacity release");
+    await expect(awaitsWithin(closed, "stalled self-revoke close")).resolves.toBe(state === "OPEN" ? 1006 : 1008);
+    await waitFor(() => (gateway as any).clients.size === 0, "the last client to leave");
     expect(frames.some((frame) => frame.topic === "test.stalled")).toBe(false);
     expect(frames.some((frame) => frame.id === "stalled-self-revoke")).toBe(false);
 
     const replacementEnrollment = await devices.ensureEnrollment();
     const replacementPaired = await devices.pair(replacementEnrollment.code, "Replacement");
     replacement = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${replacementPaired.token}` } });
-    await bounded(new Promise<void>((resolve, reject) => {
+    await awaitsWithin(new Promise<void>((resolve, reject) => {
       replacement?.once("open", () => resolve());
       replacement?.once("error", reject);
     }), "replacement connection open");
@@ -646,8 +626,8 @@ describe("WebSocket connection and outbound capacity", () => {
     ]);
     target.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
     local.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await waitUntil(() => localFrames.some((frame) => frame.type === "hello")
-      && logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened").length === 2);
+    await waitFor(() => localFrames.some((frame) => frame.type === "hello")
+      && logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened").length === 2, "the hello frame and both opened records");
 
     const closed = new Promise<number>((resolve) => target.once("close", (code) => resolve(code)));
     await devices.revoke(paired.deviceId, () => gateway.disconnectDevice(paired.deviceId));
@@ -663,7 +643,7 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(rejectedHttp).toBe(401);
     expect(local.readyState).toBe(WebSocket.OPEN);
     local.send(JSON.stringify({ type: "request", id: "local-info", method: "system.info", params: {} }));
-    await waitUntil(() => localFrames.some((frame) => frame.type === "response" && frame.id === "local-info"));
+    await waitFor(() => localFrames.some((frame) => frame.type === "response" && frame.id === "local-info"), "the local info response");
     expect(service.invoke).toHaveBeenCalledWith(expect.objectContaining({ isLocal: true }), "system.info", {});
     target.close();
     local.close();
@@ -677,7 +657,7 @@ describe("WebSocket connection and outbound capacity", () => {
     cleanups.push(async () => {
       try {
         for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-        if (gateway) await bounded(gateway.close(), "progress fixture disposal");
+        if (gateway) await awaitsWithin(gateway.close(), "progress fixture disposal");
         await rm(root, { recursive: true, force: true });
       } finally { now.mockRestore(); }
     });
@@ -697,7 +677,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const open = async () => {
       const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
       sockets.push(socket);
-      await bounded(new Promise<void>((resolve, reject) => {
+      await awaitsWithin(new Promise<void>((resolve, reject) => {
         socket.once("open", resolve);
         socket.once("error", reject);
       }), "progress socket open");
@@ -706,20 +686,20 @@ describe("WebSocket connection and outbound capacity", () => {
     const close = async (socket: WebSocket) => {
       const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
       socket.close();
-      await bounded(closed, "progress socket close");
+      await awaitsWithin(closed, "progress socket close");
     };
     await close(await open());
-    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"));
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"), "the connection closed record");
     expect(logger.log.mock.calls.find((call) => call[2]?.event === "connection.closed")?.[1])
       .toContain("lastInboundAgeMs=unknown lastWriteProgressAgeMs=unknown queuedFrames=0 queuedBytes=0 completedFrames=0");
     const live = await open();
     now.mockReturnValue(2_000);
     const pong = new Promise<void>((resolve) => live.once("pong", () => resolve()));
     live.ping();
-    await bounded(pong, "progress ping round trip");
+    await awaitsWithin(pong, "progress ping round trip");
     now.mockReturnValue(2_600);
     await close(live);
-    await waitUntil(() => logger.log.mock.calls.filter((call) => call[2]?.event === "connection.closed").length === 2);
+    await waitFor(() => logger.log.mock.calls.filter((call) => call[2]?.event === "connection.closed").length === 2, "both connection closed records");
     expect(logger.log.mock.calls.filter((call) => call[2]?.event === "connection.closed")[1]?.[1])
       .toContain("lastInboundAgeMs=600 lastWriteProgressAgeMs=unknown queuedFrames=0 queuedBytes=0 completedFrames=0");
   });
@@ -732,9 +712,9 @@ describe("WebSocket connection and outbound capacity", () => {
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         const closed = new Promise<void>(resolve => socket!.once("close", () => resolve()));
         socket.terminate();
-        await bounded(closed, "structural socket disposal");
+        await awaitsWithin(closed, "structural socket disposal");
       }
-      if (gateway) await bounded(gateway.close(), "structural fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "structural fixture disposal");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -784,16 +764,16 @@ describe("WebSocket connection and outbound capacity", () => {
     socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     const frames: any[] = [];
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
-    await bounded(new Promise<void>(resolve => socket!.once("open", resolve)), "structural socket open");
+    await awaitsWithin(new Promise<void>(resolve => socket!.once("open", resolve)), "structural socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole }));
-    await waitUntil(() => frames.some(frame => frame.type === "hello"));
+    await waitFor(() => frames.some(frame => frame.type === "hello"), "the hello frame");
     socket.send(JSON.stringify({ type: "request", id: "dense", method: "test.dense", params: {} }));
-    await waitUntil(() => frames.some(frame => frame.id === "dense"));
+    await waitFor(() => frames.some(frame => frame.id === "dense"), "the dense response frame");
     expect(frames.find(frame => frame.id === "dense")).toMatchObject({
       ok: false, error: { code: "response_too_large", details: { maximumNodes: 32_768 } },
     });
     socket.send(JSON.stringify({ type: "request", id: "small", method: "test.small", params: {} }));
-    await waitUntil(() => frames.some(frame => frame.id === "small"));
+    await waitFor(() => frames.some(frame => frame.id === "small"), "the small response frame");
     expect(frames.find(frame => frame.id === "small")).toMatchObject({ ok: true, result: { healthy: true } });
     expect(socket.readyState).toBe(WebSocket.OPEN);
     const rejection = logger.log.mock.calls.find(call => call[2]?.event === "connection.projection-rejected")?.[1];
@@ -802,11 +782,11 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(rejection).not.toContain("not-for-logs");
 
     socket.send(JSON.stringify({ type: "request", id: "open-dense", method: "session.open", params: { sessionId: "session", dense: true } }));
-    await waitUntil(() => frames.some(frame => frame.id === "open-dense"));
+    await waitFor(() => frames.some(frame => frame.id === "open-dense"), "the dense open response");
     expect(frames.find(frame => frame.id === "open-dense")).toMatchObject({ ok: false, error: { code: "response_too_large" } });
     expect(subscriptions.size).toBe(0);
     socket.send(JSON.stringify({ type: "request", id: "open-small", method: "session.open", params: { sessionId: "session" } }));
-    await waitUntil(() => frames.some(frame => frame.id === "open-small"));
+    await waitFor(() => frames.some(frame => frame.id === "open-small"), "the small open response");
     const opened = frames.find(frame => frame.id === "open-small");
     expect(opened).toMatchObject({ ok: true, result: { session: { healthy: true } } });
     expect(subscriptions.has("session")).toBe(true);
@@ -815,19 +795,19 @@ describe("WebSocket connection and outbound capacity", () => {
     // A response that is under the node ceiling but over the frame byte limit is
     // replaced by the same correlated error, and the connection stays usable.
     socket.send(JSON.stringify({ type: "request", id: "bytes", method: "test.bytes", params: {} }));
-    await waitUntil(() => frames.some(frame => frame.id === "bytes"));
+    await waitFor(() => frames.some(frame => frame.id === "bytes"), "the bytes response frame");
     expect(frames.find(frame => frame.id === "bytes")).toMatchObject({
       ok: false, error: { code: "response_too_large", retryable: false, details: { maximum: 1_048_576 } },
     });
     socket.send(JSON.stringify({ type: "request", id: "after-bytes", method: "test.small", params: {} }));
-    await waitUntil(() => frames.some(frame => frame.id === "after-bytes"));
+    await waitFor(() => frames.some(frame => frame.id === "after-bytes"), "the response after the byte ceiling");
     expect(frames.find(frame => frame.id === "after-bytes")).toMatchObject({ ok: true, result: { healthy: true } });
     expect(socket.readyState).toBe(WebSocket.OPEN);
 
     // Exactly the native node ceiling is delivered unchanged; one node more is
     // the dense case above.
     socket.send(JSON.stringify({ type: "request", id: "ceiling", method: "test.nodes", params: {} }));
-    await waitUntil(() => frames.some(frame => frame.id === "ceiling"));
+    await waitFor(() => frames.some(frame => frame.id === "ceiling"), "the ceiling response frame");
     expect(frames.find(frame => frame.id === "ceiling"))
       .toEqual({ type: "response", id: "ceiling", ok: true, result: maximumNodes });
 
@@ -835,9 +815,9 @@ describe("WebSocket connection and outbound capacity", () => {
     // client can route the resync hint, and leaks no producer content.
     socket.send(JSON.stringify({ type: "request", id: "open-small-sync", method: "session.sync",
       params: { sessionId: "session", syncToken: opened.result.syncToken } }));
-    await waitUntil(() => frames.some(frame => frame.id === "open-small-sync"));
+    await waitFor(() => frames.some(frame => frame.id === "open-small-sync"), "the small session's open response");
     gateway.broadcastSession("session", "session.snapshot", { transcript: "x".repeat(1_100_000) });
-    await waitUntil(() => frames.some(frame => frame.topic === "transport.resyncRequired" && frame.sessionId === "session"));
+    await waitFor(() => frames.some(frame => frame.topic === "transport.resyncRequired" && frame.sessionId === "session"), "the session's resync request");
     expect(frames.find(frame => frame.topic === "transport.resyncRequired" && frame.sessionId === "session")).toMatchObject({
       type: "event", topic: "transport.resyncRequired", sessionId: "session",
       payload: { reason: "oversized projection" },
@@ -851,7 +831,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let socket: WebSocket | undefined;
     cleanups.push(async () => {
       if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      if (gateway) await bounded(gateway.close(), "hello fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "hello fixture disposal");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -875,9 +855,9 @@ describe("WebSocket connection and outbound capacity", () => {
     socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     const frames: any[] = [];
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
-    await bounded(new Promise<void>(resolve => socket!.once("open", resolve)), "hello socket open");
+    await awaitsWithin(new Promise<void>(resolve => socket!.once("open", resolve)), "hello socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await waitUntil(() => frames.some(frame => frame.type === "hello"));
+    await waitFor(() => frames.some(frame => frame.type === "hello"), "the hello frame");
     expect(frames.find(frame => frame.type === "hello")).toEqual({ type: "hello", ...info, connectionId: expect.any(String) });
   });
 
@@ -891,7 +871,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await bounded(gateway?.close() ?? Promise.resolve(), "correlation fixture close");
+      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "correlation fixture close");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -913,9 +893,9 @@ describe("WebSocket connection and outbound capacity", () => {
       const frames: any[] = [];
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       socket.on("error", () => {});
-      await bounded(new Promise<void>((resolve) => socket.once("open", () => resolve())), `${label} open`);
+      await awaitsWithin(new Promise<void>((resolve) => socket.once("open", () => resolve())), `${label} open`);
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile", diagnostics }));
-      await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), `${label} hello`);
+      await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
       const connectionId = frames.find((frame) => frame.type === "hello").connectionId as string;
       expect(connectionId).toMatch(/^[0-9a-f-]{36}$/u);
       return { socket, connectionId };
@@ -936,7 +916,7 @@ describe("WebSocket connection and outbound capacity", () => {
       .toEqual({ event: "connection.opened", source: "transport", connectionId: invalid.connectionId, peerEpoch: "2" });
 
     // The third socket superseded the least recently active one: stale.
-    await waitUntil(() => recordFor("connection.closed", stale.connectionId) !== undefined);
+    await waitFor(() => recordFor("connection.closed", stale.connectionId) !== undefined, "the stale connection's close record");
     expect(recordFor("connection.superseded", stale.connectionId))
       .toEqual({ event: "connection.superseded", source: "transport", connectionId: stale.connectionId, ...staleKey });
     expect(recordFor("connection.closed", stale.connectionId)).toMatchObject(staleKey);
@@ -946,7 +926,7 @@ describe("WebSocket connection and outbound capacity", () => {
       queueMicrotask(() => callback(new Error("fixture write failure")));
     }) as any);
     gateway.broadcast("test.event", { sequence: 1 });
-    await waitUntil(() => recordFor("connection.write-error", invalid.connectionId) !== undefined);
+    await waitFor(() => recordFor("connection.write-error", invalid.connectionId) !== undefined, "the invalid connection's write error record");
     expect(recordFor("connection.write-error", invalid.connectionId)).toMatchObject({ peerEpoch: "2" });
     expect(recordFor("connection.write-error", invalid.connectionId)).not.toHaveProperty("peerClientId");
   });
@@ -971,7 +951,7 @@ describe("WebSocket connection and outbound capacity", () => {
       (gateway as unknown as { server: import("node:http").Server }).server.on("connection", socket => physicalSockets.push(socket));
       cleanups.push(async () => {
         for (const peer of peers) if (peer.readyState !== WebSocket.CLOSED) peer.terminate();
-        await bounded(gateway.close(), "fanout fixture close");
+        await awaitsWithin(gateway.close(), "fanout fixture close");
         await rm(root, { recursive: true, force: true });
       });
       await gateway.listen();
@@ -994,9 +974,9 @@ describe("WebSocket connection and outbound capacity", () => {
             if (frame.type === "response" && frame.id === "fence" && frame.ok) fenced();
           });
           socket.on("error", () => {});
-          await bounded(new Promise<void>(resolve => socket.once("open", resolve)), "fanout socket open");
+          await awaitsWithin(new Promise<void>(resolve => socket.once("open", resolve)), "fanout socket open");
           socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
-          await bounded(hello, "fanout hello");
+          await awaitsWithin(hello, "fanout hello");
           return { socket, events, fence };
         }));
         const broadcast: Array<[string, number]> = [];
@@ -1010,7 +990,7 @@ describe("WebSocket connection and outbound capacity", () => {
         // A real response follows every already-enqueued global summary on
         // each socket. It proves ordering/drain without a timing sleep.
         for (const client of clients) client.socket.send(JSON.stringify({ type: "request", id: "fence", method: "test.fence", params: {} }));
-        await bounded(Promise.all(clients.map(client => client.fence)), "fanout fences");
+        await awaitsWithin(Promise.all(clients.map(client => client.fence)), "fanout fences");
         for (const client of clients) {
           // G-4: a frame whose state a newer frame replaces is dropped unsent,
           // so what a client receives is the broadcast order with superseded
@@ -1036,7 +1016,7 @@ describe("WebSocket connection and outbound capacity", () => {
         }
         const closed = Promise.all(physicalSockets.slice(physicalStart).map(socket => new Promise<void>(resolve => socket.once("close", resolve))));
         for (const client of clients) client.socket.close(1000);
-        await bounded(closed, "fanout physical retirement");
+        await awaitsWithin(closed, "fanout physical retirement");
       }
     },
   );
@@ -1109,15 +1089,15 @@ describe("WebSocket connection and outbound capacity", () => {
     socket.on("error", () => {});
     cleanups.push(async () => {
       if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await bounded(gateway.close(), "coalescing fixture close");
+      await awaitsWithin(gateway.close(), "coalescing fixture close");
       await rm(root, { recursive: true, force: true });
     });
-    await bounded(new Promise<void>((resolve, reject) => {
+    await awaitsWithin(new Promise<void>((resolve, reject) => {
       socket.once("open", () => resolve());
       socket.once("error", reject);
     }), "coalescing socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "coalescing hello");
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     const connection = connections(gateway)[0]!;
     // Hold every application write: the link is as slow as the peer's socket
     // is, and the queue is where the Gateway's next frames wait.
@@ -1161,7 +1141,7 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
 
     release();
-    await bounded(waitUntil(() => connection.outbound.snapshot().queuedFrames === 0), "coalesced frame drain");
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "the outbound queue to drain");
     expect(held).toHaveLength(2);
     const [first, survivor] = delivered(held);
     // The frame the socket was already writing is never recalled.
@@ -1212,7 +1192,7 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
 
     release();
-    await bounded(waitUntil(() => connection.outbound.snapshot().queuedFrames === 0), "fenced frame drain");
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "the outbound queue to drain");
     const frames = delivered(held);
     // Nothing is lost and nothing overtakes: the receipt and the frame before
     // it are delivered where they were enqueued, and the rebaseline covers the
@@ -1254,7 +1234,7 @@ describe("WebSocket connection and outbound capacity", () => {
     gateway.broadcastSession("generation-session", "session.snapshot", state("generation-2", 4));
 
     release();
-    await bounded(waitUntil(() => connection.outbound.snapshot().queuedFrames === 0), "generation frame drain");
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "the outbound queue to drain");
     const described = delivered(held).map((frame) => frame.topic === "session.rebaseline"
       ? `rebaseline:${frame.payload.snapshot?.eventSequence}`
       : `${frame.topic}:${frame.payload.eventSequence}`);
@@ -1294,7 +1274,7 @@ describe("WebSocket connection and outbound capacity", () => {
     gateway.broadcast("session.summary", summary("summary-a", 3));
 
     release();
-    await bounded(waitUntil(() => connection.outbound.snapshot().queuedFrames === 0), "keyed frame drain");
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "the outbound queue to drain");
     // The revision of summary-a that was superseded while still unsent is gone;
     // every sequenced frame keeps its place, because nothing queued here covers
     // the sequences they carry.
@@ -1331,11 +1311,11 @@ describe("WebSocket connection and outbound capacity", () => {
     // Three sessions' state is 72 KiB of the same bytes the coalescing case
     // dropped; nothing supersedes it, so the backstop closes the peer and the
     // record names the frame it was waiting on and the one that did not fit.
-    await bounded(waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")), "capacity record");
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity"), "the outbound capacity record");
     const record = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity");
     expect(record?.[1]).toMatch(/oldestTopic=session\.snapshot nextTopic=session\.snapshot nextBytes=\d+/u);
     expect(connection.closeInitiated).toBe(true);
-    expect(await bounded(closed, "capacity close")).toBe(1013);
+    expect(await awaitsWithin(closed, "capacity close")).toBe(1013);
   });
 
   it("supersedes an identity's least recently active socket instead of rejecting its reconnect", async () => {
@@ -1344,7 +1324,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await bounded(gateway?.close() ?? Promise.resolve(), "supersede fixture close");
+      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "supersede fixture close");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1377,12 +1357,12 @@ describe("WebSocket connection and outbound capacity", () => {
       const frames: any[] = [];
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       socket.on("error", () => {});
-      await bounded(new Promise<void>((resolve, reject) => {
+      await awaitsWithin(new Promise<void>((resolve, reject) => {
         socket.once("open", () => resolve());
         socket.once("unexpected-response", () => reject(new Error(`${label} was rejected`)));
       }), `${label} open`);
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
-      await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), `${label} hello`);
+      await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
       return { socket, frames };
     };
 
@@ -1392,17 +1372,17 @@ describe("WebSocket connection and outbound capacity", () => {
     // The older socket is the more recently active one; admission must retire
     // by activity rather than connection age.
     active.socket.send(JSON.stringify({ type: "request", id: "progress", method: "test.progress", params: {} }));
-    await bounded(waitUntil(() => active.frames.some((frame) => frame.id === "progress")), "active progress");
+    await waitFor(() => active.frames.some((frame) => frame.id === "progress"), "the active connection's progress frame");
 
     const replacement = await connect("replacement");
-    expect(await bounded(staleClosed, "stale supersession")).toBe(4000);
+    expect(await awaitsWithin(staleClosed, "stale supersession")).toBe(4000);
     expect(active.socket.readyState).toBe(WebSocket.OPEN);
     expect(replacement.socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.filter((call) => call[2]?.event === "connection.superseded")).toHaveLength(1);
     // Superseding an identity's stale socket is not a capacity refusal.
     expect(logger.log.mock.calls.some((call) => call[2]?.reason === "connection_capacity")).toBe(false);
     replacement.socket.send(JSON.stringify({ type: "request", id: "usable", method: "test.usable", params: {} }));
-    await bounded(waitUntil(() => replacement.frames.some((frame) => frame.id === "usable" && frame.ok)), "replacement request");
+    await waitFor(() => replacement.frames.some((frame) => frame.id === "usable" && frame.ok), "the replacement connection's usable frame");
   });
 
   it("records a pre-hello socket the Gateway supersedes as the Gateway's ending", async () => {
@@ -1411,7 +1391,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await bounded(gateway?.close() ?? Promise.resolve(), "supersede pre-hello fixture close");
+      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "supersede pre-hello fixture close");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1430,7 +1410,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const silent = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
     sockets.push(silent);
     silent.on("error", () => {});
-    await bounded(new Promise<void>((resolve) => silent.once("open", () => resolve())), "silent socket open");
+    await awaitsWithin(new Promise<void>((resolve) => silent.once("open", () => resolve())), "silent socket open");
     const closed = new Promise<number>((resolve) => silent.once("close", (code) => resolve(code)));
     // The newcomer takes the identity's only slot before either has said hello:
     // the Gateway ends the silent socket, so its record must not say the peer
@@ -1438,9 +1418,9 @@ describe("WebSocket connection and outbound capacity", () => {
     const newcomer = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
     sockets.push(newcomer);
     newcomer.on("error", () => {});
-    await bounded(new Promise<void>((resolve) => newcomer.once("open", () => resolve())), "newcomer open");
-    expect(await bounded(closed, "superseded pre-hello close")).toBe(SUPERSEDED_CLOSE_CODE);
-    await bounded(waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "http.upgrade")), "superseded upgrade record");
+    await awaitsWithin(new Promise<void>((resolve) => newcomer.once("open", () => resolve())), "newcomer open");
+    expect(await awaitsWithin(closed, "superseded pre-hello close")).toBe(SUPERSEDED_CLOSE_CODE);
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "http.upgrade"), "the HTTP upgrade record");
     const record = logger.log.mock.calls.find((call) => call[2]?.event === "http.upgrade")!;
     expect(record[0]).toBe("warning");
     expect(record[2]).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "superseded" });
@@ -1451,7 +1431,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
-      if (gateway) await bounded(gateway.close(), "capacity fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "capacity fixture disposal");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1489,7 +1469,7 @@ describe("WebSocket connection and outbound capacity", () => {
     await new Promise<void>((resolve) => first.once("open", () => resolve()));
     expect(first.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
     first.send(JSON.stringify({ type: "hello", protocolVersion: 7, diagnostics: { clientId: "client-B", attemptId: "initial", epoch: "7" } }));
-    await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     // Global capacity never displaces another identity's live connection.
     const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${otherToken}` } });
@@ -1506,11 +1486,11 @@ describe("WebSocket connection and outbound capacity", () => {
     for (let sequence = 1; sequence <= 64; sequence += 1) {
       gateway.broadcast("test.event", { sequence });
     }
-    await waitUntil(() => frames.filter((frame) => frame.topic === "test.event").length === 64);
+    await waitFor(() => frames.filter((frame) => frame.topic === "test.event").length === 64, "sixty-four test events");
     expect(first.readyState).toBe(WebSocket.OPEN);
 
     gateway.broadcast("session.snapshot", { text: "private-producer-content".repeat(1_000) });
-    await waitUntil(() => frames.some((frame) => frame.topic === "transport.resyncRequired"));
+    await waitFor(() => frames.some((frame) => frame.topic === "transport.resyncRequired"), "the resync request");
     const oversized = logger.log.mock.calls.find((call) => call[2]?.event === "connection.projection-rejected")?.[1];
     expect(oversized).toContain("type=event topic=session.snapshot");
     expect(oversized).toContain("maximumBytes=16384");
@@ -1527,7 +1507,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const closed = new Promise<number>((resolve) => first.once("close", (code) => resolve(code)));
     gateway.broadcast("test.event", { oversized: "x".repeat(10_000) });
     expect(await closed).toBe(1013);
-    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"));
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"), "the connection closed record");
     const opened = logger.log.mock.calls.find((call) => call[2]?.event === "connection.opened");
     const correlation = opened?.[2]?.connectionId as string | undefined;
     expect(correlation).toBeTruthy();
@@ -1559,9 +1539,9 @@ describe("WebSocket connection and outbound capacity", () => {
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         const closed = new Promise<void>((resolve) => socket!.once("close", () => resolve()));
         socket.terminate();
-        await bounded(closed, "shed socket disposal");
+        await awaitsWithin(closed, "shed socket disposal");
       }
-      if (gateway) await bounded(gateway.close(), "shed fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "shed fixture disposal");
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1616,18 +1596,18 @@ describe("WebSocket connection and outbound capacity", () => {
     socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
-    await bounded(new Promise<void>((resolve) => socket!.once("open", () => resolve())), "shed socket open");
+    await awaitsWithin(new Promise<void>((resolve) => socket!.once("open", () => resolve())), "shed socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     // The open's subscription is committed while its response is still pending;
     // the deadline answers the request anyway and gives the barrier back.
     socket.send(JSON.stringify({ type: "request", id: "shed-open", method: "session.open", params: { sessionId: "session" } }));
-    await waitUntil(() => frames.some((frame) => frame.id === "shed-open"));
+    await waitFor(() => frames.some((frame) => frame.id === "shed-open"), "the shed open response");
     expect(frames.find((frame) => frame.id === "shed-open")).toMatchObject({
       ok: false, error: { code: "busy", retryable: true, details: { retryAfterMs: 1_000 } },
     });
-    await waitUntil(() => subscriptions.size === 0);
+    await waitFor(() => subscriptions.size === 0, "the subscriptions to drain");
     const shed = () => logger.log.mock.calls.find((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.open");
     expect(shed()?.[2]).toMatchObject({ reason: "deadline", source: "transport", counts: { retryAfterMs: 1_000 } });
     expect(shed()?.[1]).toContain("Shed session.open");
@@ -1635,7 +1615,7 @@ describe("WebSocket connection and outbound capacity", () => {
     // The same deadline covers the projection reads, and a retry of the shed
     // open is answered normally: nothing it installed leaked.
     socket.send(JSON.stringify({ type: "request", id: "shed-list", method: "session.list", params: {} }));
-    await waitUntil(() => frames.some((frame) => frame.id === "shed-list"));
+    await waitFor(() => frames.some((frame) => frame.id === "shed-list"), "the shed list response");
     expect(frames.find((frame) => frame.id === "shed-list")).toMatchObject({
       ok: false, error: { code: "busy", details: { retryAfterMs: 1_000 } },
     });
@@ -1656,14 +1636,14 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.search")).toBe(false);
     gates.get("accepted-command")?.release();
     gates.get("session.search")?.release();
-    await waitUntil(() => frames.some((frame) => frame.id === "held-command"));
+    await waitFor(() => frames.some((frame) => frame.id === "held-command"), "the held command response");
     expect(frames.find((frame) => frame.id === "held-command")).toMatchObject({ ok: true, result: { method: "accepted-command" } });
-    await waitUntil(() => frames.some((frame) => frame.id === "held-search"));
+    await waitFor(() => frames.some((frame) => frame.id === "held-search"), "the held search response");
     expect(frames.find((frame) => frame.id === "held-search")).toMatchObject({ ok: true, result: { method: "session.search" } });
 
     gates.get("session.open")?.release();
     socket.send(JSON.stringify({ type: "request", id: "retry-open", method: "session.open", params: { sessionId: "session" } }));
-    await waitUntil(() => frames.some((frame) => frame.id === "retry-open"));
+    await waitFor(() => frames.some((frame) => frame.id === "retry-open"), "the retried open response");
     expect(frames.find((frame) => frame.id === "retry-open")).toMatchObject({ ok: true, result: { session: { healthy: true } } });
     expect(subscriptions.has("session")).toBe(true);
     expect(socket.readyState).toBe(WebSocket.OPEN);

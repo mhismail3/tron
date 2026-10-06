@@ -5,20 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
-
-async function waitUntil(predicate: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 20));
-  }
-  throw new Error("condition not reached");
-}
 
 function processExists(pid: number): boolean {
   try { process.kill(pid, 0); return true; }
@@ -60,10 +52,10 @@ describe("DirectBashProcessOwner", () => {
         undefined,
       );
 
-      await waitUntil(async () => {
+      await waitFor(async () => {
         try { return Number.isSafeInteger(Number(await readFile(pidFile, "utf8"))); }
         catch { return false; }
-      });
+      }, "the async process id file");
       const detachedPid = Number(await readFile(pidFile, "utf8"));
       expect(processExists(detachedPid)).toBe(true);
       expect(owner.hasActiveProcesses).toBe(true);
@@ -71,7 +63,7 @@ describe("DirectBashProcessOwner", () => {
       try {
         await owner.abortAll();
         await expect(execution).rejects.toThrow("Command aborted");
-        await waitUntil(async () => !processExists(detachedPid));
+        await waitFor(async () => !processExists(detachedPid), "the detached process to exit");
         expect(owner.hasActiveProcesses).toBe(false);
         expect(processExists(unrelatedPid)).toBe(true);
       } finally {

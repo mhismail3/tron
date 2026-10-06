@@ -7,14 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { MAXIMUM_RECENT_MODELS, type RecentModelUsage } from "../providers/recent-models.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+import { waitFor } from "../../test-support/wait-for.js";
 
 /** Wait for the catalog owner's first published cut: a read that lands before
  * it refuses retryably, and no reader walks the folder (G-1c). */
@@ -87,7 +80,7 @@ describe.sequential("recent model usage", () => {
   async function run(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, model: { provider: string; id: string }, prompt: string): Promise<void> {
     await slot.setModel(model.provider, model.id);
     await slot.prompt(prompt);
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
   }
 
   it("orders, dedupes, and bounds recency from admitted user runs, and excludes subagents", async () => {

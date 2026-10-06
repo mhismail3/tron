@@ -2778,6 +2778,23 @@ current test (or the file, for async work that outlives its test), so an unstubb
 hang depending on the host's network. It does not cover child processes or DNS
 lookups.
 
+Waits are hang bounds, not speed budgets. Every condition a test waits for — a
+turn settling, a frame arriving, a record landing — is correct at any speed, and
+only `test-support/wait-for.ts` may bound one: `waitFor(condition, label)` polls
+a sync or async condition and `awaitsWithin(promise, label)` bounds an event or
+promise the code already exposes. Both fail with their label at
+`WAIT_HANG_BOUND_MS` (12 s, kept below the 15-second `testTimeout` so the failure
+names the condition instead of being cut off, and above any host load that still
+leaves the product working). Do not add a file-local poll helper, a numeric
+deadline, or an attempt-count budget: a bound tuned to host speed turns unrelated
+CPU contention (parallel agent builds, hosted runners) into a false failure that
+lands on a different test each run (epic #400). Prefer awaiting the event or
+promise the owning code already exposes. Where elapsed time is itself the
+contract — a throughput or latency relationship a test measures on its own clock
+— keep the explicit bound and say why at that call site. A wait inside a
+`beforeEach`/`afterEach` must pass a smaller `boundMs`, below Vitest's 10-second
+hook timeout.
+
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 
 ```bash

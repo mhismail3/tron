@@ -20,6 +20,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
 import { RequestSpan, requestsCompetingForLoop, runInRequestSpan } from "./request-span.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 /**
  * Proves the request span's breakdown reaches the real log writer: every
@@ -68,14 +69,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("probe did not bind");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
-}
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 function stagesOf(stages: string): Map<string, number> {
@@ -224,7 +217,7 @@ describe("cold session.open request span", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString()) as SocketFrame));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
-    await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
     const reports: Array<Record<string, unknown>> = [];
     const requestId = "cold-open";
@@ -236,12 +229,12 @@ describe("cold session.open request span", () => {
       method: "session.open",
       params: { sessionId: manager.getSessionId() },
     }));
-    await waitUntil(() => frames.some((frame) => frame.id === requestId));
+    await waitFor(() => frames.some((frame) => frame.id === requestId), "the request's response frame");
     const response = frames.find((frame) => frame.id === requestId);
     expect(response?.ok, JSON.stringify(response)).toBe(true);
     // By request ID, not by position: another RPC's record must not be read
     // as this open's breakdown.
-    await waitUntil(() => completionOf() !== undefined);
+    await waitFor(() => completionOf() !== undefined, "the completion");
 
     const completion = completionOf()!;
     const stages = completion.stages;
@@ -280,11 +273,11 @@ describe("cold session.open request span", () => {
       method: "session.open",
       params: { sessionId: "00000000-0000-4000-8000-000000000000" },
     }));
-    await waitUntil(() => frames.some((frame) => frame.id === failedRequestId));
+    await waitFor(() => frames.some((frame) => frame.id === failedRequestId), "the failed request's response frame");
     expect(frames.find((frame) => frame.id === failedRequestId)?.ok).toBe(false);
-    await waitUntil(() => persistedRecords(logPath).some(
+    await waitFor(() => persistedRecords(logPath).some(
       (record) => record.requestID === failedRequestId && record.event === "rpc.completed",
-    ));
+    ), "the persisted rpc.completed record");
     const persisted = persistedRecords(logPath)
       .find((record) => record.requestID === failedRequestId && record.event === "rpc.completed")!;
     expect(persisted.outcome).toBe("failure");
@@ -335,16 +328,9 @@ describe("request loop signal", () => {
     scheduler.register({ name: "check.slice", intervalMs: 1, slice: () => { slices.push(1); } });
     // The production wiring: the in-flight signal is the request span count.
     scheduler.start({ requestsInFlight: requestsCompetingForLoop });
-    const waitFor = async (check: () => boolean, timeoutMs = 5_000): Promise<void> => {
-      const deadline = Date.now() + timeoutMs;
-      while (!check()) {
-        if (Date.now() >= deadline) throw new Error("condition timed out");
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    };
     try {
       // An idle loop runs the job.
-      await waitFor(() => slices.length >= 2);
+      await waitFor(() => slices.length >= 2, "the second background slice");
       const idle = slices.length;
 
       // A request that shares the loop pauses the slices.
@@ -384,7 +370,7 @@ describe("request loop signal", () => {
         "session.rename",
         { commandId: "rename-command", sessionId: "session-1", name: "Renamed" },
       ));
-      await waitFor(() => finishRename !== undefined);
+      await waitFor(() => finishRename !== undefined, "the rename to finish");
       expect(requestsCompetingForLoop()).toBe(false);
       expect(workRegistry.facts()).toEqual([
         expect.objectContaining({ kind: "rpc-mutation", method: "session.rename" }),
@@ -393,7 +379,7 @@ describe("request loop signal", () => {
       // slice after it must still start while the mutation waits.
       await new Promise((resolve) => setTimeout(resolve, 30));
       const holding = slices.length;
-      await waitFor(() => slices.length > holding);
+      await waitFor(() => slices.length > holding, "the background slices to resume");
 
       finishRename!();
       await pending;
@@ -401,7 +387,7 @@ describe("request loop signal", () => {
       expect(requestsCompetingForLoop()).toBe(true);
       mutationSpan.breakdown(0);
       expect(requestsCompetingForLoop()).toBe(false);
-      await waitFor(() => workRegistry.size === 0);
+      await waitFor(() => workRegistry.size === 0, "the work registry to drain");
     } finally {
       scheduler.stop();
     }

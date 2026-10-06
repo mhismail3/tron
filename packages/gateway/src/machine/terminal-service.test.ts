@@ -3,8 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TerminalService } from "./terminal-service.js";
-
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+import { waitFor } from "../../test-support/wait-for.js";
 
 describe("TerminalService", () => {
   it("opens a PTY and retains bounded replay", async () => {
@@ -16,9 +15,7 @@ describe("TerminalService", () => {
     expect(service.belongsToSession(terminal.id, "other-session")).toBe(false);
     service.write(terminal.id, "write", "printf TRON_TERMINAL_OK\\n");
 
-    for (let attempt = 0; attempt < 20 && !JSON.stringify(events).includes("TRON_TERMINAL_OK"); attempt += 1) {
-      await wait(25);
-    }
+    await waitFor(() => JSON.stringify(events).includes("TRON_TERMINAL_OK"), "the terminal output");
     const replay = service.attach(terminal.id, 0);
     expect(replay.chunks.map((chunk) => chunk.data).join("")).toContain("TRON_TERMINAL_OK");
     await service.terminate(terminal.id);
