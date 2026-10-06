@@ -2208,6 +2208,41 @@ is uploaded before
 owned state is removed. This simulator boundary is an explicit Pi-graph/release
 checkpoint, not an ordinary edit-loop or general UI regression suite.
 
+The same harness owns one real-UI lane. `scripts/ios-gateway-e2e-test run-ui`
+installs and builds the fixture Gateway like `all`, builds the `Tron UI Validation`
+products (`UIValidation` test plan) in this worktree's one E2E DerivedData, patches
+only the `TronMobileUITests` target with the same `TRON_E2E_*` environment, and runs
+the journeys under `packages/ios-app/UITests/RealGateway/` — each against its own
+freshly owned fixture and pairing code while the lane stays leased, so a consumed
+pairing invitation is never reused. `run-ui [--only-testing OWNER …]` selects
+journeys; with none it runs the journeys it owns. `status` reports the UI products
+beside the unit ones, and a journey the fixture never reached skips, which the
+harness refuses to report green (it requires exactly one executed, passing case).
+
+`RealGatewayPairAndChatUITests` declares the failure modes it protects. It launches
+the app with no fixture argument, so the production scene runs with a real `AppModel`
+and `GatewayClient`, and pairs against the fault proxy's port through the test app's
+onboarding manual pairing form — the production host, port and one-time-code entry a
+user without a QR code takes. It deliberately does not use `XCUIApplication.open(tron://pair…)`:
+the deep-link handler is attached only to the scene outside `HOSTED_TEST`, so the link
+would be delivered nowhere in this lane and a handler added for it would be a test-only
+production hook. The journey then creates a session in the fixture's workspace, sends
+one prompt, observes the fixture's reply while it is still incomplete and again when it
+completes, backgrounds and foregrounds the app, and requires the conversation intact.
+The wrong-code control asserts the app's own `Pairing code is invalid` refusal, that a
+refused code advances nothing, and then that the same form and address pair with the
+fixture's code — so the control cannot pass by being a broken address. Both journeys
+retain screenshots.
+
+Each journey leaves one evidence directory under this worktree's fixture
+(`results/<utc>-ui.XXXXXX`) holding the `.xcresult`, the Gateway's canonical runtime
+log (`gateway.jsonl`), the fault proxy's `link-stats` JSON, and `report.json`, which
+names every artifact with the sha256 of its bytes (a result bundle's digest covers its
+sorted file tree) and is itself described by `report.sha256`. That directory stays
+local; a pull request cites the digests. iOS work verification routes this journey file
+to the same harness (`run-ui`) instead of the ordinary hosted runner, and stops the
+fixture afterwards.
+
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,
 transport, bounds, accessibility identifiers, and authorization remain covered

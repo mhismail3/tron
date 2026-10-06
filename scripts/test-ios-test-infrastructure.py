@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,13 @@ IDENTITY = ROOT / "scripts/ios-test-build-identity.py"
 RUNNER = ROOT / "scripts/tron-ios-test"
 PROFILER = ROOT / "scripts/tron-profile-ios"
 E2E = ROOT / "scripts/ios-gateway-e2e-test"
+XCTESTRUN_FIXTURE_KEYS = [
+    "TRON_E2E_CODE",
+    "TRON_E2E_PI_VERSION",
+    "TRON_E2E_PORT",
+    "TRON_E2E_PROXY_TOKEN",
+    "TRON_E2E_WORKSPACE",
+]
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
 XCODEGEN_VERSION = re.search(
     r"^TRON_CI_XCODEGEN_VERSION=(\S+)$", (ROOT / "config/ci-toolchain.env").read_text(), re.M,
@@ -1841,8 +1849,9 @@ arguments = sys.argv[1:]
 if arguments[:2] == ['xcresulttool', 'get']:
     if arguments[2:4] == ['test-results', 'tests'] and os.environ.get('FAKE_TESTS_RESULT'):
         print(Path(os.environ['FAKE_TESTS_RESULT']).read_text()); raise SystemExit(0)
-    # The runner's summary of a focused run: one executed, passing test.
-    print('{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
+    # The runner's summary of a focused run: one executed, passing test, unless
+    # a case asks for a different one (for example a skipped journey).
+    print(os.environ.get('FAKE_SUMMARY') or '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
 assert arguments[0] == 'simctl', arguments
 arguments = arguments[1:]
 log = os.environ.get('FAKE_SIMCTL_LOG')
@@ -3172,31 +3181,54 @@ class LifecycleHarness(LaneHarness):
 
         `FAKE_BUILD_GATE` (a path) holds the build open until the file exists,
         so a case can kill the command that owns the lane while it is still
-        building.
+        building. `FAKE_XCODEBUILD_LOG` records every invocation as JSON, with
+        the build's scheme/test plan and each target's patched fixture
+        environment, so a case can prove which target the harness patched.
         """
         self.synthetic_stub(self.bin / "xcodebuild", FIXTURE_GATE_SOURCE + '''
+import json, plistlib
 arguments = sys.argv[1:]
 if arguments[:1] == ["-version"]:
     print("Xcode 26.6"); raise SystemExit(0)
+log = os.environ.get("FAKE_XCODEBUILD_LOG")
+def record(value):
+    if log:
+        with open(log, "a", encoding="utf-8") as handle: handle.write(json.dumps(value) + "\\n")
+def xctestrun_targets(path):
+    document = plistlib.loads(Path(path).read_bytes())
+    return {target["BlueprintName"]: sorted(target.get("EnvironmentVariables", {}))
+            for configuration in document["TestConfigurations"]
+            for target in configuration["TestTargets"]}
 if "build-for-testing" in arguments:
     derived = Path(arguments[arguments.index("-derivedDataPath") + 1])
     products = derived / "Build/Products"
     products.mkdir(parents=True, exist_ok=True)
-    (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\\n")
+    scheme = arguments[arguments.index("-scheme") + 1]
+    test_plan = arguments[arguments.index("-testPlan") + 1]
+    targets = [{"BlueprintName": "TronMobileTests", "IsUITestBundle": False}]
+    if scheme == "Tron UI Validation":
+        targets.append({"BlueprintName": "TronMobileUITests", "IsUITestBundle": True})
+    record({"action": "build", "scheme": scheme, "test_plan": test_plan})
+    with (products / (scheme + "_" + test_plan + "_iOS.xctestrun")).open("wb") as handle:
+        plistlib.dump({"TestConfigurations": [{"IsEnabled": True, "TestTargets": targets}]}, handle)
     if os.environ.get("FAKE_BUILD_GATE"):
         wait_for_fixture_gate(Path(os.environ["FAKE_BUILD_GATE"]))
 if "test-without-building" in arguments and "-resultBundlePath" in arguments:
     calls = os.environ.get("FAKE_XCODEBUILD_CALLS")
+    test_filter = next((value.split(":", 1)[1] for value in arguments if value.startswith("-only-testing:")), "unknown")
     if calls:
-        test_filter = next((value.split(":", 1)[1] for value in arguments if value.startswith("-only-testing:")), "unknown")
         with open(calls, "a", encoding="utf-8") as handle: handle.write(test_filter + "\\n")
+    record({"action": "run", "test_filter": test_filter,
+            "targets": xctestrun_targets(arguments[arguments.index("-xctestrun") + 1]) if "-xctestrun" in arguments else None})
     invocation = Path(calls).read_text().splitlines() if calls and Path(calls).exists() else []
     failure = int(os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_EXIT") or 0)
     if failure and len(invocation) == 1:
         if os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_BUNDLE") == "1":
             Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
         raise SystemExit(failure)
-    Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
+    bundle = Path(arguments[arguments.index("-resultBundlePath") + 1])
+    bundle.mkdir(parents=True, exist_ok=True)
+    (bundle / "Info.plist").write_text("fixture result bundle\\n")
 ''')
 
 
@@ -3349,6 +3381,19 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         iterating its children, suppressing optional failure details.
     16. Shared-link ping/pong counts increment both at FIFO admission and actual
         forwarding, so reported frames do not match the observed event timeline.
+
+    W-53 (issue #424): the real-UI lane reuses the same fixture, lane and lease.
+
+    17. `run-ui` patches the hosted unit target (or no target at all), so the UI
+        runner never receives the fixture environment, every journey skips for a
+        missing fixture, and the cross-layer receipt is green.
+    18. `run-ui` runs something other than the journeys it owns, or loses the
+        `--only-testing` selection when the lease holder starts it again.
+    19. A journey's evidence directory omits the result bundle, the Gateway's
+        runtime log or the proxy's link statistics, or names a digest that does
+        not match the bytes it claims to describe.
+    20. `run-ui` leaves the lane's simulator booted when the command ends, or
+        leaves the Gateway fixture it failed with running.
     """
 
     def setUp(self) -> None:
@@ -3376,7 +3421,9 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         These actual-runner regressions stop before XCTest. Their only fixture
         contract is the enrollment/health and proxy-ready signals consumed while
         setting up a fresh case, so a clean checkout need not build production
-        Gateway artifacts merely to test runner failure propagation.
+        Gateway artifacts merely to test runner failure propagation. The one bin
+        directory also carries `npm`, which the harness requires beside `node`
+        before it installs the fixture Gateway.
         """
         real_node = shutil.which("node", path=environment["PATH"])
         self.assertIsNotNone(real_node, "the pinned Node runtime is required by the E2E runner")
@@ -3402,6 +3449,15 @@ esac
 exec "$FAKE_E2E_REAL_NODE" "$@"
 """)
         node.chmod(0o755)
+        # `npm` only has to satisfy the harness's same-bin-directory check and
+        # the fixture install it performs; no case builds production Gateway
+        # artifacts, and the checks under test stop before that build's output.
+        npm = binary / "npm"
+        npm.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+""")
+        npm.chmod(0o755)
         result = dict(environment)
         result["PATH"] = f"{binary}:{environment['PATH']}"
         result.update({
@@ -3409,6 +3465,9 @@ exec "$FAKE_E2E_REAL_NODE" "$@"
             "FAKE_E2E_GATEWAY_SOURCE": '''const fs = require("node:fs");
 const http = require("node:http");
 process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
+const logs = `${process.env.TRON_DATA_DIR}/logs`;
+fs.mkdirSync(logs, { recursive: true });
+fs.appendFileSync(`${logs}/gateway.jsonl`, JSON.stringify({ event: "gateway.started" }) + "\\n");
 const enrollment = `${process.env.TRON_DATA_DIR}/gateway/enrollment.json`;
 fs.writeFileSync(enrollment, JSON.stringify({ code: "fixture-pairing-code" }), { mode: 0o600 });
 const server = http.createServer((request, response) => {
@@ -3422,7 +3481,15 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
             "FAKE_E2E_PROXY_SOURCE": '''const fs = require("node:fs");
 const http = require("node:http");
 process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
-const server = http.createServer((request, response) => { response.writeHead(404); response.end(); });
+const server = http.createServer((request, response) => {
+  if (request.url === "/_fixture/control") {
+    // The harness reads the owned proxy's link statistics as journey evidence.
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ schedule: "unshaped" }));
+    return;
+  }
+  response.writeHead(404); response.end();
+});
 server.listen(0, "127.0.0.1", () => {
   fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({ port: server.address().port, pid: process.pid }), { mode: 0o600 });
 });
@@ -3505,6 +3572,150 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         state = self.root / "e2e-state"
         for name in ("state.env", "gateway.pid", "proxy.pid", "gateway.log", "tron", "home"):
             self.assertFalse((state / name).exists(), f"run renewed {name} before refusing its products")
+
+    def ui_environment(self, **extra: str) -> dict[str, str]:
+        """The fixture plus the xcodebuild record every real-UI case reads.
+
+        The synthetic `node`/`npm`/Gateway carry the fixture contract the UI lane
+        consumes: the enrollment code, a canonical Gateway runtime log and a
+        fault proxy that answers the evidence read. No journey runs, and the
+        production Gateway is never built.
+        """
+        environment = self.readiness_node_environment(dict(self.environment))
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(self.root / "ui-calls.txt"),
+            "FAKE_XCODEBUILD_LOG": str(self.root / "ui-xcodebuild.jsonl"),
+        })
+        environment.update(extra)
+        return environment
+
+    def xcodebuild_invocations(self, environment: dict[str, str]) -> list[dict[str, Any]]:
+        path = Path(environment["FAKE_XCODEBUILD_LOG"])
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def journey_evidence(self, output: str) -> list[Path]:
+        """The evidence directory each journey of a `run-ui` line reported."""
+        return [
+            Path(line.rsplit("evidence: ", 1)[1])
+            for line in output.splitlines()
+            if line.startswith("Real-UI journey ")
+        ]
+
+    def owned_ui_journeys(self) -> list[str]:
+        return [
+            "TronMobileUITests/RealGatewayPairAndChatUITests/testPairsByLinkStreamsAndSurvivesBackground",
+            "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeReportsClearFailure",
+        ]
+
+    def test_run_ui_builds_the_ui_plan_and_patches_the_ui_target(self) -> None:
+        """Failure modes 17 and 18: the UI runner, not the hosted unit runner,
+        receives the fixture environment, and the command runs its own journeys."""
+        environment = self.ui_environment()
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        invocations = self.xcodebuild_invocations(environment)
+        self.assertEqual(
+            [entry for entry in invocations if entry["action"] == "build"],
+            [{"action": "build", "scheme": "Tron UI Validation", "test_plan": "UIValidation"}],
+        )
+        runs = [entry for entry in invocations if entry["action"] == "run"]
+        self.assertEqual([entry["test_filter"] for entry in runs], self.owned_ui_journeys())
+        for entry in runs:
+            self.assertEqual(entry["targets"].get("TronMobileUITests"), XCTESTRUN_FIXTURE_KEYS)
+            self.assertEqual(entry["targets"].get("TronMobileTests"), [], "the unit target must carry no fixture environment")
+
+    def test_run_ui_leaves_one_complete_evidence_bundle_per_journey(self) -> None:
+        """Failure mode 19: every journey leaves the xcresult, the Gateway log,
+        the proxy link statistics and digests that match the bytes on disk."""
+        environment = self.ui_environment()
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        directories = self.journey_evidence(result.stdout)
+        self.assertEqual(len(directories), 2, result.stdout)
+        for directory, journey in zip(directories, self.owned_ui_journeys()):
+            with self.subTest(journey=journey):
+                for name in ("Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "report.json", "report.sha256"):
+                    self.assertTrue((directory / name).exists(), f"missing {name} in {directory}")
+                report = json.loads((directory / "report.json").read_text())
+                self.assertEqual(report["journey"], journey)
+                self.assertEqual(report["journey_status"], 0)
+                artifacts = {artifact["path"]: artifact for artifact in report["artifacts"]}
+                self.assertEqual(sorted(artifacts), ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json"])
+                for name, artifact in artifacts.items():
+                    self.assertRegex(artifact["sha256"], r"^[0-9a-f]{64}$")
+                    self.assertIn(artifact["kind"], ("file-sha256", "tree-sha256"))
+                for name in ("gateway.jsonl", "proxy-link-stats.json"):
+                    self.assertEqual(
+                        artifacts[name]["sha256"],
+                        hashlib.sha256((directory / name).read_bytes()).hexdigest(),
+                        f"the report's digest for {name} must describe the bytes it names",
+                    )
+                bundle = directory / "Journeys.xcresult"
+                tree = hashlib.sha256()
+                for path in sorted((item for item in bundle.rglob("*") if item.is_file()),
+                                   key=lambda item: item.relative_to(bundle).as_posix()):
+                    tree.update(path.relative_to(bundle).as_posix().encode() + b"\0"
+                                + hashlib.sha256(path.read_bytes()).hexdigest().encode() + b"\n")
+                self.assertEqual(artifacts["Journeys.xcresult"]["sha256"], tree.hexdigest())
+                self.assertEqual(
+                    (directory / "report.sha256").read_text().split()[0],
+                    hashlib.sha256((directory / "report.json").read_bytes()).hexdigest(),
+                )
+
+    def test_run_ui_releases_its_lane_and_leaves_current_products(self) -> None:
+        """Failure mode 20: the lane is released when the command ends, and the
+        products it built belong to this worktree's current source state."""
+        environment = self.ui_environment()
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        marker = json.loads((self.state / "simulator.json").read_text())
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        status = self.e2e("status", environment=environment)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        products = [line for line in status.stdout.splitlines() if line.startswith("UI test products: ")]
+        self.assertEqual(len(products), 1, status.stdout)
+        self.assertIn("built from this worktree's current source state", products[0])
+
+    def test_run_ui_refuses_a_skipped_journey_and_keeps_its_evidence(self) -> None:
+        """Failure mode 17: a journey that cannot reach its fixture skips, which
+        is not a passing cross-layer receipt. The selected journey still leaves
+        the evidence a reviewer needs, and the failed run leaves no fixture or
+        booted lane behind (failure mode 20)."""
+        journey = self.owned_ui_journeys()[0]
+        environment = self.ui_environment(
+            FAKE_SUMMARY=json.dumps({"passedTests": 0, "failedTests": 0, "skippedTests": 1, "totalTestCount": 1}),
+        )
+        result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("skipped, missing, or failed", result.stderr)
+        self.assertEqual(
+            [entry["test_filter"] for entry in self.xcodebuild_invocations(environment) if entry["action"] == "run"],
+            [journey],
+            "the selected journey must survive the lease holder's re-exec",
+        )
+        directories = self.journey_evidence(result.stdout)
+        self.assertEqual(len(directories), 1, result.stdout)
+        report = json.loads((directories[0] / "report.json").read_text())
+        self.assertEqual(report["journey_status"], 65)
+        self.assertEqual(report["journey"], journey)
+        marker = json.loads((self.state / "simulator.json").read_text())
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        status = self.e2e("status", environment=environment)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn("Gateway: stopped", status.stdout)
+        self.assertIn("Fault proxy: stopped", status.stdout)
+
+    def test_only_testing_applies_to_run_ui(self) -> None:
+        """The selection is `run-ui`'s alone, and a missing owner is refused
+        before anything is leased or renewed."""
+        refused = self.e2e("run", "--only-testing", self.owned_ui_journeys()[0], environment=self.environment)
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertIn("--only-testing applies to run-ui", refused.stderr)
+        missing = self.e2e("run-ui", "--only-testing", environment=self.environment)
+        self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+        self.assertIn("--only-testing requires an owner", missing.stderr)
+        self.assertFalse((self.state / "simulator.json").exists(), "a refused selection must not lease or boot a lane")
+        self.assert_no_fixture_renewed()
 
     def test_each_worktree_owns_its_default_fixture_and_products(self) -> None:
         """Failure modes 7 and 8: default roots follow the worktree; overrides win."""
