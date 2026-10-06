@@ -237,8 +237,8 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(trace.contains("xsetup.appear dest=integration-fixture:g0 view=\(setupViewID)"), trace)
         let events = trace.split(separator: "|").map(String.init)
         // The form that appeared for the original destination is the one that disappears, and
-        // it disappears with the transition that retires it. A focus re-identity retires the
-        // same presentation earlier, so the ordered disappearance is the retirement.
+        // it disappears with the transition that retires it. The last disappearance of that
+        // view is the retirement, so an earlier one for any reason cannot satisfy the order.
         guard let retiring = events.firstIndex(of: "integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"),
               let disappearing = events.lastIndex(where: { $0.hasPrefix("xsetup.disappear ") && $0.hasSuffix(" view=\(setupViewID)") }) else {
             return XCTFail("The trace must record the destination transition that retires the form and the disappearance of the form that appeared for it: \(trace)")
