@@ -918,11 +918,9 @@ placements that would replace a user/agent decision fail with the typed
 writes are fenced at the same store boundary. Legacy non-pending admissions
 without connector ownership are conservatively treated as prior decisions; legacy
 scope changes without producer metadata cannot be distinguished from prior
-intake placement. Intake reads the canonical source's admission before capture:
-an item whose admission a user or agent already decided is acknowledged as
-skipped without fetching or rewriting the source again. A decision that lands
-while capture is in flight is retained by those store refusals. Intake continues
-processing an undecided admission in an agent-decided scope. A refusal does not turn into a silent no-op; intake reports the preserved
+intake placement. Intake relies on those store refusals to retain an existing
+decision and continues processing an undecided admission in an agent-decided
+scope. A refusal does not turn into a silent no-op; intake reports the preserved
 admission and completes the queue identity when it can establish the authoritative
 record. Focused KnowledgeStore coverage exercises admission writes,
 curation placement, recapture/correction, permitted agent overrides, and

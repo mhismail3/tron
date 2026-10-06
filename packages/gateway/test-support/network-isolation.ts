@@ -1,5 +1,5 @@
 import net from "node:net";
-import { afterEach } from "vitest";
+import { afterAll, afterEach } from "vitest";
 
 // Gateway tests own every remote boundary through injected fetchers, resolvers
 // and HTTP stubs. An unstubbed path that reaches the real network passes or
@@ -35,8 +35,11 @@ net.Socket.prototype.connect = function (this: net.Socket, ...args: unknown[]) {
   return (connect as (...values: unknown[]) => net.Socket).apply(this, args);
 } as typeof net.Socket.prototype.connect;
 
-afterEach(() => {
+// afterAll reports attempts made by async work that outlived the file's last test.
+function reportViolations(): void {
   if (violations.length === 0) return;
   const found = violations.splice(0);
   throw new Error(found.join("\n"));
-});
+}
+afterEach(reportViolations);
+afterAll(reportViolations);

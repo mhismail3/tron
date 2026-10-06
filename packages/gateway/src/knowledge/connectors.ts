@@ -893,25 +893,20 @@ export class KnowledgeConnectorExtension {
           live = await this.store.connectorState("raindrop") ?? live;
           if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
           if (mapping && item.collectionId !== mapping.collectionId) throw new GatewayError("conflict", "Raindrop item collection does not match the selected mapping");
-          const acknowledgeDecided = async (decided: KnowledgeRecord & { kind: "source" }) => {
-            const status = decided.content.admission?.status;
-            const disposition = status === "archived" ? "archived" : status === "retained" ? "retained" : "pending";
-            if (disposition === "archived") archived += 1;
-            else if (disposition === "retained") retained += 1;
-            else pending += 1;
-            setOutcome(item, { sourceId: decided.id, sourceRevision: decided.revisionId, disposition, assessment: "not-run", move: "not-attempted", reason: "Canonical source admission was already decided by a user or agent" });
-            await markDone(item.id, "skipped", "Admission already decided by a user or agent; intake left it unchanged");
-          };
-          // A user or agent decision is final for intake: acknowledge it before
-          // capture so a decided source is never fetched or rewritten again.
-          const canonical = await canonicalFor(item.id);
-          if (canonical && sourceAdmissionIsDecided(canonical)) { await acknowledgeDecided(canonical); continue; }
           let source = await this.ingestItem({ commandId: command(request.commandId, `ingest-${item.id}`), connector: "raindrop", connectionId: request.connectionId ?? "legacy", itemId: item.id, scope: mappedScope }, item, live, signal);
           setOutcome(item, { sourceId: source.id, sourceRevision: source.revisionId, disposition: "pending", assessment: "not-run", move: "not-attempted", reason: "Source captured; processing not yet complete" });
           let sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           captured += 1;
-          // A decision can still land while capture is in flight.
-          if (sourceAdmissionIsDecided(source)) { await acknowledgeDecided(source); continue; }
+          if (sourceAdmissionIsDecided(source)) {
+            const status = source.content.admission?.status;
+            const disposition = status === "archived" ? "archived" : status === "retained" ? "retained" : "pending";
+            if (disposition === "archived") archived += 1;
+            else if (disposition === "retained") retained += 1;
+            else pending += 1;
+            setOutcome(item, { ...sourceRef, disposition, assessment: "not-run", move: "not-attempted", reason: "Canonical source admission was already decided by a user or agent" });
+            await markDone(item.id, "skipped", "Admission already decided by a user or agent; intake left it unchanged");
+            continue;
+          }
           // The entry's own scope, not the collection mapping, decides the path:
           // a source a user or agent placed in personal never reaches Jev.
           if (source.scope === "personal") {
