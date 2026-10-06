@@ -566,12 +566,16 @@
     "evidenceEnv": "TRON_IOS_E2E_STATE_DIR",
     "journeys": {
       "real-gateway-pair-and-chat": {
-        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
-        "report": "results/latest-ui/report.json"
+        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
+        "report": "results/latest-ui/report.json",
+        "timeoutSeconds": 1800
       },
       "real-gateway-wrong-pairing-code": {
-        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
-        "report": "results/latest-ui/report.json"
+        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
+        "report": "results/latest-ui/report.json",
+        "timeoutSeconds": 1800
       }
     }
   },

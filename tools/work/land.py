@@ -197,8 +197,10 @@ def validation_handoff(action: Optional[str], irreducible: Optional[str]) -> Opt
     """The Maintainer validation section: what no journey can prove, then the check itself.
 
     A handoff without its irreducible part asks the maintainer to redo work an
-    acceptance journey could have done, so the two flags travel together.
+    acceptance journey could have done, so the two flags travel together; a flag
+    whose value is blank counts as absent rather than naming anything.
     """
+    action, irreducible = _given(action), _given(irreducible)
     if action is None and irreducible is None:
         return None
     if irreducible is None:
@@ -207,7 +209,13 @@ def validation_handoff(action: Optional[str], irreducible: Optional[str]) -> Opt
     if action is None:
         raise LandError("--irreducible names the part of a --needs-user-validation handoff that no "
                         "acceptance journey can prove")
-    return f"Irreducible: {irreducible.strip()}\n\n{action.strip()}"
+    return f"Irreducible: {irreducible}\n\n{action}"
+
+
+def _given(value: Optional[str]) -> Optional[str]:
+    """A flag's value, or None when it is absent or blank."""
+    stripped = value.strip() if isinstance(value, str) else None
+    return stripped or None
 
 
 def verification(receipt: dict, evidence_link: Optional[str] = None) -> str:

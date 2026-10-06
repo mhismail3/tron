@@ -647,10 +647,11 @@ as does `acceptance` for the journeys it can run.
    commit; running `land` again continues.
 3. **Acceptance.** With `--acceptance`, it runs each named journey against the
    head it is about to verify, and refuses unless every report proves that run:
-   the journey passed, its evidence is complete, its stamped source revision is
-   that head, its stamped source is not dirty, and it carries a source
-   fingerprint. A journey that fails, or a report that does not name that head,
-   stops `land` with nothing pushed, posted or merged (see
+   the run wrote it, it names the registered journey, the journey passed, its
+   evidence is complete, its stamped source revision is that head, its stamped
+   source is not dirty, and it carries a source fingerprint. A journey that
+   fails, passes its registry bound, or leaves a report that does not name that
+   head stops `land` with nothing pushed, posted or merged (see
    [Acceptance journeys](#acceptance-journeys)).
 4. **Receipt.** It runs `verify` and stops on a failing receipt. It then
    pushes the branch (fast-forward only) and posts the receipt as
@@ -754,8 +755,10 @@ or a language:
   "evidenceEnv": "HARNESS_EVIDENCE_DIR",
   "journeys": {
     "journey-id": {
+      "journey": "<the journey name this id runs and its report must name>",
       "command": "<shell command, run from the repository root>",
-      "report": "<its report.json, inside the evidence directory>"
+      "report": "<its report.json, inside the evidence directory>",
+      "timeoutSeconds": 1800
     }
   }
 }
@@ -764,54 +767,57 @@ or a language:
 `land` runs the command with `evidenceEnv` in its environment pointing at
 `<git-dir>/work/acceptance/<head>`: one directory for every journey of the head
 being landed, beside verify's receipts and logs, so a second journey reuses the
-fixture state and dependency install the first one paid for. `report` is
-relative to that directory, and `land` copies the bytes it validated to
-`<journey-id>.report.json` there, because the next run in the directory
+fixture state and dependency install the first one paid for. `{journey}` in a
+command expands to the entry's `journey`, so the name is written once. `report`
+is relative to the evidence directory, and `land` copies the bytes it validated
+to `<journey-id>.report.json` there, because the next run in the directory
 replaces the link that report path resolves through.
 
-A report is JSON. `land` refuses it unless `journey_status` is 0,
-`evidence_complete` is true, `source.revision` is the head being landed,
-`source.dirty` is false, and `source.source_fingerprint` is a non-empty string.
-The five fields are the run's own statement of what it did and which source
-state produced it: `revision` binds the run to that head, while `dirty` and the
-fingerprint rule out content beyond it (a clean worktree's fingerprint is the
-fixed clean-state value). The harness that writes them proves its build
-products against the live source state before it runs the journey. The reports
-and their digests stay local; the pull request's Verification section carries
-each report's sha256 with its summary fields, and no report path, so a reviewer
-can compare the digest and re-run the journey with the same command.
+A report is JSON. `land` refuses it unless the run wrote it (the resolved path,
+inode and modification time at the declared report path must differ from what
+was there before the command ran), it names the entry's `journey`,
+`journey_status` is 0, `evidence_complete` is true, `source.revision` is the
+head being landed, `source.dirty` is false, and `source.source_fingerprint` is a
+non-empty string. Those fields are the run's own statement of what it did and
+which source state produced it: `revision` binds the run to that head, while
+`dirty` and the fingerprint rule out content beyond it (a clean worktree's
+fingerprint is the fixed clean-state value). The harness that writes them proves
+its build products against the live source state before it runs the journey.
+The reports and their digests stay local; the pull request's Verification
+section carries each report's sha256 with its summary fields, and no report
+path, so a reviewer can compare the digest and re-run the journey with the same
+command.
+
+`timeoutSeconds` is the wall-clock bound on that one command, setup included.
+A journey that passes it is stopped with SIGINT — never SIGKILL, because the
+harness stops its fixture and the lease holder releases the simulator lane only
+while they run their own wind-down — and `land` reports the expiry instead of
+proceeding. A journey still running 120 s after that SIGINT is named with its
+PID and left for the agent to stop. The same holds for an interrupt: a journey
+shares `land`'s terminal process group, so `land` waits for it to finish its own
+wind-down and only then re-raises, rather than killing the holder and leaving
+the lane booted.
 
 Screenshots and recordings are not attached from a journey. `--evidence-manifest`
 remains the explicit opt-in it is ([UI evidence](#ui-evidence)); exporting a
 manifest from a result bundle is not part of this path, which is the one
-residual of the journey evidence.
+residual of the journey evidence. A head's evidence directory is not pruned
+while the worktree lives either: result bundles and fixture state accumulate
+under `<git-dir>/work/acceptance/` until `work cleanup` removes the worktree.
 
 ### Tron's acceptance journeys
 
-`.github/work.json` registers the two real-UI journeys of
-`scripts/ios-gateway-e2e-test` (`run-ui`) that landed with the harness. Their
-commands run from the repository root and their reports are the ones that
-harness writes under its fixture's `results/latest-ui` link:
-
-```json
-"acceptance": {
-  "evidenceEnv": "TRON_IOS_E2E_STATE_DIR",
-  "journeys": {
-    "real-gateway-pair-and-chat": {
-      "command": "scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
-      "report": "results/latest-ui/report.json"
-    },
-    "real-gateway-wrong-pairing-code": {
-      "command": "scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
-      "report": "results/latest-ui/report.json"
-    }
-  }
-}
-```
+`.github/work.json` holds Tron's registry: `evidenceEnv` is
+`TRON_IOS_E2E_STATE_DIR`, and the two ids `real-gateway-pair-and-chat` and
+`real-gateway-wrong-pairing-code` run the real-UI journeys of
+`scripts/ios-gateway-e2e-test` (`run-ui`) with
+`results/latest-ui/report.json` as their report. Their commands, the journey
+names they run and their bounds are the config file's, not this document's.
 
 Tron's iOS verification routes those two journeys to the same `run-ui` command
-([Tron's check set](#trons-check-set)). A journey for another layer is added
-here with the command a developer would run by hand and the report it leaves.
+([Tron's check set](#trons-check-set)). A journey for another layer is added to
+that registry with the command a developer would run by hand, the journey name
+its report carries, and the report it leaves.
 
 ### Maintainer validation handoffs
 
@@ -820,7 +826,8 @@ requires `--irreducible "<part>"`: the part no acceptance journey can prove,
 such as real third-party consent, the maintainer's own route, or
 physical-device-only behavior. `land` refuses either flag without the other,
 before any GitHub write, and states both in the pull request body and the
-handoff comment.
+handoff comment. A value that is empty or whitespace counts as absent, so a
+blank `--irreducible` cannot stand in for a named part.
 
 Installing or deploying a build is a deployment step, not validation: state it
 in the summary, next to the handoff, never as the check the maintainer is asked
@@ -927,19 +934,32 @@ Project state and records every call. The live E2E covers GitHub itself.
     a land that already merged.
 71. **An acceptance report does not prove the head being landed.** `land
     --acceptance` runs each registered journey against the head it is about to
-    verify and refuses unless the report says the journey passed, left complete
-    evidence, ran from exactly that revision with no dirty source flag, and
-    carries a source fingerprint. A failure stops land before the receipt is
-    pushed, before the pull request is written and before the merge, and the
-    bytes it refused stay inspectable under the journey's own name in the
-    head's evidence directory.
-72. **An unknown journey id is run.** `--acceptance` admits only ids the
+    verify and refuses unless the run wrote the report (its resolved path,
+    inode and modification time differ from what was at the declared report
+    path before the command ran), the report names the entry's journey, and it
+    says the journey passed, left complete evidence, ran from exactly that
+    revision with no dirty source flag and carries a source fingerprint. A
+    journey that exits 0 without writing is refused rather than judged on an
+    earlier run's report. A failure stops land before the receipt is pushed,
+    before the pull request is written and before the merge, and the bytes it
+    refused stay inspectable under the journey's own name in the head's
+    evidence directory.
+72. **A journey that never finishes holds the lane.** Every registry entry
+    declares `timeoutSeconds`, the wall-clock bound on its command. On expiry
+    land sends SIGINT, waits for the harness and its lease holder to release the
+    fixture and the simulator lane, and reports the expiry without proceeding;
+    it never SIGKILLs a journey, which would skip that release. A journey still
+    running after the wind-down grace is named with its PID and left for the
+    agent to stop. An interrupt behaves the same way: land waits for the
+    journey's own wind-down and then re-raises.
+73. **An unknown journey id is run.** `--acceptance` admits only ids the
     registry holds, refuses a value with an empty id, and names the registered
     ids it refused, before any journey runs or any GitHub write happens.
-73. **A handoff asks for work a journey could have done, or names no
+74. **A handoff asks for work a journey could have done, or names no
     irreducible part.** `--needs-user-validation` is refused without
-    `--irreducible` and `--irreducible` without it, before any GitHub write.
-    The pull request body's Maintainer validation section states the
+    `--irreducible` and `--irreducible` without it, before any GitHub write, and
+    a value that is empty or whitespace counts as absent rather than naming a
+    part. The pull request body's Maintainer validation section states the
     irreducible part and then the check, and the handoff comment carries both;
     a resumed land compares that whole section with the merged body, so a
     resume cannot quietly drop or change the irreducible part.

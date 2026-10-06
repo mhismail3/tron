@@ -1,4 +1,4 @@
-"""Isolated checks for land and steward failure modes 32-42, 64-66 and 71-73 in README.md.
+"""Isolated checks for land and steward failure modes 32-42, 64-66 and 71-74 in README.md.
 
 Real temporary repositories with a local bare remote. GitHub is a fake `gh`
 (WORK_GH) that keeps pull request, check, status, issue and Project state in a
@@ -12,10 +12,12 @@ import hashlib
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 
@@ -40,17 +42,33 @@ WRONG_CODE = "wrong-code"
 REPORT_PATH = "results/latest-ui/report.json"
 
 # The stand-in for a registered journey: it writes the report its spec names into
-# the evidence directory land hands the run, so every report field land has to
-# refuse is reachable from a test.
+# the evidence directory land hands the run, records every step it took, and can
+# be made to run long enough for land's bound or an interrupt to reach it, so
+# every report field and every stop path land owns is reachable from a test.
 FAKE_JOURNEY = textwrap.dedent(
     """\
     #!/usr/bin/env python3
-    import json, os, subprocess, sys
+    import json, os, signal, subprocess, sys, time
     from pathlib import Path
     journey = sys.argv[1]
     spec = json.loads(Path(os.environ["FAKE_ACCEPTANCE_SPEC"]).read_text()).get(journey, {})
+    runs = Path(os.environ["FAKE_ACCEPTANCE_RUNS"])
+
+    def note(what):
+        with runs.open("a") as handle:
+            handle.write(f"{journey} {what}\\n")
+
+    note("started")
     if spec.get("exit"):
         sys.exit(spec["exit"])
+    if spec.get("sleep"):
+        if spec.get("trap_sigint"):
+            def wind_down(*_):
+                note("cleanup")
+                sys.exit(130)
+            signal.signal(signal.SIGINT, wind_down)
+        time.sleep(spec["sleep"])
+        note("wound down")
     if spec.get("report", True):
         # The same relative report path the registry declares (REPORT_PATH).
         report_dir = Path(os.environ["FAKE_ACCEPTANCE_EVIDENCE"]) / "results/latest-ui"
@@ -61,7 +79,7 @@ FAKE_JOURNEY = textwrap.dedent(
                                       check=True).stdout.strip()
         report = {
             "schema": "tron.ios-e2e-ui-journey.v1",
-            "journey": spec.get("selector", journey),
+            "journey": spec.get("journey", journey),
             "journey_status": spec.get("status", 0),
             "journey_seconds": spec.get("seconds", 9),
             "evidence_complete": spec.get("evidence_complete", True),
@@ -70,6 +88,7 @@ FAKE_JOURNEY = textwrap.dedent(
             "artifacts": [{"path": "Journeys.xcresult", "kind": "tree-sha256", "sha256": "cd" * 32}],
         }
         (report_dir / "report.json").write_text(spec.get("raw") or json.dumps(report, indent=2, sort_keys=True) + "\\n")
+        note(f"report {revision}")
     """
 )
 
@@ -330,12 +349,14 @@ class LandFixture(unittest.TestCase):
         # The acceptance registry's journeys are real commands, so the fixture's
         # are scripts that write the report each test asks for.
         self.acceptance_spec = self.tmp / "acceptance-reports.json"
+        self.acceptance_runs = self.tmp / "acceptance-runs.txt"
         journey_script = self.tmp / "journey"
         journey_script.write_text(FAKE_JOURNEY.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         journey_script.chmod(0o755)
         self.config["acceptance"] = {
             "evidenceEnv": "FAKE_ACCEPTANCE_EVIDENCE",
-            "journeys": {name: {"command": f"{journey_script} {name}", "report": REPORT_PATH}
+            "journeys": {name: {"journey": name, "command": f"{journey_script} {{journey}}",
+                                "report": REPORT_PATH, "timeoutSeconds": 60}
                          for name in (PAIR, WRONG_CODE)},
         }
         self.spec({PAIR: {}, WRONG_CODE: {}})
@@ -352,7 +373,8 @@ class LandFixture(unittest.TestCase):
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         fake.chmod(0o755)
         env = {"WORK_GH": str(fake), "FAKE_GH_STATE": str(self.state_path), "FAKE_GH_LOG": str(self.gh_log),
-               "FAKE_ACCEPTANCE_SPEC": str(self.acceptance_spec)}
+               "FAKE_ACCEPTANCE_SPEC": str(self.acceptance_spec),
+               "FAKE_ACCEPTANCE_RUNS": str(self.acceptance_runs)}
         saved = {key: os.environ.get(key) for key in env}
         os.environ.update(env)
         self.addCleanup(self._restore, saved)
@@ -442,7 +464,24 @@ class LandFixture(unittest.TestCase):
     def spec(self, reports: dict) -> None:
         """What each fake journey's report says; a journey absent from it passes at HEAD."""
         self.acceptance_spec.write_text(json.dumps(
-            {journey: {"revision": "HEAD", **values} for journey, values in reports.items()}))
+            {journey: {"revision": "HEAD", "journey": journey, **values}
+             for journey, values in reports.items()}))
+
+    def journey_timeout(self, journey: str, seconds: int) -> None:
+        self.config["acceptance"]["journeys"][journey]["timeoutSeconds"] = seconds
+
+    def journey_runs(self) -> list:
+        """Every step the fake journeys recorded, in order."""
+        if not self.acceptance_runs.exists():
+            return []
+        return self.acceptance_runs.read_text().splitlines()
+
+    def passing_report(self, journey: str, head: str) -> dict:
+        """A report land would accept, for a run that did not write it."""
+        return {"schema": "tron.ios-e2e-ui-journey.v1", "journey": journey, "journey_status": 0,
+                "journey_seconds": 9, "evidence_complete": True,
+                "source": {"revision": head, "dirty": False, "source_fingerprint": "ab" * 32},
+                "artifacts": []}
 
     def acceptance_evidence(self, head: str) -> Path:
         """The evidence directory land gives the journeys of one head."""
@@ -811,14 +850,30 @@ class HandoffTests(LandFixture):
         self.assertIn(f"Irreducible: {self.IRREDUCIBLE}", pull["body"])
 
     def test_a_handoff_that_names_no_irreducible_part_is_refused(self):
-        cases = {"validation without its irreducible part": dict(validation="Restart the Gateway."),
-                 "an irreducible part without validation": dict(irreducible="a physical device")}
-        for name, kwargs in cases.items():
+        cases = {"validation without its irreducible part": (dict(validation="Restart the Gateway."),
+                                                              "--irreducible"),
+                 "an irreducible part without validation": (dict(irreducible="a physical device"),
+                                                            "--needs-user-validation"),
+                 "a blank irreducible part": (dict(validation="Restart the Gateway.", irreducible="  "),
+                                               "--irreducible"),
+                 "a blank validation text": (dict(validation="\t\n", irreducible="a physical device"),
+                                             "--needs-user-validation")}
+        for name, (kwargs, named) in cases.items():
             with self.subTest(case=name):
-                with self.assertRaises(land.LandError):
+                with self.assertRaises(land.LandError) as raised:
                     self.land(**kwargs)
+                self.assertIn(named, str(raised.exception))
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.remote_head(), self.claim_sha)
+
+    def test_a_blank_handoff_is_no_handoff_at_all(self):
+        # Both values blank means neither flag named anything, so land lands as
+        # it does without them.
+        self.assertEqual(self.land(validation="   ", irreducible="\t"), 0)
+        pull = self.state()["pulls"][0]
+        self.assertTrue(pull["body"].startswith("Closes #7\n"))
+        self.assertNotIn("Maintainer validation", pull["body"])
+        self.assertEqual(self.issue()["state"], "CLOSED")
 
     def test_a_failure_after_the_merge_keeps_the_action_text(self):
         action = "Run `scripts/example restart`, then check that status names this branch."
@@ -846,6 +901,8 @@ class AcceptanceLandingTests(LandFixture):
         self.assertIn(PAIR, body)
         self.assertIn(f"source `{head}`", body)
         self.assertNotIn(str(self.tmp), body)
+        # The registered journey is what the command received and what the report names.
+        self.assertEqual(self.journey_runs(), [f"{PAIR} started", f"{PAIR} report {head}"])
         self.assertEqual(len(self.merges()), 1)
         self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
 
@@ -867,25 +924,94 @@ class AcceptanceLandingTests(LandFixture):
         self.assert_nothing_published()
 
     def test_a_report_that_is_not_from_a_completed_clean_run_is_refused(self):
-        cases = {"a dirty run": {"dirty": True},
-                 "incomplete evidence": {"evidence_complete": False},
-                 "a failed journey": {"status": 1},
-                 "no report": {"report": False},
-                 "an unreadable report": {"raw": "not json"},
-                 "no source fingerprint": {"fingerprint": ""}}
-        for name, spec in cases.items():
+        cases = {"a dirty run": ({"dirty": True}, "ran from a dirty worktree"),
+                 "incomplete evidence": ({"evidence_complete": False}, "did not leave complete evidence"),
+                 "a failed journey": ({"status": 1}, "reported status 1"),
+                 "an unreadable report": ({"raw": "not json"}, "unreadable report"),
+                 "no source fingerprint": ({"fingerprint": ""}, "names no source fingerprint"),
+                 "a report for another journey": ({"journey": "TronMobileUITests/Other/x"},
+                                                  "not the registered journey")}
+        for name, (spec, message) in cases.items():
             with self.subTest(case=name):
                 self.spec({PAIR: spec})
-                with self.assertRaises(acceptance.AcceptanceError):
+                with self.assertRaises(acceptance.AcceptanceError) as raised:
                     self.land(acceptance=PAIR)
+                self.assertIn(message, str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_journey_that_writes_no_report_is_refused(self):
+        # A fresh evidence directory: no earlier run's report is there to be
+        # taken for this run's.
+        self.spec({PAIR: {"report": False}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("left no report", str(raised.exception))
+        self.assert_nothing_published()
+
+    def test_a_report_an_earlier_run_left_is_refused(self):
+        # The declared path resolves to a file this run did not write. The
+        # planted report is one land would otherwise accept, so only the run's
+        # own write can qualify it.
+        head = git(self.repo, "rev-parse", "HEAD")
+        stale = self.acceptance_evidence(head) / REPORT_PATH
+        stale.parent.mkdir(parents=True)
+        stale.write_text(json.dumps(self.passing_report(PAIR, head)))
+        self.spec({PAIR: {"report": False}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        self.assertIn("left no new report", str(raised.exception))
         self.assert_nothing_published()
 
     def test_a_journey_command_that_fails_is_refused(self):
         self.spec({PAIR: {"exit": 3}})
         with self.assertRaises(acceptance.AcceptanceError) as raised:
             self.land(acceptance=PAIR)
-        self.assertIn(PAIR, str(raised.exception))
+        self.assertIn("failed (exit 3)", str(raised.exception))
         self.assert_nothing_published()
+
+    def test_a_journey_that_passes_its_bound_is_interrupted_and_winds_down_itself(self):
+        self.journey_timeout(PAIR, 1)
+        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "report": False}})
+        with self.assertRaises(acceptance.AcceptanceError) as raised:
+            self.land(acceptance=PAIR)
+        message = str(raised.exception)
+        self.assertIn("passed its 1s bound", message)
+        self.assertIn("interrupted (exit 130)", message)
+        # SIGINT reached the journey and its own wind-down ran; land never killed it.
+        self.assertIn(f"{PAIR} cleanup", self.journey_runs())
+        self.assertNotIn(f"{PAIR} wound down", self.journey_runs())
+        self.assert_nothing_published()
+
+    def test_an_interrupted_land_waits_for_the_journey_to_wind_down(self):
+        self.spec({PAIR: {"sleep": 2, "report": False}})
+        interrupter = threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGINT))
+        interrupter.start()
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                self.land(acceptance=PAIR)
+        finally:
+            interrupter.cancel()
+        # The journey ran to its own wind-down instead of being killed with land.
+        self.assertIn(f"{PAIR} wound down", self.journey_runs())
+        self.assert_nothing_published()
+
+    def test_the_journeys_run_against_the_head_that_is_pushed_after_a_base_move(self):
+        before = git(self.repo, "rev-parse", "HEAD")
+        moved = self.base_commit("lib/new.txt", "from base\n")
+        self.set_state(pendingViews=1, baseMoves={"1": moved})
+        self.assertEqual(self.land(acceptance=PAIR), 0)
+        head = git(self.repo, "rev-parse", "HEAD")
+        self.assertNotEqual(head, before)
+        # Round 1 proved the head it ran against; round 2 proved the head that
+        # was verified, pushed and cited, which is where its evidence lives.
+        self.assertIn(f"{PAIR} report {before}", self.journey_runs())
+        self.assertIn(f"{PAIR} report {head}", self.journey_runs())
+        body = self.state()["pulls"][0]["body"]
+        digest = hashlib.sha256(self.kept_report(PAIR, head)).hexdigest()
+        self.assertIn(f"source `{head}`", body)
+        self.assertIn(f"report sha256 `{digest}`", body)
+        [merge] = self.merges()
+        self.assertEqual(merge[merge.index("--match-head-commit") + 1], head)
 
     def test_a_report_the_scrub_refuses_stops_before_any_github_write(self):
         self.spec({PAIR: {"fingerprint": "FORBIDDEN fingerprint"}})
