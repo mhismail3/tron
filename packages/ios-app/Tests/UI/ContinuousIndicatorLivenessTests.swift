@@ -80,7 +80,7 @@ final class ContinuousIndicatorLivenessTests: XCTestCase {
         ]
         let blank = try await capturedFrames(of: AnyView(Color.clear), count: 1)
         for (name, view) in cases {
-            let frames = try await capturedFrames(of: view)
+            let frames = try await capturedFrames(of: view, stabilize: true)
             print("indicator liveness: \(name): \(Set(frames).count) distinct of \(frames.count)")
             XCTAssertEqual(Set(frames).count, 1, "\(name) must hold a static frame")
             if Set(frames).count != 1 { attach(frames, name: name) }
@@ -107,7 +107,14 @@ final class ContinuousIndicatorLivenessTests: XCTestCase {
     /// Mounts `content` in a hosted window with the production gates open
     /// (active scene and surface, visible, Reduce Motion from the simulator,
     /// which is off) and captures committed frames at a fixed interval.
-    private func capturedFrames(of content: AnyView, count: Int = frameCount) async throws -> [Data] {
+    ///
+    /// A closed-gate case measures a window that must not change, so it first
+    /// waits until two consecutive captures match. Glass and blur keep reshaping
+    /// while the host app is still launching - and the hosted app now runs the
+    /// production scene, whose launch work is real - so a fixed settle delay can
+    /// measure a window that is still resolving rather than a frozen indicator.
+    /// The measured sequence and its assertion are unchanged.
+    private func capturedFrames(of content: AnyView, count: Int = frameCount, stabilize: Bool = false) async throws -> [Data] {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
         let host = UIHostingController(rootView: content
@@ -137,7 +144,15 @@ final class ContinuousIndicatorLivenessTests: XCTestCase {
         }
         // The first snapshot of glass chrome differs by one channel step at its
         // shadow edge from every later one, animation or not; discard it.
-        _ = try capture()
+        var settled = try capture()
+        if stabilize {
+            for _ in 0..<60 {
+                try await Task.sleep(for: .milliseconds(50))
+                let next = try capture()
+                if next == settled { break }
+                settled = next
+            }
+        }
         var frames: [Data] = []
         for index in 0..<count {
             try await Task.sleep(for: index == 0 ? .milliseconds(100) : Self.frameInterval)

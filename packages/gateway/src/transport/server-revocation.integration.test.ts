@@ -14,20 +14,13 @@ import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
 import type { AsyncMutex } from "../util/async-mutex.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 function gate() {
   let resolve!: () => void;
   let released = false;
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, release: () => { released = true; resolve(); }, get released() { return released; } };
-}
-
-async function until(predicate: () => boolean | Promise<boolean>) {
-  const end = Date.now() + 5_000;
-  while (!await predicate()) {
-    if (Date.now() >= end) throw new Error("Revocation observation timed out");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -136,15 +129,15 @@ async function fixture() {
     socket.on("error", (value) => { error = value; });
     socket.on("close", (code) => { closed = code; });
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
-    await until(() => opened || error !== undefined);
+    await waitFor(() => opened || error !== undefined, "the connection to open or fail");
     if (error) throw error;
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-    await until(() => frames.some((frame) => frame.type === "hello"));
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
     return {
       socket, frames, closed: () => closed,
       send: (id: string, method: string, params: object) => socket.send(JSON.stringify({ type: "request", id, method, params })),
       response: async (id: string) => {
-        await until(() => frames.some((frame) => frame.id === id));
+        await waitFor(() => frames.some((frame) => frame.id === id), "the response frame");
         return frames.find((frame) => frame.id === id);
       },
     };
@@ -199,7 +192,7 @@ describe("device revocation at real ownership boundaries", () => {
     }
     let revocation: Promise<boolean> | undefined;
     try {
-      await until(() => captured.released);
+      await waitFor(() => captured.released, "the captured barrier to release");
       revocation = f.devices.revoke(f.paired.deviceId, () => {
         order.push("retired");
         f.server.disconnectDevice(f.paired.deviceId);
@@ -210,11 +203,11 @@ describe("device revocation at real ownership boundaries", () => {
       if (!capturedUnderMutex) await revocation;
       resume.release();
       await revocation;
-      await until(() => finished || order.includes("admitted"));
+      await waitFor(() => finished || order.includes("admitted"), "the run to finish or be admitted");
       // Admission may win, or revalidation may reject after revocation wins;
       // only publishing an admitted effect AFTER retirement is illegal.
       expect([["admitted", "retired"], ["retired"]]).toContainEqual(order);
-      await until(() => finished);
+      await waitFor(() => finished, "the scheduler run to finish");
       if (requestError) throw requestError;
       if (transport === "http") expect(status).toBe(order.includes("admitted") ? 200 : 401);
     } finally {
@@ -241,14 +234,14 @@ describe("device revocation at real ownership boundaries", () => {
     f.http.push(outgoing);
     outgoing.on("error", (value) => { error = value; finished = true; });
     outgoing.end();
-    await until(() => entered.released);
+    await waitFor(() => entered.released, "the entry barrier to release");
     let retired = false;
     const revocation = f.devices.revoke(f.paired.deviceId, () => { retired = true; f.server.disconnectDevice(f.paired.deviceId); });
     f.pending.add(revocation);
-    await until(() => retired);
+    await waitFor(() => retired, "the retired connection");
     expect(finished).toBe(false);
     resume.release();
-    await until(() => finished);
+    await waitFor(() => finished, "the scheduler run to finish");
     expect(error).toBeUndefined();
     expect(status).toBe(200);
   });
@@ -276,9 +269,9 @@ describe("device revocation at real ownership boundaries", () => {
       f.uploads.materialize.mockImplementation(async () => { entered.release(); await resume.promise; return materialize(); });
     }
     peer.send("prompt", "session.prompt", { sessionId: slot.id, text: "exactly once", commandId: "revocation-prompt-command" });
-    await until(() => entered.released);
+    await waitFor(() => entered.released, "the entry barrier to release");
     await f.devices.revoke(f.paired.deviceId, () => f.server.disconnectDevice(f.paired.deviceId));
-    await until(() => peer.closed() !== undefined);
+    await waitFor(() => peer.closed() !== undefined, "the peer to close");
     (slot as any).lastTouchedAt = 0;
     await (f.registry as any).evictIdle();
     expect(slot.isDisposed).toBe(false);
@@ -288,7 +281,7 @@ describe("device revocation at real ownership boundaries", () => {
     // Gateway work registry before reading durable evidence or cleaning up.
     await f.registry.administrativeWorkRegistry.waitUntilSettled();
     expect(await f.receipts.status(f.paired.deviceId, "session.prompt", "revocation-prompt-command")).toMatchObject({ status: "completed" });
-    await until(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(peer.frames.some((frame) => frame.id === "prompt")).toBe(false);
     // Replay through the durable owner must return its result without invoking
     // the operation again, even though the originating socket is gone.
@@ -355,14 +348,14 @@ describe("device revocation at real ownership boundaries", () => {
       entered.release(); await resume.promise; return acquire(...args);
     });
     peer.send("terminal", "terminal.open", { sessionId: slot.id, commandId: "retired-terminal-command" });
-    await until(() => entered.released);
+    await waitFor(() => entered.released, "the entry barrier to release");
     await f.devices.revoke(f.paired.deviceId, () => f.server.disconnectDevice(f.paired.deviceId));
-    await until(() => peer.closed() !== undefined);
+    await waitFor(() => peer.closed() !== undefined, "the peer to close");
     (slot as any).lastTouchedAt = 0;
     await (f.registry as any).evictIdle();
     expect(slot.isDisposed).toBe(false);
     resume.release();
-    await until(() => f.pending.size === 0);
+    await waitFor(() => f.pending.size === 0, "the pending work to drain");
     expect(f.terminals.open).toHaveBeenCalledOnce();
     expect(connection.terminals.size).toBe(0);
     expect(slot.isBusy).toBe(false);
@@ -396,11 +389,11 @@ describe("device revocation at real ownership boundaries", () => {
       return source.page(...args);
     } });
     peer.send("list", "session.list", { limit: 1 });
-    await until(() => entered.released);
+    await waitFor(() => entered.released, "the entry barrier to release");
     await f.devices.revoke(f.paired.deviceId, () => f.server.disconnectDevice(f.paired.deviceId));
-    await until(() => peer.closed() !== undefined);
+    await waitFor(() => peer.closed() !== undefined, "the peer to close");
     resume.release();
-    await until(() => f.pending.size === 0);
+    await waitFor(() => f.pending.size === 0, "the pending work to drain");
     expect((f.service as any).sessionListPages.activeLeaseCount).toBe(0);
     expect(peer.frames.some((frame) => frame.id === "list")).toBe(false);
   });
@@ -423,14 +416,14 @@ describe("device revocation at real ownership boundaries", () => {
     });
     f.server.broadcast("test.earlier", {});
     peer.send("self", "device.revoke", { deviceId: f.paired.deviceId, commandId: "ordered-self-revoke-command" });
-    await until(() => connection.outbound.snapshot().queuedFrames === 2);
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 2, "two queued frames");
     expect((f.service as any).sessionListPages.activeLeaseCount).toBe(0);
     expect(peer.closed()).toBeUndefined();
     f.server.broadcast("test.retired", {});
     expect(connection.outbound.snapshot().queuedFrames).toBe(2);
     resume.release();
     expect(await peer.response("self")).toMatchObject({ ok: true, result: { revoked: true } });
-    await until(() => peer.closed() !== undefined);
+    await waitFor(() => peer.closed() !== undefined, "the peer to close");
     expect(peer.frames.findIndex((frame) => frame.topic === "test.earlier"))
       .toBeLessThan(peer.frames.findIndex((frame) => frame.id === "self"));
     expect(peer.frames.some((frame) => frame.topic === "test.retired")).toBe(false);
@@ -450,9 +443,9 @@ describe("device revocation at real ownership boundaries", () => {
     peer.send("prompt", "session.prompt", params);
     const first = await peer.response("prompt");
     expect(first.ok).toBe(true);
-    await until(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     peer.socket.terminate();
-    await until(() => (f.server as any).clients.size === 0);
+    await waitFor(() => (f.server as any).clients.size === 0, "the last client to leave");
     (slot as any).lastTouchedAt = 0;
     await (f.registry as any).evictIdle();
     expect(slot.isDisposed).toBe(true);
@@ -486,17 +479,17 @@ describe("device revocation at real ownership boundaries", () => {
     });
     peer.send("self", "device.revoke", { deviceId: f.paired.deviceId, commandId: "self-revoke-command" });
     (requester === "origin" ? peer : observer).send("other", "device.revoke", { deviceId: target === "same" ? f.paired.deviceId : other.deviceId, commandId: "other-revoke-command" });
-    await until(() => selfCompleted && observer.closed() !== undefined);
+    await waitFor(() => selfCompleted && observer.closed() !== undefined, "the observed self-close");
     expect(peer.closed()).toBeUndefined();
     expect(observer.closed()).toBe(1008);
     waiting.release();
-    await until(() => f.pending.size === 1);
+    await waitFor(() => f.pending.size === 1, "one pending item");
     expect(await f.receipts.status(f.paired.deviceId, "device.revoke", "other-revoke-command")).toMatchObject({ status: "completed" });
     acknowledgement.release();
     expect(await peer.response("self")).toMatchObject({ ok: true, result: { revoked: true } });
-    await until(() => peer.closed() !== undefined && f.pending.size === 0);
+    await waitFor(() => peer.closed() !== undefined && f.pending.size === 0, "the peer to close and pending work to drain");
     expect(peer.frames.filter((frame) => frame.type === "response").map((frame) => frame.id)).toEqual(["self"]);
-    if (target === "other") await until(() => unrelated.closed() === 1008);
+    if (target === "other") await waitFor(() => unrelated.closed() === 1008, "the unrelated peer's policy close");
     else expect(unrelated.closed()).toBeUndefined();
     expect(await f.receipts.status(f.paired.deviceId, "device.revoke", "other-revoke-command")).toMatchObject({ status: "completed" });
   });

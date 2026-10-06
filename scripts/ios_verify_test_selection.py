@@ -10,12 +10,14 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_TARGET = "TronMobileTests"
-# Inputs proven only by a real fixture runner: the fixture-only suite (which
-# skips under the ordinary XCTest runner) and the fault proxy that shapes every
-# one of its cases.
+# Inputs proven only by a real fixture runner: fixture-owned suites (which skip
+# under the ordinary hosted runner, where every case would correctly skip for a
+# missing fixture) and the fault proxy that shapes every real-Gateway case. Each
+# value is the owning harness and its command for that input.
 FIXTURE_RUNNER_INPUTS = {
-    "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift": "scripts/ios-gateway-e2e-test",
-    "scripts/ios-gateway-fault-proxy.mjs": "scripts/ios-gateway-e2e-test",
+    "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift": ("scripts/ios-gateway-e2e-test", "all"),
+    "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift": ("scripts/ios-gateway-e2e-test", "run-ui"),
+    "scripts/ios-gateway-fault-proxy.mjs": ("scripts/ios-gateway-e2e-test", "all"),
 }
 # Focus only sources with an audited owner. Other Settings files remain full-suite
 # until their test ownership has been established.
@@ -191,15 +193,15 @@ def _has_deletions(merge_base: str) -> bool:
 
 def test_commands(paths: list[str], *, has_deletions: bool = False) -> list[list[str]]:
     """Dispatch fixture-owned integration suites to their real fixture runner."""
-    fixture_runners = []
+    fixture_commands: list[list[str]] = []
     ordinary_paths = []
     for raw_path in paths:
         relative = _relative(raw_path)
-        runner = FIXTURE_RUNNER_INPUTS.get(relative or "")
-        if runner is None:
+        owned = FIXTURE_RUNNER_INPUTS.get(relative or "")
+        if owned is None:
             ordinary_paths.append(raw_path)
-        elif runner not in fixture_runners:
-            fixture_runners.append(runner)
+        elif list(owned) not in fixture_commands:
+            fixture_commands.append(list(owned))
 
     commands: list[list[str]] = []
     if ordinary_paths or has_deletions:
@@ -209,10 +211,14 @@ def test_commands(paths: list[str], *, has_deletions: bool = False) -> list[list
             for selector in selectors:
                 command.extend(["--only-testing", selector])
         commands.append(command)
-    commands.extend([[runner, "all"] for runner in fixture_runners])
+    commands.extend(fixture_commands)
     if not commands:
         commands.append(["scripts/tron-ios-test", "run"])
     return commands
+
+
+def fixture_runners() -> set[str]:
+    return {runner for runner, _ in FIXTURE_RUNNER_INPUTS.values()}
 
 
 def main() -> int:
@@ -225,7 +231,7 @@ def main() -> int:
     result_code = 0
     try:
         for command in commands:
-            fixture_runner_started |= command[0] in FIXTURE_RUNNER_INPUTS.values()
+            fixture_runner_started |= command[0] in fixture_runners()
             result = subprocess.run(command, cwd=ROOT, check=False)
             if result.returncode:
                 result_code = result.returncode

@@ -2822,6 +2822,30 @@ current test (or the file, for async work that outlives its test), so an unstubb
 hang depending on the host's network. It does not cover child processes or DNS
 lookups.
 
+Waits are hang bounds, not speed budgets. Every condition a test waits for — a
+turn settling, a frame arriving, a record landing — is correct at any speed.
+`test-support/wait-for.ts` owns that bound: `waitFor(condition, label)` polls a
+sync or async condition on real timers and `awaitsWithin(promise, label)` bounds
+an event or promise the code already exposes. Both fail with their label at
+`WAIT_HANG_BOUND_MS` (12 s, kept below the 15-second `testTimeout` so the failure
+names the condition instead of being cut off), and neither moves a fake clock a
+test installed: a file that fakes timers advances them itself. A wait that a
+hook runs (`beforeEach`/`afterEach` and the cleanup callbacks they await) passes
+`HOOK_HANG_BOUND_MS` (5 s), because Vitest's 10-second `hookTimeout` would
+truncate the label. A call site with its own measurement budget passes its own
+`boundMs` and says why. Waits converted by #433 go through this helper; several
+of those files still carry `vi.waitFor` budgets and file-local poll helpers that
+were outside that change (94 `vi.waitFor` call sites across 23 files), and the
+follow-up list is recorded on #433 rather than claimed as converted here.
+
+A bound tuned to host speed turns unrelated CPU contention (parallel agent
+builds, hosted runners) into a false failure that lands on a different test each
+run (epic #400). Prefer awaiting the event or promise the owning code already
+exposes. Where elapsed time, a pass count or an attempt count is itself the
+contract — a throughput or latency relationship the test measures, a bounded
+number of discovery passes, an event storm whose length is the assertion — keep
+that explicit bound or count and say why at the call site.
+
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 
 ```bash

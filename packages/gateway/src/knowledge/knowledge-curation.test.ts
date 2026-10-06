@@ -8,6 +8,7 @@ import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-ser
 import { KnowledgeCurationJobs } from "./knowledge-curation.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import type { KnowledgeCurationResponse } from "./knowledge-contract.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -95,7 +96,7 @@ describe("Knowledge curation", () => {
     const jobs = new KnowledgeCurationJobs(64, 30_000, job => events.push(job));
     jobs.start({ commandId: "job-success", operation: "summary", sourceId: "source-1", run: async () => ({ revisionId: "revision-2" }) });
     jobs.start({ commandId: "job-failure", operation: "tags", sourceId: "source-2", run: async () => { throw new Error("provider failed"); } });
-    for (let attempt = 0; attempt < 200 && events.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 5));
+    await waitFor(() => events.length >= 2, "both terminal curation events");
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ commandId: "job-success", operation: "summary", sourceId: "source-1", status: "done", revisionId: "revision-2" }),
       expect.objectContaining({ commandId: "job-failure", operation: "tags", sourceId: "source-2", status: "failed", code: expect.any(String), reason: expect.any(String) }),
@@ -420,11 +421,9 @@ function counts(response: KnowledgeCurationResponse) {
 }
 
 async function waitForJob(service: KnowledgeService, commandId: string) {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  return waitFor(async () => {
     const listed = await service.tool({ action: "curationJob", commandId });
     const job = (listed.details as { jobs: Array<{ status: string; revisionId?: string; code?: string }> }).jobs[0];
-    if (job && job.status !== "running") return job;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error("Summary job did not settle");
+    return job && job.status !== "running" ? job : undefined;
+  }, "the summary job to settle");
 }

@@ -42,6 +42,40 @@ class IOSVerifyTestSelectionTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "fixture-run.json").read_text()), ["all"])
             self.assertTrue((root / "fixture-stopped.json").exists())
 
+    def test_real_ui_journey_dispatches_the_ui_lane_and_stops_its_fixture(self):
+        """The real-UI journey owns a real Gateway and a real app, so it runs
+        through `run-ui`; the ordinary hosted runner would skip it, and the
+        fixture it started is stopped afterwards either way."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            journey = root / "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift"
+            journey.parent.mkdir(parents=True)
+            journey.write_text("final class RealGatewayPairAndChatUITests: XCTestCase {}\n")
+            runner = root / "scripts/ios-gateway-e2e-test"
+            runner.parent.mkdir(parents=True)
+            runner.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, pathlib, sys\n"
+                "if sys.argv[1] == 'stop':\n"
+                "    pathlib.Path('ui-stopped.json').write_text(json.dumps(sys.argv[1:]))\n"
+                "    raise SystemExit(0)\n"
+                "pathlib.Path('ui-run.json').write_text(json.dumps(sys.argv[1:]))\n"
+                "raise SystemExit(23)\n"
+            )
+            runner.chmod(0o755)
+            import ios_verify_test_selection
+
+            arguments = [
+                "--merge-base", "unused-in-test",
+                "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+            ]
+            with patch("ios_verify_test_selection.ROOT", root), patch(
+                "ios_verify_test_selection._has_deletions", return_value=False
+            ), patch("sys.argv", ["ios_verify_test_selection.py", *arguments]):
+                self.assertEqual(ios_verify_test_selection.main(), 23)
+            self.assertEqual(json.loads((root / "ui-run.json").read_text()), ["run-ui"])
+            self.assertEqual(json.loads((root / "ui-stopped.json").read_text()), ["stop"])
+
     def test_fault_proxy_change_runs_the_real_boundary_fixture(self):
         # The proxy shapes every boundary case's traffic; a unit run skips them all.
         self.assertEqual(

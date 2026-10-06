@@ -8,6 +8,7 @@ import { TrustService } from "../admin/trust-service.js";
 import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which lifecycle facts the
@@ -84,14 +85,6 @@ async function pausedFixture(label: string): Promise<Fixture> {
     summaries,
     latestSummary: () => [...summaries].reverse().find((summary) => summary.sessionId === manager.getSessionId()),
   };
-}
-
-async function waitUntil(predicate: () => boolean, label: string, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 function processRows(slot: RuntimeSlot): SessionProcessActivity[] {
@@ -199,7 +192,7 @@ it("settles a paused subagent row as recent only after the observed process-term
   expect(windingDown.lifecycle.terminalAt).toBeUndefined();
   expect(windingDown.visibility).toBe("active");
   expect(slot.snapshot().processOverview).toMatchObject({ activeCount: 1, recentCount: 0 });
-  await waitUntil(() => fixture.latestSummary()?.hasActiveSubagents === true, "active subagent summary");
+  await waitFor(() => fixture.latestSummary()?.hasActiveSubagents === true, "active subagent summary");
   record("paused-without-proof", {
     row: windingDown,
     overview: slot.snapshot().processOverview,
@@ -221,7 +214,7 @@ it("settles a paused subagent row as recent only after the observed process-term
   expect(settled.durationMs).toBe(proofObservedAt - started);
   expect(slot.snapshot().processOverview).toMatchObject({ activeCount: 0, recentCount: 1 });
   expect(slot.administrativeDrainBlockers().some((fact) => fact.category === "detached-extension-run")).toBe(false);
-  await waitUntil(() => fixture.latestSummary()?.hasActiveSubagents === false, "settled subagent summary");
+  await waitFor(() => fixture.latestSummary()?.hasActiveSubagents === false, "settled subagent summary");
   record("settled-paused", {
     row: settled,
     overview: slot.snapshot().processOverview,

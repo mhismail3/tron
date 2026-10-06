@@ -8,6 +8,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const installedFork = process.env.TRON_P99_17_BROWSER_FORK_COPY;
 const installedForkSource = "git:github.com/fitchmultz/pi-agent-browser-native@d6cde09af8d7757bbfba5a4ffaf83381bb392683";
@@ -21,14 +22,6 @@ afterEach(async () => {
   if (oldPath === undefined) delete process.env.PATH;
   else process.env.PATH = oldPath;
 });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 8_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 function toolResult(slot: Awaited<ReturnType<RuntimeRegistry["create"]>>, toolCallId: string): any {
   return slot.snapshot().transcript.find((item) =>
@@ -110,7 +103,7 @@ describe("installed agent-browser fork receipts", () => {
     await slot.setModel(model.provider, model.id);
 
     await slot.prompt("run direct browser");
-    await waitUntil(() => toolResult(slot, "browser-direct") !== undefined && !slot.isBusy);
+    await waitFor(() => toolResult(slot, "browser-direct") !== undefined && !slot.isBusy, "the direct browser tool result and an idle slot");
     const direct = toolResult(slot, "browser-direct");
     expect(direct?.details).toMatchObject({ browserLiveView: { schema: "tron.browser-live-view.v1" }, tronBrowserReference: { toolCallId: "browser-direct" } });
     expect(admitBrowserToolReference("agent_browser", "browser-direct", direct.details, slot.id))
@@ -118,7 +111,7 @@ describe("installed agent-browser fork receipts", () => {
     expect(views.describe(slot.id, direct.details.browserLiveView.viewId, direct.details.browserLiveView.generation)).toEqual(direct.details.browserLiveView);
 
     await slot.prompt("run nested browser");
-    await waitUntil(() => toolResult(slot, "browser-nested-parent") !== undefined && !slot.isBusy);
+    await waitFor(() => toolResult(slot, "browser-nested-parent") !== undefined && !slot.isBusy, "the nested browser parent's result and an idle slot");
     const nestedParent = toolResult(slot, "browser-nested-parent");
     const nested = nestedParent?.details?.tronNested?.browserLiveViews?.[0];
     expect(nestedParent).toMatchObject({ details: { tronNested: { complete: true, browserLiveViews: [{ toolCallId: expect.stringContaining("browser-nested-parent/") }] } } });
@@ -132,7 +125,7 @@ describe("installed agent-browser fork receipts", () => {
     const reopened = createRegistry();
     registries.push(reopened);
     await reopened.initialize();
-    await waitUntil(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut());
+    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut");
     await reopened.catalog("all");
     slot = await reopened.acquire(slot.id);
     const coldParent = toolResult(slot, "browser-nested-parent");
@@ -140,8 +133,8 @@ describe("installed agent-browser fork receipts", () => {
     expect(slot.snapshot().toolExecutions).toEqual([]);
 
     const abortedPrompt = slot.prompt("abort nested browser parent");
-    await waitUntil(() => slot.snapshot().toolExecutions.some((execution) =>
-      execution.toolCallId === "browser-aborted-parent" && execution.nestedCalls?.calls.some((call) => call.toolName === "agent_browser")));
+    await waitFor(() => slot.snapshot().toolExecutions.some((execution) =>
+      execution.toolCallId === "browser-aborted-parent" && execution.nestedCalls?.calls.some((call) => call.toolName === "agent_browser")), "the aborted browser parent's recorded nested call");
     const abortOperation = slot.snapshot().operation?.id;
     expect(abortOperation).toBeDefined();
     await slot.abort("codemode", abortOperation);
@@ -152,11 +145,11 @@ describe("installed agent-browser fork receipts", () => {
     const afterAbort = createRegistry();
     registries.push(afterAbort);
     await afterAbort.initialize();
-    await waitUntil(() => (afterAbort as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut());
+    await waitFor(() => (afterAbort as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut after the abort");
     await afterAbort.catalog("all");
     slot = await afterAbort.acquire(slot.id);
     await slot.prompt("later unrelated parent");
-    await waitUntil(() => toolResult(slot, "browser-later-parent") !== undefined && !slot.isBusy);
+    await waitFor(() => toolResult(slot, "browser-later-parent") !== undefined && !slot.isBusy, "the later browser parent's result and an idle slot");
     const laterParent = toolResult(slot, "browser-later-parent");
     expect(laterParent).toBeDefined();
     expect((laterParent?.details as Record<string, unknown> | undefined)?.tronNested).toBeUndefined();

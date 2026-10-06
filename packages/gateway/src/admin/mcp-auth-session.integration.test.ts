@@ -14,6 +14,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { DeviceStore } from "../security/device-store.js";
 import { UploadStore } from "../machine/upload-store.js";
 import type { JsonValue } from "../protocol/types.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 const servers: Array<ReturnType<typeof createServer>> = [];
@@ -34,10 +35,6 @@ async function requestBody(req: IncomingMessage): Promise<string> {
   for await (const chunk of req) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks).toString("utf8");
 }
-async function waitFor(predicate: () => boolean): Promise<void> {
-  await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 10_000, interval: 10 });
-}
-
 const client = {
   id: "phone", identity: "device:mcp-auth-test", isLocal: true,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
@@ -118,7 +115,7 @@ describe("MCP auth through a live Gateway session", () => {
       receipts: new CommandReceiptStore(root), uploads: new UploadStore(root, 1024), broadcast: () => {},
       requestRestart: () => {}, sessionDeleted: () => {},
     } as unknown as GatewayServiceDependencies);
-    await waitFor(() => requests.includes("POST /mcp"));
+    await waitFor(() => requests.includes("POST /mcp"), "the MCP POST request");
     await new Promise((resolve) => setTimeout(resolve, 500));
     await expect(service.invoke(client, "mcp.token.set", {
       commandId: "mcp-token-invalid-1", scope: "global", server: "invalid/name", token: "secret", unexpected: true,
@@ -192,7 +189,7 @@ describe("MCP auth through a live Gateway session", () => {
     const slot = await registry.create(cwd), model = faux.getModel(); await slot.setModel(model.provider, model.id);
     faux.setResponses([async () => fauxAssistantMessage("Done")]);
     await slot.prompt("/mcp login fixture");
-    await waitFor(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(browserOpenCount).toBe(0);
     expect(authEvents.filter((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url")).toHaveLength(0);
   });

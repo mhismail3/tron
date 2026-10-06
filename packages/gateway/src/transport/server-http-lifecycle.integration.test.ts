@@ -11,6 +11,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
 import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, HTTP_HEADERS_TIMEOUT_MS } from "./server.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes this file exists to catch (real sockets, real HTTP boundary):
 // 1. An upgrade that opens the write buffer and is deleted before hello
@@ -44,14 +45,6 @@ function gate() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function bounded<T>(promise: Promise<T>, label: string, timeoutMs = 3_000): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  try {
-    return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
-    })]);
-  } finally { clearTimeout(timer); }
-}
 async function fixture(maximumHttpRequests = 128) {
   const root = await mkdtemp(join(tmpdir(), "tron-http-lifecycle-"));
   const devices = new DeviceStore(root, "fixture-machine");
@@ -78,14 +71,14 @@ async function fixture(maximumHttpRequests = 128) {
   const clientSockets: Socket[] = [];
   cleanups.push(async () => {
     for (const socket of clientSockets) socket.destroy();
-    try { await bounded(gateway.close(), "fixture close"); }
+    try { await awaitsWithin(gateway.close(), "fixture close", HOOK_HANG_BOUND_MS); }
     finally { await rm(root, { recursive: true, force: true }); }
   });
   await gateway.listen();
   return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob, logger };
 }
 async function health(port: number): Promise<number> {
-  return bounded(new Promise((resolve, reject) => {
+  return awaitsWithin(new Promise((resolve, reject) => {
     const outgoing = request({ host: "127.0.0.1", port, path: "/health", agent: false }, incoming => {
       incoming.resume();
       incoming.once("end", () => resolve(incoming.statusCode ?? 0));
@@ -96,7 +89,7 @@ async function health(port: number): Promise<number> {
   }), "health response");
 }
 function capture(socket: Socket, responses = 1): Promise<string> {
-  return bounded(new Promise((resolve, reject) => {
+  return awaitsWithin(new Promise((resolve, reject) => {
     let text = "";
     const data = (chunk: Buffer) => {
       text += chunk.toString("utf8");
@@ -117,13 +110,11 @@ interface LoggedRecord {
 
 /** Waits for one event record, which is written once its owning phase ends. */
 async function loggedRecord(f: Awaited<ReturnType<typeof fixture>>, event: string): Promise<LoggedRecord> {
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    const call = f.logger.log.mock.calls.find((candidate) => candidate[2]?.event === event);
-    if (call) return { level: call[0] as string, message: call[1] as string, fields: call[2] as Record<string, unknown> };
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`${event} was not logged`);
+  const call = await waitFor(
+    () => f.logger.log.mock.calls.find((candidate) => candidate[2]?.event === event),
+    `${event} to be logged`,
+  );
+  return { level: call[0] as string, message: call[1] as string, fields: call[2] as Record<string, unknown> };
 }
 
 describe("HTTP pending-work ownership", () => {
@@ -132,10 +123,10 @@ describe("HTTP pending-work ownership", () => {
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
     const closed = once(f.serverSockets[0]!, "close");
     peer.terminate();
-    await bounded(closed, "abandoned upgrade close");
+    await awaitsWithin(closed, "abandoned upgrade close");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "peer_closed" });
@@ -163,7 +154,7 @@ describe("HTTP pending-work ownership", () => {
     const mutex = (f.devices as unknown as { mutex: AsyncMutex }).mutex;
     const owner = mutex.run(async () => { ownerEntered.resolve(); await ownerRelease.promise; });
     cleanups.push(async () => { ownerRelease.resolve(); await owner; });
-    await bounded(ownerEntered.promise, "credential owner entry");
+    await awaitsWithin(ownerEntered.promise, "credential owner entry");
     const authenticate = f.devices.authenticateAndAdmit.bind(f.devices);
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation((...args) => {
       const result = authenticate(...args);
@@ -173,12 +164,12 @@ describe("HTTP pending-work ownership", () => {
     const socket = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(socket);
     socket.on("error", () => {});
-    await bounded(once(socket, "connect"), "abandoned upgrade connect");
+    await awaitsWithin(once(socket, "connect"), "abandoned upgrade connect");
     socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
-    await bounded(authEntered.promise, "queued upgrade authentication");
+    await awaitsWithin(authEntered.promise, "queued upgrade authentication");
     const physicallyClosed = once(f.serverSockets[0]!, "close");
     socket.destroy();
-    await bounded(physicallyClosed, "abandoned upgrade socket close");
+    await awaitsWithin(physicallyClosed, "abandoned upgrade socket close");
     const record = await loggedRecord(f, "http.upgrade");
     // The peer reached the Mac and stopped in the credential wait, not at the
     // request: `abandoned` sends triage to the peer, `request` would not.
@@ -193,7 +184,7 @@ describe("HTTP pending-work ownership", () => {
     const socket = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(socket);
     socket.on("error", () => {});
-    await bounded(once(socket, "connect"), "refused handshake connect");
+    await awaitsWithin(once(socket, "connect"), "refused handshake connect");
     const response = capture(socket);
     // Version 13 is the only one ws completes; anything else is `abortHandshake`
     // with no callback, so only the trace can record the refusal.
@@ -210,7 +201,7 @@ describe("HTTP pending-work ownership", () => {
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
     peer.send("not a frame");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
@@ -223,7 +214,7 @@ describe("HTTP pending-work ownership", () => {
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
     // Over the 16 KiB frame bound: the ws library refuses the frame itself and
     // closes with 1009, which is a hello-phase refusal, not a peer departure.
     peer.send("x".repeat(20_000));
@@ -239,12 +230,12 @@ describe("HTTP pending-work ownership", () => {
     const phone = await f.devices.pair((await f.devices.ensureEnrollment()).code, "Phone");
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
     const closed = once(peer, "close");
     // The device is revoked while its socket has not introduced itself: the
     // Gateway ends the socket, so the record must name that, not the peer.
     f.gateway.disconnectDevice(phone.deviceId);
-    await bounded(closed, "revoked socket close");
+    await awaitsWithin(closed, "revoked socket close");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "device_revoked" });
@@ -256,7 +247,7 @@ describe("HTTP pending-work ownership", () => {
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
     const closed = once(peer, "close");
     peer.send(JSON.stringify({ type: "hello", protocolVersion }));
     const record = await loggedRecord(f, "http.upgrade");
@@ -272,7 +263,7 @@ describe("HTTP pending-work ownership", () => {
     // generic transport failure retries a version mismatch forever, so the
     // typed code and the version range are what let the phone name the build
     // that must update (F-3).
-    const [closeCode, closeReason] = await bounded(closed, "protocol mismatch close");
+    const [closeCode, closeReason] = await awaitsWithin(closed, "protocol mismatch close");
     expect(closeCode).toBe(PROTOCOL_MISMATCH_CLOSE_CODE);
     expect(JSON.parse(String(closeReason))).toEqual({
       code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION,
@@ -305,13 +296,13 @@ describe("HTTP pending-work ownership", () => {
       : new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
     if (!(peer instanceof WebSocket)) peer.end();
-    await bounded(entered.promise, "authentication entry");
+    await awaitsWithin(entered.promise, "authentication entry");
     const physicallyClosed = once(f.serverSockets[0]!, "close");
     if (peer instanceof WebSocket) peer.terminate(); else peer.destroy();
-    await bounded(physicallyClosed, "exact server socket close");
+    await awaitsWithin(physicallyClosed, "exact server socket close");
     expect(await health(f.port)).toBe(503);
     release.resolve();
-    await bounded(returned.promise, "authentication return");
+    await awaitsWithin(returned.promise, "authentication return");
     expect(await health(f.port)).toBe(200);
     expect(f.acquireBlob).not.toHaveBeenCalled();
   });
@@ -322,7 +313,7 @@ describe("HTTP pending-work ownership", () => {
     const mutex = (f.devices as unknown as { mutex: AsyncMutex }).mutex;
     const owner = mutex.run(async () => { ownerEntered.resolve(); await ownerRelease.promise; });
     cleanups.push(async () => { ownerRelease.resolve(); await owner; });
-    await bounded(ownerEntered.promise, "credential owner entry");
+    await awaitsWithin(ownerEntered.promise, "credential owner entry");
     let expireDeadline: (() => void) | undefined;
     if (kind === "upgrade-deadline") {
       const original = globalThis.setTimeout;
@@ -343,13 +334,13 @@ describe("HTTP pending-work ownership", () => {
       : new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
     if (!(peer instanceof WebSocket)) peer.end();
-    await bounded(authEntered.promise, "queued authentication");
+    await awaitsWithin(authEntered.promise, "queued authentication");
     const physicallyClosed = once(f.serverSockets[0]!, "close");
     if (kind === "upgrade-deadline") {
       expect(expireDeadline).toBeTypeOf("function");
       expireDeadline!();
     } else if (peer instanceof WebSocket) peer.terminate(); else peer.destroy();
-    await bounded(physicallyClosed, "cancelled socket close");
+    await awaitsWithin(physicallyClosed, "cancelled socket close");
     expect(await health(f.port)).toBe(200);
     expect((mutex as unknown as { waiting: Set<unknown> }).waiting.size).toBe(0);
     expect(f.acquireBlob).not.toHaveBeenCalled();
@@ -363,10 +354,10 @@ describe("HTTP pending-work ownership", () => {
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
     // The Gateway's own 5 s deadline closes a socket that never introduced
     // itself; the peer did not leave, so `reason` must not say it did.
-    await bounded(once(peer, "close"), "hello deadline close", 10_000);
+    await awaitsWithin(once(peer, "close"), "hello deadline close", 10_000);
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "hello_timeout" });
@@ -378,8 +369,8 @@ describe("HTTP pending-work ownership", () => {
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
-    await bounded(once(peer, "open"), "upgrade open");
-    await bounded(f.gateway.close(), "gateway close");
+    await awaitsWithin(once(peer, "open"), "upgrade open");
+    await awaitsWithin(f.gateway.close(), "gateway close");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "shutting_down" });
   });
@@ -390,7 +381,7 @@ describe("HTTP pending-work ownership", () => {
     const mutex = (f.devices as unknown as { mutex: AsyncMutex }).mutex;
     const owner = mutex.run(async () => { ownerEntered.resolve(); await ownerRelease.promise; });
     cleanups.push(async () => { ownerRelease.resolve(); await owner; });
-    await bounded(ownerEntered.promise, "credential owner entry");
+    await awaitsWithin(ownerEntered.promise, "credential owner entry");
     const authenticate = f.devices.authenticateAndAdmit.bind(f.devices);
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation((...args) => {
       const result = authenticate(...args);
@@ -400,12 +391,12 @@ describe("HTTP pending-work ownership", () => {
     const socket = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(socket);
     socket.on("error", () => {});
-    await bounded(once(socket, "connect"), "pending upgrade connect");
+    await awaitsWithin(once(socket, "connect"), "pending upgrade connect");
     socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
-    await bounded(authEntered.promise, "queued upgrade authentication");
+    await awaitsWithin(authEntered.promise, "queued upgrade authentication");
     // Shutdown destroys the socket while the credential is still unread; the
     // peer is still there, so the record must not call it a peer close.
-    await bounded(f.gateway.close(), "gateway close");
+    await awaitsWithin(f.gateway.close(), "gateway close");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "auth", reason: "shutting_down" });
     expect(typeof record.fields.authMs).toBe("number");
@@ -437,18 +428,18 @@ describe("HTTP pending-work ownership", () => {
     peer.on("error", () => {});
     cleanups.push(async () => {
       peer.destroy(); producerRelease.resolve();
-      if (didAcquire) await bounded(physicalRelease.promise, "late physical lease cleanup");
+      if (didAcquire) await awaitsWithin(physicalRelease.promise, "late physical lease cleanup", HOOK_HANG_BOUND_MS);
       await blobs.dispose();
     });
     peer.end();
-    await bounded(acquired.promise, "physical acquire entry");
+    await awaitsWithin(acquired.promise, "physical acquire entry");
     const closed = once(f.serverSockets[0]!, "close");
     peer.destroy();
-    await bounded(closed, "abandoned response close");
+    await awaitsWithin(closed, "abandoned response close");
     expect(await health(f.port)).toBe(200);
     await expect(blobs.acquire(id)).rejects.toMatchObject({ code: "busy" });
     producerRelease.resolve();
-    await bounded(physicalRelease.promise, "late resource release");
+    await awaitsWithin(physicalRelease.promise, "late resource release");
     const next = await blobs.acquire(id);
     expect(next.size).toBe(7);
     await next.release();
@@ -465,11 +456,11 @@ describe("HTTP pending-work ownership", () => {
     });
     const socket = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(socket); socket.on("error", () => {});
-    await bounded(once(socket, "connect"), "pipeline connect");
+    await awaitsWithin(once(socket, "connect"), "pipeline connect");
     const count = HTTP_MAXIMUM_REQUESTS_PER_CONNECTION + 1;
     const received = capture(socket, count);
     socket.write("GET /v1/blobs/fixture HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer fixture\r\n\r\n".repeat(count));
-    await bounded(entered.promise, "bounded pipeline admission");
+    await awaitsWithin(entered.promise, "bounded pipeline admission");
     expect(authenticate).toHaveBeenCalledTimes(HTTP_MAXIMUM_REQUESTS_PER_CONNECTION);
     expect(await health(f.port)).toBe(200);
     release.resolve();
@@ -483,17 +474,17 @@ describe("HTTP pending-work ownership", () => {
     for (let index = 0; index < HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS; index++) {
       const socket = createConnection({ host: "127.0.0.1", port: f.port });
       f.clientSockets.push(socket); socket.on("error", () => {});
-      await bounded(once(socket, "connect"), "held header connect");
+      await awaitsWithin(once(socket, "connect"), "held header connect");
     }
     const rejected = createConnection({ host: "127.0.0.1", port: f.port });
     f.clientSockets.push(rejected); rejected.on("error", () => {});
-    await bounded(once(rejected, "close"), "one-over-address rejection");
+    await awaitsWithin(once(rejected, "close"), "one-over-address rejection");
     const first = f.clientSockets[0]!;
     const released = once(f.serverSockets[0]!, "close");
     const response = capture(first);
     first.write("GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
     expect(await response).toContain("HTTP/1.1 200");
-    await bounded(released, "held socket release");
+    await awaitsWithin(released, "held socket release");
     expect(await health(f.port)).toBe(200);
   });
 });

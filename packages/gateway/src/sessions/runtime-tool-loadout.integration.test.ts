@@ -6,6 +6,7 @@ import { fauxAssistantMessage, fauxProvider, getCurrentTools } from "@earendil-w
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -13,14 +14,6 @@ afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 async function activeTools(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>): Promise<string[]> {
   const context = await slot.context() as { activeTools: string[] };
@@ -83,20 +76,20 @@ describe("per-chat tool loadout", () => {
     const chosen = [...defaults.filter((name) => name !== "write"), "codemode"].sort();
     await slot.setTools(chosen);
     await slot.prompt("record the loadout");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(await transcriptTools(sessionDir)).toEqual(chosen);
 
     await registry.dispose();
     registries.splice(registries.indexOf(registry), 1);
     const reopened = createRegistry();
     await reopened.initialize();
-    await waitUntil(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut());
+    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut");
     await reopened.catalog("all");
     const reloaded = await reopened.acquire(slot.id);
     expect(await activeTools(reloaded)).toEqual(chosen);
 
     await reloaded.prompt("keep the loadout");
-    await waitUntil(() => !reloaded.isBusy);
+    await waitFor(() => !reloaded.isBusy, "the reloaded slot to go idle");
     expect(await transcriptTools(sessionDir)).toEqual(chosen);
 
     const fresh = await reopened.create(cwd);
