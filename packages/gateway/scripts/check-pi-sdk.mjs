@@ -171,6 +171,26 @@ function validateInstalled(root, lockPackages, version, issues) {
   }
 }
 
+const KNOWN_DELTA_KEYS = ["store", "from", "to", "reason"];
+
+/**
+ * A `knownOneWayDeltas` entry accepts one store's re-keying for one version
+ * range as a documented, one-way rollback delta. It is deliberately narrow: an
+ * exact `from`/`to` pair, a named store, and a reason, so the rollback matrix
+ * keeps failing for every other store and version pair.
+ */
+function validateKnownOneWayDeltas(entries, issues) {
+  for (const entry of entries) {
+    const keys = entry && typeof entry === "object" && !Array.isArray(entry) ? Object.keys(entry) : [];
+    const coherent = keys.length === KNOWN_DELTA_KEYS.length && KNOWN_DELTA_KEYS.every((key) => keys.includes(key))
+      && typeof entry.store === "string" && /^[a-z][a-z0-9-]*$/u.test(entry.store)
+      && typeof entry.from === "string" && EXACT_VERSION.test(entry.from)
+      && typeof entry.to === "string" && EXACT_VERSION.test(entry.to)
+      && typeof entry.reason === "string" && entry.reason.trim().length > 0;
+    if (!coherent) addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas entries must be exactly {store, from, to, reason} with exact versions and a reason`);
+  }
+}
+
 /**
  * Validate the Pi family in a Gateway package directory.
  * Returns a stable report and never performs network or filesystem mutation.
@@ -179,12 +199,21 @@ export function readPiSdkBaseline(gatewayDir) {
   const issues = [];
   const path = join(resolve(gatewayDir), BASELINE_FILE);
   const value = readJson(path, BASELINE_FILE, issues, BASELINE_MAX_BYTES);
-  if (!value || Object.keys(value).length !== 2 || value.schema !== 1
+  const keys = value && typeof value === "object" ? Object.keys(value) : [];
+  const shaped = keys.length === 2 || (keys.length === 3 && keys.includes("knownOneWayDeltas"));
+  if (!value || !shaped || value.schema !== 1
     || typeof value.rollbackVersion !== "string" || !EXACT_VERSION.test(value.rollbackVersion)) {
-    addIssue(issues, `${BASELINE_FILE} must contain exactly schema 1 and an exact rollbackVersion`);
+    addIssue(issues, `${BASELINE_FILE} must contain exactly schema 1, an exact rollbackVersion, and at most the knownOneWayDeltas list`);
     return { value: undefined, issues };
   }
-  return { value, issues };
+  if (value.knownOneWayDeltas !== undefined) {
+    if (!Array.isArray(value.knownOneWayDeltas)) {
+      addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas must be a list`);
+    } else {
+      validateKnownOneWayDeltas(value.knownOneWayDeltas, issues);
+    }
+  }
+  return { value: issues.length > 0 ? undefined : value, issues };
 }
 
 export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."), checkInstalled = true, requireBaseline = true } = {}) {

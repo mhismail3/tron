@@ -246,13 +246,17 @@ payloads intentionally omit development-only `pi-sdk-baseline.json`; validate
 those trees with `node scripts/check-pi-sdk.mjs --runtime-tree <app>`. Run focused script tests with
 `npm run test:pi-sdk-scripts` and the isolated sequential rollback matrix with
 `npm run test:pi-sdk-rollback`. The rollback matrix seeds and rereads the
-persisted stores it owns — session JSONL, settings, auth, `mcp.json` (with a
-hyphenated server name) and the MCP OAuth credential store — in both directions,
-and names the on-disk credential keys when a runtime cannot resolve what the
-other wrote. A runtime that predates Pi's built-in MCP extension (0.87.1)
-reports that it skipped the MCP case, so a passing run never implies coverage it
-did not have. The committed `pi-sdk-baseline.json` records only the prior runtime
-used for rollback verification; `package.json` remains
+persisted stores it owns — session JSONL, settings, auth, `mcp.json` (written by
+`pi mcp add` and read back with a hyphenated server name) and the MCP OAuth
+credential store — in both directions, and names the on-disk credential keys when
+a runtime cannot resolve what the other wrote. Only the rollback runtime may
+report that it has no built-in MCP surface; a candidate that drops or moves it
+fails instead of passing as unsupported. A store whose re-keying the maintainer
+has accepted as a one-way rollback delta is listed in `pi-sdk-baseline.json`
+under `knownOneWayDeltas` (an exact `{store, from, to, reason}` entry, carried
+forward by `update:pi-sdk`); the matrix still observes and reports it, and keeps
+failing for every other store and version pair. The committed
+`pi-sdk-baseline.json` records only the prior runtime used for rollback verification; `package.json` remains
 current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi
 family, without treating unrelated lockfile churn as an SDK change. CI runs the

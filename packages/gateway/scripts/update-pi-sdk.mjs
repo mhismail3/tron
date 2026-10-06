@@ -66,19 +66,37 @@ function manifestsDirty(gatewayDir, spawn = spawnSync) {
     || check(["diff", "--cached", "--quiet", "--", "package.json", "package-lock.json", BASELINE_FILE]);
 }
 
-/** Release order of two exact semvers, prereleases before their release. */
+/** Release order of two exact semvers, by semver precedence: numeric cores,
+ * then prerelease identifiers, which order numerically when both are numeric and
+ * outrank nothing when the other side is a release. */
 export function compareVersions(left, right) {
-  const [leftCore, leftPre] = left.split("-");
-  const [rightCore, rightPre] = right.split("-");
-  const leftParts = leftCore.split(".").map(Number);
-  const rightParts = rightCore.split(".").map(Number);
+  const parse = (value) => {
+    const separator = value.indexOf("-");
+    return separator < 0
+      ? { core: value.split(".").map(Number), prerelease: [] }
+      : { core: value.slice(0, separator).split(".").map(Number), prerelease: value.slice(separator + 1).split(".") };
+  };
+  const leftVersion = parse(left);
+  const rightVersion = parse(right);
   for (let index = 0; index < 3; index += 1) {
-    if (leftParts[index] !== rightParts[index]) return leftParts[index] < rightParts[index] ? -1 : 1;
+    if (leftVersion.core[index] !== rightVersion.core[index]) return leftVersion.core[index] < rightVersion.core[index] ? -1 : 1;
   }
-  if (leftPre === rightPre) return 0;
-  if (leftPre === undefined) return 1;
-  if (rightPre === undefined) return -1;
-  return leftPre < rightPre ? -1 : 1;
+  if (leftVersion.prerelease.length === 0 || rightVersion.prerelease.length === 0) {
+    return leftVersion.prerelease.length === rightVersion.prerelease.length ? 0 : (leftVersion.prerelease.length === 0 ? 1 : -1);
+  }
+  for (let index = 0; index < Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length); index += 1) {
+    const leftPart = leftVersion.prerelease[index];
+    const rightPart = rightVersion.prerelease[index];
+    if (leftPart === rightPart) continue;
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    const leftNumeric = /^\d+$/u.test(leftPart);
+    const rightNumeric = /^\d+$/u.test(rightPart);
+    if (leftNumeric && rightNumeric) return Number(leftPart) < Number(rightPart) ? -1 : 1;
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart < rightPart ? -1 : 1;
+  }
+  return 0;
 }
 
 /**
@@ -126,7 +144,13 @@ export function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
 /** Read the installed coding-agent changelog and write this run's extract. */
 export function writeChangelogEvidence({ gatewayDir, from, to, spawn = spawnSync } = {}) {
   const path = changelogEvidencePath(gatewayDir, from, to, spawn);
-  const changelog = readFileSync(join(gatewayDir, "node_modules", CODING_AGENT, CHANGELOG_FILE), "utf8");
+  const changelogPath = join(gatewayDir, "node_modules", CODING_AGENT, CHANGELOG_FILE);
+  let changelog;
+  try {
+    changelog = readFileSync(changelogPath, "utf8");
+  } catch {
+    throw new Error(`installed ${CODING_AGENT} has no ${CHANGELOG_FILE}, so this update has no upstream inventory to record`);
+  }
   const delta = extractChangelogDelta(changelog, from, to);
   const header = `# ${CODING_AGENT} upstream changelog: ${from} -> ${to}\n\nSource: ${CODING_AGENT}@${to} ${CHANGELOG_FILE}\n\n`;
   mkdirSync(dirname(path), { recursive: true });
@@ -183,7 +207,10 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     if (!current.ok || !current.version) throw new Error(`cannot snapshot an incoherent current Pi SDK: ${formatPiSdkReport(current)}`);
     const baseline = readPiSdkBaseline(root);
     if (baseline.issues.length > 0) throw new Error(`cannot snapshot Pi SDK rollback metadata: ${baseline.issues.join("; ")}`);
-    writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version }, null, 2)}\n`);
+    // Accepted one-way deltas are keyed by the version range they were accepted
+    // for, so they are carried forward rather than erased by this rewrite.
+    const knownOneWayDeltas = baseline.value.knownOneWayDeltas ?? [];
+    writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
     const command = updateCommand(version);
     installStarted = true;
     const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, npm_config_offline: "false", npm_config_engine_strict: "true" } });

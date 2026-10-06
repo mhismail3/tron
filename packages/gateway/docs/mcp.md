@@ -49,13 +49,18 @@ Each string is capped at 256 characters (except `state`, capped at 64); `error`
 is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
 paths are not exposed. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
-covered by `src/admin/mcp-admin-service.test.ts`; sign-in relay outcomes and
-callback safety are covered by `src/admin/auth-broker.test.ts`, and the local
-OAuth fixture in `src/admin/mcp-auth-session.integration.test.ts` drives Pi's own
-PKCE S256 challenge, dynamic client registration, loopback callback relay, token
-persistence and refresh through the Gateway's `mcp.auth.start` operation. Those
-tests reach Pi only through its public exports, so they describe the supported
-boundary instead of one installed layout. The sequential rollback matrix
+covered by `src/admin/mcp-admin-service.test.ts`, which proves the `!command`
+header reference through Pi's own CLI against a loopback server that records the
+`Authorization` it receives; sign-in relay outcomes and callback safety are
+covered by `src/admin/auth-broker.test.ts`, and the local OAuth fixture in
+`src/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
+challenge, the resource-metadata URL named by `WWW-Authenticate` (the well-known
+root is deliberately not served, so a Pi that ignored the header could not
+discover an authorization server), dynamic client registration, loopback
+callback relay, token persistence and refresh through the Gateway's
+`mcp.auth.start` operation. Those tests reach Pi only through its public exports,
+so they describe the supported boundary instead of one installed layout. The
+sequential rollback matrix
 (`packages/gateway/scripts/check-pi-sdk-rollback.mjs`) seeds and rereads
 `mcp.json` and `mcp-auth.json` through each runtime's own `pi mcp list`
 resolution, so an SDK change that rewrites either store in a way the previous

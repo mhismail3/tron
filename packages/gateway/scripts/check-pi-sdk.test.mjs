@@ -125,6 +125,29 @@ test("rejects missing or malformed rollback metadata", async () => {
   });
 });
 
+test("accepts an empty known-one-way-delta ledger and rejects a malformed entry", async () => {
+  await withFixture({}, async (root) => {
+    const baseline = (knownOneWayDeltas) => writeFile(join(root, "pi-sdk-baseline.json"), JSON.stringify({ schema: 1, rollbackVersion: version, knownOneWayDeltas }));
+    await baseline([]);
+    assert.equal(validatePiSdk({ gatewayDir: root, checkInstalled: false }).ok, true);
+    await baseline([{ store: "mcp-auth", from: "0.99.1", to: version, reason: "accepted one-way re-key" }]);
+    assert.equal(validatePiSdk({ gatewayDir: root, checkInstalled: false }).ok, true);
+    for (const entry of [
+      { store: "mcp-auth", from: "0.99.1", to: version },
+      { store: "mcp-auth", from: "^0.99.1", to: version, reason: "ranged" },
+      { store: "mcp-auth", from: "0.99.1", to: version, reason: "  " },
+      { store: "MCP Auth", from: "0.99.1", to: version, reason: "unnamed store" },
+    ]) {
+      await baseline([entry]);
+      const report = validatePiSdk({ gatewayDir: root, checkInstalled: false });
+      assert.equal(report.ok, false, `accepted a malformed ledger entry: ${JSON.stringify(entry)}`);
+      assert.match(report.issues.join("\n"), /knownOneWayDeltas/);
+    }
+    await baseline("mcp-auth");
+    assert.equal(validatePiSdk({ gatewayDir: root, checkInstalled: false }).ok, false);
+  });
+});
+
 test("rejects ranged or missing direct declarations", async () => {
   await withFixture({}, async (root) => {
     await editJson(root, "package.json", (value) => { delete value.dependencies[DIRECT_PI_PACKAGES[0]]; value.dependencies[DIRECT_PI_PACKAGES[1]] = `^${version}`; });

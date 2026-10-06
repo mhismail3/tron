@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { resolveConfigValueUncached } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/resolve-config-value.js";
 import lockfile from "proper-lockfile";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
@@ -150,15 +150,37 @@ describe("McpAdminService", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("stores a token only through its credential owner and writes a !command reference", async () => {
+  it("stores a token only through its credential owner and writes a !command reference Pi resolves", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-token-"));
     const captured: string[] = [];
     const owner: McpCredentialOwner = {
       async store(scope, _server, token) { captured.push(`${scope.scope}:${token}`); return "tron-mcp-global-fixture"; },
       async remove() {},
     };
+    // The header Pi actually sends is observed at a loopback MCP server, so the
+    // `!command` resolution is proved through Pi's own public CLI rather than by
+    // calling an unexported helper.
+    const received: Array<string | undefined> = [];
+    const fixture = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      received.push(req.headers.authorization);
+      const rpc = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as { id?: number; method?: string };
+      const answer = (body: unknown, status = 200) => {
+        res.writeHead(status, { "content-type": "application/json", "mcp-session-id": "fixture-session", "mcp-protocol-version": "2025-03-26" });
+        res.end(JSON.stringify(body));
+      };
+      if (rpc.method === "initialize") return answer({ jsonrpc: "2.0", id: rpc.id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } } });
+      if (rpc.method === "notifications/initialized") { res.writeHead(202); res.end(); return; }
+      if (rpc.method === "tools/list") return answer({ jsonrpc: "2.0", id: rpc.id, result: { tools: [] } });
+      answer({});
+    });
     try {
-      await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: "https://fixture.invalid/mcp" } } }));
+      await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+      const address = fixture.address();
+      if (!address || typeof address === "string") throw new Error("MCP fixture failed to bind loopback");
+      const origin = `http://127.0.0.1:${address.port}`;
+      await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp` } } }));
       const service = new McpAdminService(root, cliPath, owner);
       const response = await service.storeBearer({ scope: "global" }, "fixture", "never-projected-secret");
       const config = await readFile(join(root, "mcp.json"), "utf8");
@@ -170,13 +192,25 @@ describe("McpAdminService", () => {
       const piCommand = saved.mcpServers.fixture.headers.Authorization.replace(
         /\/usr\/bin\/security find-generic-password -s tron\.mcp -a [A-Za-z0-9._-]+ -w/u, tokenCommand,
       );
-      expect(resolveConfigValueUncached(piCommand)).toBe("Bearer token with spaces");
+      await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp`, headers: { Authorization: piCommand } } } }));
+      const listed = await new Promise<{ stdout: string }>((resolve, reject) => {
+        const child = spawn(process.execPath, [cliPath, "mcp", "list", "--json"], { cwd: root, env: { ...process.env, PI_CODING_AGENT_DIR: root } });
+        let stdout = "";
+        child.stdout.on("data", (chunk) => { stdout += chunk; });
+        child.once("error", reject);
+        child.on("close", () => resolve({ stdout }));
+      });
+      expect((JSON.parse(listed.stdout) as { servers: Array<{ state: string }> }).servers[0].state).toBe("connected");
+      expect(received).toContain("Bearer token with spaces");
       expect(captured).toEqual(["global:never-projected-secret"]);
       expect(response).toEqual({ server: "fixture", stored: true });
       expect(config).toContain("/usr/bin/security");
       expect(saved.mcpServers.fixture.headers.Authorization).toMatch(/^!/u);
       expect(config).not.toContain("never-projected-secret");
-    } finally { await rm(root, { recursive: true, force: true }); }
+    } finally {
+      await new Promise<void>((resolve) => fixture.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
 });

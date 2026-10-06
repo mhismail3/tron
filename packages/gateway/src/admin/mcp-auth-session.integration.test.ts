@@ -50,10 +50,15 @@ describe("MCP auth through a live Gateway session", () => {
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     let origin = "", authQuery: URLSearchParams | undefined, token = "", toolCalls = 0, registrationCount = 0, refreshCount = 0;
     const requests: string[] = [], rpcMethods: string[] = [];
+    // The challenge names its own resource-metadata URL, and the well-known root
+    // is not served: a Pi that ignored `WWW-Authenticate` could not discover an
+    // authorization server at all, so sign-in succeeding proves it read the header.
+    const challengePath = "/challenge/resource-metadata";
     const fixture = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", origin || "http://127.0.0.1");
       requests.push(`${req.method} ${url.pathname}`);
-      if (url.pathname === "/.well-known/oauth-protected-resource") return reply(res, 200, { resource: `${origin}/mcp`, authorization_servers: [origin] });
+      if (url.pathname === "/.well-known/oauth-protected-resource") { res.writeHead(404); res.end(); return; }
+      if (url.pathname === challengePath) return reply(res, 200, { resource: `${origin}/mcp`, authorization_servers: [origin] });
       if (url.pathname === "/.well-known/oauth-authorization-server") return reply(res, 200, {
         issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, registration_endpoint: `${origin}/register`,
         response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"], token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"],
@@ -86,7 +91,7 @@ describe("MCP auth through a live Gateway session", () => {
       }
       if (url.pathname === "/mcp") {
         if (req.headers.authorization !== `Bearer ${token}` || !token) {
-          res.writeHead(401, { "www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"` }); res.end(); return;
+          res.writeHead(401, { "www-authenticate": `Bearer resource_metadata="${origin}${challengePath}"` }); res.end(); return;
         }
         if (req.method !== "POST") { res.writeHead(405); res.end(); return; }
         const rpc = JSON.parse(await requestBody(req)) as { id: number; method: string; params?: any };
@@ -160,6 +165,9 @@ describe("MCP auth through a live Gateway session", () => {
     await waitFor(() => events.some((event) => event.topic === "auth.completed"), "the completed MCP authentication event").catch((error) => { throw new Error(`no completion; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} requests=${JSON.stringify(requests)} methods=${JSON.stringify(rpcMethods)}`, { cause: error }); });
     expect((events.find((event) => event.topic === "auth.completed")!.payload as any).success).toBe(true);
     const persisted = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
+    expect(Object.keys(persisted)).toEqual([`${origin}/mcp`]);
+    expect(requests).toContain(`GET ${challengePath}`);
+    expect(requests).not.toContain("GET /.well-known/oauth-protected-resource");
     expect(registrationCount).toBe(1);
     expect(authQuery?.get("code_challenge_method")).toBe("S256");
     // The fixture expires the sign-in token in one second, so Pi refreshes it and
@@ -183,6 +191,7 @@ describe("MCP auth through a live Gateway session", () => {
     const toolOutput = toolResult?.content?.map((block: any) => block.type === "text" ? block.text : "").join("\\n") ?? "";
     const artifact = { rpcStarted: true, authTarget: authEvent.target, authUrlRelayed: true, callbackForwarded: callbackResult.forwarded,
       authCompleted: true, pkceS256: authQuery?.get("code_challenge_method") === "S256", dynamicRegistrationCount: registrationCount,
+      challengeResourceMetadataUsed: requests.includes(`GET ${challengePath}`) && !requests.includes("GET /.well-known/oauth-protected-resource"),
       tokenPersistedInAgentDir: true, tokenRefreshedAfterExpiry: refreshCount === 1,
       directToolCallSucceeded: toolOutput.includes("worked:next-turn"), toolCallRequests: toolCalls, fauxProviderTurns: 2 };
     const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-signin-session.json");
