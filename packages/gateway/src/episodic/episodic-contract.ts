@@ -85,6 +85,16 @@ export const EPISODIC_OMITTED_TEXT = "[omitted]";
 /** How the view renders a part whose node is not built (gist §6). */
 export const EPISODIC_PLACEHOLDER = "(not summarized yet: zoom it)";
 
+/* The memory's own search (Tron's addition to the recipe, docs/episodic-memory.md):
+ * one case-insensitive substring pass over the projected catalog. */
+
+/** Longest accepted search query, in characters. */
+export const EPISODIC_SEARCH_QUERY_CHARS = 200;
+/** Most hits one search returns; the match count still covers the whole range. */
+export const EPISODIC_SEARCH_HITS = 20;
+/** Bound on one hit's snippet, in characters, including its truncation marks. */
+export const EPISODIC_SEARCH_SNIPPET_CHARS = 300;
+
 export type EpisodicBlockedReason =
   | "permanent-failure"
   | "retries-exhausted"
@@ -140,6 +150,9 @@ export interface EpisodicMessageRecord {
   /** The entry contributes no text of its own (a null context edit, or a
    * navigation that left the branch). Never sent to the model. */
   omitted: boolean;
+  /** The canonical entry's instant. Absent on a record written before this
+   * field existed: `entryTimestamp` reads the source for it instead. */
+  timestamp?: string;
 }
 
 /**

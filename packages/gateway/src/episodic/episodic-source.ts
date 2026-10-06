@@ -269,6 +269,9 @@ export interface EpisodicProjectedMessage {
   entryId: string;
   kind: EpisodicMessageKind;
   text: string;
+  /** The canonical entry's instant, carried so the catalog can answer a
+   * message's date without reading the source again. */
+  timestamp: string;
   sourceDigest: string;
   projectedDigest: string;
   omissions: string[];
@@ -422,6 +425,7 @@ export function projectBranch(cut: EpisodicCanonicalCut, limits: EpisodicLimits)
       entryId: entry.id,
       kind,
       text: credentials,
+      timestamp: entry.timestamp,
       sourceDigest: digest(entry.line),
       projectedDigest: digest(credentials),
       omissions: [...new Set(omissions)],
