@@ -90,7 +90,9 @@ took. If they ask for options, list the top three and wait.
      recent `main` history for the same fix.
 2. **Claim.**
    - Run `scripts/tron work start <issue>`, then work only in the worktree it
-     prints.
+     prints. When the parent epic's Landing is an integration branch, add
+     `--base <that branch>` (the epic's Decisions name it); the claim then
+     lands there, not on `main`.
    - If it refuses (claimed, ineligible, blocked), report the reason and pick
      again; never work around it.
    - A refused claim is not a reason to create a second branch.
@@ -168,6 +170,9 @@ For work that spans sessions or several tasks:
 2. Add one Task issue per claimable step as a sub-issue, with blocked-by links
    for the order.
 3. Add everything to the Project as Proposed, and present the epic to the user.
+   Landing (straight to `main`, or held on an integration branch until the
+   maintainer verifies the whole set) is the maintainer's decision: present it
+   as one, not as a default.
 
 Nothing in it can be claimed until the maintainer moves it to Ready.
 

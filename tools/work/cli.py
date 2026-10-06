@@ -39,6 +39,8 @@ def main(argv: list) -> int:
     begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
     begin.add_argument("issue", type=int, help="issue number")
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    begin.add_argument("--base", help="start from, and later land into, this open issue's claim branch "
+                                      "instead of the configured base; fixed for the claim's life")
     check = commands.add_parser("verify", help="run the checks the branch diff requires and write a receipt")
     check.add_argument("--post", action="store_true",
                        help="publish the receipt: evidence comment, private logs, commit status")
@@ -78,7 +80,7 @@ def main(argv: list) -> int:
         if args.command == "bootstrap":
             return bootstrap.run(Gh(root), root, config, args.apply, args.report)
         if args.command == "start":
-            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
+            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.base)
         if args.command == "verify":
             receipt = verify.verify(root, config, args.evidence_manifest)
             print(f"receipt:  {verify.receipt_path(root, receipt['head'])}")
