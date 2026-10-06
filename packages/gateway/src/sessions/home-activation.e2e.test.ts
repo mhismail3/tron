@@ -183,7 +183,7 @@ function openRegistry(f: Fixture): void {
   f.service = service;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; tokenBudget?: number; virtualModel?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; tokenBudget?: number; virtualModel?: boolean; contextWindow?: number } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -192,7 +192,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
   const faux = fauxProvider({
     provider: PROVIDER,
-    models: [{ id: MODEL_ID, reasoning: true }],
+    models: [{ id: MODEL_ID, reasoning: true, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) }],
     tokensPerSecond: 1_000_000,
     tokenSize: { min: 10, max: 10 },
   });
@@ -290,6 +290,49 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
 }
 
 describe.sequential("Tron Home activations end to end", () => {
+  // progress.md C12 (#466), the property Home exists for: the full history grows
+  // to several model windows while every request stays bounded, carries no
+  // earlier activation's native messages, and its view still covers message 0.
+  it("keeps every request bounded while the full history grows to several model windows", async () => {
+    const WINDOW = 64_000;
+    const f = await fixture("windows", { contextWindow: WINDOW });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-designate-windows");
+    const reply = (turn: number) => `REPLY-${turn}-MARK ` + "long assistant output line ".repeat(1_500);
+    const turns: Array<{ chars: number; carriesEarlier: boolean; coversZero: boolean }> = [];
+    for (let turn = 0; turn < 20; turn += 1) {
+      const requests: CapturedRequest[] = [];
+      f.faux.setResponses([responsesOf(f, requests)(reply(turn))]);
+      await slot.prompt(`INPUT-${turn}-MARK please continue`);
+      await waitUntil(() => !slot.isBusy, 60_000);
+      expect(requests).toHaveLength(1);
+      const view = viewOf(requests[0]!);
+      // Short inputs are verbatim view lines (gist §3); only text outside the
+      // view would be a resent native message, and replies are never verbatim.
+      const outside = requests[0]!.blob.replace(view, "");
+      let carriesEarlier = false;
+      for (let earlier = 0; earlier < turn; earlier += 1) {
+        if (outside.includes(`INPUT-${earlier}-MARK`) || requests[0]!.blob.includes(`REPLY-${earlier}-MARK`)) carriesEarlier = true;
+      }
+      const lines = view.split("\\n").filter((line) => /^\d+\+\d+\|/u.test(line));
+      turns.push({ chars: requests[0]!.blob.length, carriesEarlier, coversZero: turn === 0 || lines.some((line) => line.startsWith("0+")) });
+    }
+    const history = (await canonicalMessages(slot)).reduce((sum, message) => sum + JSON.stringify(message.content ?? "").length, 0);
+    const row = {
+      window: WINDOW, historyTokens: Math.ceil(history / 4), maxRequestChars: Math.max(...turns.map((t) => t.chars)),
+      anyCarriedEarlier: turns.some((t) => t.carriesEarlier), viewsCoverZero: turns.every((t) => t.coversZero),
+      refusals: f.requestRecords.filter((record) => record.event === "refused").length,
+    };
+    report.cases.push({ case: "several-windows", ...row });
+    // The control: the full history really is several windows long.
+    expect(row.historyTokens).toBeGreaterThan(WINDOW * 2);
+    expect(row.anyCarriedEarlier).toBe(false);
+    expect(row.viewsCoverZero).toBe(true);
+    expect(row.refusals).toBe(0);
+    // Every request, estimated at four characters a token, is a small fraction of the window.
+    expect(row.maxRequestChars / 4).toBeLessThan(WINDOW / 4);
+  }, 300_000);
+
   it("runs activation two on the view of activation one, frozen across its tool loop", async () => {
     const f = await fixture("view");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });

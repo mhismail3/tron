@@ -222,10 +222,12 @@ projection is never stale.
 
 ## Departures from the recipe, with reasons
 
-1. **A node's context is one text block, not two.** The recipe's user message has
-   the context and the step as two text blocks. Here they are one block separated
-   by a blank line. The prefix is byte-identical across calls either way, which is
-   what a provider cache reads.
+1. **The context is sent as its cache pieces, then the step.** The recipe's user
+   message has two text blocks, the context and the step. Here the context is cut
+   further at the cache marks (see Prompt caching), so a long context's first
+   pieces are re-read from the cache even when its end changed. The request keeps
+   the whole first turn as one text, which estimates and the size loop use; only
+   the default summarizer splits it into blocks.
 2. **A node's context is stored as level runs, not as an address list.** The
    context is a prefix of the view, which tiles from message 0, so the parts'
    levels in order reconstruct every address exactly. At production `VIEW` the
@@ -350,7 +352,24 @@ why that control was removed rather than kept as a permanent test.
 counts by level and kind, the view (parts, bytes, `VIEW` budget, built/unbuilt
 counts, and the parts themselves up to a bounded list with a `truncatedParts`
 count), coverage counters (admitted messages, summarized leaves), the pump's busy
-count, the blocked state and its reason, and reserved/used tokens.
+count, the blocked state and its reason, and reserved/used tokens. `sinceOpen`
+adds the provider-reported input, output, cache-read and cache-write tokens since
+the memory opened, so caching can be checked from the provider's own usage
+fields (gist §8). It is not persisted.
+
+## Prompt caching
+
+Each compactor call puts its context block first, as the recipe says (gist §4.2,
+§8): consecutive calls share that prefix.
+
+- **Pieces:** the default summarizer sends the context cut at the same marks as
+  Home's view (`cache-layout.ts`), then the step as the last block.
+- **Anthropic:** it marks the cut pieces within the four-mark limit. Other
+  providers reuse the prefix on their own.
+- **Cache key:** every call carries the memory's cache key,
+  `tron-episodic:<source session id>`, as pi-ai's `sessionId`. This drives
+  OpenAI's `prompt_cache_key`, and the session-affinity header where a provider
+  opts in, so one memory's calls reach one cache.
 
 ## Test artifacts
 

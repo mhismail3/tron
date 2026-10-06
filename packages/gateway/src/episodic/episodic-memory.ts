@@ -8,7 +8,7 @@ import {
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
   type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState,
-  type EpisodicSummarizer, type EpisodicTokenBudget, type EpisodicViewPartStatus,
+  type EpisodicSummarizer, type EpisodicTokenBudget, type EpisodicUsage, type EpisodicViewPartStatus,
 } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
@@ -129,6 +129,7 @@ export class EpisodicMemory {
   private readonly store: EpisodicStore;
   private readonly summarizer: EpisodicSummarizer;
   private readonly budget: EpisodicTokenBudget;
+  private readonly usageSinceOpen: EpisodicUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly diagnostic: (record: EpisodicDiagnostic) => void;
   private readonly mutex = new AsyncMutex();
@@ -478,7 +479,7 @@ export class EpisodicMemory {
       coverage: { admitted: this.messages.size, summarized },
       pump: { busy: this.building.size },
       blocked: this.blocked,
-      tokens,
+      tokens: { ...tokens, sinceOpen: { ...this.usageSinceOpen } },
     };
   }
 
@@ -901,7 +902,8 @@ export class EpisodicMemory {
   // ---- one compactor call, the size loop, retries and the budget ---------------
 
   private async compact(lines: readonly string[], step: string, stamp: BuildStamp): Promise<string> {
-    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, contextBlock(lines), step, this.abort.signal);
+    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, contextBlock(lines), step, this.abort.signal,
+      `tron-episodic:${this.dependencies.sessionId}`);
     const tries: string[] = [];
     for (let attempt = 0; attempt < this.limits.tries; attempt += 1) {
       const reply = await this.compactCall(request, stamp);
@@ -937,6 +939,10 @@ export class EpisodicMemory {
         continue;
       }
       this.budget.settle(estimate, usageTokens(message.usage));
+      this.usageSinceOpen.input += message.usage?.input ?? 0;
+      this.usageSinceOpen.output += message.usage?.output ?? 0;
+      this.usageSinceOpen.cacheRead += message.usage?.cacheRead ?? 0;
+      this.usageSinceOpen.cacheWrite += message.usage?.cacheWrite ?? 0;
       // Durable before the next call: a crash must not hand the budget back.
       await this.saveState();
       const verdict = classifyReply(message);

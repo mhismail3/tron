@@ -1078,7 +1078,12 @@ export interface HomeMemoryStatus {
     coverage: { admitted: number; summarized: number };
     pump: { busy: number };
     blocked: { reason: string; detail?: string } | null;
-    tokens: { limit: number; reserved: number; used: number };
+    tokens: {
+      limit: number;
+      reserved: number;
+      used: number;
+      sinceOpen: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    };
   };
   blocked?: string;
   reason?: string;
