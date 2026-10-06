@@ -9,7 +9,7 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import { HOME_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import type { JsonValue } from "../protocol/types.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
@@ -72,9 +72,6 @@ import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
-import type { HomeOwner } from "../home/home-owner.js";
-import { MAXIMUM_MEMORY_TOKEN_BUDGET } from "../home/home-memory.js";
-import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
@@ -208,7 +205,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -292,8 +289,6 @@ export interface GatewayServiceDependencies {
   knowledge?: KnowledgeService;
   /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
   connections?: ConnectionOwner;
-  /** Tron Home's designation owner; absent only in a Gateway without one. */
-  home?: HomeOwner;
   sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
@@ -450,7 +445,6 @@ export class GatewayService {
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
-        ...(this.dependencies.home ? [HOME_CAPABILITY] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
     };
@@ -464,49 +458,6 @@ export class GatewayService {
     switch (method) {
       case "system.info":
         return this.info();
-      case "home.status": {
-        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
-        return safeJson(await this.requireHome().status());
-      }
-      case "home.designate":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "model"], method);
-          const model = this.admitNamedHomeModel(params.model);
-          // The owner falls back to the recorded model when re-enabling an
-          // existing Home, and only a fresh session uses the default.
-          return safeJson(await this.requireHome().designate(
-            model ? { model } : {},
-            () => this.defaultHomeModel(),
-          ));
-        });
-      case "home.disable":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId"], method);
-          return safeJson(await this.requireHome().disable());
-        });
-      case "home.configureMemory":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "model", "tokenBudget"], method);
-          const model = this.admitNamedHomeModel(params.model);
-          if (!model) throw new GatewayError("invalid_request", "home.configureMemory requires model");
-          // A budget is a spend ceiling, not a trust boundary; its bound keeps a
-          // value no compactor could ever exhaust out of the record.
-          return safeJson(await this.requireHome().configureMemory({
-            model,
-            tokenBudget: integer(params.tokenBudget, "tokenBudget", 1, MAXIMUM_MEMORY_TOKEN_BUDGET),
-          }));
-        });
-      case "home.resumeMemory":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId"], method);
-          // A budget block is refused here: its cause is the configured ceiling,
-          // so the answer is home.configureMemory with a raised budget.
-          return safeJson(await this.requireHome().resumeMemory());
-        });
-      case "home.context": {
-        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home context accepts no parameters");
-        return safeJson(this.requireHome().contextStatus());
-      }
       case "knowledge.status":
       case "knowledge.observation.coverage":
       case "knowledge.list":
@@ -2188,45 +2139,6 @@ export class GatewayService {
     if (["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
       throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish before installing iOS", true);
     }
-  }
-
-  private requireHome(): HomeOwner {
-    if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is unavailable in this Gateway build");
-    return this.dependencies.home;
-  }
-
-  /** Admit the model a request named, or undefined when it named none. A
-   * virtual model is refused here because Home must not route on the canonical
-   * transcript. */
-  private admitNamedHomeModel(input: unknown): ModelRef | undefined {
-    if (input === undefined || input === null) return undefined;
-    const model = object(input, "model");
-    if (Object.keys(model).some((key) => key !== "provider" && key !== "id")) {
-      throw new GatewayError("invalid_request", "model accepts only provider and id");
-    }
-    return this.admitHomeModel(
-      string(model.provider, "model.provider", { max: 120 }),
-      string(model.id, "model.id", { max: 300 }),
-    );
-  }
-
-  /** This Gateway's default model for a new session, admitted the same way. */
-  private defaultHomeModel(): ModelRef {
-    const defaults = this.dependencies.settings.get(this.dependencies.config.tronHome, false) as {
-      effective?: { defaultModel?: ModelRef | null };
-    };
-    const fallback = defaults.effective?.defaultModel;
-    if (!fallback) throw new GatewayError("invalid_request", "Tron Home needs a model: set a default model or name one");
-    return this.admitHomeModel(fallback.provider, fallback.id);
-  }
-
-  private admitHomeModel(provider: string, id: string): ModelRef {
-    const model = this.dependencies.modelRuntime.getModel(provider, id);
-    if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
-    if (isVirtualModel(model)) {
-      throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
-    }
-    return { provider, id };
   }
 
   private requireKnowledge(): KnowledgeService {
