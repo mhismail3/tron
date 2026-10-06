@@ -12,6 +12,7 @@ import { InMemoryConnectorCredentialStore } from "../../test-support/connector-c
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 import * as durableJson from "../util/durable-json.js";
+import { waitFor, WAIT_HANG_BOUND_MS } from "../../test-support/wait-for.js";
 
 interface IntakeFixture { root: string; cleanup?: () => Promise<void>; retire?: () => void; retained?: boolean }
 const fixtures: IntakeFixture[] = [];
@@ -90,11 +91,11 @@ describe("K5 Raindrop intake enrichment", () => {
     service.queueIntakeSummary(failing.record as never);
     service.queueIntakeSummary(succeeding.record as never);
     service.queueIntakeSummary(personalWithoutText.record as never);
-    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    await waitFor(async () => {
       const jobs = await service.invoke({ operation: "knowledge.curation.jobs", request: { limit: 64 } }) as { jobs: Array<{ operation: string; status: string }> };
-      if (jobs.jobs.some(job => job.operation === "tags" && job.status === "failed") && jobs.jobs.filter(job => job.operation === "summary").every(job => job.status !== "running")) break;
-      await new Promise(resolve => setTimeout(resolve, 5));
-    }
+      return jobs.jobs.some(job => job.operation === "tags" && job.status === "failed")
+        && jobs.jobs.filter(job => job.operation === "summary").every(job => job.status !== "running");
+    }, "tagging to fail and every summary to settle");
     const result = await service.invoke({ operation: "knowledge.curation.jobs", request: { limit: 64 } }) as { jobs: Array<{ sourceId: string; operation: string; status: string; reason?: string }> };
     expect(result.jobs.find(job => job.operation === "summary" && job.sourceId === failing.record.id)?.status).toBe("failed");
     expect(result.jobs.find(job => job.operation === "summary" && job.sourceId === succeeding.record.id)?.status).toBe("done");
@@ -192,11 +193,13 @@ describe("K5 Raindrop intake enrichment", () => {
         return done.promise;
       }));
     };
+    // The wait shares the one hang bound; only its failure report is local,
+    // because a hang here is diagnosed from the job rows and phases it dumps.
     const bounded = async <T,>(name: string, promise: Promise<T>): Promise<T> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([promise, new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`${name}: ${JSON.stringify({ sequence, jobs: jobs.observe({ limit: 64 }), phases })}`)), 10_000);
+          timer = setTimeout(() => reject(new Error(`Waited ${WAIT_HANG_BOUND_MS}ms for ${name}; ${JSON.stringify({ sequence, jobs: jobs.observe({ limit: 64 }), phases })}`)), WAIT_HANG_BOUND_MS);
         })]);
       } finally { clearTimeout(timer); }
     };

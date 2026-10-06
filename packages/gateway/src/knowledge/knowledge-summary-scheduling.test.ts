@@ -6,23 +6,20 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
-async function until(condition: () => boolean) {
-  for (let attempt = 0; attempt < 400; attempt += 1) { if (condition()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
-  throw new Error("Condition was not reached");
-}
+/** Generation is owned background work, so a caller observes its terminal row
+ * instead of holding a request open for it. */
 async function settle(service: KnowledgeService, commandId: string) {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  return waitFor(async () => {
     const listed = await service.invoke({ operation: "knowledge.curation.jobs", request: { commandId } }) as { jobs: Array<{ status: string; revisionId?: string; code?: string }> };
     const job = listed.jobs[0];
-    if (job && job.status !== "running") return job;
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-  throw new Error("Summary job did not settle");
+    return job && job.status !== "running" ? job : undefined;
+  }, "the summary job to settle");
 }
 
 /** Failure modes under test: a long model call holds the store lock so every
@@ -56,7 +53,7 @@ describe("Knowledge source summary scheduling", () => {
     const accepted = await service.invoke(action) as { job: { status: string }; record: { revisionId: string } };
     expect(accepted.job.status).toBe("running");
     expect(accepted.record.revisionId).toBe(source.record.revisionId);
-    await until(() => counter.generations === 1);
+    await waitFor(() => counter.generations === 1, "the first summary generation");
     // The generation is in flight: every read must still answer.
     expect((await store.status()).available).toBe(true);
     expect((await store.list({ kind: "source" })).records.map(record => record.id)).toEqual([source.record.id]);
@@ -84,7 +81,7 @@ describe("Knowledge source summary scheduling", () => {
     const left = second.service.invoke(second.action) as Promise<{ job: { commandId: string } }>;
     const right = second.service.invoke(second.action) as Promise<{ job: { commandId: string } }>;
     const [leftAccepted, rightAccepted] = await Promise.all([left, right]);
-    await until(() => concurrent.generations === 1);
+    await waitFor(() => concurrent.generations === 1, "the first concurrent summary generation");
     gate.resolve();
     expect(await settle(second.service, second.action.request.commandId)).toMatchObject({ status: "done" });
     // One run: the duplicate observes the accepted job instead of starting one.

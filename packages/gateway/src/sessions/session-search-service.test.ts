@@ -10,6 +10,7 @@ import { JevDecisionClient, JevEvaluationError } from "../knowledge/jev-client.j
 import { SessionSearchService, type SessionSearchEmbeddingClient } from "./session-search-service.js";
 import { SessionSearchIndex } from "./session-search-index.js";
 import { SessionSearchAllowanceLedger } from "./session-search-allowance.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -229,7 +230,14 @@ describe("SessionSearchService backend seams", () => {
     const embedding = new FixtureEmbedding();
     const { index, service } = await realService(embedding);
     await service.warm();
-    for (let attempt = 0; attempt < 100 && embedding.calls < 3; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
+    // `warm()` starts semantic indexing in the background; the search below must
+    // fuse the warm index's candidate before the final result cap. Wait for that
+    // pass to embed every fixture passage — the old bound here waited for
+    // `calls >= 3`, one more than this fixture has, so it always expired quietly
+    // after 200 ms and the case never proved the warm index was in play (the #400
+    // class of a wait whose budget, not its condition, decided the outcome).
+    const passages = entries.filter((entry) => entry.type === "message").length;
+    await waitFor(() => embedding.calls >= passages, "the warm-up to embed every fixture passage");
     const response = await service.search({ query: "needle", maxResults: 1 });
     expect(response.results).toHaveLength(1);
     expect(response.results[0]?.entryId).toBe("semantic");

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelRuntime, SettingsManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
+import { waitFor } from "../../test-support/wait-for.js";
 import { GlobalProviderResources } from "./global-provider-resources.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 
@@ -32,25 +33,13 @@ async function fixture() {
     refreshOnCreate: false,
   });
   const events: Array<{ topic: string; payload: JsonValue }> = [];
-  // Authentication events are this fixture's only asynchronous signal, so
-  // waiters settle from the sink instead of polling the clock.
-  const listeners = new Set<() => void>();
   const broker = new AuthBroker(runtime, (_client, topic, payload) => {
     events.push({ topic, payload });
-    for (const listener of [...listeners]) listener();
   });
-  /** Resolves once the recorded events satisfy the predicate; an event storm
-   * that never satisfies it throws instead of looping. */
-  const waitForAuthEvent = async (predicate: () => boolean): Promise<void> => {
-    for (let attempt = 0; attempt < 64; attempt += 1) {
-      if (predicate()) return;
-      await new Promise<void>((resolve) => {
-        const listener = (): void => { listeners.delete(listener); resolve(); };
-        listeners.add(listener);
-      });
-    }
-    if (!predicate()) throw new Error("global provider auth event did not arrive");
-  };
+  /** Waits for the recorded events to satisfy the predicate; the shared hang
+   * bound names it when they never do. */
+  const waitForAuthEvent = (predicate: () => boolean): Promise<void> =>
+    waitFor(predicate, "the global provider auth event");
   const log = vi.fn();
   const broadcast = vi.fn();
   const createResources = () => GlobalProviderResources.create({

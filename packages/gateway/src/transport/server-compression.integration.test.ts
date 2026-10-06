@@ -8,6 +8,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 // permessage-deflate is negotiated only for paired devices (see
 // packages/gateway/docs/connection-resilience.md#frame-compression).
@@ -38,14 +39,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("probe did not bind");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
-}
-
-async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
 }
 
 async function startGateway() {
@@ -102,7 +95,7 @@ async function startGateway() {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
-    await waitUntil(() => frames.some((frame) => frame.type === "hello"), "hello");
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     const openedRecords = logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened");
     return { socket, frames, transport: () => transport!, negotiated, opened: openedRecords.at(-1)?.[1] as string };
   };
@@ -117,7 +110,7 @@ async function startGateway() {
       "test.large",
       { text },
     );
-    await waitUntil(() => client.frames.some((frame) => frame.topic === "test.large"), "large event");
+    await waitFor(() => client.frames.some((frame) => frame.topic === "test.large"), "large event");
     expect(client.frames.find((frame) => frame.topic === "test.large")?.payload.text).toBe(text);
     return { wireBytes: client.transport().bytesRead - before, textBytes: text.length };
   };
@@ -179,7 +172,7 @@ describe("WebSocket frame compression", () => {
     expect(client.socket.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
 
     client.socket.send(paddedRequest("at-limit", MAXIMUM_FRAME_BYTES));
-    await waitUntil(() => client.frames.some((frame) => frame.id === "at-limit"), "at-limit response");
+    await waitFor(() => client.frames.some((frame) => frame.id === "at-limit"), "at-limit response");
     expect(client.frames.find((frame) => frame.id === "at-limit")).toMatchObject({ ok: true });
 
     // Compressed, the over-limit message is a few dozen bytes on the wire, so
@@ -212,7 +205,7 @@ describe("decoded outbound ceiling on every send path", () => {
     });
     const request = async (id: string, method: string, params: Record<string, unknown>) => {
       client.socket.send(JSON.stringify({ type: "request", id, method, params }));
-      await waitUntil(() => client.frames.some((frame) => frame.id === id), id);
+      await waitFor(() => client.frames.some((frame) => frame.id === id), id);
       return client.frames.find((frame) => frame.id === id);
     };
     const resyncs = () => client.frames.filter((frame) => frame.topic === "transport.resyncRequired");
@@ -221,19 +214,19 @@ describe("decoded outbound ceiling on every send path", () => {
     expect(await request("response", "test.oversized", {})).toMatchObject({ ok: false, error: { code: "response_too_large" } });
     // emitToClient.
     fixture.gateway.emitToClient(connection.id, "test.direct", { transcript: OVERSIZED_CONTENT });
-    await waitUntil(() => resyncs().length === 1, "direct event fallback");
+    await waitFor(() => resyncs().length === 1, "direct event fallback");
     // Global broadcast (one prepared frame shared by every client).
     fixture.gateway.broadcast("test.global", { transcript: OVERSIZED_CONTENT });
-    await waitUntil(() => resyncs().length === 2, "global broadcast fallback");
+    await waitFor(() => resyncs().length === 2, "global broadcast fallback");
     // Session broadcast buffered by the synchronization barrier, then replayed.
     const opened = await request("open", "session.open", { sessionId: "session" });
     fixture.gateway.broadcastSession("session", "session.snapshot", { transcript: OVERSIZED_CONTENT });
     expect(resyncs()).toHaveLength(2);
     await request("sync", "session.sync", { sessionId: "session", syncToken: opened.result.syncToken });
-    await waitUntil(() => resyncs().length === 3, "barrier replay fallback");
+    await waitFor(() => resyncs().length === 3, "barrier replay fallback");
     // Session broadcast to a synchronized subscriber.
     fixture.gateway.broadcastSession("session", "session.snapshot", { transcript: OVERSIZED_CONTENT });
-    await waitUntil(() => resyncs().length === 4, "session broadcast fallback");
+    await waitFor(() => resyncs().length === 4, "session broadcast fallback");
 
     expect(resyncs().map((frame) => frame.sessionId)).toEqual([undefined, undefined, "session", "session"]);
     expect(client.socket.readyState).toBe(WebSocket.OPEN);
