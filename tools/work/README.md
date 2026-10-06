@@ -772,12 +772,14 @@ replaces the link that report path resolves through.
 A report is JSON. `land` refuses it unless `journey_status` is 0,
 `evidence_complete` is true, `source.revision` is the head being landed,
 `source.dirty` is false, and `source.source_fingerprint` is a non-empty string.
-Those five fields are the run's proof of what it did and which source bytes
-produced it; the harness that writes them proves its own build products against
-the live source state before it runs the journey. The reports and their
-digests stay local; the pull request's Verification section carries each
-report's sha256 with its summary fields, and no report path, so a reviewer can
-compare the digest and re-run the journey with the same command.
+The five fields are the run's own statement of what it did and which source
+state produced it: `revision` binds the run to that head, while `dirty` and the
+fingerprint rule out content beyond it (a clean worktree's fingerprint is the
+fixed clean-state value). The harness that writes them proves its build
+products against the live source state before it runs the journey. The reports
+and their digests stay local; the pull request's Verification section carries
+each report's sha256 with its summary fields, and no report path, so a reviewer
+can compare the digest and re-run the journey with the same command.
 
 Screenshots and recordings are not attached from a journey. `--evidence-manifest`
 remains the explicit opt-in it is ([UI evidence](#ui-evidence)); exporting a
