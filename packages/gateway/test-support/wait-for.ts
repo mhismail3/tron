@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { clearTimeout as realClearTimeout, setTimeout as realSetTimeout } from "node:timers";
 
 /**
  * How long a Gateway test waits for a condition whose timing is not the contract
@@ -12,48 +12,52 @@ import { vi } from "vitest";
  *
  * The bound stays below the 15 s `testTimeout` in `vitest.config.ts` so the wait
  * reports its own label; a wait that outlived the test would be cut off with
- * only "Test timed out" and no condition. It is above Vitest's 10 s
- * `hookTimeout`, so a wait inside `beforeEach`/`afterEach` passes a smaller
- * `boundMs` of its own.
+ * only "Test timed out" and no condition.
  */
 export const WAIT_HANG_BOUND_MS = 12_000;
+
+/**
+ * The bound for a wait a hook body runs (`beforeEach`/`afterEach`/`afterAll`, and
+ * the cleanup callbacks they await). Vitest's `hookTimeout` is 10 s
+ * independently of the 15 s test timeout, so a hook wait under the default bound
+ * would be cut off with "Hook timed out" and no label.
+ */
+export const HOOK_HANG_BOUND_MS = 5_000;
+
+/**
+ * Real time, captured at module load. `vi.useFakeTimers()` replaces
+ * `globalThis.Date` and the global timer functions for the rest of the test, and
+ * a poll must never move a clock the test owns: that would fire the timers under
+ * test (epic #400). `node:timers` is not a target of the global replacement, so
+ * both references stay real even while a test's clock is fake.
+ */
+const realDateNow = Date.now;
 
 export interface WaitForOptions {
   /** Poll cadence in ms. */
   readonly intervalMs?: number;
   /**
-   * Replaces the shared hang bound. Only for the rare case where elapsed time
-   * is itself the contract; say why at that call site.
+   * Replaces the shared hang bound. Only for a case where elapsed time is
+   * itself the contract, or where the surrounding hook has its own smaller
+   * timeout (then pass `HOOK_HANG_BOUND_MS` or less); say why at that call site.
    */
   readonly boundMs?: number;
 }
 
 /**
- * Awaits an event or promise the code already exposes, under the same hang
- * bound and with the same labeled failure as {@link waitFor}. A promise whose
- * latency is not the contract under test must not be raced against a budget
- * tuned to host speed either.
- */
-export async function awaitsWithin<T>(promise: Promise<T>, label: string, boundMs = WAIT_HANG_BOUND_MS): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  try {
-    return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Waited ${boundMs}ms for ${label} and it never settled`)), boundMs);
-    })]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Waits for `condition` to report a value, failing with `label` when it never
- * does. A condition that throws fails immediately and unchanged, so a real bug
- * in the awaited path is never mistaken for a slow host.
+ * Waits for `condition` to report a result, failing with `label` when it never
+ * does. A result of `undefined` or `false` means "not yet"; any other result —
+ * including `0`, `""` and `null` — is the awaited value, so a condition can
+ * observe a value as well as assert one.
  *
- * Built on `vi.waitUntil`, which polls on timers that stay real under
- * `vi.useFakeTimers()` and advances the test's fake clock between polls. Tests
- * that own a fake clock (for example knowledge observation) therefore keep
- * making progress on their real I/O while their simulated timers stay theirs.
+ * Two properties matter:
+ * - A condition that throws fails immediately and unchanged, so a real bug in
+ *   the awaited path is never mistaken for a slow host.
+ * - The hang bound is enforced here, not by the test runner, so even a condition
+ *   whose evaluation never settles fails with its own label at the bound.
+ *
+ * Polling happens on real timers and real time only. A test that owns a fake
+ * clock advances it itself, as the file that fakes it decides.
  */
 export async function waitFor<T>(
   condition: () => T | undefined | false | Promise<T | undefined | false>,
@@ -62,13 +66,64 @@ export async function waitFor<T>(
 ): Promise<T> {
   const boundMs = options.boundMs ?? WAIT_HANG_BOUND_MS;
   const intervalMs = options.intervalMs ?? 10;
-  const deadline = Date.now() + boundMs;
-  return vi.waitUntil(async () => {
-    const value = await condition();
+  const deadline = realDateNow() + boundMs;
+  for (;;) {
+    const remaining = deadline - realDateNow();
+    if (remaining <= 0) throw unmetCondition(label, boundMs);
+    const value = await evaluateWithin(condition, remaining, () => unmetCondition(label, boundMs));
     if (value !== undefined && value !== false) return value as T;
-    if (Date.now() >= deadline) {
-      throw new Error(`Waited ${boundMs}ms for ${label} and the condition was never met`);
-    }
-    return undefined;
-  }, { timeout: boundMs + intervalMs, interval: intervalMs });
+    const pause = Math.min(intervalMs, deadline - realDateNow());
+    if (pause > 0) await realDelay(pause);
+  }
+}
+
+/**
+ * Awaits an event or promise the code already exposes, under the same hang bound
+ * and with the same labeled failure as {@link waitFor}. A promise whose latency
+ * is not the contract under test must not be raced against a budget tuned to
+ * host speed either.
+ */
+export async function awaitsWithin<T>(promise: Promise<T>, label: string, boundMs: number = WAIT_HANG_BOUND_MS): Promise<T> {
+  let timer!: NodeJS.Timeout;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = realSetTimeout(() => reject(unmetSettlement(label, boundMs)), boundMs);
+  });
+  try {
+    return await Promise.race([promise, expiry]);
+  } finally {
+    realClearTimeout(timer);
+  }
+}
+
+/** One evaluation, abandoned when it outlives what is left of the bound. */
+async function evaluateWithin<T>(
+  condition: () => T | undefined | false | Promise<T | undefined | false>,
+  remainingMs: number,
+  onExpiry: () => Error,
+): Promise<T | undefined | false> {
+  let timer: NodeJS.Timeout | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = realSetTimeout(() => reject(onExpiry()), remainingMs);
+  });
+  const evaluation = (async () => condition())();
+  // The abandoned evaluation may still reject after the bound fired; it is no
+  // longer awaited, and an unhandled rejection would fail an unrelated test.
+  evaluation.catch(() => {});
+  try {
+    return await Promise.race([evaluation, expiry]);
+  } finally {
+    realClearTimeout(timer);
+  }
+}
+
+function realDelay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => { realSetTimeout(resolve, milliseconds); });
+}
+
+function unmetCondition(label: string, boundMs: number): Error {
+  return new Error(`Waited ${boundMs}ms for ${label} and the condition was never met`);
+}
+
+function unmetSettlement(label: string, boundMs: number): Error {
+  return new Error(`Waited ${boundMs}ms for ${label} and it never settled`);
 }

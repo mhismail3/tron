@@ -9,7 +9,7 @@ import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -345,7 +345,7 @@ describe("WebSocket connection and outbound capacity", () => {
     cleanups.push(async () => {
       finishCommand();
       for (const peer of peers) if (peer.readyState !== WebSocket.CLOSED) peer.terminate();
-      try { await awaitsWithin(gateway?.close() ?? Promise.resolve(), "overload gateway disposal"); }
+      try { await awaitsWithin(gateway?.close() ?? Promise.resolve(), "overload gateway disposal", HOOK_HANG_BOUND_MS); }
       finally { await rm(root, { recursive: true, force: true }); }
     });
     const devices = new DeviceStore(root, "machine");
@@ -434,7 +434,7 @@ describe("WebSocket connection and outbound capacity", () => {
       // failed assertions must not strand the service behind this gate.
       releaseCleanup();
       try {
-        await awaitsWithin(gateway?.close() ?? Promise.resolve(), "self-revoke gateway close");
+        await awaitsWithin(gateway?.close() ?? Promise.resolve(), "self-revoke gateway close", HOOK_HANG_BOUND_MS);
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -507,7 +507,7 @@ describe("WebSocket connection and outbound capacity", () => {
         if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
       }
       try {
-        await awaitsWithin(gateway?.close() ?? Promise.resolve(), "stalled self-revoke gateway close");
+        await awaitsWithin(gateway?.close() ?? Promise.resolve(), "stalled self-revoke gateway close", HOOK_HANG_BOUND_MS);
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -657,7 +657,7 @@ describe("WebSocket connection and outbound capacity", () => {
     cleanups.push(async () => {
       try {
         for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-        if (gateway) await awaitsWithin(gateway.close(), "progress fixture disposal");
+        if (gateway) await awaitsWithin(gateway.close(), "progress fixture disposal", HOOK_HANG_BOUND_MS);
         await rm(root, { recursive: true, force: true });
       } finally { now.mockRestore(); }
     });
@@ -712,9 +712,9 @@ describe("WebSocket connection and outbound capacity", () => {
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         const closed = new Promise<void>(resolve => socket!.once("close", () => resolve()));
         socket.terminate();
-        await awaitsWithin(closed, "structural socket disposal");
+        await awaitsWithin(closed, "structural socket disposal", HOOK_HANG_BOUND_MS);
       }
-      if (gateway) await awaitsWithin(gateway.close(), "structural fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "structural fixture disposal", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -831,7 +831,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let socket: WebSocket | undefined;
     cleanups.push(async () => {
       if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      if (gateway) await awaitsWithin(gateway.close(), "hello fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "hello fixture disposal", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -871,7 +871,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "correlation fixture close");
+      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "correlation fixture close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -951,7 +951,7 @@ describe("WebSocket connection and outbound capacity", () => {
       (gateway as unknown as { server: import("node:http").Server }).server.on("connection", socket => physicalSockets.push(socket));
       cleanups.push(async () => {
         for (const peer of peers) if (peer.readyState !== WebSocket.CLOSED) peer.terminate();
-        await awaitsWithin(gateway.close(), "fanout fixture close");
+        await awaitsWithin(gateway.close(), "fanout fixture close", HOOK_HANG_BOUND_MS);
         await rm(root, { recursive: true, force: true });
       });
       await gateway.listen();
@@ -1089,7 +1089,7 @@ describe("WebSocket connection and outbound capacity", () => {
     socket.on("error", () => {});
     cleanups.push(async () => {
       if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await awaitsWithin(gateway.close(), "coalescing fixture close");
+      await awaitsWithin(gateway.close(), "coalescing fixture close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     await awaitsWithin(new Promise<void>((resolve, reject) => {
@@ -1324,7 +1324,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "supersede fixture close");
+      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "supersede fixture close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1391,7 +1391,7 @@ describe("WebSocket connection and outbound capacity", () => {
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
       for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "supersede pre-hello fixture close");
+      await awaitsWithin(gateway?.close() ?? Promise.resolve(), "supersede pre-hello fixture close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1431,7 +1431,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
-      if (gateway) await awaitsWithin(gateway.close(), "capacity fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "capacity fixture disposal", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");
@@ -1539,9 +1539,9 @@ describe("WebSocket connection and outbound capacity", () => {
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         const closed = new Promise<void>((resolve) => socket!.once("close", () => resolve()));
         socket.terminate();
-        await awaitsWithin(closed, "shed socket disposal");
+        await awaitsWithin(closed, "shed socket disposal", HOOK_HANG_BOUND_MS);
       }
-      if (gateway) await awaitsWithin(gateway.close(), "shed fixture disposal");
+      if (gateway) await awaitsWithin(gateway.close(), "shed fixture disposal", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
     const devices = new DeviceStore(root, "machine");

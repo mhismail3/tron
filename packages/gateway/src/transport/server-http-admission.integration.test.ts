@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
-import { awaitsWithin } from "../../test-support/wait-for.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -29,16 +29,6 @@ function responseStatus(outgoing: ReturnType<typeof request>): Promise<{ respons
   });
 }
 
-async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out`)), 2_500);
-    timer.unref();
-  });
-  try { return await Promise.race([promise, timeout]); }
-  finally { clearTimeout(timer); }
-}
-
 describe("Gateway HTTP admission and retirement", () => {
   it("rejects non-object pairing JSON with bounded invalid_request responses", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-pair-body-"));
@@ -50,7 +40,7 @@ describe("Gateway HTTP admission and retirement", () => {
       auth: {} as any, service: { info: () => ({ protocolVersion: 7 }) } as any, logger: { log: () => {} } as any,
     });
     await gateway.listen();
-    cleanups.push(async () => { await awaitsWithin(gateway.close(), "pair gateway close"); await rm(root, { recursive: true, force: true }); });
+    cleanups.push(async () => { await awaitsWithin(gateway.close(), "pair gateway close", HOOK_HANG_BOUND_MS); await rm(root, { recursive: true, force: true }); });
     for (const body of ["null", "[]", JSON.stringify("x"), "123"]) {
       const outgoing = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/pair", headers: { "content-type": "application/json" } });
       outgoing.end(body);
@@ -82,7 +72,7 @@ describe("Gateway HTTP admission and retirement", () => {
     cleanups.push(async () => {
       fail(); peer?.destroy();
       await starting.catch(() => {});
-      try { await awaitsWithin(gateway.close(), "failed-startup cleanup"); }
+      try { await awaitsWithin(gateway.close(), "failed-startup cleanup", HOOK_HANG_BOUND_MS); }
       finally { await rm(root, { recursive: true, force: true }); }
     });
     await awaitsWithin(bound, "startup listener");
@@ -122,7 +112,7 @@ describe("Gateway HTTP admission and retirement", () => {
     await gateway.listen();
     cleanups.push(async () => {
       releaseAuthentication();
-      await awaitsWithin(gateway.close(), "upgrade gateway close");
+      await awaitsWithin(gateway.close(), "upgrade gateway close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
 
@@ -170,7 +160,7 @@ describe("Gateway HTTP admission and retirement", () => {
     await gateway.listen();
     cleanups.push(async () => {
       stream.destroy();
-      await awaitsWithin(gateway.close(), "HTTP gateway close");
+      await awaitsWithin(gateway.close(), "HTTP gateway close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
 

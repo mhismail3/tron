@@ -114,7 +114,7 @@ describe("two-phase session synchronization protocol", () => {
     // `session.sync` for a token no synchronization owns, which fails closed.
     const awaitAdmitted = async (id: string): Promise<void> => {
       request(id, "session.sync", "same", { syncToken: "not-a-token" });
-      await waitFor(() => frames.some((frame) => frame.id === id), "the id response frame");
+      await waitFor(() => frames.some((frame) => frame.id === id), `the ${id} response frame`);
       expect(frames.find((frame) => frame.id === id).error.code).toBe("conflict");
     };
     request("open-1", "session.open", "same");
@@ -204,7 +204,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
       mobile.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));
       await waitStarted(sessionId, expectedCount);
       openResolvers.get(sessionId)?.();
-      await waitFor(() => mobileFrames.some((frame) => frame.id === `${prefix}-open`), "the `${prefix}-open` response frame");
+      await waitFor(() => mobileFrames.some((frame) => frame.id === `${prefix}-open`), `the ${prefix}-open response frame`);
       const opened = mobileFrames.find((frame) => frame.id === `${prefix}-open`);
       expect(opened.ok).toBe(true);
       if (prefix === "mobile-c") {
@@ -214,7 +214,7 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
         expect(sessions.setPresentationVisibility).not.toHaveBeenCalled();
       }
       mobile.send(JSON.stringify({ type: "request", id: `${prefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
-      await waitFor(() => mobileFrames.some((frame) => frame.id === `${prefix}-sync`), "the `${prefix}-sync` response frame");
+      await waitFor(() => mobileFrames.some((frame) => frame.id === `${prefix}-sync`), `the ${prefix}-sync response frame`);
       return opened.result.subscriptionToken;
     };
     await mobileOpenSync("mobile-a", "a");
@@ -366,11 +366,11 @@ describe("synchronization catch-up overflow recovery", () => {
 
     const openAndSync = async (idPrefix: string, sessionId: string) => {
       socket.send(JSON.stringify({ type: "request", id: `${idPrefix}-open`, method: "session.open", params: { sessionId } }));
-      await waitFor(() => frames.some((frame) => frame.id === `${idPrefix}-open`), "the `${idPrefix}-open` response frame");
+      await waitFor(() => frames.some((frame) => frame.id === `${idPrefix}-open`), `the ${idPrefix}-open response frame`);
       const opened = frames.find((frame) => frame.id === `${idPrefix}-open`);
       expect(opened.ok).toBe(true);
       socket.send(JSON.stringify({ type: "request", id: `${idPrefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
-      await waitFor(() => frames.some((frame) => frame.id === `${idPrefix}-sync`), "the `${idPrefix}-sync` response frame");
+      await waitFor(() => frames.some((frame) => frame.id === `${idPrefix}-sync`), `the ${idPrefix}-sync response frame`);
     };
 
     await openAndSync("ordered", "ordered");

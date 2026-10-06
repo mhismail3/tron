@@ -664,7 +664,7 @@ describe("AuthBroker", () => {
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"), "the auth prompt event");
     const prompt = events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>;
     expect(broker.respond("device", exchanging, prompt.promptId as string, "synthetic-code")).toBe(true);
-    await waitFor(() => finishExchange !== undefined, "the exchange completion");
+    await waitFor(() => finishExchange !== undefined, "the exchange to reach its hook");
     expect(broker.cancel("device", exchanging)).toBe(true);
     await registry.waitUntilSettled();
     expect(settlements).toEqual(["rejected"]);

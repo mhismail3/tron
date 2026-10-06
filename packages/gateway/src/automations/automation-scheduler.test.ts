@@ -435,7 +435,7 @@ describe("AutomationScheduler", () => {
     });
 
     scheduler.start();
-    await waitFor(() => setTimer.mock.calls.some(([handler, delay]) => typeof handler === "function" && delay === 30_000), "the 30 s scheduler timer");
+    await waitFor(() => setTimer.mock.calls.some((call) => call.length === 2 && typeof call[0] === "function" && call[1] === 30_000), "the 30 s scheduler timer");
   });
 
   // G-1c/B2: the catalog owner may not have published a cut when recovery runs

@@ -40,9 +40,6 @@ const entries = [
 
 const output = JSON.stringify({ observations: [{ text: "The release is planned for Friday.", attribution: "user", certainty: "qualified", observedAt: "2026-01-01T00:00:01Z" }] });
 
-/** Waits for an observable condition. `waitFor` polls on real timers, so store
- * I/O still progresses between its polls while a test's fake clock stays under
- * the test's control; tests that would otherwise sleep advance it explicitly. */
 describe("KnowledgeObservationService", () => {
   it("publishes observations from one prose-wrapped JSON object", async () => {
     const { store, observer } = await fixture({ infer: async () => "Observations follow.\n" + output + "\nEnd." });

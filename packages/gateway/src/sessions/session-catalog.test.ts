@@ -226,8 +226,6 @@ async function fixture(
   };
 }
 
-/** Wait for a condition the watcher's own timers produce. The watcher fires
- * outside the owner's lane, so `settled()` alone cannot observe it. */
 /** A folder watcher a test drives by hand: it delivers exactly the events the
  * test chose, so an event the platform would have dropped, a start failure and a
  * watcher that stops observing can each be reproduced. Every case that needs the

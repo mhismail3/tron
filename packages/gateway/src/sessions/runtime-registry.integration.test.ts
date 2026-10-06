@@ -10,6 +10,7 @@ import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -82,24 +83,41 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
  * is the deterministic equivalent of waiting the watcher out, and settling the
  * owner then makes its rows and the durable document current without waiting
  * out the persist debounce. */
+/** Passes `discoverExtensionArtifactsUntil` may run before it stops on its own.
+ * It only stops the loop: the caller's pass assertion is the bound, so a lagging
+ * routing is reported as a pass count instead of a hang. It sits well above the
+ * one pass the production code implies for the cases that assert a count. */
+const DISCOVERY_PASS_LIMIT = 8;
+
 /** Registry discovery is a bounded single owner: a call that arrives while a
  * pass is in flight returns without discovering anything, and the next scheduled
  * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
- * of its own instead of treating the awaited call as a barrier, so wait out any
- * in-flight pass and then await one this call starts; `settled` names the state
- * that pass must publish (T-1). Neither waiting out a running pass nor repeating
- * passed is bounded by wall clock of its own: a pass walks a production-shaped
- * root of thousands of directory entries and a loaded host stretches that past
- * any fixed guess, which reported a pass that was merely slow as one that would
- * never settle (T-6). The shared hang bound is the only bound, and it names the
- * condition (epic #400). */
-async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
+ * of its own instead of treating the awaited call as a barrier; `settled` names
+ * the state that pass must publish (T-1). This helper runs only its own passes
+ * and reports how many, so a caller can assert the pass count the production code
+ * implies instead of a wall-clock budget (epic #400): a loaded host stretches a
+ * pass, which used to report a pass that was merely slow as one that would never
+ * settle (T-6).
+ *
+ * `passLimit` only stops the loop; the caller's assertion is the bound. A pass
+ * that never settles reports its own label at the shared hang bound. */
+async function discoverExtensionArtifactsUntil(
+  registry: RuntimeRegistry,
+  settled: () => boolean = () => true,
+  passLimit = DISCOVERY_PASS_LIMIT,
+): Promise<number> {
   const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
+  let passes = 0;
   await waitFor(async () => {
-    while (state.artifactDiscoveryInFlight) await new Promise((resolve) => setTimeout(resolve, 10));
+    // A pass that is already in flight returns without discovering anything; let
+    // it finish first (on the shared poll), so every pass counted here is one
+    // this call ran, and a caller's pass assertion is about its own passes.
+    if (state.artifactDiscoveryInFlight) return false;
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-    return settled();
+    passes += 1;
+    return settled() || passes >= passLimit;
   }, "extension artifact discovery to settle");
+  return passes;
 }
 
 /** Initialize a registry and wait for the catalog owner's first published cut.
@@ -113,6 +131,11 @@ async function initializeRegistry(
   await catalogOwner(registry).whenPublished();
 }
 
+/** A test that writes canonical files itself is an external writer: the folder
+ * watcher observes it, but no reader polls for it. Forcing one owner reconcile
+ * is the deterministic equivalent of waiting the watcher out, and settling the
+ * owner then makes its rows and the durable document current without waiting
+ * out the persist debounce. */
 async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
   await catalogOwner(registry).reconcile();
   await catalogOwner(registry).settled();
@@ -5668,7 +5691,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       content: [{ type: "text", text: "launched" }],
       details: { runId: late.runId, asyncDir: late.asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
     });
-    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
+    // The run must be offered by the first pass this call runs. Everything the
+    // pass needs is already derived: the root was walked above, so every
+    // unchanged artifact fact is cached by identity and the walk reaches the end
+    // of the root without spending the 1,024-read budget; the per-root routing
+    // budget for one root and two live slots is 512 (runtime-registry.ts:3935),
+    // and candidates no live slot can attribute are filtered out before that
+    // slice (runtime-registry.ts:3966), so the late run is the only candidate
+    // left to offer. A second pass means attribution or routing regressed, which
+    // is the bound this case's title claims.
+    const passes = await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
+    expect(passes, "the pass that offers the newly attributed run").toBe(1);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([late.asyncDir]));
     expect(stopped).toHaveLength(1);
     await rm(delegated.root, { recursive: true, force: true });
@@ -5803,36 +5836,67 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // read can open one inode and stat another. The discovery lane owns no
     // watcher for that window and used to report the first losing read as a
     // rejected artifact.
+    //
+    // The event this case needs is a read that lost that race and was retried:
+    // observing it read-only through the existing retry path is what makes the
+    // sample real, where the old `passes > 100` was a speed budget (#430:
+    // `expected 69 to be greater than 100`). A read that returns nothing is the
+    // only reason `readExtensionStatusArtifactWithReplacementRetry` reads again,
+    // and a first read that returns nothing under a non-stop rename is a losing
+    // read. No production hook is added.
+    const slotInternals = slot as unknown as {
+      readExtensionStatusArtifact: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
+      readExtensionStatusArtifactWithReplacementRetry: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
+    };
+    const readOnce = slotInternals.readExtensionStatusArtifact.bind(slot);
+    const readWithRetry = slotInternals.readExtensionStatusArtifactWithReplacementRetry.bind(slot);
+    // The watcher lane reads the same file through the same inner method
+    // (`refreshExtensionActivityFromArtifact`), so a read count taken across the
+    // retry path's wall-clock window would count its reads too. Scoping the count
+    // to the retry invocation's own async context keeps the observation exact:
+    // more than one read inside it is this path retrying a read that lost the
+    // race with the producer's rename.
+    const retryInvocation = new AsyncLocalStorage<{ reads: number }>();
+    let retriedLosingReads = 0;
+    vi.spyOn(slotInternals, "readExtensionStatusArtifact").mockImplementation(async (directory: string) => {
+      const invocation = retryInvocation.getStore();
+      if (invocation) invocation.reads += 1;
+      return readOnce(directory);
+    });
+    vi.spyOn(slotInternals, "readExtensionStatusArtifactWithReplacementRetry")
+      .mockImplementation((directory: string) => retryInvocation.run({ reads: 0 }, async () => {
+        const invocation = retryInvocation.getStore()!;
+        try {
+          return await readWithRetry(directory);
+        } finally {
+          if (invocation.reads > 1) retriedLosingReads += 1;
+        }
+      }));
     const tempPath = join(asyncDir, "status.tmp");
     let replacing = true;
-    let replacements = 0;
     const replacer = (async () => {
       while (replacing) {
         await writeFile(tempPath, payload);
         await rename(tempPath, statusPath);
-        replacements += 1;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
     })();
     try {
-      // A sustained replace storm is the requirement here, so the bound is the
-      // storm's own window and not a pass count derived from it. How many passes
-      // fit in the window is host speed: the old `passes > 100` was a speed budget
-      // that reported 69 passes on a loaded host as a failure (#430). The oracle
-      // is that no pass in the window reports a losing read, and the coverage
-      // guard below is that both the storm and the passes actually ran.
-      const stormEndsAt = Date.now() + 8_000;
-      let passes = 0;
-      while (Date.now() < stormEndsAt) {
-        await discoverExtensionArtifactsUntil(fixture.registry);
-        passes += 1;
-      }
-      expect(passes, "the discovery passes to run inside the storm window").toBeGreaterThan(0);
-      expect(replacements, "the replace storm to run inside the window").toBeGreaterThan(0);
+      // One pass is enough once the storm collides with a read; a storm that
+      // never loses a read still reports this label at the shared hang bound
+      // rather than a pass count nobody can derive from host speed.
+      await waitFor(
+        async () => {
+          await discoverExtensionArtifactsUntil(fixture.registry);
+          return retriedLosingReads > 0;
+        },
+        "a status.json read to lose the replace race and be retried",
+      );
     } finally {
       replacing = false;
       await replacer;
     }
+    expect(retriedLosingReads, "the losing read the case observed").toBeGreaterThan(0);
     expect(warnings.filter((warning) => warning.reason === "artifact-replacement-in-progress")).toEqual([]);
     expect(projected()).toMatchObject({ status: "running", runId });
     await rm(delegated.root, { recursive: true, force: true });

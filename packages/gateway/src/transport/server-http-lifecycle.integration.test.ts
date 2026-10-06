@@ -11,7 +11,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
 import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, HTTP_HEADERS_TIMEOUT_MS } from "./server.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes this file exists to catch (real sockets, real HTTP boundary):
 // 1. An upgrade that opens the write buffer and is deleted before hello
@@ -45,14 +45,6 @@ function gate() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function bounded<T>(promise: Promise<T>, label: string, timeoutMs = 3_000): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  try {
-    return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
-    })]);
-  } finally { clearTimeout(timer); }
-}
 async function fixture(maximumHttpRequests = 128) {
   const root = await mkdtemp(join(tmpdir(), "tron-http-lifecycle-"));
   const devices = new DeviceStore(root, "fixture-machine");
@@ -79,7 +71,7 @@ async function fixture(maximumHttpRequests = 128) {
   const clientSockets: Socket[] = [];
   cleanups.push(async () => {
     for (const socket of clientSockets) socket.destroy();
-    try { await awaitsWithin(gateway.close(), "fixture close"); }
+    try { await awaitsWithin(gateway.close(), "fixture close", HOOK_HANG_BOUND_MS); }
     finally { await rm(root, { recursive: true, force: true }); }
   });
   await gateway.listen();
@@ -436,7 +428,7 @@ describe("HTTP pending-work ownership", () => {
     peer.on("error", () => {});
     cleanups.push(async () => {
       peer.destroy(); producerRelease.resolve();
-      if (didAcquire) await awaitsWithin(physicalRelease.promise, "late physical lease cleanup");
+      if (didAcquire) await awaitsWithin(physicalRelease.promise, "late physical lease cleanup", HOOK_HANG_BOUND_MS);
       await blobs.dispose();
     });
     peer.end();

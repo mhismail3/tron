@@ -72,15 +72,6 @@ afterEach(async () => {
  * one-record-per-condition assertions. */
 const RECONCILE_SETTLE_MS = 150;
 
-async function bounded<T>(promise: Promise<T>, label: string, timeoutMs = 3_000): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  try {
-    return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
-    })]);
-  } finally { clearTimeout(timer); }
-}
-
 async function unusedPort(): Promise<number> {
   const probe = createTcpServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));

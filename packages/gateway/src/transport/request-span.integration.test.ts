@@ -142,6 +142,13 @@ describe("receipt-backed prompt request span", () => {
   });
 });
 
+/** This case measures a 2 MiB cold `session.open` and reports its stages, so its
+ * waits take a bound sized to the case's own budget (its test timeout below)
+ * rather than the suite-wide hang bound: a loaded host must not report the
+ * measurement's own fixture cost as a hang. Well below the 300 s timeout, and
+ * well above the old 30 s speed budget this file used to carry. */
+const COLD_OPEN_WAIT_BOUND_MS = 120_000;
+
 describe("cold session.open request span", () => {
   it("names a cold open's stages in the real logger's record and reports their volume", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-request-span-open-"));
@@ -217,7 +224,7 @@ describe("cold session.open request span", () => {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString()) as SocketFrame));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
-    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
+    await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
 
     const reports: Array<Record<string, unknown>> = [];
     const requestId = "cold-open";
@@ -229,12 +236,12 @@ describe("cold session.open request span", () => {
       method: "session.open",
       params: { sessionId: manager.getSessionId() },
     }));
-    await waitFor(() => frames.some((frame) => frame.id === requestId), "the request's response frame");
+    await waitFor(() => frames.some((frame) => frame.id === requestId), "the request's response frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
     const response = frames.find((frame) => frame.id === requestId);
     expect(response?.ok, JSON.stringify(response)).toBe(true);
     // By request ID, not by position: another RPC's record must not be read
     // as this open's breakdown.
-    await waitFor(() => completionOf() !== undefined, "the completion");
+    await waitFor(() => completionOf() !== undefined, "the completion", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
 
     const completion = completionOf()!;
     const stages = completion.stages;
@@ -273,11 +280,11 @@ describe("cold session.open request span", () => {
       method: "session.open",
       params: { sessionId: "00000000-0000-4000-8000-000000000000" },
     }));
-    await waitFor(() => frames.some((frame) => frame.id === failedRequestId), "the failed request's response frame");
+    await waitFor(() => frames.some((frame) => frame.id === failedRequestId), "the failed request's response frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
     expect(frames.find((frame) => frame.id === failedRequestId)?.ok).toBe(false);
     await waitFor(() => persistedRecords(logPath).some(
       (record) => record.requestID === failedRequestId && record.event === "rpc.completed",
-    ), "the persisted rpc.completed record");
+    ), "the persisted rpc.completed record", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
     const persisted = persistedRecords(logPath)
       .find((record) => record.requestID === failedRequestId && record.event === "rpc.completed")!;
     expect(persisted.outcome).toBe("failure");
@@ -370,7 +377,7 @@ describe("request loop signal", () => {
         "session.rename",
         { commandId: "rename-command", sessionId: "session-1", name: "Renamed" },
       ));
-      await waitFor(() => finishRename !== undefined, "the rename to finish");
+      await waitFor(() => finishRename !== undefined, "the rename to reach its hook");
       expect(requestsCompetingForLoop()).toBe(false);
       expect(workRegistry.facts()).toEqual([
         expect.objectContaining({ kind: "rpc-mutation", method: "session.rename" }),
