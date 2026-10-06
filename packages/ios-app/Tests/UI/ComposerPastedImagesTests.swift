@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import Testing
 import UniformTypeIdentifiers
@@ -19,6 +20,46 @@ struct ComposerPastedImagesTests {
             await #expect(throws: ComposerPastedImages.ImportError.self) {
                 _ = try await ComposerPastedImages.load(provider, maximumBytes: 16)
             }
+        }
+    }
+
+    // Failure modes (#407): an iPhone photo copies as public.heic first. Uploading
+    // it raw put an image type no provider accepts into the session, so every
+    // later turn was rejected. A copy must upload a provider-accepted format,
+    // must not be transcoded when one is already offered, and must fail visibly
+    // rather than upload bytes that cannot be decoded.
+    @Test("a copy that offers a provider-accepted format uploads it unchanged")
+    func prefersAcceptedRepresentation() async throws {
+        let png = try #require(image(.red).pngData())
+        let provider = NSItemProvider()
+        register(Data("not decoded".utf8), as: .heic, on: provider)
+        register(png, as: .png, on: provider)
+        let candidate = try await ComposerPastedImages.load(provider, maximumBytes: 1_048_576)
+        #expect(candidate.mimeType == "image/png")
+        #expect(candidate.name == "photo.png")
+        #expect(candidate.data == png)
+    }
+
+    @Test("a copy offering only a format providers reject uploads as JPEG")
+    func transcodesRejectedFormat() async throws {
+        let original = image(.blue)
+        let tiff = try encoded(original, as: .tiff)
+        let provider = NSItemProvider()
+        register(tiff, as: .tiff, on: provider)
+        let candidate = try await ComposerPastedImages.load(provider, maximumBytes: 1_048_576)
+        #expect(candidate.mimeType == "image/jpeg")
+        #expect(candidate.name == "photo.jpg")
+        let source = try #require(CGImageSourceCreateWithData(candidate.data as CFData, nil))
+        #expect(CGImageSourceGetType(source) as String? == UTType.jpeg.identifier)
+        #expect(CGImageSourceCreateImageAtIndex(source, 0, nil)?.width == original.cgImage?.width)
+    }
+
+    @Test("undecodable bytes in a rejected format fail instead of uploading")
+    func undecodableRejectedFormat() async {
+        let provider = NSItemProvider()
+        register(Data("not an image".utf8), as: .heic, on: provider)
+        await #expect(throws: ComposerPastedImages.ImportError.self) {
+            _ = try await ComposerPastedImages.load(provider, maximumBytes: 1_024)
         }
     }
 
@@ -82,6 +123,21 @@ struct ComposerPastedImagesTests {
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
         gate.finish()
+    }
+
+    private func register(_ data: Data, as type: UTType, on provider: NSItemProvider) {
+        provider.registerDataRepresentation(forTypeIdentifier: type.identifier, visibility: .all) { completion in
+            completion(data, nil)
+            return nil
+        }
+    }
+
+    private func encoded(_ image: UIImage, as type: UTType) throws -> Data {
+        let data = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try #require(image.cgImage), nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return data as Data
     }
 
     private func image(_ color: UIColor) -> UIImage {

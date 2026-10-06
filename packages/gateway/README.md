@@ -280,7 +280,11 @@ input path, which can be removed with the upload; it is not a guaranteed
 navigable parent. Imported entries remain self-contained for reopen and context. Pi 0.87 also applies the active model's initial image-resize
 profile before attachments, `read` results and tool-result images enter history;
 Gateway must preserve the source upload and avoid pre-resizing prompt images a
-second time. Update focused owner tests and this boundary map when ownership
+second time. Pi 0.99 does not normalize images on its queued steer/follow-up path
+and cannot decode HEIC on either path, so `UploadStore` inlines only png, jpeg,
+gif and webp uploads. Any other `image/*` is claimed as a path-envelope file
+attachment. An inline image a provider rejects would be replayed by every later
+request in its session (#407). Update focused owner tests and this boundary map when ownership
 changes. Keep a candidate's detailed version matrix in its GitHub epic until
 closeout; do not turn this paragraph into a second change tracker.
 
