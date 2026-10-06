@@ -197,7 +197,7 @@ describe("McpAdminService", () => {
       if (!address || typeof address === "string") throw new Error("MCP fixture failed to bind loopback");
       const origin = `http://127.0.0.1:${address.port}`;
       await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp` } } }));
-      const service = new McpAdminService(root, cliPath, owner);
+      const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
       const response = await service.storeBearer({ scope: "global" }, "fixture", "never-projected-secret");
       const config = await readFile(join(root, "mcp.json"), "utf8");
       const saved = JSON.parse(config) as { mcpServers: Record<string, { headers: { Authorization: string } }> };
