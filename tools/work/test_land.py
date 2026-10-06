@@ -17,8 +17,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import threading
-import time
 import unittest
 from pathlib import Path
 
@@ -62,6 +60,14 @@ FAKE_JOURNEY = textwrap.dedent(
     note("started")
     if spec.get("exit"):
         sys.exit(spec["exit"])
+    if spec.get("signal_parent"):
+        # The journey signals land's own process the way a terminal Ctrl-C does,
+        # then winds down on its own. It replaces its shell (`exec` in the
+        # fixture's command), so its parent is land's process.
+        time.sleep(spec.get("signal_after", 0.3))
+        os.kill(os.getppid(), signal.SIGINT)
+        time.sleep(spec.get("wound_down_after", 1.0))
+        note("wound down")
     if spec.get("sleep"):
         if spec.get("trap_sigint"):
             def wind_down(*_):
@@ -69,13 +75,6 @@ FAKE_JOURNEY = textwrap.dedent(
                 sys.exit(130)
             signal.signal(signal.SIGINT, wind_down)
         time.sleep(spec["sleep"])
-        note("wound down")
-    if spec.get("until"):
-        # Runs until the test releases it: an interrupted land must wait for
-        # this wind-down rather than killing the journey.
-        deadline = time.time() + 60
-        while not Path(spec["until"]).exists() and time.time() < deadline:
-            time.sleep(0.05)
         note("wound down")
     if spec.get("report", True):
         # The same relative report path the registry declares (REPORT_PATH).
@@ -363,7 +362,7 @@ class LandFixture(unittest.TestCase):
         journey_script.chmod(0o755)
         self.config["acceptance"] = {
             "evidenceEnv": "FAKE_ACCEPTANCE_EVIDENCE",
-            "journeys": {name: {"journey": name, "command": f"{journey_script} {{journey}}",
+            "journeys": {name: {"journey": name, "command": f"exec {journey_script} {{journey}}",
                                 "report": REPORT_PATH, "timeoutSeconds": 60}
                          for name in (PAIR, WRONG_CODE)},
         }
@@ -483,18 +482,6 @@ class LandFixture(unittest.TestCase):
         if not self.acceptance_runs.exists():
             return []
         return self.acceptance_runs.read_text().splitlines()
-
-    def interrupt_when_started(self, journey: str, release: Path) -> None:
-        """SIGINT this process once the journey is up and land is waiting on it, then let it finish."""
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if f"{journey} started" in self.journey_runs():
-                break
-            time.sleep(0.02)
-        time.sleep(0.2)
-        os.kill(os.getpid(), signal.SIGINT)
-        time.sleep(1)
-        release.touch()
 
     def passing_report(self, journey: str, head: str) -> dict:
         """A report land would accept, for a run that did not write it."""
@@ -1003,12 +990,10 @@ class AcceptanceLandingTests(LandFixture):
         self.assert_nothing_published()
 
     def test_an_interrupted_land_waits_for_the_journey_to_wind_down(self):
-        # The journey runs until the test releases it. land must wait for that
-        # wind-down and then re-raise; the interrupt path of subprocess.run would
-        # kill the journey here instead.
-        release = self.tmp / "release"
-        self.spec({PAIR: {"until": str(release), "report": False}})
-        threading.Thread(target=self.interrupt_when_started, args=(PAIR, release), daemon=True).start()
+        # The journey signals land's process the way a terminal interrupt does and
+        # then winds down on its own. land must wait for that wind-down and
+        # re-raise; the interrupt path of subprocess.run would kill it instead.
+        self.spec({PAIR: {"signal_parent": True, "report": False}})
         with self.assertRaises(KeyboardInterrupt):
             self.land(acceptance=PAIR)
         self.assertIn(f"{PAIR} wound down", self.journey_runs())
