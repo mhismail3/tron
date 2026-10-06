@@ -834,10 +834,25 @@ A worktree is provably done when all of these hold:
 
 - it is a linked worktree under `claim.worktreeRoot`, never the primary
   checkout, on a claim branch (`<type>/<issue>-<slug>`), and not locked;
-- GitHub reports a pull request from that branch in this repository MERGED
-  into `claim.baseBranch`, and that pull request's head is the local branch
-  head. Ancestry is not used, because a squash merge leaves the branch head
-  outside the base branch;
+- the branch head is accounted for, in either of two ways:
+  - GitHub reports a pull request from that branch in this repository MERGED
+    into `claim.baseBranch`, and that pull request's head is the local branch
+    head. Ancestry is not used, because a squash merge leaves the branch head
+    outside the base branch;
+  - or the issue the branch claims is CLOSED and the branch holds nothing
+    beyond the one claim commit `start` created for it. That commit is
+    identified as `start`, the dashboard and `land` identify it: the only
+    commit in `<remote>/<base>..HEAD`, carrying both the issue's
+    `Work-Claim-Issue` and `Work-Claim-Session` trailers, and empty. `start`
+    makes it with `commit-tree` on the base tip's tree, so it has one parent
+    and the same tree as that parent; the content is what proves the claim
+    spent, because work amended or squashed into the commit keeps its message
+    and trailers. This is how an evidence-only task, which produces no pull
+    request, proves itself spent. A later base branch tip is not another
+    commit of this branch, so a claim made before it still qualifies. An open
+    issue, any commit beyond the claim, a single commit without that marker
+    for the issue, a single commit carrying changes, and a `<remote>/<base>`
+    that cannot be resolved all keep the worktree;
 - the worktree has no modified, staged or untracked files, and no merge,
   rebase, cherry-pick, revert or bisect in progress;
 - every ignored file matches a `cleanup.regenerableIgnored` glob. These are
@@ -853,7 +868,9 @@ For a worktree that is provably done, `cleanup`:
    own process group, bounded by its `timeoutSeconds`. These release what the
    worktree's own tooling holds outside it. A non-zero exit or a timeout keeps
    the worktree and prints the end of the command's output;
-2. checks every condition above again, since the commands take time;
+2. checks every condition above again, since the commands take time. A claim's
+   proof re-reads the issue state, because an issue can be reopened while a
+   release command runs; a merged pull request cannot unmerge;
 3. gives the owner read, write and search permission on every directory in the
    worktree through no-follow descriptors, so a replaced directory name cannot
    redirect permission changes outside it. Read-only generated output (the
@@ -862,13 +879,13 @@ For a worktree that is provably done, `cleanup`:
    keeps the worktree;
 4. runs `git worktree remove` without `--force`. Git deletes the regenerable
    ignored files with the worktree;
-5. deletes the local branch only if it is still at the merged head
-   (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings in
-   the shared Git config. The head check guards the short window after step
+5. deletes the local branch only if it is still at the head that proved it
+   done (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings
+   in the shared Git config. The head check guards the short window after step
    2; while the branch is checked out, the recheck already covers it;
-6. deletes the remote branch with a lease on the merged head, as `land` does.
-   A branch already gone is fine; a branch at any other commit is kept and
-   reported.
+6. deletes the remote branch with a lease on the head that proved it done —
+   the merged head, or the claim commit — as `land` does. A branch already
+   gone is fine; a branch at any other commit is kept and reported.
 
 Any other worktree is never touched and no release command runs for it.
 Without `--all`, `cleanup` refuses the current worktree with its reasons.
@@ -923,8 +940,8 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     the worktree, and a command past its timeout has its process group killed
     and keeps it too.
 58. **A branch that moved is deleted.** The remote branch is deleted only
-    with a lease on the merged head. A remote branch pushed to after the
-    merge is kept and reported.
+    with a lease on the head that proved the worktree done. A remote branch
+    pushed to after the merge, or after the claim commit, is kept and reported.
 59. **The worktree changes between the check and the removal.** A commit or a
     new file made while the release commands run keeps the worktree.
 60. **A dry run changes something.** `--dry-run` runs no release command and
@@ -944,3 +961,17 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     After assertions, fixture teardown walks the surviving payload without
     following symlinks, including directories renamed by the controlled race;
     captured pre-race names would leave read-only children behind on Python 3.9.
+70. **An evidence-only claim is removed while its branch still holds work, or
+    kept after it is spent.** `test_cleanup.py` removes a claim worktree whose
+    issue is CLOSED and whose branch is nothing but its empty claim commit,
+    including after the base branch has moved on, and keeps it for an open
+    issue, a `<remote>/<base>` it cannot resolve, any commit beyond the claim, a
+    single commit carrying no claim marker for the issue, a single empty commit
+    that is another issue's claim, and work amended or squashed into the claim
+    commit, which keeps its message and trailers. It also keeps a modified,
+    untracked or non-regenerable ignored file, an operation in progress, an
+    issue reopened while a release command ran, and a failed `gh` lookup, under
+    `--all` per worktree and, for one worktree, before anything is touched. With
+    no pull request the claim commit is the whole proof, so the remote claim
+    branch keeps its lease on exactly that commit, as for a merged worktree, and
+    a dry run of the same proof changes nothing.

@@ -103,6 +103,38 @@ def _scope(tree: Worktree, settings: Settings) -> Optional[str]:
     return None
 
 
+def _issue_state(gh: Gh, number: int) -> str:
+    """OPEN or CLOSED for the issue a claim branch is for; a missing issue fails the call."""
+    return json.loads(gh.run("issue", "view", str(number), "--json", "state"))["state"]
+
+
+def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Optional[str], Optional[str]]:
+    """(the claim commit the head is, why the branch is more than the single claim `start` made)."""
+    base_ref = f"{settings.remote}/{settings.base}"
+    # The base branch moving on is not a change to the branch: a claim commit made
+    # against an older remote base tip is still the only commit beyond this ref.
+    counted = _git(tree.path, "rev-list", "--count", f"{base_ref}..{tree.head}", check=False)
+    if counted.returncode != 0:
+        return None, f"cannot compare it with {base_ref}: {counted.stderr.strip() or 'git failed'}"
+    beyond = counted.stdout.strip() or "0"
+    if beyond != "1":
+        return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
+    # The same trailers `start` writes, the dashboard reads and `land` checks.
+    if claims.claim_session(tree.path, base_ref, tree.head, number) is None:
+        return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
+    # `start` commits the base tree itself. Work amended or squashed into that
+    # commit keeps its message and trailers, so the content decides: one parent,
+    # and the tree of that parent unchanged.
+    parents = _git(tree.path, "rev-list", "--parents", "--max-count=1", tree.head).stdout.split()
+    if len(parents) != 2:
+        return None, f"its claim commit has {max(len(parents) - 1, 0)} parents, not one"
+    head_tree = _git(tree.path, "rev-parse", f"{tree.head}^{{tree}}").stdout.strip()
+    parent_tree = _git(tree.path, "rev-parse", f"{tree.head}^1^{{tree}}").stdout.strip()
+    if head_tree != parent_tree:
+        return None, "its claim commit carries changes"
+    return tree.head, None
+
+
 def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[str], Optional[str]]:
     """(the pull request that merged exactly `head`, None) or (None, why none did)."""
     pulls = land.merged_pulls(gh, branch)
@@ -179,10 +211,39 @@ def _process_blockers(path: Path, settings: Settings) -> List[str]:
     return [f"working directory of {_shown(inside)}"] if inside else []
 
 
-def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[str], List[str]]:
-    """(the pull request that merged the head, every reason the worktree must stay)."""
+@dataclass
+class Done:
+    """A head proven done: how the removal line reports it, and whether a claim, not a pull request, proved it."""
+
+    proof: str
+    claim_only: bool
+
+
+def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
+    """(how the head is provably done, why it is not) — a merged pull request, or a spent claim."""
     pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
-    return pull, ([why] if why else []) + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+    if pull:
+        return Done(f"{pull} merged", False), []
+    reasons = [why] if why else []
+    # `_scope` admits only claim branches, so the issue number is known here.
+    number = claims.claimed_issue(tree.branch)
+    claim_commit, why_not = _claim_commit(tree, settings, number)
+    if claim_commit is None:
+        reasons.append(why_not)
+    else:
+        # An evidence-only task produces no pull request: its closed issue with a
+        # branch that is nothing but the claim commit proves the claim is spent.
+        state = _issue_state(gh, number)
+        if state == "CLOSED":
+            return Done(f"#{number} closed, only its claim commit", True), []
+        reasons.append(f"#{number} is {state}")
+    return None, reasons
+
+
+def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
+    """(how the worktree is provably done, every reason it must stay)."""
+    done, reasons = _done(gh, tree, settings)
+    return done, reasons + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
 
 
 # ------------------------------------------------------------------ removal
@@ -260,7 +321,7 @@ def _open_directories(path: Path) -> Optional[str]:
     return None
 
 
-def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
+def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[bool, str]:
     """Release, recheck, then remove the worktree, the local branch and the remote branch."""
     for entry in settings.releases:
         failure = _release(tree.path, entry)
@@ -268,6 +329,12 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
             return False, f"release command {failure}"
     # The release commands take time; everything local is proven again right before removing.
     reasons = _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+    if done.claim_only:
+        # A merged pull request cannot unmerge; an issue a claim proved spent can reopen.
+        number = claims.claimed_issue(tree.branch)
+        state = _issue_state(gh, number)
+        if state != "CLOSED":
+            reasons.append(f"#{number} is {state}")
     if reasons:
         return False, "; ".join(reasons)
     # Only now that everything left is proven committed or regenerable.
@@ -277,7 +344,7 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     removed = _git(settings.primary, "worktree", "remove", str(tree.path), check=False)
     if removed.returncode != 0:
         return False, f"git worktree remove refused: {removed.stderr.strip()}"
-    # Only at the merged head: a branch moved since the check keeps its commits.
+    # Only at the head that proved it done: a branch moved since the check keeps its commits.
     deleted = _git(settings.primary, "update-ref", "-d", f"refs/heads/{tree.branch}", tree.head, check=False)
     if deleted.returncode == 0:
         local = "deleted" + _drop_branch_settings(settings.primary, tree.branch)
@@ -328,8 +395,9 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
     os.chdir(primary)
     # Under --all, one worktree's error (a failed gh call, a git failure) keeps that worktree
     # and the rest are still decided; for the current worktree alone it fails the command.
-    errors = (CleanupError, GhError, land.LandError, json.JSONDecodeError, OSError) if all_worktrees else ()
-    blocked = failed = done = 0
+    errors = (CleanupError, GhError, claims.ClaimError, land.LandError, json.JSONDecodeError,
+              OSError) if all_worktrees else ()
+    blocked = failed = removed = 0
     for tree in candidates:
         label = name(tree)
         reason = _scope(tree, settings)
@@ -338,36 +406,36 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
             blocked += 1
             continue
         try:
-            pull, reasons = _blockers(gh, tree, settings)
+            done, reasons = _blockers(gh, tree, settings)
         except errors as error:
-            pull, reasons = None, [f"cannot decide: {error}"]
+            done, reasons = None, [f"cannot decide: {error}"]
         if reasons:
             print(f"kept:     {label} ({tree.branch}): " + "; ".join(reasons))
             blocked += 1
             continue
         if dry_run:
             releases = ", ".join(entry["name"] for entry in settings.releases) or "none"
-            print(f"would remove: {label} ({tree.branch} at {tree.head[:12]}, {pull} merged); "
+            print(f"would remove: {label} ({tree.branch} at {tree.head[:12]}, {done.proof}); "
                   f"release commands: {releases}")
-            done += 1
+            removed += 1
             continue
         try:
-            ok, detail = _remove(tree, settings)
+            ok, detail = _remove(gh, tree, settings, done)
         except errors as error:
             ok, detail = False, f"error: {error}"
         if ok:
-            print(f"removed:  {label} ({tree.branch} at {tree.head[:12]}, {pull} merged); {detail}")
-            done += 1
+            print(f"removed:  {label} ({tree.branch} at {tree.head[:12]}, {done.proof}); {detail}")
+            removed += 1
         else:
             print(f"stopped:  {label} ({tree.branch}): {detail}")
             failed += 1
 
     if all_worktrees:
         root = os.path.relpath(settings.root, shown)
-        print(f"{'would remove' if dry_run else 'removed'} {done}, kept {blocked}, stopped {failed} under {root}; "
+        print(f"{'would remove' if dry_run else 'removed'} {removed}, kept {blocked}, stopped {failed} under {root}; "
               f"{len(outside)} worktree{'s' if len(outside) != 1 else ''} outside {root} left to the "
               "housekeeping procedure")
         return 1 if failed else 0
-    if done and not dry_run:
+    if removed and not dry_run:
         print(f"cd {primary}")
-    return 0 if done else 1
+    return 0 if removed else 1
