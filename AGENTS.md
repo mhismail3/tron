@@ -308,6 +308,10 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
     scrubbed by `verify`.
   - Screenshots, recordings and full logs go only to the private evidence
     repository. The repository is public.
+  - Every agent working an issue posts evidence on it at each milestone
+    (reproduced, fix candidate, blocked, landed), separating verified from
+    inferred claims. A delegating agent passes this rule to each child; the
+    [tron-work skill](.agents/skills/tron-work/SKILL.md) owns the procedure.
 - **Discovered work:** file it, then stay in scope.
   - File a new task issue (Task form). If it belongs to the current epic, make
     it a sub-issue there; otherwise label it `needs-triage`.
