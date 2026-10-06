@@ -26,6 +26,7 @@ from unittest import mock
 
 import claim as claims
 import cleanup
+from gh import GhError
 
 REMOTE = "origin"
 BASE = "main"
@@ -51,6 +52,9 @@ FAKE_GH = textwrap.dedent(
         print(json.dumps([{k: p[k] for k in fields} for p in pulls]))
         sys.exit(0)
     if args[:2] == ["issue", "view"]:
+        if args[2] in state.get("failing_issues", []):
+            print("fake gh: HTTP 502", file=sys.stderr)
+            sys.exit(1)
         # A number no test set is an open issue.
         print(json.dumps({"state": state.get("issues", {}).get(args[2], "OPEN")}))
         sys.exit(0)
@@ -175,9 +179,10 @@ class CleanupFixture(unittest.TestCase):
         self.pulls.append(pull)
         self.save_pulls()
 
-    def save_pulls(self, failing=()) -> None:
-        """failing: branches whose `gh pr list` exits non-zero."""
+    def save_pulls(self, failing=(), failing_issues=()) -> None:
+        """failing: branches whose `gh pr list` exits non-zero; failing_issues: issue numbers that do."""
         self.state_path.write_text(json.dumps({"pulls": self.pulls, "failing": list(failing),
+                                               "failing_issues": [str(n) for n in failing_issues],
                                                "issues": self.issues}))
 
     def issue_state(self, number: int, state: str) -> None:
@@ -348,6 +353,74 @@ class ClosedClaimTests(CleanupFixture):
         self.assertEqual(code, 1, out)
         self.assertIn("cannot compare", out)
         self.assert_kept(path, branch, head)
+
+    # The claim commit is empty because `start` commits the base tree; work put
+    # into it keeps its message and both trailers, so its content proves it.
+    def test_an_amended_claim_commit_carrying_changes_keeps_the_worktree(self):
+        for number, pushed in ((7, False), (8, True)):
+            with self.subTest(pushed=pushed):
+                path, branch, claim = self.claim_only_worktree(number, "CLOSED")
+                self.write(path, f"src/{number}.txt", "work\n")
+                git(path, "add", "-A")
+                git(path, "commit", "-q", "--amend", "--no-edit")
+                amended = git(path, "rev-parse", "HEAD")
+                self.assertNotEqual(amended, claim)
+                self.assertEqual(claims.claim_session(path, f"{REMOTE}/{BASE}", amended, number), "session-a")
+                if pushed:
+                    git(path, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{claim}",
+                        REMOTE, f"HEAD:refs/heads/{branch}")
+                code, out = self.cleanup(path)
+                self.assertEqual(code, 1, out)
+                self.assertIn("its claim commit carries changes", out)
+                self.assert_kept(path, branch, amended, remote=amended if pushed else claim)
+
+    def test_a_claim_commit_for_another_issue_keeps_the_worktree(self):
+        # The commit is empty, but it names #8: it is not this branch's claim (README.md, `start`).
+        branch = "chore/7-evidence"
+        other = claims.create_claim(self.repo, REMOTE, BASE, branch, 8, "session-a")
+        git(self.repo, "fetch", "-q", REMOTE)
+        path = self.root / "7-evidence"
+        git(self.repo, "worktree", "add", "-q", "--track", "-b", branch, str(path), f"{REMOTE}/{branch}")
+        self.issue_state(7, "CLOSED")
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("no claim marker for #7", out)
+        self.assert_kept(path, branch, other.sha)
+
+    def test_a_gh_issue_lookup_failure_proves_nothing(self):
+        path, branch, head = self.claim_only_worktree(7, "CLOSED")
+        self.save_pulls(failing_issues=[7])
+        # For one worktree the failed lookup fails the command with nothing touched.
+        with self.assertRaises(GhError):
+            cleanup.run(cleanup.Gh(path), path, self.config, False, False)
+        self.assert_kept(path, branch, head)
+        # Under `--all` it keeps that worktree with the error and goes on.
+        code, out = self.cleanup(path, all_worktrees=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("cannot decide", out)
+        self.assert_kept(path, branch, head)
+
+    # Failure mode 59 for this path: the issue state can change while the release
+    # commands run, and the claim's proof is the issue being closed.
+    def test_an_issue_reopened_while_a_release_command_runs_keeps_the_claim(self):
+        path, branch, head = self.claim_only_worktree(7, "CLOSED")
+        script = self.tmp / "reopen.py"
+        script.write_text("import json, os\n"
+                          "path = os.environ['FAKE_GH_STATE']\n"
+                          "state = json.load(open(path))\n"
+                          "state['issues']['7'] = 'OPEN'\n"
+                          "json.dump(state, open(path, 'w'))\n")
+        self.config["cleanup"]["releaseCommands"] = [
+            {"name": "reopen", "command": f"{sys.executable} {script}", "timeoutSeconds": 10}]
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("#7 is OPEN", out)
+        # The release command ran, and the recheck read the state it left behind.
+        self.assertEqual(json.loads(self.state_path.read_text())["issues"]["7"], "OPEN")
+        self.assertTrue(path.is_dir())
+        self.assertIn(str(path), self.registered())
+        self.assertEqual(self.local_branch(branch), head)
+        self.assertEqual(self.remote_branch(branch), head)
 
     # Failure mode 58 for this path: the lease still guards the remote claim branch.
     def test_a_moved_remote_claim_branch_is_kept_and_reported(self):
