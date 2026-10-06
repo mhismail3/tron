@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { constants, readFileSync } from "node:fs";
 import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
@@ -21,7 +21,7 @@ import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
  * prove it consistent, resume the pump and refold a valid view. The same file
  * covers the store boundaries that can be seen without a crash: a torn trailing
  * record (discarded, because it was never acknowledged), a corrupt record
- * (refused visibly, never skipped), a deleted namespace and a second opener.
+ * (refused visibly, never skipped), a deleted container and a second opener.
  */
 
 const EPISODIC_MEMORY_MODULE = fileURLToPath(new URL("./episodic-memory.ts", import.meta.url));
@@ -645,19 +645,19 @@ describe("episodic memory crash recovery", () => {
     await reopened.dispose();
   }, 180_000);
 
-  it("refuses a deleted namespace, an unknown version and a second opener, and keeps every store path owner-only", async () => {
+  it("refuses a deleted container, an unknown version and a second opener, and keeps every store path owner-only", async () => {
     const fx = await fixture("version", 2);
     const memory = await openMemory(fx);
     await memory.entriesCommitted(fx.sessionId);
     // A second in-process opener would write the same files without a lock.
     await expect(openMemory(fx)).rejects.toThrowError(/already open/u);
     await memory.dispose();
-    // The marker is what makes a deleted namespace lost state rather than a
+    // The marker is what makes a deleted container lost state rather than a
     // fresh installation that re-spends every compactor call.
     const reopened = await openMemory(fx);
     await reopened.dispose();
-    await rm(fx.storeRoot, { recursive: true });
-    await expect(openMemory(fx)).rejects.toThrowError(/namespace is missing/u);
+    await rm(dirname(fx.storeRoot), { recursive: true });
+    await expect(openMemory(fx)).rejects.toThrowError(/container is missing/u);
 
     const fresh = await fixture("version-2", 2);
     const freshMemory = await openMemory(fresh);

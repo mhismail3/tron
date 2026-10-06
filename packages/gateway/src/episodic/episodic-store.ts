@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { lstat, mkdir, open, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { readSecureJson } from "../util/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -22,9 +22,13 @@ import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
  * write (the record never became durable), so it is truncated away on load and
  * reported; any other unparsable record refuses the store visibly.
  *
- * A namespace that the workspace marker says was initialized but that is now
- * missing is lost state, not a new installation: it refuses rather than
- * restarting and re-spending every compactor call.
+ * The workspace marker is evidence that the shared `state/episodic` container
+ * was initialized. A container that is now missing is lost state, not a new
+ * installation: it refuses rather than restarting and re-spending every
+ * compactor call. One session's namespace is created lazily inside the container,
+ * and the marker carries no per-session evidence, so a session without one
+ * starts fresh within its own budget (#483), including one whose namespace was
+ * deleted (D5: repair within the memory budget).
  */
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
@@ -77,9 +81,13 @@ export class EpisodicStore {
   async read(): Promise<EpisodicStoreSnapshot> {
     const paths = await this.paths();
     if (!(await directoryExists(paths.root))) {
-      // The workspace marker is the evidence that this namespace once existed.
-      if (await this.workspace.featureInitialized("episodic")) {
-        throw new EpisodicMemoryError("invalid-store", "Episodic memory namespace is missing after it was initialized");
+      // The workspace-wide marker describes the shared container, never one
+      // session: reading it per session refused every Home after the first (#483).
+      // Marker first: `ensureRoot` creates the container before it sets the
+      // marker, so a set marker proves the container existed, and a container
+      // created concurrently after a missing-container read cannot look lost.
+      if (await this.workspace.featureInitialized("episodic") && !(await directoryExists(dirname(paths.root)))) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
       }
       return { present: false, messages: [], nodes: [], state: null, recoveredTornBytes: 0, highestGeneration: 0, highestRevision: 0 };
     }
@@ -174,8 +182,8 @@ export class EpisodicStore {
     await assertOwnerDirectory(paths.root, true);
     if (!(await fileExists(paths.initialized))) {
       await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
-      // The workspace marker is what tells a later start that this namespace is
-      // lost state rather than a fresh installation.
+      // The workspace marker is what tells a later start that a missing shared
+      // container is lost state rather than a fresh installation.
       await this.workspace.markFeatureInitialized("episodic");
     }
     return paths;
