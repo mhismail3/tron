@@ -663,10 +663,10 @@ describe.sequential("Tron Home memory tools end to end", () => {
     expect(row.longSnippetBounded).toBe(true);
     expect(row.bulkHeader).toBe('memory_search "bulkbatch" in messages [0, 32): 21 match(es), 20 shown, 3 [omitted], 1 capped.');
     expect(row.bulkShown).toBe(20);
-    // The placeholder text is the projected text of an omitted message, so it is
-    // findable like any other text.
-    expect(row.omittedHeader).toBe('memory_search "omitted" in messages [0, 32): 3 match(es), 3 shown, 3 [omitted], 1 capped.');
-    expect(row.omittedHits).toEqual([`28+0|user: ${OMITTED}`, `29+0|user: ${OMITTED}`, `30+0|talk: ${OMITTED}`]);
+    // An omitted message holds no searchable text: the `[omitted]` placeholder is
+    // counted in the header and never reported as a hit.
+    expect(row.omittedHeader).toBe('memory_search "omitted" in messages [0, 32): 0 match(es), 0 shown, 3 [omitted], 1 capped.');
+    expect(row.omittedHits).toEqual([]);
     expect(row.emptyOutcome).toEqual({ status: "invalid-arguments" });
     expect(row.emptyText).toBe("memory_search needs a query of 1 to 200 characters.");
     expect(row.oversizedOutcome).toEqual({ status: "invalid-arguments" });

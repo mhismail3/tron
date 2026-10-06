@@ -198,8 +198,8 @@ text.
   to spaces, exactly as a view line renders text, so one hit is one line. It
   reports the whole range's match count and its `[omitted]` and capped counts, so
   a message that holds no searchable text is named instead of silently absent; an
-  `[omitted]` message's projected text is `[omitted]`, and the search finds it like
-  any other text. An empty query, or one over `EPISODIC_SEARCH_QUERY_CHARS` (200),
+  `[omitted]` message is counted there and skipped, so its placeholder is never a
+  hit. An empty query, or one over `EPISODIC_SEARCH_QUERY_CHARS` (200),
   is refused; omitted bounds default to the whole memory and are clamped to it.
 
 These reads never ingest, open, or start anything: their caller does, and the

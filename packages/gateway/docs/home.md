@@ -327,8 +327,9 @@ Rules the tool results hold to:
   text cannot look like another hit's line. The search header names its range as
   `[from, to)` and reports how many messages in it are `[omitted]` and how many
   hold capped text, so a message that could not be searched is named rather than
-  looking like a message that never matched. The `[omitted]` placeholder is that
-  message's projected text, so a search finds it like any other text.
+  looking like a message that never matched. An `[omitted]` message holds no
+  searchable text: its placeholder is counted in the header, never reported as a
+  hit.
 - **A result is bounded.** Every tool result is capped at the recipe's `CAP`
   (30,000 characters, head and tail kept with a marker), so a 128 KiB message
   cannot enter the transcript whole.

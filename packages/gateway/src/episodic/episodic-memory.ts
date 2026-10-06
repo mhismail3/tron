@@ -392,7 +392,9 @@ export class EpisodicMemory {
     for (let index = start; index < end; index += 1) {
       const message = this.messages.get(index);
       if (!message) continue;
-      if (message.omitted) omitted += 1;
+      // An omitted message holds no searchable text: its `[omitted]` text is a
+      // placeholder, counted in the header and never reported as a hit.
+      if (message.omitted) { omitted += 1; continue; }
       if (message.omissions.includes("capped")) capped += 1;
       const at = message.text.toLowerCase().indexOf(needle);
       if (at < 0) continue;
