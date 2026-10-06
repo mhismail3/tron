@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import * as durableJson from "../util/durable-json.js";
 import { DEFAULT_KNOWLEDGE_CONFIG, type KnowledgeRecordDraft } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 
@@ -32,6 +33,11 @@ const observation = (sessionId: string, fromEntryId: string): KnowledgeRecordDra
 });
 
 function command(suffix: string): string { return `knowledge-test-${suffix}`; }
+function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
+/** Every file a first namespace publishes lives under this path, including the
+ * staging directory it is built in before publication. The workspace resolves
+ * its own root, so the temporary home's real path is not assumed. */
+async function namespacePath(workspace: TronWorkspace): Promise<string> { return join((await workspace.describe()).root, "state", "knowledge"); }
 
 describe("KnowledgeStore", () => {
   it("refuses connector admission and scope overrides of user and agent decisions at every store write boundary", async () => {
@@ -222,6 +228,52 @@ describe("KnowledgeStore", () => {
     const { store } = await fixture();
     await expect(store.captureSource({ commandId: command("invalid-first"), record: { ...source("invalid"), content: { ...source("invalid").content, object: { hash: "a".repeat(64), mediaType: "text/plain", bytes: 1 } } } })).rejects.toThrow(/durably captured/);
     await expect(store.captureSource({ commandId: command("valid-after-invalid"), record: source("valid after invalid") })).resolves.toBeDefined();
+  });
+
+  it("never shows a concurrent reader a partially published first namespace", async () => {
+    const { store, workspace } = await fixture();
+    // The gate holds the first namespace on its own integrity marker, so a
+    // mutex-free reader provably runs while that publication is still open.
+    const namespace = await namespacePath(workspace);
+    const markerReached = deferred();
+    const releaseMarker = deferred();
+    const publish = durableJson.durableAtomicWriteJson;
+    const write = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation(async (path, value, mode) => {
+      if (path.startsWith(namespace) && basename(path) === "initialized.json") { markerReached.resolve(); await releaseMarker.promise; }
+      await publish(path, value, mode);
+    });
+    const capture = store.captureSource({ commandId: command("concurrent-first-read"), record: source("published once") });
+    await markerReached.promise;
+    try {
+      await expect(store.list({ kind: "source", includeArchived: true, includePending: true })).resolves.toMatchObject({ records: [] });
+      expect((await store.config()).revision).toBe(DEFAULT_KNOWLEDGE_CONFIG.revision);
+      expect((await store.status()).state).toBe("uninitialized");
+    } finally {
+      releaseMarker.resolve();
+      write.mockRestore();
+      await capture.catch(() => undefined);
+    }
+    expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records.map(record => record.content.title)).toEqual(["published once"]);
+    expect((await store.status()).state).toBe("ready");
+  });
+
+  it("keeps a first namespace retryable when its state publication is interrupted", async () => {
+    const { store, workspace } = await fixture();
+    // An interruption between the namespace's evidence and its state manifest
+    // must not leave an established namespace behind: nothing published it, so
+    // the next deliberate mutation must be able to initialize it.
+    const namespace = await namespacePath(workspace);
+    const publish = durableJson.durableAtomicWriteJson;
+    const write = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation(async (path, value, mode) => {
+      if (path.startsWith(namespace) && basename(path) === "state.json") throw Object.assign(new Error("synthetic knowledge state publication failure"), { code: "ENOSPC" });
+      await publish(path, value, mode);
+    });
+    try {
+      await expect(store.captureSource({ commandId: command("interrupted-first"), record: source("interrupted") })).rejects.toThrow("synthetic knowledge state publication failure");
+    } finally { write.mockRestore(); }
+    await expect(store.captureSource({ commandId: command("retried-first"), record: source("retried") })).resolves.toBeDefined();
+    expect((await store.list({ kind: "source" })).records.map(record => record.content.title)).toEqual(["retried"]);
+    expect((await store.status()).state).toBe("ready");
   });
 
   it("publishes forget tombstones before cleanup if state save fails", async () => {

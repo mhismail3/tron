@@ -14,7 +14,14 @@ state/knowledge/
   objects/<sha256>                      # immutable raw content-addressed bytes
 ```
 
-The workspace-owned `gateway/workspace-state/initialized.json` also records
+A first mutation publishes that namespace atomically: it is built in a temporary
+sibling directory under `state/` — integrity marker, state manifest and catalog
+included — and renamed into place, and the workspace-owned evidence is recorded
+only after the rename. Reads project state without the store mutex, so a
+namespace visible before its own evidence were would be indistinguishable from a
+damaged corpus; an initialization that fails while building it publishes
+nothing, and the next deliberate mutation initializes the namespace again. The
+workspace-owned `gateway/workspace-state/initialized.json` also records
 initialization. Deleting an established namespace, manifest, or active catalog
 reports unavailable/lost state rather than creating an empty corpus.
 
