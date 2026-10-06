@@ -993,6 +993,14 @@ class AcceptanceLandingTests(LandFixture):
         # The journey signals land's process the way a terminal interrupt does and
         # then winds down on its own. land must wait for that wind-down and
         # re-raise; the interrupt path of subprocess.run would kill it instead.
+        # A backgrounded verify inherits SIGINT ignored (POSIX gives an
+        # asynchronous job in a non-interactive shell SIG_IGN), so this test
+        # listens for the interrupt it delivers either way: its subject is
+        # land's own handler path, not the shell's disposition.
+        inherited = signal.getsignal(signal.SIGINT)
+        if inherited is signal.SIG_IGN:
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+        self.addCleanup(signal.signal, signal.SIGINT, inherited)
         self.spec({PAIR: {"signal_parent": True, "report": False}})
         with self.assertRaises(KeyboardInterrupt):
             self.land(acceptance=PAIR)
