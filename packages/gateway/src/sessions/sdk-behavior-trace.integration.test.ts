@@ -95,7 +95,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-/** Bounded in-process CPU load: 4 chained 4 ms bursts keep the event loop ~half busy. */
+/**
+ * Bounded in-process CPU load: two chains of 4 ms bursts keep roughly one and a
+ * half cores busy for the scenario. Deliberately modest — the Gateway suite runs
+ * four workers on a Mac shared with other agents, and an event-loop-stall owner
+ * (`session-search-stall.test.ts`) measures the host this test also runs on.
+ */
 function startInProcessLoad(): () => void {
   let running = true;
   const burst = (): void => {
@@ -104,7 +109,7 @@ function startInProcessLoad(): () => void {
     while (performance.now() < until) { /* Spin: the load is the point. */ }
     setTimeout(burst, 0);
   };
-  for (let chain = 0; chain < 4; chain += 1) setTimeout(burst, 0);
+  for (let chain = 0; chain < 2; chain += 1) setTimeout(burst, 0);
   return () => { running = false; };
 }
 
@@ -361,7 +366,8 @@ describe("Pi SDK boundary behavior trace", () => {
   it("produces the same trace while the test process is under load", async () => {
     // Failure mode: the trace records timing- or ordering-dependent SDK
     // behavior, so a busy host produces a different "delta" than an idle one and
-    // the golden stops being evidence. No wait in this file is a speed budget.
+    // the golden stops being evidence. No wait in this file is a speed budget;
+    // the load is bounded and confined to this process.
     const trace = await runBoundaryScenario({ load: true });
     expectSubstantialTrace(trace);
     await compareWithGolden({ goldenPath: GOLDEN_PATH, actualPath: LOADED_ACTUAL_PATH, trace });
