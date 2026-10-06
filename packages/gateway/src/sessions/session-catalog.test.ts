@@ -930,6 +930,44 @@ describe("SessionCatalog", () => {
     await catalog.dispose();
   });
 
+  it("treats a folder removed while a named parent is walked as absence, without a whole-folder pass", async () => {
+    // Linux reports the parent of an `rm -rf` while the removal is still in
+    // progress, so the walk of that parent can list a folder that is gone by the
+    // time it is read (#406). That folder is absent, not unreadable: its rows are
+    // re-read and dropped instead of a whole-folder pass. The race is driven by
+    // hand: each removal overlaps events naming the parent it empties.
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
+    const producers = Array.from({ length: 40 }, (_, attempt) => join(sessions, "parent", `producer-${attempt}`));
+    for (const [attempt, producer] of producers.entries()) {
+      await writeSession(join(producer, "run-1", "session.jsonl"), `id-child-${attempt}`, sessions, ["child"]);
+      // Empty folders lengthen each removal, widening the window the walk races.
+      for (let index = 0; index < 20; index += 1) await mkdir(join(producer, `empty-${index}`, "deep"), { recursive: true });
+    }
+    catalog.start();
+    await catalog.settled();
+    expect(catalog.rows()).toHaveLength(producers.length);
+
+    const walks = vi.spyOn(source, "scan");
+    const removals: Promise<void>[] = [];
+    for (const producer of producers) {
+      removals.push(rm(producer, { recursive: true, force: true }));
+      for (let index = 0; index < 5; index += 1) {
+        watch.emit("parent");
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+    await Promise.all(removals);
+    // The platform also names each removed folder once it is gone.
+    for (const producer of producers) watch.emit(relative(sessions, producer));
+    await waitFor(() => catalog.rows().length === 0, 10_000);
+    // A whole-folder pass would follow the unnamed-event debounce.
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_EVENT_DEBOUNCE_MS + 200));
+    await catalog.settled();
+    expect(walks).not.toHaveBeenCalled();
+    await catalog.dispose();
+  });
+
   it("keeps its rows while the root itself is away, and a later cut republishes them", async () => {
     // The production watcher: macOS reports the root's own rename as one event
     // named for the root, which may coalesce with the report the watch makes
@@ -1158,9 +1196,15 @@ describe("SessionCatalog", () => {
   });
 
   it("re-reads a path whose events never stop arriving", async () => {
+    // The ceiling is measured on the catalog's own clock, which this test owns:
+    // the oracle is that a row is re-read once its event window reaches the
+    // ceiling even though events never stop. How long the read then takes in
+    // wall time is host load, not the requirement (#406: 1.7–2.1 s under the
+    // full suite against a 1.5 s wall bound).
     const watch = manualWatch();
+    let catalogNow = Date.now();
     const { sessions, catalog } = await fixture({
-      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+      watchCatalog: watch.backend, reconcileIntervalMs: 0, now: () => catalogNow,
     });
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
@@ -1168,16 +1212,17 @@ describe("SessionCatalog", () => {
     await catalog.settled();
 
     await appendMessage(file, "two", 1);
-    const appendedAt = Date.now();
+    const windowStartedAt = catalogNow;
     // A writer that appends faster than the quiet spell re-arms the debounce on
-    // every event; the ceiling is what reaches the row.
-    const deadline = appendedAt + 4_000;
-    while (Date.now() < deadline && catalog.row(file)?.messageCount !== 2) {
+    // every event; only the ceiling can reach the row. Each event advances the
+    // catalog clock by one event gap until the window reaches the ceiling.
+    const hangDeadline = Date.now() + 10_000;
+    while (catalog.row(file)?.messageCount !== 2 && Date.now() < hangDeadline) {
+      catalogNow = Math.min(catalogNow + 50, windowStartedAt + CATALOG_EVENT_MAX_WAIT_MS);
       watch.emit("workspace/a.jsonl");
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    expect(catalog.row(file)?.messageCount).toBe(2);
-    expect(Date.now() - appendedAt).toBeLessThanOrEqual(CATALOG_EVENT_MAX_WAIT_MS + 500);
+    expect(catalog.row(file)?.messageCount, "the ceiling never released the never-quiet path").toBe(2);
   });
 
   it("reports one catalog.changed per row the watcher changed, and how it was derived", async () => {
