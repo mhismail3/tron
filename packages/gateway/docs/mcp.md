@@ -54,13 +54,15 @@ header reference through Pi's own CLI against a loopback server that records the
 `Authorization` it receives; sign-in relay outcomes and callback safety are
 covered by `src/admin/auth-broker.test.ts`, and the local OAuth fixture in
 `src/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
-challenge, the resource-metadata URL named by `WWW-Authenticate` (the well-known
-root is deliberately not served, so a Pi that ignored the header could not
-discover an authorization server), dynamic client registration, loopback
-callback relay, token persistence and refresh through the Gateway's
-`mcp.auth.start` operation. Those tests reach Pi only through its public exports,
-so they describe the supported boundary instead of one installed layout. The
-sequential rollback matrix
+challenge, dynamic client registration, loopback callback relay, token
+persistence and refresh through the Gateway's `mcp.auth.start` operation. That
+fixture serves the resource-metadata URL named by `WWW-Authenticate` and not the
+well-known root, and asserts the challenge path was fetched while the root was
+not: the request log is the proof, because Pi's discovery falls back to the
+server origin and would otherwise still sign in. The MCP CLI is located through
+the `bin.pi` the package declares rather than a guessed layout. Those tests reach
+Pi only through its public exports, so they describe the supported boundary
+instead of one installed layout. The sequential rollback matrix
 (`packages/gateway/scripts/check-pi-sdk-rollback.mjs`) seeds and rereads
 `mcp.json` and `mcp-auth.json` through each runtime's own `pi mcp list`
 resolution, so an SDK change that rewrites either store in a way the previous

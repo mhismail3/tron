@@ -17,9 +17,17 @@
  * and then asks the rollback runtime to resolve it again.
  *
  * A store whose re-keying the maintainer has accepted as a one-way rollback
- * delta is listed in `pi-sdk-baseline.json` under `knownOneWayDeltas`; the check
- * still observes and reports it, but does not fail on it. The list is empty on
- * the pinned 0.99.1 layer.
+ * delta is listed in `pi-sdk-baseline.json` under `knownOneWayDeltas`. The entry
+ * names the store, the version range, the credential-key transform and the
+ * rollback state that transform may leave behind; the check then asserts every
+ * other runtime, step, state and key, and fails when the entry is stale. The
+ * list is absent on the pinned 0.99.1 layer.
+ *
+ * `TRON_PI_ROLLBACK_MCP_FAULT=candidate-needs-auth` (or `candidate-failed`) is a
+ * negative-control injection that makes the fixture refuse the candidate
+ * runtime's requests, proving the matrix still fails when the candidate, rather
+ * than the rollback, is the runtime that cannot resolve the credential. It is
+ * never set in a normal run.
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -35,16 +43,19 @@ const PROCESS_TIMEOUT_MS = 120_000;
 const PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const MCP_SERVER = "probe-mcp-server";
 const MCP_ACCESS_TOKEN = "probe-mcp-access-token";
+const MCP_FAULT = process.env.TRON_PI_ROLLBACK_MCP_FAULT ?? "";
 
 /**
  * Run one child to completion without blocking this process: the MCP fixture is
  * served from here, so a synchronous spawn would starve it and every probe would
- * report a timed-out server instead of the state under test.
+ * report a timed-out server instead of the state under test. Each child leads
+ * its own process group, so a timeout kills its descendants too — a probe that
+ * is killed must not leave a `pi mcp` grandchild behind.
  */
 async function run(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? PROCESS_TIMEOUT_MS;
   const child = spawn(command, args, {
-    cwd: options.cwd,
+    cwd: options.cwd, detached: true,
     env: { ...process.env, npm_config_offline: "false", PI_CODING_AGENT_DIR: options.agentDir ?? join(options.cwd ?? tmpdir(), "unused-agent") },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -53,7 +64,11 @@ async function run(command, args, options = {}) {
   child.stdout.on("data", (chunk) => { if (Buffer.byteLength(stdout) <= MAX_OUTPUT_BYTES) stdout += chunk; });
   child.stderr.on("data", (chunk) => { if (Buffer.byteLength(stderr) <= MAX_OUTPUT_BYTES) stderr += chunk; });
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
+  const killGroup = () => {
+    try { process.kill(-child.pid, "SIGKILL"); }
+    catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
+  };
+  const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeoutMs);
   let status;
   try {
     status = await new Promise((resolve, reject) => {
@@ -132,9 +147,11 @@ async function probe(probePath, root, action, temp, mcpUrl) {
  * It lives in this check rather than in each probe process so every probe of a
  * direction writes and reads the same server URL: a per-process port would make
  * `mcp.json` differ between the runtimes and hide exactly what is being compared.
+ * `setFault` is the negative-control injection described in the file header.
  */
 async function startMcpFixture() {
   let origin = "";
+  let fault = "";
   const server = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -144,7 +161,8 @@ async function startMcpFixture() {
       res.end(JSON.stringify({ resource: `${origin}/mcp`, authorization_servers: [origin] }));
       return;
     }
-    if (req.headers.authorization !== `Bearer ${MCP_ACCESS_TOKEN}`) {
+    if (fault === "failed") { res.writeHead(503, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "injected failure" })); return; }
+    if (fault === "needs-auth" || req.headers.authorization !== `Bearer ${MCP_ACCESS_TOKEN}`) {
       res.writeHead(401, { "www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"` });
       res.end();
       return;
@@ -172,32 +190,51 @@ async function startMcpFixture() {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("MCP fixture failed to bind loopback");
   origin = `http://127.0.0.1:${address.port}`;
-  return { url: `${origin}/mcp`, close: () => new Promise((resolve) => server.close(() => resolve())) };
+  return {
+    url: `${origin}/mcp`,
+    setFault: (next) => { fault = next; },
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
+
+/** Pi's tool and credential namespace for a server name: `-` becomes `_`. */
+function mcpNamespace(server) {
+  return `mcp__${server.replace(/-/gu, "_")}`;
+}
+
+/** Render one accepted-delta key template; `check-pi-sdk.mjs` allows no other placeholder. */
+function renderCredentialKey(template, server, url) {
+  return template.split("{namespace}").join(mcpNamespace(server)).split("{url}").join(url);
 }
 
 /**
  * The MCP half of the matrix. A runtime without Pi's built-in MCP extension
  * (0.87.1 predates it) reports `supported: false`; the check then asserts only
  * what the runtimes that do own the stores report, and names the runtimes it
- * skipped so a passing run never implies coverage it did not have.
+ * skipped so a passing run never implies coverage it did not have. Only the
+ * rollback runtime may be unsupported, so a candidate that drops or moves the
+ * MCP surface cannot pass as "unsupported".
  *
- * A `knownOneWayDeltas` entry in the baseline accepts one store's re-keying for
- * one version range as a documented, one-way rollback delta: the delta is still
- * observed and reported, but it no longer fails the matrix. Every other store
- * and every other version pair stays fatal, and only the rollback runtime may
- * report `supported: false`, so a candidate that drops or moves the MCP surface
- * cannot pass as "unsupported".
+ * A matching `knownOneWayDeltas` entry does not bypass the MCP checks. It names
+ * exactly one observation it accepts: the rollback runtime, in the step after
+ * the candidate wrote the store, reports the entry's `rollbackState` for the
+ * server whose credential key moved from the entry's `from` template to its `to`
+ * template. Every candidate step must still be connected, the server must still
+ * resolve, `mcp.json` must still round-trip, the pre-candidate rollback step
+ * must still be connected, no other state is accepted, and an entry whose delta
+ * is not observed fails as stale.
  */
-function assertMcpSequence(states, direction, versions, rollbackVersion, knownOneWayDeltas) {
-  const supported = states.flatMap((state, index) => state.supported ? [{ state, version: versions[index] }] : []);
+function assertMcpSequence(states, direction, versions, rollbackVersion, mcpUrl, knownOneWayDeltas) {
+  const supported = states.flatMap((state, index) => state.supported ? [{ state, version: versions[index], index }] : []);
   const skipped = versions.filter((_version, index) => !states[index].supported);
+  const server = (state) => state.servers.find((entry) => entry.name === MCP_SERVER);
   const observed = states.map((state, index) => {
     if (!state.supported) return `Pi ${versions[index]} has no usable built-in MCP surface (${state.reason})`;
-    const server = state.servers.find((entry) => entry.name === MCP_SERVER);
+    const resolved = server(state);
     const keys = state.credentialsBefore.join(", ") === state.credentialsAfter.join(", ")
       ? `[${state.credentialsBefore.join(", ")}]`
       : `[${state.credentialsBefore.join(", ")}] re-keyed to [${state.credentialsAfter.join(", ")}]`;
-    return `Pi ${versions[index]} ${server ? `${server.state}${server.error ? ` (${server.error})` : ""}` : "lost the server"} with credential keys ${keys}`;
+    return `Pi ${versions[index]} ${resolved ? `${resolved.state}${resolved.error ? ` (${resolved.error})` : ""}` : "lost the server"} with credential keys ${keys}`;
   }).join("; ");
   for (const [index, state] of states.entries()) {
     if (!state.supported && versions[index] !== rollbackVersion) {
@@ -205,49 +242,92 @@ function assertMcpSequence(states, direction, versions, rollbackVersion, knownOn
     }
   }
   if (supported.length === 0) return { checked: [], skipped, accepted: [] };
-  const candidateVersion = versions.find((version) => version !== rollbackVersion);
-  const accepted = candidateVersion === undefined ? undefined
-    : knownOneWayDeltas.find((entry) => entry.store === "mcp-auth" && entry.from === rollbackVersion && entry.to === candidateVersion);
+  const candidateIndex = versions.findIndex((version) => version !== rollbackVersion);
+  const candidateVersion = candidateIndex < 0 ? undefined : versions[candidateIndex];
+  const entry = candidateVersion === undefined ? undefined
+    : knownOneWayDeltas.find((delta) => delta.store === "mcp-auth" && delta.from === rollbackVersion && delta.to === candidateVersion);
+  if (entry !== undefined && supported.length !== states.length) {
+    throw new Error(`${direction} the accepted ${entry.store} delta ${entry.from} -> ${entry.to} cannot be observed because Pi ${rollbackVersion} has no usable built-in MCP surface: ${observed}`);
+  }
+  // 1. Every runtime that owns the stores must still resolve the configured server.
   for (const { state, version } of supported) {
-    const server = state.servers.find((entry) => entry.name === MCP_SERVER);
-    if (!server) throw new Error(`${direction} MCP config lost server "${MCP_SERVER}": ${observed}`);
-    if (server.state !== "connected" && accepted === undefined) {
-      throw new Error(`${direction} MCP OAuth credential was not resolved by Pi ${version}: server "${MCP_SERVER}" reports "${server.state}" — ${observed}`);
+    if (!server(state)) throw new Error(`${direction} MCP config lost server "${MCP_SERVER}" for Pi ${version}: ${observed}`);
+  }
+  // 2. Every candidate step must be connected: an upgrade that signs users out is
+  //    a forward regression, never an accepted rollback delta.
+  for (const { state, version } of supported) {
+    if (version !== rollbackVersion && server(state).state !== "connected") {
+      throw new Error(`${direction} MCP OAuth credential was not resolved by candidate Pi ${version}: server "${MCP_SERVER}" reports "${server(state).state}" — ${observed}`);
     }
   }
+  // 3. The rollback step before the candidate ran must be connected. Only the
+  //    rollback step after it may report the entry's expected rollback state.
+  let deltaObserved = 0;
+  for (const { state, version, index } of supported) {
+    if (version !== rollbackVersion) continue;
+    const state_ = server(state).state;
+    if (state_ === "connected") continue;
+    if (entry !== undefined && index > candidateIndex && state_ === entry.rollbackState) { deltaObserved += 1; continue; }
+    throw new Error(`${direction} MCP OAuth credential was not resolved by rollback Pi ${version}: server "${MCP_SERVER}" reports "${state_}" — ${observed}`);
+  }
   const checked = supported.map(({ version }) => version);
-  const report = { checked, skipped, accepted: accepted === undefined ? [] : [{ ...accepted, observed }] };
+  const report = { checked, skipped, accepted: entry === undefined ? [] : [{ ...entry, direction, observed }] };
   if (supported.length !== states.length) return report;
   const [written, appended, final] = states;
-  // `mcp.json` is not the accepted store, so its round trip stays asserted even
-  // when the credential re-keying is accepted.
   if (!isDeepStrictEqual(appended.config, written.config) || !isDeepStrictEqual(final.config, written.config)) {
     throw new Error(`${direction} MCP config changed across the rollback: ${JSON.stringify(written.config)} -> ${JSON.stringify(appended.config)} -> ${JSON.stringify(final.config)}`);
   }
-  if (accepted !== undefined) return report;
-  if (!isDeepStrictEqual(appended.servers, written.servers) || !isDeepStrictEqual(final.servers, written.servers)) {
+  // `mcp.json` is not the accepted store, so its resolution must round-trip
+  // whichever state the credential is in.
+  const resolution = (state) => {
+    const { name, enabled, exposure, transport } = server(state);
+    return { name, enabled, exposure, transport };
+  };
+  if (!isDeepStrictEqual(resolution(appended), resolution(written)) || !isDeepStrictEqual(resolution(final), resolution(written))) {
     throw new Error(`${direction} MCP server resolution changed across the rollback: ${JSON.stringify(written.servers)} -> ${JSON.stringify(appended.servers)} -> ${JSON.stringify(final.servers)}`);
   }
-  if (!isDeepStrictEqual(final.credentialsBefore, written.credentialsBefore)) {
-    throw new Error(`${direction} MCP credential store keys changed across the rollback: [${written.credentialsBefore.join(", ")}] -> [${appended.credentialsBefore.join(", ")}] -> [${final.credentialsBefore.join(", ")}]`);
+  if (entry === undefined) {
+    if (!isDeepStrictEqual(appended.servers, written.servers) || !isDeepStrictEqual(final.servers, written.servers)) {
+      throw new Error(`${direction} MCP server resolution changed across the rollback: ${JSON.stringify(written.servers)} -> ${JSON.stringify(appended.servers)} -> ${JSON.stringify(final.servers)}`);
+    }
+    if (!isDeepStrictEqual(final.credentialsBefore, written.credentialsBefore)) {
+      throw new Error(`${direction} MCP credential store keys changed across the rollback: [${written.credentialsBefore.join(", ")}] -> [${appended.credentialsBefore.join(", ")}] -> [${final.credentialsBefore.join(", ")}]`);
+    }
+    return report;
+  }
+  if (deltaObserved === 0) {
+    throw new Error(`${direction} the accepted ${entry.store} delta ${entry.from} -> ${entry.to} was not observed, so its entry is stale and must be removed: ${observed}`);
+  }
+  const fromKey = renderCredentialKey(entry.credentialKey.from, MCP_SERVER, mcpUrl);
+  const toKey = renderCredentialKey(entry.credentialKey.to, MCP_SERVER, mcpUrl);
+  if (!isDeepStrictEqual(written.credentialsBefore, [fromKey])) {
+    throw new Error(`${direction} MCP credential store did not start from the accepted key "${fromKey}": [${written.credentialsBefore.join(", ")}] — ${observed}`);
+  }
+  if (!isDeepStrictEqual(appended.credentialsAfter, [toKey]) || !isDeepStrictEqual(final.credentialsBefore, [toKey])) {
+    throw new Error(`${direction} MCP credential store did not move to the accepted key "${toKey}": [${appended.credentialsAfter.join(", ")}] -> [${final.credentialsBefore.join(", ")}] — ${observed}`);
   }
   return report;
 }
 
-function assertSequence([written, appended, final], direction, versions, rollbackVersion, knownOneWayDeltas) {
+function assertSequence([written, appended, final], direction, versions, rollbackVersion, mcpUrl, knownOneWayDeltas) {
   if (appended.entries.length !== written.entries.length + 1) throw new Error(`${direction} compatibility did not preserve exactly one appended JSONL entry`);
   if (!isDeepStrictEqual(appended.entries.slice(0, -1), written.entries)) throw new Error(`${direction} compatibility changed pre-existing JSONL entries`);
   if (!isDeepStrictEqual(final.entries, appended.entries)) throw new Error(`${direction} final reader disagrees with the append reader`);
   if (!isDeepStrictEqual(final.settingsAuth, appended.settingsAuth)) throw new Error(`${direction} final reader disagrees with settings/auth state`);
   if (appended.settingsAuth.settings.theme !== "dark" || !appended.settingsAuth.auth.includes("anthropic")) throw new Error(`${direction} settings/auth append was lost`);
-  return assertMcpSequence([written.mcp, appended.mcp, final.mcp], direction, versions, rollbackVersion, knownOneWayDeltas);
+  return assertMcpSequence([written.mcp, appended.mcp, final.mcp], direction, versions, rollbackVersion, mcpUrl, knownOneWayDeltas);
 }
 
 function mcpCoverage(forward, reverse, rollbackVersion, currentVersion) {
   const checked = [...new Set([...forward.checked, ...reverse.checked])].sort();
   const skipped = [...new Set([...forward.skipped, ...reverse.skipped])].sort();
-  // Both directions observe the same accepted range; report it once.
-  const knownDeltas = [...new Map([...forward.accepted, ...reverse.accepted].map((entry) => [`${entry.store}|${entry.from}|${entry.to}`, entry])).values()];
+  // Both directions verify the same accepted range; report it once, with the
+  // exact sequence each direction observed it in.
+  const reported = [...forward.accepted, ...reverse.accepted];
+  const knownDeltas = [...new Set(reported.map((entry) => `${entry.store}|${entry.from}|${entry.to}`))].map((key) => {
+    const group = reported.filter((entry) => `${entry.store}|${entry.from}|${entry.to}` === key);
+    return { ...group[0], observed: group.map((entry) => `${entry.direction}: ${entry.observed}`).join(" | ") };
+  });
   const roundTrip = forward.skipped.length === 0 && reverse.skipped.length === 0 && knownDeltas.length === 0;
   const coverage = checked.length > 0
     ? `MCP config+credentials checked by ${checked.join(", ")}`
@@ -259,7 +339,7 @@ function mcpCoverage(forward, reverse, rollbackVersion, currentVersion) {
     knownDeltas,
     description: roundTrip
       ? `${coverage}, round-tripped through ${currentVersion} and ${rollbackVersion}`
-      : `${coverage}${skipped.length > 0 ? `; ${skipped.join(", ")} predates Pi's built-in MCP extension` : ""}${knownDeltas.length > 0 ? `; known one-way delta accepted: ${knownDeltas.map((entry) => `${entry.store} ${entry.from} -> ${entry.to}`).join(", ")}` : ""}`,
+      : `${coverage}${skipped.length > 0 ? `; ${skipped.join(", ")} predates Pi's built-in MCP extension` : ""}${knownDeltas.map((entry) => `; known one-way delta accepted: ${entry.store} ${entry.from} -> ${entry.to} (${entry.rollbackState}, ${entry.observed})`).join("")}`,
   };
 }
 
@@ -278,16 +358,22 @@ export async function runRollbackCheck({ gatewayDir = resolve(dirname(fileURLToP
       : await installRollback(root, baseline.value.rollbackVersion, temp);
     const probePath = join(root, "scripts/pi-session-compatibility-probe.mjs");
     // Each action is a separate Node process, so module caches and open files
-    // cannot mask a format or migration incompatibility.
+    // cannot mask a format or migration incompatibility. The candidate's steps
+    // are the ones the fault injection refuses.
+    const candidateFault = MCP_FAULT === "candidate-needs-auth" ? "needs-auth" : MCP_FAULT === "candidate-failed" ? "failed" : "";
+    const asCandidate = async (work) => {
+      mcp.setFault(candidateFault);
+      try { return await work(); } finally { mcp.setFault(""); }
+    };
     const forwardWrite = await probe(probePath, rollbackRoot, "write", join(temp, "forward"), mcp.url);
-    const forwardAppend = await probe(probePath, packageRoot(root), "read-append", join(temp, "forward"), mcp.url);
+    const forwardAppend = await asCandidate(() => probe(probePath, packageRoot(root), "read-append", join(temp, "forward"), mcp.url));
     const forwardRead = await probe(probePath, rollbackRoot, "read", join(temp, "forward"), mcp.url);
-    const reverseWrite = await probe(probePath, packageRoot(root), "write", join(temp, "reverse"), mcp.url);
+    const reverseWrite = await asCandidate(() => probe(probePath, packageRoot(root), "write", join(temp, "reverse"), mcp.url));
     const reverseAppend = await probe(probePath, rollbackRoot, "read-append", join(temp, "reverse"), mcp.url);
-    const reverseRead = await probe(probePath, packageRoot(root), "read", join(temp, "reverse"), mcp.url);
+    const reverseRead = await asCandidate(() => probe(probePath, packageRoot(root), "read", join(temp, "reverse"), mcp.url));
     const knownOneWayDeltas = baseline.value.knownOneWayDeltas ?? [];
-    const forward = assertSequence([forwardWrite, forwardAppend, forwardRead], "forward", [baseline.value.rollbackVersion, current.version, baseline.value.rollbackVersion], baseline.value.rollbackVersion, knownOneWayDeltas);
-    const reverse = assertSequence([reverseWrite, reverseAppend, reverseRead], "reverse", [current.version, baseline.value.rollbackVersion, current.version], baseline.value.rollbackVersion, knownOneWayDeltas);
+    const forward = assertSequence([forwardWrite, forwardAppend, forwardRead], "forward", [baseline.value.rollbackVersion, current.version, baseline.value.rollbackVersion], baseline.value.rollbackVersion, mcp.url, knownOneWayDeltas);
+    const reverse = assertSequence([reverseWrite, reverseAppend, reverseRead], "reverse", [current.version, baseline.value.rollbackVersion, current.version], baseline.value.rollbackVersion, mcp.url, knownOneWayDeltas);
     const coverage = mcpCoverage(forward, reverse, baseline.value.rollbackVersion, current.version);
     return { currentVersion: current.version, rollbackVersion: baseline.value.rollbackVersion, mcp: coverage, forward: [forwardWrite, forwardAppend, forwardRead], reverse: [reverseWrite, reverseAppend, reverseRead] };
   } finally {

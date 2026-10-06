@@ -78,7 +78,7 @@ function assertExpected(value, action) {
 }
 const MCP_SERVER = "probe-mcp-server";
 const MCP_ACCESS_TOKEN = "probe-mcp-access-token";
-const MCP_CLI_TIMEOUT_MS = 60_000;
+const MCP_CLI_TIMEOUT_MS = 30_000;
 const mcpConfigPath = join(agentDir, "mcp.json");
 const mcpAuthPath = join(agentDir, "mcp-auth.json");
 
@@ -98,9 +98,12 @@ function mcpCliPath() {
 }
 
 /**
- * Run this runtime's own `pi mcp` CLI. Bounded and killed on timeout so a probe
- * that the orchestrator SIGKILLs cannot leave the listing child behind, and
- * asynchronous so a server this process serves stays answerable.
+ * Run this runtime's own `pi mcp` CLI. Bounded and killed on timeout, and
+ * asynchronous so a server this process serves stays answerable. The budget is
+ * half the orchestrator's per-probe budget, because the `write` action runs
+ * `pi mcp add` and `pi mcp list` back to back; the orchestrator additionally
+ * kills this probe's whole process group, so a probe killed from above cannot
+ * leave this child behind.
  */
 function runMcpCli(args) {
   const cliPath = mcpCliPath();

@@ -253,9 +253,10 @@ a runtime cannot resolve what the other wrote. Only the rollback runtime may
 report that it has no built-in MCP surface; a candidate that drops or moves it
 fails instead of passing as unsupported. A store whose re-keying the maintainer
 has accepted as a one-way rollback delta is listed in `pi-sdk-baseline.json`
-under `knownOneWayDeltas` (an exact `{store, from, to, reason}` entry, carried
-forward by `update:pi-sdk`); the matrix still observes and reports it, and keeps
-failing for every other store and version pair. The committed
+under `knownOneWayDeltas`: an exact `{store, from, to, reason, rollbackState,
+credentialKey}` entry that names the one observation it accepts, so every other
+runtime, step, state and key still fails, and an entry whose delta is not
+observed fails as stale. The committed
 `pi-sdk-baseline.json` records only the prior runtime used for rollback verification; `package.json` remains
 current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi

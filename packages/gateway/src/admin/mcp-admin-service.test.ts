@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -8,7 +9,20 @@ import { describe, expect, it, vi } from "vitest";
 import lockfile from "proper-lockfile";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
-const cliPath = join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js");
+/** The Pi CLI the package declares in its own manifest, not a guessed layout. */
+function piCliPath(): string {
+  let directory = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
+  while (directory !== dirname(directory)) {
+    const manifest = join(directory, "package.json");
+    if (existsSync(manifest)) {
+      const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { name?: string; bin?: { pi?: string } };
+      if (parsed.name === "@earendil-works/pi-coding-agent" && parsed.bin?.pi) return join(directory, parsed.bin.pi);
+    }
+    directory = dirname(directory);
+  }
+  throw new Error("could not locate the pi-coding-agent package manifest");
+}
+const cliPath = piCliPath();
 
 describe("McpAdminService", () => {
   it("quotes interactive Keychain commands and rejects line-breaking secrets without exposing argv", async () => {
@@ -193,14 +207,11 @@ describe("McpAdminService", () => {
         /\/usr\/bin\/security find-generic-password -s tron\.mcp -a [A-Za-z0-9._-]+ -w/u, tokenCommand,
       );
       await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp`, headers: { Authorization: piCommand } } } }));
-      const listed = await new Promise<{ stdout: string }>((resolve, reject) => {
-        const child = spawn(process.execPath, [cliPath, "mcp", "list", "--json"], { cwd: root, env: { ...process.env, PI_CODING_AGENT_DIR: root } });
-        let stdout = "";
-        child.stdout.on("data", (chunk) => { stdout += chunk; });
-        child.once("error", reject);
-        child.on("close", () => resolve({ stdout }));
-      });
-      expect((JSON.parse(listed.stdout) as { servers: Array<{ state: string }> }).servers[0].state).toBe("connected");
+      // The bounded production path: it owns the CLI's timeout and kills the
+      // process group, so a hanging Pi cannot leak the child or the fixture.
+      vi.stubEnv("PI_CODING_AGENT_DIR", root);
+      const listed = await service.list({ scope: "global" }) as { servers: Array<{ name: string; state: string }> };
+      expect(listed.servers).toEqual([expect.objectContaining({ name: "fixture", state: "connected" })]);
       expect(received).toContain("Bearer token with spaces");
       expect(captured).toEqual(["global:never-projected-secret"]);
       expect(response).toEqual({ server: "fixture", stored: true });
@@ -208,6 +219,7 @@ describe("McpAdminService", () => {
       expect(saved.mcpServers.fixture.headers.Authorization).toMatch(/^!/u);
       expect(config).not.toContain("never-projected-secret");
     } finally {
+      vi.unstubAllEnvs();
       await new Promise<void>((resolve) => fixture.close(() => resolve()));
       await rm(root, { recursive: true, force: true });
     }

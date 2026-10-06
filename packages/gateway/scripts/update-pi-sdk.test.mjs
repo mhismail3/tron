@@ -33,7 +33,7 @@ async function makeRepo() {
   }
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "fixture", private: true, dependencies }));
   await writeFile(join(root, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages }));
-  await writeFile(join(root, "pi-sdk-baseline.json"), JSON.stringify({ schema: 1, rollbackVersion: "0.84.0", knownOneWayDeltas: [] }));
+  await writeFile(join(root, "pi-sdk-baseline.json"), JSON.stringify({ schema: 1, rollbackVersion: "0.84.0" }));
   await writeFile(join(repo, ".gitignore"), "node_modules/\n");
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["add", ".gitignore", "packages/gateway/package.json", "packages/gateway/package-lock.json", "packages/gateway/pi-sdk-baseline.json"], { cwd: repo });
@@ -275,7 +275,7 @@ test("refuses an update whose installed package publishes no changelog", async (
 test("carries the accepted one-way delta ledger forward across an update", async () => {
   const { repo, root } = await makeRepo();
   try {
-    const delta = { store: "mcp-auth", from: "0.99.1", to: currentVersion, reason: "accepted one-way re-key" };
+    const delta = { store: "mcp-auth", from: "0.99.1", to: currentVersion, reason: "accepted one-way re-key", rollbackState: "needs-auth", credentialKey: { from: "{url}", to: "{namespace}|{url}" } };
     await writeFile(join(root, "pi-sdk-baseline.json"), JSON.stringify({ schema: 1, rollbackVersion: "0.84.0", knownOneWayDeltas: [delta] }));
     execFileSync("git", ["-C", repo, "add", "packages/gateway/pi-sdk-baseline.json"]);
     execFileSync("git", ["-C", repo, "-c", "user.name=Tron Test", "-c", "user.email=tron-test@example.invalid", "commit", "-qm", "ledger"]);

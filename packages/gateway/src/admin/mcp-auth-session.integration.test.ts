@@ -51,8 +51,10 @@ describe("MCP auth through a live Gateway session", () => {
     let origin = "", authQuery: URLSearchParams | undefined, token = "", toolCalls = 0, registrationCount = 0, refreshCount = 0;
     const requests: string[] = [], rpcMethods: string[] = [];
     // The challenge names its own resource-metadata URL, and the well-known root
-    // is not served: a Pi that ignored `WWW-Authenticate` could not discover an
-    // authorization server at all, so sign-in succeeding proves it read the header.
+    // is not served. Sign-in succeeding would NOT prove the header was read --
+    // pi-mcp falls back to the server origin as the authorization server, which
+    // this fixture serves -- so the proof is the request log below: the only way
+    // to learn the challenge path is the header.
     const challengePath = "/challenge/resource-metadata";
     const fixture = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", origin || "http://127.0.0.1");
@@ -164,10 +166,10 @@ describe("MCP auth through a live Gateway session", () => {
     expect(callbackResult.forwarded).toBe(true);
     await waitFor(() => events.some((event) => event.topic === "auth.completed"), "the completed MCP authentication event").catch((error) => { throw new Error(`no completion; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} requests=${JSON.stringify(requests)} methods=${JSON.stringify(rpcMethods)}`, { cause: error }); });
     expect((events.find((event) => event.topic === "auth.completed")!.payload as any).success).toBe(true);
-    const persisted = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
-    expect(Object.keys(persisted)).toEqual([`${origin}/mcp`]);
     expect(requests).toContain(`GET ${challengePath}`);
     expect(requests).not.toContain("GET /.well-known/oauth-protected-resource");
+    const persisted = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
+    expect(Object.keys(persisted)).toEqual([`${origin}/mcp`]);
     expect(registrationCount).toBe(1);
     expect(authQuery?.get("code_challenge_method")).toBe("S256");
     // The fixture expires the sign-in token in one second, so Pi refreshes it and

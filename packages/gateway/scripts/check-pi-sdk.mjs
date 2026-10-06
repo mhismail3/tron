@@ -171,23 +171,46 @@ function validateInstalled(root, lockPackages, version, issues) {
   }
 }
 
-const KNOWN_DELTA_KEYS = ["store", "from", "to", "reason"];
+const KNOWN_DELTA_KEYS = ["store", "from", "to", "reason", "rollbackState", "credentialKey"];
+const CREDENTIAL_KEY_KEYS = ["from", "to"];
+const KNOWN_DELTA_PLACEHOLDERS = ["{namespace}", "{url}"];
+/**
+ * The stores and rollback states the sequential rollback matrix can act on. An
+ * entry naming anything else would validate but never match, so it is rejected
+ * instead of sitting in the file looking authoritative.
+ */
+export const KNOWN_DELTA_STORES = Object.freeze(["mcp-auth"]);
+export const KNOWN_DELTA_ROLLBACK_STATES = Object.freeze(["needs-auth"]);
+
+function isCredentialKeyTemplate(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const withoutPlaceholders = KNOWN_DELTA_PLACEHOLDERS.reduce((text, placeholder) => text.split(placeholder).join(""), value);
+  return !withoutPlaceholders.includes("{") && !withoutPlaceholders.includes("}");
+}
 
 /**
- * A `knownOneWayDeltas` entry accepts one store's re-keying for one version
- * range as a documented, one-way rollback delta. It is deliberately narrow: an
- * exact `from`/`to` pair, a named store, and a reason, so the rollback matrix
- * keeps failing for every other store and version pair.
+ * A `knownOneWayDeltas` entry accepts exactly one store's documented re-keying
+ * for exactly one version range. It names the store, the range, the credential
+ * key transform (`{namespace}` and `{url}` placeholders) and the rollback
+ * state that transform is allowed to leave behind, so the matrix can keep
+ * asserting every other runtime, step and state.
  */
 function validateKnownOneWayDeltas(entries, issues) {
   for (const entry of entries) {
     const keys = entry && typeof entry === "object" && !Array.isArray(entry) ? Object.keys(entry) : [];
+    const credentialKeyKeys = entry?.credentialKey && typeof entry.credentialKey === "object" && !Array.isArray(entry.credentialKey)
+      ? Object.keys(entry.credentialKey) : [];
     const coherent = keys.length === KNOWN_DELTA_KEYS.length && KNOWN_DELTA_KEYS.every((key) => keys.includes(key))
-      && typeof entry.store === "string" && /^[a-z][a-z0-9-]*$/u.test(entry.store)
+      && typeof entry.store === "string" && KNOWN_DELTA_STORES.includes(entry.store)
       && typeof entry.from === "string" && EXACT_VERSION.test(entry.from)
       && typeof entry.to === "string" && EXACT_VERSION.test(entry.to)
-      && typeof entry.reason === "string" && entry.reason.trim().length > 0;
-    if (!coherent) addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas entries must be exactly {store, from, to, reason} with exact versions and a reason`);
+      && typeof entry.reason === "string" && entry.reason.trim().length > 0
+      && typeof entry.rollbackState === "string" && KNOWN_DELTA_ROLLBACK_STATES.includes(entry.rollbackState)
+      && credentialKeyKeys.length === CREDENTIAL_KEY_KEYS.length && CREDENTIAL_KEY_KEYS.every((key) => credentialKeyKeys.includes(key))
+      && isCredentialKeyTemplate(entry.credentialKey?.from) && isCredentialKeyTemplate(entry.credentialKey?.to);
+    if (!coherent) {
+      addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas entries must be exactly {store, from, to, reason, rollbackState, credentialKey: {from, to}} with a known store (${KNOWN_DELTA_STORES.join(", ")}), exact versions, a reason, a known rollback state (${KNOWN_DELTA_ROLLBACK_STATES.join(", ")}) and key templates using only ${KNOWN_DELTA_PLACEHOLDERS.join("/")}`);
+    }
   }
 }
 

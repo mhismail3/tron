@@ -1,5 +1,4 @@
 {
   "schema": 1,
-  "rollbackVersion": "0.87.1",
-  "knownOneWayDeltas": []
+  "rollbackVersion": "0.87.1"
 }
