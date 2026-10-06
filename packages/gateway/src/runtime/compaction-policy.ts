@@ -51,25 +51,11 @@ export class CompactionOperationPolicy {
   private budgetSources: Pick<CompactionConfiguration["source"], "enabled" | "reserveTokens" | "keepRecentTokens">;
   private active: { signal: AbortSignal; configuration: ResolvedCompactionConfiguration; reason: SessionBeforeCompactEvent["reason"] } | undefined;
   private warning: string | undefined;
-  /** True only for a Home session. Never read from global settings. */
-  private readonly disabled: boolean;
 
-  constructor(
-    private readonly session: AgentSession,
-    private readonly agentDir: string,
-    /** Tron Home keeps its own history: SDK compaction is disabled for this
-     * session only, through the same per-session overlay `applyBudgets`
-     * reapplies from canonical settings at every idle admission. */
-    options: { disabled?: boolean } = {},
-  ) {
-    this.disabled = options.disabled === true;
+  constructor(private readonly session: AgentSession, private readonly agentDir: string) {
     this.next = settingsCompactionPolicy(session.settingsManager);
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
     this.refresh();
-    // The override must exist from the session's first admission, not only after
-    // the first idle prompt: `applyBudgets` is the only writer of this session's
-    // compaction budget, and the SDK's own threshold check reads it directly.
-    if (this.disabled) this.applyBudgets();
     // Installed before RuntimeSlot's subscriber: an end snapshot cannot retain
     // policy authority from the completed operation, including failed attempts.
     session.subscribe(event => { if (event.type === "compaction_end") this.active = undefined; });
@@ -106,7 +92,7 @@ export class CompactionOperationPolicy {
   applyBudgets(): void {
     this.refresh();
     const { enabled, reserveTokens, keepRecentTokens } = this.next;
-    this.session.settingsManager.applyOverrides({ compaction: { enabled: this.disabled ? false : enabled, reserveTokens, keepRecentTokens } });
+    this.session.settingsManager.applyOverrides({ compaction: { enabled, reserveTokens, keepRecentTokens } });
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
   }
 

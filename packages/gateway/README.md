@@ -640,42 +640,6 @@ fail-local recovery, backup, prompt coverage, internal-file display, and the
 future managed-state contract are owned by
 [`docs/internal-workspace.md`](docs/internal-workspace.md).
 
-## Tron Home
-
-Tron Home is one opt-in persistent conversation per Gateway installation. It is
-created only by an explicit `home.designate`; until then every session is
-ordinary. `home.status` (a read) returns the bounded projection
-`{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
-  sessionPresent, memory }`, where `memory` is
-`{ configured, open, model?, tokenBudget?, spentTokens?, episodic?, blocked?,
-  reason? }`, `episodic` is the memory owner's own bounded status and
-`spentTokens` is the persisted spend (present whenever a store exists, open or
-not, because a restart restores it and charges it against the budget). `home.designate`,
-`home.disable`, `home.configureMemory` and `home.resumeMemory` are
-command-id-receipted mutations,
-`home.context` (a read) returns the bounded request context of Home's current or
-last activation — its start entry id, whether it is open, its view line and byte
-counts, effective tokens, model window and its own refusal reason (the sizes are
-absent when it was refused before it prepared a request), and never a message
-body — and
-`home.v1` is advertised in `hello`/`system.info`. There are no memory defaults:
-Home refuses its activations until `home.configureMemory` records a physical
-model and a token budget. Home runs in the neutral
-`<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
-curated runtime profile (no agent-directory or project discovery — including the
-agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
-`ask_user`/`display`/`notify` executable allowlist, per-session compaction
-disabled, a fixed physical model, and zero cache-warming requests), and its
-designation is keyed by session id, so a fork is ordinary. A profile change
-replaces the live runtime in place inside the session's own lane, and a record
-whose session is gone is given a fresh one. Every activation (one admitted input
-and its whole tool loop) sends the model only the system messages that precede
-it, ONE frozen memory view and its own messages: prior activations are never
-re-sent, the view is never persisted, and a request waits for the lines it will
-send (abortably) before it is made. Ordinary sessions are byte-for-byte
-unaffected. The record, the profile, the RPCs, fork and loadout semantics and
-what is not built yet are owned by [`docs/home.md`](docs/home.md).
-
 ## Runtime and state
 
 The launcher executes `dist/index.js`, a small entrypoint that imports the
@@ -2789,14 +2753,6 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 ## Session search
 
 [Session search](docs/session-search.md) owns the `session-search.v1` capability.
-
-## Episodic memory
-
-[Episodic memory](docs/episodic-memory.md) owns the projected-summary tree over
-one canonical session (`packages/gateway/src/episodic/`): its projection rules,
-the tree and view algorithms, invalidation semantics and measured cost,
-retries/budget/blocked states, and its storage under the internal workspace. No
-live session calls it yet; wiring it to Home's commits is a later task.
 
 ## Development
 
