@@ -565,6 +565,8 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
+  /** Every Home session's chat runtime; see `gatewayModelRuntime`. */
+  private sharedHomeModelRuntime: Promise<ModelRuntime> | undefined;
   private knowledgeService: KnowledgeService | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
@@ -747,6 +749,10 @@ export class RuntimeRegistry {
        * model for its own calls: from the Gateway's ModelRuntime, never a
        * session's runtime. Absent means no Home memory can be configured. */
       homeMemorySummarizer?: (model: { provider: string; id: string }) => HomeMemoryModelResolution;
+      /** The Gateway-wide user-scope runtime, where user provider packages (for
+       * example CortexKit's `anthropic` override) are registered. Home's chat runs
+       * on it (#480); without it, every Home session shares one runtime of its own. */
+      gatewayModelRuntime?: ModelRuntime;
       /** Where Home's memory reports its bounded records. */
       homeMemoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
       /** Where Home's request seam reports one record per activation and per
@@ -1614,6 +1620,9 @@ export class RuntimeRegistry {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
+      homeModelRuntime: () => this.sharedHomeModelRuntime ??= this.options.gatewayModelRuntime
+        ? Promise.resolve(this.options.gatewayModelRuntime)
+        : this.dependencies().createModelRuntime(),
       createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),

@@ -60,7 +60,18 @@ so a fork or a reset, which produce a new session id, is never Home.
 | Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
+| Model runtime | the Gateway-wide user-scope runtime, shared by every Home session | one per session runtime |
 | Cache warming | zero requests | unchanged |
+
+Home runs on the Gateway-wide model runtime, the one that serves the model
+catalog, admits `home.designate` and backs Home's summarizer. User provider
+packages (for example CortexKit's `anthropic` override, which carries a Claude
+subscription) register their providers there through `GlobalProviderResources`,
+so Home reaches its designated model through the same provider the catalog
+offered. Ordinary sessions keep a runtime each, because a project extension may
+register a provider into it. Sharing is safe for Home because it loads no
+extension that can register one. Without this, Home reached Pi's built-in
+provider instead (#480).
 
 `tron-home` is a first-party module loaded only for Home. It contributes Home's
 operating context, registers the three memory tools (see

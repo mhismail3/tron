@@ -415,6 +415,9 @@ export interface RuntimeSlotDependencies {
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
+  /** The one runtime every Home session's chat uses: the Gateway-wide runtime,
+   * so the model `home.designate` admitted resolves through the same providers. */
+  homeModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
   exports: BlobStore;
@@ -1592,7 +1595,13 @@ export class RuntimeSlot {
       // registration is mutable, so sharing one instance across projects would
       // leak project providers between concurrent Tron sessions. Credentials and
       // model files remain canonical through their shared file paths.
-      const modelRuntime = await this.dependencies.createModelRuntime();
+      // Home is the exception: it loads no project or package code, so nothing
+      // can register a provider into its runtime, and it runs on the Gateway-wide
+      // runtime where `home.designate` admitted its model and user provider
+      // packages such as CortexKit's are registered (#480).
+      const modelRuntime = this.isHomeProfile(sessionManager)
+        ? await this.dependencies.homeModelRuntime()
+        : await this.dependencies.createModelRuntime();
       let contextPolicy: SessionContextWindowPolicy | undefined;
       let compactionPolicy: CompactionOperationPolicy | undefined;
       this.resourceReloadOptions = {

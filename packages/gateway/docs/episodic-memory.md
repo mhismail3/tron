@@ -333,7 +333,10 @@ why that control was removed rather than kept as a permanent test.
   node blocks with `retries-exhausted`. A thrown auth or configuration error is
   classified by that same pinned classifier and blocks at once.
 - An **empty reply, a refusal, or any other permanent error** blocks at once
-  with `permanent-failure`. A store record the append cannot write (an oversized
+  with `permanent-failure`. A reasoning model can spend its whole output on
+  reasoning; that block's detail says so. To make it rare, each call asks a
+  reasoning model for a `low` effort, and the output ceiling (8,192 tokens) leaves
+  room for bounded reasoning plus the line (#480). A store record the append cannot write (an oversized
   line) blocks the same way rather than stalling the cursor silently.
 - A **token budget** is injected. Each call reserves the prompt estimate **plus
   its whole output ceiling** before it runs, and settles with the actual usage

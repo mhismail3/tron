@@ -12,7 +12,7 @@ import {
 } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
-  createModelRuntimeSummarizer, estimateCompactorReservation, leafStep, mergeStep, sizeFeedback,
+  createModelRuntimeSummarizer, emptyReplyDetail, estimateCompactorReservation, leafStep, mergeStep, sizeFeedback,
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import {
@@ -948,7 +948,7 @@ export class EpisodicMemory {
       const verdict = classifyReply(message);
       if (verdict === "ok") return summarizerText(message);
       if (verdict === "permanent") {
-        throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? "the compactor returned no line" });
+        throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? emptyReplyDetail(message) });
       }
       if (attempt >= this.limits.maxRetries) {
         throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: message.errorMessage ?? "the compactor call kept failing" });
