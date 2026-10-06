@@ -116,6 +116,8 @@ took. If they ask for options, list the top three and wait.
    Screenshots and full logs go to the private evidence repository through
    `verify --evidence-manifest`. When delegating, put this rule in every child
    task and read the issue yourself rather than trusting the child's report.
+   A delegated child stops at a verified, pushed commit; the coordinator
+   dispatches and follows hosted CI, so no child spends its runtime polling.
    Anything out of scope becomes a new issue (see AGENTS.md); do not grow the
    pull request.
 6. **Verify.**
@@ -143,8 +145,9 @@ took. If they ask for options, list the top three and wait.
    anything handed to them. When work needs the maintainer's install, name the
    checkpoint: which builds (Mac and Stable Gateway, iPhone) cover it, and every
    other open handoff the same install makes ready, so one rebuild validates
-   and closes as many issues as possible. Close an issue only on the evidence
-   its handoff asked for.
+   and closes as many issues as possible. Offer the checkpoint only when no
+   agent work is running: a Stable restart drains and pauses it. Close an issue
+   only on the evidence its handoff asked for.
 
 ## Plan larger work
 
