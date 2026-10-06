@@ -5,12 +5,14 @@
  * deploys, or starts Tron.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASELINE_FILE, DIRECT_PI_PACKAGES, PI_PACKAGES, formatPiSdkReport, readPiSdkBaseline, validatePiSdk, validSha512Integrity } from "./check-pi-sdk.mjs";
 
 const REGISTRY_ARGS = Object.freeze(["--registry=https://registry.npmjs.org/"]);
+const CODING_AGENT = "@earendil-works/pi-coding-agent";
+const CHANGELOG_FILE = "CHANGELOG.md";
 
 export function exactVersion(value) {
   return typeof value === "string" && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(value);
@@ -64,6 +66,98 @@ function manifestsDirty(gatewayDir, spawn = spawnSync) {
     || check(["diff", "--cached", "--quiet", "--", "package.json", "package-lock.json", BASELINE_FILE]);
 }
 
+/** Release order of two exact semvers, by semver precedence: numeric cores,
+ * then prerelease identifiers, which order numerically when both are numeric and
+ * outrank nothing when the other side is a release. */
+export function compareVersions(left, right) {
+  const parse = (value) => {
+    const separator = value.indexOf("-");
+    return separator < 0
+      ? { core: value.split(".").map(Number), prerelease: [] }
+      : { core: value.slice(0, separator).split(".").map(Number), prerelease: value.slice(separator + 1).split(".") };
+  };
+  const leftVersion = parse(left);
+  const rightVersion = parse(right);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftVersion.core[index] !== rightVersion.core[index]) return leftVersion.core[index] < rightVersion.core[index] ? -1 : 1;
+  }
+  if (leftVersion.prerelease.length === 0 || rightVersion.prerelease.length === 0) {
+    return leftVersion.prerelease.length === rightVersion.prerelease.length ? 0 : (leftVersion.prerelease.length === 0 ? 1 : -1);
+  }
+  for (let index = 0; index < Math.max(leftVersion.prerelease.length, rightVersion.prerelease.length); index += 1) {
+    const leftPart = leftVersion.prerelease[index];
+    const rightPart = rightVersion.prerelease[index];
+    if (leftPart === rightPart) continue;
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    const leftNumeric = /^\d+$/u.test(leftPart);
+    const rightNumeric = /^\d+$/u.test(rightPart);
+    if (leftNumeric && rightNumeric) return Number(leftPart) < Number(rightPart) ? -1 : 1;
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart < rightPart ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * The released CHANGELOG.md sections strictly after `from` and at most `to`,
+ * newest first, byte-for-byte as the installed coding-agent package publishes
+ * them. This is what makes the per-seam inventory mechanical: the upgrade task
+ * reads the upstream release notes instead of a hand-read changelog.
+ */
+export function extractChangelogDelta(changelog, from, to) {
+  if (!exactVersion(from) || !exactVersion(to)) throw new Error(`changelog delta needs exact semver bounds (received ${from ?? "missing"} -> ${to ?? "missing"})`);
+  const sections = [];
+  let current;
+  for (const line of changelog.split("\n")) {
+    if (line.startsWith("## ")) {
+      const version = /^##\s+\[?([0-9A-Za-z.+-]+)\]?/u.exec(line)?.[1];
+      current = version !== undefined && exactVersion(version) ? { version, lines: [line] } : undefined;
+      if (current) sections.push(current);
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  const selected = sections.filter(({ version }) => compareVersions(version, from) > 0 && compareVersions(version, to) <= 0);
+  if (selected.length === 0) throw new Error(`CHANGELOG.md has no release section between ${from} and ${to}`);
+  return `${selected.map(({ lines }) => lines.join("\n").trimEnd()).join("\n\n")}\n`;
+}
+
+function gitOutput(gatewayDir, args, spawn) {
+  const result = spawn("git", ["-C", gatewayDir, ...args], { encoding: "utf8" });
+  return result.status === 0 ? (result.stdout ?? "").trim() : undefined;
+}
+
+/**
+ * Where this run's changelog evidence goes: the work item's directory under the
+ * git directory, beside the rest of the run's evidence. It is never committed,
+ * so it cannot mark the checkout dirty, and a run outside a task branch still
+ * keeps its extract under `work/pi-sdk-update/`.
+ */
+export function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
+  const gitDir = gitOutput(gatewayDir, ["rev-parse", "--absolute-git-dir"], spawn);
+  if (!gitDir) throw new Error("cannot locate the git directory that holds this Pi SDK update's evidence");
+  const issue = gitOutput(gatewayDir, ["rev-parse", "--abbrev-ref", "HEAD"], spawn)?.match(/^[a-z]+\/(\d+)-/u)?.[1];
+  return join(gitDir, "work", issue ? `issue-${issue}` : "pi-sdk-update", `pi-sdk-changelog-${from}-to-${to}.md`);
+}
+
+/** Read the installed coding-agent changelog and write this run's extract. */
+export function writeChangelogEvidence({ gatewayDir, from, to, spawn = spawnSync } = {}) {
+  const path = changelogEvidencePath(gatewayDir, from, to, spawn);
+  const changelogPath = join(gatewayDir, "node_modules", CODING_AGENT, CHANGELOG_FILE);
+  let changelog;
+  try {
+    changelog = readFileSync(changelogPath, "utf8");
+  } catch {
+    throw new Error(`installed ${CODING_AGENT} has no ${CHANGELOG_FILE}, so this update has no upstream inventory to record`);
+  }
+  const delta = extractChangelogDelta(changelog, from, to);
+  const header = `# ${CODING_AGENT} upstream changelog: ${from} -> ${to}\n\nSource: ${CODING_AGENT}@${to} ${CHANGELOG_FILE}\n\n`;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, header + delta);
+  return { from, to, path, bytes: Buffer.byteLength(delta) };
+}
+
 function compareLockIntegrities(gatewayDir, metadata) {
   const lock = JSON.parse(readFileSync(resolve(gatewayDir, "package-lock.json"), "utf8"));
   const mismatches = [];
@@ -113,7 +207,10 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     if (!current.ok || !current.version) throw new Error(`cannot snapshot an incoherent current Pi SDK: ${formatPiSdkReport(current)}`);
     const baseline = readPiSdkBaseline(root);
     if (baseline.issues.length > 0) throw new Error(`cannot snapshot Pi SDK rollback metadata: ${baseline.issues.join("; ")}`);
-    writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version }, null, 2)}\n`);
+    // Accepted one-way deltas are keyed by the version range they were accepted
+    // for, so they are carried forward rather than erased by this rewrite.
+    const knownOneWayDeltas = baseline.value.knownOneWayDeltas ?? [];
+    writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
     const command = updateCommand(version);
     installStarted = true;
     const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, npm_config_offline: "false", npm_config_engine_strict: "true" } });
@@ -123,7 +220,8 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     compareLockIntegrities(root, metadata);
     const audit = spawn(npmBin, auditCommand(), { cwd: root, stdio: "inherit", env: { ...process.env, npm_config_offline: "false" } });
     if (audit.status !== 0) throw new Error(commandFailure("npm audit signatures", audit));
-    return { version, metadata, command, auditCommand: auditCommand(), report };
+    const changelog = writeChangelogEvidence({ gatewayDir: root, from: current.version, to: version, spawn });
+    return { version, metadata, command, auditCommand: auditCommand(), report, changelog };
   } catch (error) {
     if (!installStarted) throw error;
     const originalError = error instanceof Error ? error.message : String(error);
@@ -136,7 +234,7 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = runUpdate({ version: process.argv[2] });
-    console.log(JSON.stringify({ version: result.version, metadata: result.metadata, packages: result.report.packages }, null, 2));
+    console.log(JSON.stringify({ version: result.version, metadata: result.metadata, packages: result.report.packages, changelog: result.changelog }, null, 2));
   } catch (error) {
     console.error(`Pi SDK update failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

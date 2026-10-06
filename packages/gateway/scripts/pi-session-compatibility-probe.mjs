@@ -3,14 +3,24 @@
  * Exercise Pi's public persistence APIs in an isolated directory. This file is
  * intentionally a subprocess worker; the rollback orchestrator supplies the
  * package root so no canonical user directory is ever consulted.
+ *
+ * Failure modes this probe exists to make visible (see check-pi-sdk-rollback.mjs
+ * for the cross-version assertions):
+ * - an MCP server name that round-trips through `mcp.json` as a different server
+ *   (renamed, dropped, or refused), so the tools the user configured are gone;
+ * - an MCP OAuth credential that the runtime that wrote it can still resolve and
+ *   the next runtime cannot, so a Gateway rollback silently signs the user out.
+ * Both are read back through Pi's own public entry (`pi mcp list --json`) so the
+ * reported state is the running runtime's resolution, not this probe's guess.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const MAX_RESULT_BYTES = 256 * 1024;
-const [packageRoot, action, workRoot] = process.argv.slice(2);
-if (!packageRoot || !action || !workRoot || !["write", "read-append", "read"].includes(action)) throw new Error("usage: probe PACKAGE_ROOT ACTION WORK_ROOT");
+const [packageRoot, action, workRoot, mcpUrl] = process.argv.slice(2);
+if (!packageRoot || !action || !workRoot || !mcpUrl || !["write", "read-append", "read"].includes(action)) throw new Error("usage: probe PACKAGE_ROOT ACTION WORK_ROOT MCP_FIXTURE_URL");
 const pi = await import(pathToFileURL(join(packageRoot, "dist/index.js")).href);
 const { SessionManager, SettingsManager, ModelRuntime } = pi;
 const sessionDir = join(workRoot, "sessions");
@@ -66,6 +76,99 @@ function assertExpected(value, action) {
   if (!value.settingsAuth?.settings || !value.settingsAuth?.auth?.includes("openai")) throw new Error("settings/auth state was lost");
   if (action === "read" && !value.settingsAuth.auth.includes("anthropic")) throw new Error("appended auth state was lost");
 }
+const MCP_SERVER = "probe-mcp-server";
+const MCP_ACCESS_TOKEN = "probe-mcp-access-token";
+const MCP_CLI_TIMEOUT_MS = 30_000;
+const mcpConfigPath = join(agentDir, "mcp.json");
+const mcpAuthPath = join(agentDir, "mcp-auth.json");
+
+function readJson(path) {
+  try { return JSON.parse(readFileSync(path, "utf8")); } catch { return undefined; }
+}
+
+/** This runtime's own `pi` entry, read from the `bin.pi` it declares. */
+function mcpCliPath() {
+  try {
+    const bin = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"))?.bin;
+    const relative = typeof bin === "object" && bin !== null ? bin.pi : undefined;
+    if (typeof relative !== "string" || !relative || relative.startsWith("/") || relative.split(/[\\/]/u).includes("..")) return undefined;
+    const path = join(packageRoot, relative);
+    return existsSync(path) ? path : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * Run this runtime's own `pi mcp` CLI. Bounded and killed on timeout, and
+ * asynchronous so a server this process serves stays answerable. The budget is
+ * half the orchestrator's per-probe budget, because the `write` action runs
+ * `pi mcp add` and `pi mcp list` back to back; the orchestrator additionally
+ * kills this probe's whole process group, so a probe killed from above cannot
+ * leave this child behind.
+ */
+function runMcpCli(args) {
+  const cliPath = mcpCliPath();
+  if (!cliPath) return Promise.resolve(undefined);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...args], {
+      cwd: workRoot, env: { ...process.env, PI_CODING_AGENT_DIR: agentDir }, stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => { child.kill("SIGKILL"); }, MCP_CLI_TIMEOUT_MS);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (code, signal) => { clearTimeout(timer); resolve({ code, signal, stdout, stderr }); });
+  });
+}
+
+/**
+ * Seed the on-disk state a pre-upgrade Gateway leaves: one hyphenated server
+ * with `direct` exposure, and its OAuth credential.
+ *
+ * `mcp.json` is written by the runtime's own `pi mcp add`, so the seeded config
+ * is what that runtime produces rather than this probe's guess at the file
+ * format. A runtime that predates Pi's MCP support has no writer; the documented
+ * `mcpServers` shape is then the user's own configuration file. Pi exposes no
+ * public writer for the OAuth credential store, so that credential is seeded in
+ * the shape the store used before server names entered its key.
+ */
+async function writeMcpSeed() {
+  // `pi mcp add` is the runtime's own writer for `mcp.json`, so the seeded config
+  // is what that runtime produces. A runtime without Pi's built-in MCP extension
+  // has no such command; the documented `mcpServers` shape is then the user's own
+  // configuration file.
+  if (typeof pi.createMcpExtension === "function" && mcpCliPath()) {
+    const added = await runMcpCli(["mcp", "add", MCP_SERVER, "--url", mcpUrl, "--exposure", "direct"]);
+    if (added && added.code !== 0) throw new Error(`pi mcp add failed: ${added.stderr.trim() || `exit ${added.code}`}`);
+  }
+  if (!existsSync(mcpConfigPath)) writeFileSync(mcpConfigPath, `${JSON.stringify({ mcpServers: { [MCP_SERVER]: { url: mcpUrl, exposure: "direct" } } }, null, 2)}\n`);
+  writeFileSync(mcpAuthPath, `${JSON.stringify({ [mcpUrl]: { clientInformation: { client_id: "probe-client", redirect_uris: ["http://127.0.0.1:1/callback"] }, tokens: { access_token: MCP_ACCESS_TOKEN, token_type: "Bearer", expires_in: 3600 }, tokensExpireAt: Date.now() + 3_600_000 } }, null, 2)}\n`);
+}
+
+/**
+ * What this runtime resolves from the seeded config and credential store.
+ * `pi mcp list --json` exits 1 when a configured server is not connected, so a
+ * non-zero exit is a reported state, not a probe failure. Credential keys are
+ * read on both sides of the listing: a runtime that re-keys the store does it
+ * while it resolves the server, so only the after-keys show what it left.
+ */
+async function mcpState() {
+  const credentialsBefore = Object.keys(readJson(mcpAuthPath) ?? {}).sort();
+  const onDisk = { config: readJson(mcpConfigPath)?.mcpServers ?? {} };
+  const unsupported = typeof pi.createMcpExtension !== "function" ? "no built-in MCP extension" : mcpCliPath() ? undefined : "no pi CLI entry";
+  if (unsupported) return { supported: false, reason: unsupported, ...onDisk, credentialsBefore, credentialsAfter: credentialsBefore };
+  const listed = await runMcpCli(["mcp", "list", "--json"]);
+  if (!listed) throw new Error("the pi CLI entry disappeared between the support check and the listing");
+  let listing;
+  try { listing = JSON.parse(listed.stdout); } catch { throw new Error(`MCP listing returned invalid JSON (exit ${listed.code}): ${listed.stderr.trim() || listed.stdout.trim()}`); }
+  const servers = (listing.servers ?? []).map((server) => ({
+    name: server.name, enabled: server.enabled, exposure: server.exposure, transport: server.transport, state: server.state, tools: server.tools,
+    error: typeof server.error === "string" ? server.error.slice(0, 200) : undefined,
+  })).sort((left, right) => left.name.localeCompare(right.name));
+  return { supported: true, ...onDisk, credentialsBefore, credentialsAfter: Object.keys(readJson(mcpAuthPath) ?? {}).sort(), servers, errors: listing.errors ?? [] };
+}
+
 async function settingsAndAuth(mode) {
   const settings = SettingsManager.create(workRoot, agentDir);
   const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
@@ -92,7 +195,9 @@ async function settingsAndAuth(mode) {
 }
 let manager;
 let settingsAuth;
+let mcp;
 if (action === "write") {
+  await writeMcpSeed();
   manager = SessionManager.create(workRoot, sessionDir);
   const user = manager.appendMessage({ role: "user", content: "probe user", timestamp: 1 });
   manager.appendThinkingLevelChange("high"); manager.appendModelChange("fixture", "fixture-model");
@@ -114,6 +219,7 @@ if (action === "write") {
   manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "probe branch" }], api: "fixture", provider: "fixture", model: "fixture-model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 1 });
   manager.appendCompaction("probe compaction", user, 10, { stable: true });
   settingsAuth = await settingsAndAuth("write");
+  mcp = await mcpState();
   writeFileSync(statePath, manager.getSessionFile());
 } else {
   const sessionPath = readFileSync(statePath, "utf8").trim();
@@ -121,9 +227,10 @@ if (action === "write") {
   const before = semantic(manager);
   settingsAuth = await settingsAndAuth(action);
   assertExpected({ ...before, settingsAuth }, action);
+  mcp = await mcpState();
   if (action === "read-append") manager.appendCustomEntry("probe-after-read", { stable: true });
 }
-const result = { ...semantic(manager), settingsAuth };
+const result = { ...semantic(manager), settingsAuth, mcp };
 const encoded = JSON.stringify(result);
 if (Buffer.byteLength(encoded) > MAX_RESULT_BYTES) throw new Error("probe result exceeded bound");
 process.stdout.write(`${encoded}\n`);
