@@ -1040,7 +1040,70 @@ export interface HomeStatus {
   model?: ModelRef;
   live: boolean;
   sessionPresent: boolean;
+  /** Home's memory, once a record names one. There are no memory defaults
+   * (decision D4), so a Home whose memory is unconfigured refuses its
+   * activations until `home.configureMemory`. */
+  memory: HomeMemoryStatus;
 }
+
+/**
+ * `home.status`'s memory part. `configured` is the record's decision, `open` is
+ * whether the memory's store is serving, `episodic` is the memory owner's own
+ * bounded status (view sizes, coverage, pump, blocked state, token spend) and is
+ * absent until that store is open, and `blocked` is the block's reason, reported
+ * even when the store is not open.
+ */
+export interface HomeMemoryStatus {
+  configured: boolean;
+  open: boolean;
+  model?: ModelRef;
+  tokenBudget?: number;
+  episodic?: {
+    sourceSessionId: string;
+    generation: number;
+    messages: number;
+    nodes: { total: number; free: number; summary: number; byLevel: Array<{ level: number; count: number }> };
+    view: {
+      parts: Array<{ address: string; start: number; messages: number; bytes: number; built: boolean }>;
+      truncatedParts: number;
+      bytes: number;
+      budgetBytes: number;
+      built: number;
+      unbuilt: number;
+    };
+    coverage: { admitted: number; summarized: number };
+    pump: { busy: number };
+    blocked: { reason: string; detail?: string } | null;
+    tokens: { limit: number; reserved: number; used: number };
+  };
+  blocked?: string;
+  reason?: string;
+}
+
+/**
+ * `home.context`: the bounded request context of Home's current or last
+ * activation, and nothing else. It carries no message body: the activation's
+ * start entry is named by id, the memory view only by its line and byte counts,
+ * and the refusal only by its reason and detail. A caller that needs the
+ * conversation reads the transcript, and the view text never leaves the request
+ * that carried it.
+ */
+export type HomeContextProjection =
+  | { available: false }
+  | {
+    available: true;
+    /** The canonical entry the activation's input followed; null when nothing
+     * preceded it (the first activation of an empty Home). */
+    activationStartEntryId: string | null;
+    /** Whether that activation is still open (its run has not settled). */
+    activationOpen: boolean;
+    viewLines: number;
+    viewBytes: number;
+    effectiveTokens: number;
+    contextWindow: number;
+    lastRefusalReason?: string;
+    lastRefusalDetail?: string;
+  };
 
 /** `home.designate`/`home.disable` result: the exact admitted identity. */
 export interface HomeDesignation {

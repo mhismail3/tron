@@ -319,7 +319,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       forkExcludesView: !forkBlob.includes(HOME_MEMORY_VIEW_MARKER),
       forkHasNoSeam: item.registry.homeOwner().requestPolicyFor(fork.sessionId) === undefined,
       canonicalEntryCount: entries.length,
-      memory: { configured: memoryStatus.configured, open: memoryStatus.open, messages: memoryStatus.memory?.messages ?? 0, blocked: memoryStatus.blocked ?? null },
+      memory: { configured: memoryStatus.configured, open: memoryStatus.open, messages: memoryStatus.episodic?.messages ?? 0, blocked: memoryStatus.blocked ?? null },
       transformObservations,
     };
     item.record("C2", row);
@@ -511,7 +511,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.faux.setResponses([item.response("first activation response")]);
     await item.slot.prompt(longInput("C7 first activation input"));
     await waitUntil(() => !item.slot.isBusy);
-    await waitUntil(() => item.memoryStatus().blocked !== null);
+    await waitUntil(() => item.memoryStatus().blocked !== undefined);
     const requestsBefore = item.faux.state.callCount;
     const autoRetryStarts: Array<Record<string, unknown>> = [];
     item.session.subscribe((event) => {
@@ -535,7 +535,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       canonicalRoles: messages.map((message) => message.role),
       canonicalErrorEntry: errorEntry ? { role: errorEntry.role, stopReason: errorEntry.stopReason, errorMessage: errorEntry.errorMessage } : null,
       policyRefusals: item.policy()?.refusalLog().map((entry) => entry.reason) ?? [],
-      memoryBlocked: memoryStatus.blocked?.reason ?? null,
+      memoryBlocked: memoryStatus.blocked ?? null,
       slotPhase: item.slot.snapshot().phase,
       slotOperation: item.slot.snapshot().operation?.id ?? null,
       assistantErrorEntries: messages.filter((message) => message.role === "assistant" && message.stopReason === "error").length,
@@ -795,7 +795,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await waitUntil(() => item.compactor.entered > 0);
     item.record("C18-wait", {
       compactorEntered: item.compactor.entered,
-      viewUnbuilt: item.memoryStatus().memory?.view.unbuilt ?? -1,
+      viewUnbuilt: item.memoryStatus().episodic?.view.unbuilt ?? -1,
       requestsBefore: item.requests.length,
     });
     expect(item.requests.length).toBe(1);
@@ -803,7 +803,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     // The activation is admitted, and Pi is running it, but no request may be
     // sent while the lines it would carry are unbuilt.
     await waitUntil(() => item.policy()?.currentOperationId() !== undefined);
-    await waitUntil(() => (item.memoryStatus().memory?.coverage.summarized ?? 0) === 0);
+    await waitUntil(() => (item.memoryStatus().episodic?.coverage.summarized ?? 0) === 0);
     const requestsWhileWaiting = item.requests.length;
     item.compactor.release?.();
     await second;

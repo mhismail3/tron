@@ -142,6 +142,9 @@ export class EpisodicMemory {
       if (snapshot.state) {
         memory.sourceCursor = snapshot.state.cursor;
         memory.blocked = snapshot.state.blocked;
+        // Spend is restored before any compactor call, so a restarted Gateway
+        // cannot spend a second budget on the same history.
+        memory.budget.restore(snapshot.state.spend);
       }
       if (snapshot.recoveredTornBytes > 0) {
         memory.diagnostic({
@@ -729,6 +732,8 @@ export class EpisodicMemory {
         continue;
       }
       this.budget.settle(estimate, usageTokens(message.usage));
+      // Durable before the next call: a crash must not hand the budget back.
+      await this.saveState();
       const verdict = classifyReply(message);
       if (verdict === "ok") return summarizerText(message);
       if (verdict === "permanent") {
@@ -817,7 +822,13 @@ export class EpisodicMemory {
   }
 
   private async saveState(): Promise<void> {
-    await this.store.saveState({ version: EPISODIC_STORE_VERSION, generation: this.generation, cursor: this.sourceCursor, blocked: this.blocked });
+    await this.store.saveState({
+      version: EPISODIC_STORE_VERSION,
+      generation: this.generation,
+      cursor: this.sourceCursor,
+      blocked: this.blocked,
+      spend: this.budget.snapshot().used,
+    });
   }
 
   /** Every append is chained, so the durable order equals the request order and

@@ -260,7 +260,10 @@ describe.sequential("Tron Home designation", () => {
     expect(extensionNames(ordinaryContext)).toEqual(extensionNames(controlContext));
     expect(registeredTools(ordinaryContext)).toEqual(registeredTools(controlContext));
 
-    expect(await homeStatus(f)).toEqual({ available: true, enabled: false, live: false, sessionPresent: false });
+    expect(await homeStatus(f)).toEqual({
+      available: true, enabled: false, live: false, sessionPresent: false,
+      memory: { configured: false, open: false },
+    });
 
     // The default-model branch: no model named means this Gateway's default.
     const designation = await designate(f, "home-designate-1", null);
@@ -289,6 +292,9 @@ describe.sequential("Tron Home designation", () => {
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
+      // Home has no memory defaults (decision D4): until `home.configureMemory`,
+      // the projection says so and every activation refuses.
+      memory: { configured: false, open: false },
     });
 
     // Idempotent, and a replayed command id returns the same result.

@@ -96,6 +96,8 @@ export interface HomeRefusal {
 export interface HomeRequestStep {
   operationId: string;
   nonce: string;
+  /** The activation's start entry, exactly as `admit` captured it. */
+  boundaryEntryId: string | null;
   /** Agent-message roles of the rewritten context, in order. */
   roles: string[];
   /** Effective-size estimate of the rewritten context, in tokens. */
@@ -105,6 +107,9 @@ export interface HomeRequestStep {
   viewLines: number;
   /** Canonical messages at or before the activation start that were NOT sent. */
   excludedMessages: number;
+  /** The model's context window this activation was measured against, 0 when the
+   * model declares none. */
+  contextWindow: number;
   /** sha256 of `convertToLlm(rewritten messages)`, recorded for evidence. */
   digest: string;
   /** True when the SDK's projection messages were the identical objects compared against. */
@@ -128,6 +133,39 @@ export interface HomeActivationIdentity {
   boundaryEntryId: string | null;
 }
 
+/** The frozen view one activation receives, and how long it waited for it. */
+export interface HomeActivationView {
+  text: string;
+  /** Milliseconds spent waiting for the memory to cover the activation's start;
+   * 0 when every line it needed was already built. */
+  waitedMs: number;
+}
+
+/**
+ * One bounded record per activation and per refusal. Home is used deliberately,
+ * one turn at a time, so one line per activation is the only place the effective
+ * size of a request and the readiness wait are visible at all; nothing here
+ * carries message text, an entry id or the activation nonce.
+ */
+export type HomeRequestRecord =
+  | {
+    event: "activation";
+    /** Effective-size estimate of the request this activation sent, in tokens. */
+    effectiveTokens: number;
+    contextWindow: number;
+    viewLines: number;
+    viewBytes: number;
+    excludedMessages: number;
+    waitedMs: number;
+  }
+  | {
+    event: "refused";
+    reason: HomeRefusalReason;
+    detail: string;
+    effectiveTokens?: number;
+    contextWindow?: number;
+  };
+
 export interface HomeRequestPolicyOptions {
   /**
    * The frozen memory view for one activation. Called at most once per
@@ -135,9 +173,11 @@ export interface HomeRequestPolicyOptions {
    * that activation closed before any provider call. The wait for the memory to
    * cover the activation start is abortable through the request's signal.
    */
-  prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => Promise<string>;
+  prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => Promise<HomeActivationView>;
   /** Head-room kept below the model's context window. */
   reserveTokens?: number;
+  /** Where the seam reports its bounded per-activation and refusal records. */
+  onRecord?: (record: HomeRequestRecord) => void;
 }
 
 /** Raised for every refusal. Never retryable and never provider-visible. */
@@ -152,8 +192,10 @@ export class HomeRequestPolicyError extends Error {
 }
 
 interface ActivationState extends HomeActivationIdentity {
-  view: Promise<string> | undefined;
+  view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
+  /** True while this activation's first request has not been recorded yet. */
+  unrecorded: boolean;
 }
 
 interface RewrittenContext {
@@ -245,6 +287,7 @@ export class HomeRequestPolicy {
       boundaryEntryId,
       view: undefined,
       viewRefusal: undefined,
+      unrecorded: true,
     };
     this.expectedDigest = undefined;
     this.expectedNonSystemMessages = undefined;
@@ -300,22 +343,42 @@ export class HomeRequestPolicy {
         throw this.refuse(
           "context-overflow",
           `effective ${effectiveTokens} tokens leave no head-room below the ${contextWindow}-token window`,
+          activation,
+          { effectiveTokens, contextWindow },
         );
       }
       const digest = digestLlmMessages(convertToLlm(rewritten.messages));
       this.expectedDigest = digest;
       this.expectedNonSystemMessages = rewritten.nonSystem;
+      const viewBytes = utf8Bytes(memoryView.text);
+      const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
       this.recordStep({
         operationId: activation.operationId,
         nonce: activation.nonce,
+        boundaryEntryId: activation.boundaryEntryId,
         roles: rewritten.roles,
         effectiveTokens,
-        viewBytes: utf8Bytes(memoryView),
-        viewLines: memoryView === "" ? 0 : memoryView.split("\n").length,
+        viewBytes,
+        viewLines,
         excludedMessages: rewritten.excludedMessages,
+        contextWindow,
         digest,
         identityEqual: rewritten.identityEqual,
       });
+      // Once per activation, not once per request: a tool loop or a retry is the
+      // same activation and its effective size and wait are already reported.
+      if (activation.unrecorded) {
+        activation.unrecorded = false;
+        this.options.onRecord?.({
+          event: "activation",
+          effectiveTokens,
+          contextWindow,
+          viewLines,
+          viewBytes,
+          excludedMessages: rewritten.excludedMessages,
+          waitedMs: memoryView.waitedMs,
+        });
+      }
       return { ...update, context: { ...context, messages: rewritten.messages } };
     };
   }
@@ -393,7 +456,7 @@ export class HomeRequestPolicy {
    * every later step of the same activation, so a tool loop or an SDK retry
    * cannot re-render (and cannot re-wait on) the memory.
    */
-  private async memoryView(activation: ActivationState, signal: AbortSignal | undefined): Promise<string> {
+  private async memoryView(activation: ActivationState, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     if (activation.viewRefusal) throw activation.viewRefusal;
     activation.view ??= (async () => {
       try {
@@ -525,7 +588,7 @@ export class HomeRequestPolicy {
     projection: SessionProjection,
     boundaryIndex: number,
     activation: ActivationState,
-    memoryView: string,
+    memoryView: HomeActivationView,
     identityEqual: boolean,
   ): RewrittenContext {
     const systems: AgentMessage[] = [];
@@ -548,7 +611,7 @@ export class HomeRequestPolicy {
     const memory: AgentMessage = {
       role: "custom",
       customType: HOME_MEMORY_CUSTOM_TYPE,
-      content: `${HOME_NONCE_MARKER}${activation.nonce}\n${memoryView}`,
+      content: `${HOME_NONCE_MARKER}${activation.nonce}\n${memoryView.text}`,
       display: false,
       details: undefined,
       timestamp: Date.now(),
@@ -577,6 +640,7 @@ export class HomeRequestPolicy {
     reason: HomeRefusalReason,
     detail: string,
     activation?: ActivationState,
+    sizes?: { effectiveTokens: number; contextWindow: number },
   ): HomeRequestPolicyError {
     const open = activation ?? this.activation;
     this.recordRefusal({
@@ -584,6 +648,7 @@ export class HomeRequestPolicy {
       detail,
       ...(open ? { operationId: open.operationId, nonce: open.nonce } : {}),
     });
+    this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
     return new HomeRequestPolicyError(reason, `Home request refused (${reason}): ${detail}`);
   }
 }

@@ -248,11 +248,35 @@ const sessions = new RuntimeRegistry({
     if (isVirtualModel(resolved)) return { refusal: "virtual-model" as const };
     return { summarizer: createModelRuntimeSummarizer(modelRuntime, resolved) };
   },
-  homeMemoryDiagnostic: (record) => logger.log(record.level === "error" ? "warning" : record.level, "Tron Home memory diagnostic", {
+  homeMemoryDiagnostic: (record) => logger.log(record.level, "Tron Home memory diagnostic", {
     event: record.event, source: "home",
     ...(record.reason === undefined ? {} : { reason: record.reason }),
     ...(record.counts === undefined ? {} : { counts: record.counts }),
   }),
+  // Home is used deliberately, one turn at a time, so one line per activation is
+  // both affordable and the only place a turn's effective size and the readiness
+  // wait it took are visible. No message text, entry id or nonce is included.
+  homeRequestDiagnostic: (record) => {
+    if (record.event === "activation") {
+      logger.log("info", "Tron Home activation", {
+        event: "home.activation", source: "home",
+        counts: {
+          effectiveTokens: record.effectiveTokens,
+          contextWindow: record.contextWindow,
+          viewLines: record.viewLines,
+          viewBytes: record.viewBytes,
+          excludedMessages: record.excludedMessages,
+        },
+        durationMs: record.waitedMs,
+      });
+      return;
+    }
+    logger.log("warning", "Tron Home activation refused", {
+      event: "home.activation-refused", source: "home", reason: record.reason,
+      ...(record.detail.length > 200 ? { detail: `${record.detail.slice(0, 200)}…` } : { detail: record.detail }),
+      ...(record.effectiveTokens === undefined ? {} : { counts: { effectiveTokens: record.effectiveTokens, contextWindow: record.contextWindow ?? 0 } }),
+    });
+  },
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to
@@ -401,6 +425,10 @@ const knowledge = new KnowledgeService(
       `Prospective knowledge observation cuts were not retained (${dropped} cut(s); ${queued} queued); no durable coverage is claimed`,
       { event: code, source: "knowledge" },
     ),
+    // Tron Home is one private conversation whose memory is its own: automatic
+    // Knowledge observation never sees it. The Home owner's designation is the
+    // predicate, so a fork (an ordinary session) is observed normally.
+    (sessionId) => sessions.homeOwner().profileFor(sessionId) === "home",
   ),
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),

@@ -205,11 +205,19 @@ function validateState(value: unknown): EpisodicStoreState {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid blocked state");
     }
   }
+  const spend = state.spend;
+  if (spend !== undefined && (typeof spend !== "number" || !Number.isSafeInteger(spend) || spend < 0)) {
+    throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid token spend");
+  }
   return {
     version: EPISODIC_STORE_VERSION,
     generation: state.generation,
     cursor: cursor ? { ...cursor } : null,
     blocked: blocked ? { ...blocked } : null,
+    // A state written before spend was recorded reads as zero spend: the tokens
+    // already spent are unknown, and inventing a number would be worse than
+    // starting the ceiling again from a known point.
+    spend: spend ?? 0,
   };
 }
 

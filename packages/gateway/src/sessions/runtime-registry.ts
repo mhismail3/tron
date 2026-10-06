@@ -103,6 +103,7 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
 import type { HomeMemoryModelResolution } from "../home/home-memory.js";
+import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
@@ -749,6 +750,9 @@ export class RuntimeRegistry {
       homeMemorySummarizer?: (model: { provider: string; id: string }) => HomeMemoryModelResolution;
       /** Where Home's memory reports its bounded records. */
       homeMemoryDiagnostic?: (record: EpisodicDiagnostic) => void;
+      /** Where Home's request seam reports one record per activation and per
+       * refusal. */
+      homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -803,6 +807,7 @@ export class RuntimeRegistry {
       workspace: this.workspace,
       memorySummarizer: options.homeMemorySummarizer ?? (() => ({ refusal: "unavailable" })),
       ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
+      ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({

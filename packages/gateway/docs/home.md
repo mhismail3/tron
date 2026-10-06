@@ -151,8 +151,12 @@ restores it.
 
 The Gateway log carries one record per designation lifecycle outcome:
 `home.designated`, `home.enabled`, `home.disabled` (info), and
-`home.unavailable`, `home.refused` (warning). `home.status` is the bounded
-runtime projection. See [observability.md](observability.md).
+`home.unavailable`, `home.refused` (warning). It also carries one
+`home.activation` record per activation (the effective size of the request and how
+long it waited for its view), a `home.activation-refused` record for every refusal
+with its reason, and the memory's own `episodic.*` records. `home.status` and
+`home.context` are the bounded projections. See
+[observability.md](observability.md).
 
 ## Activations
 
@@ -197,11 +201,22 @@ the memory re-reads the log after its cursor and builds its tree in the backgrou
 under its own bounds.
 
 There are **no defaults** (decision D4). The record's optional `memory` field holds
-the model and the token budget, written by `HomeOwner.configureMemory`; the
-receipted `home.configureMemory` mutation over it is the client surface. A Home
-whose memory is unconfigured, blocked, or unable to place the activation's start
-entry refuses every activation with a readable reason and makes zero provider
-requests.
+the model and the token budget: `home.configureMemory` (a command-id-receipted
+mutation, `{ model, tokenBudget }`, refusing a virtual or unregistered model and a
+budget outside `1…100000000`) writes it, and its result is the same bounded memory
+projection `home.status` carries as `memory`. Reconfiguring with the same values
+changes nothing and never resets spend; a raised budget resumes a memory that
+stopped with `budget-exhausted`, and only the nodes it has not built cost
+anything, because the tree is durable. Token spend is persisted with the memory's
+state, so a Gateway restart never hands the budget back.
+
+A Home whose memory is unconfigured, blocked, or unable to place the activation's
+start entry refuses every activation with a readable reason and makes zero
+provider requests. `home.context` is the bounded read for the other side of that:
+for Home's current or last activation it returns the activation's start entry id,
+whether it is still open, the frozen view's line and byte counts, the effective
+token estimate the request was measured at, the model's window, and the last
+refusal reason and detail — never a message body and never the view text.
 
 An activation waits for the memory before it sends anything (the recipe's "wait,
 don't cut"): the wait covers the lines the view will carry, so an unbuilt line is

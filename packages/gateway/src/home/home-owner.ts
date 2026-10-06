@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { HomeDesignation, HomeStatus, ModelRef } from "../protocol/types.js";
+import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeStatus, ModelRef } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { EpisodicDiagnostic } from "../episodic/episodic-contract.js";
@@ -10,8 +10,8 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
-import { HomeMemory, MAXIMUM_MEMORY_TOKEN_BUDGET, type HomeMemoryModelResolution, type HomeMemoryStatus } from "./home-memory.js";
-import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity } from "./home-request-policy.js";
+import { HomeMemory, MAXIMUM_MEMORY_TOKEN_BUDGET, type HomeMemoryModelResolution } from "./home-memory.js";
+import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 1;
@@ -93,6 +93,9 @@ export interface HomeOwnerOptions {
   memorySummarizer: (model: ModelRef) => HomeMemoryModelResolution;
   /** Where Home's memory reports its bounded records. */
   memoryDiagnostic?: (record: EpisodicDiagnostic) => void;
+  /** Where Home's request seam reports one record per activation and per
+   * refusal: the effective size of a turn and the readiness wait it took. */
+  requestDiagnostic?: (record: HomeRequestRecord) => void;
 }
 
 /**
@@ -140,10 +143,13 @@ export class HomeOwner {
 
   async status(): Promise<HomeStatus> {
     if (this.unavailable) {
-      return { available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false };
+      return {
+        available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false,
+        memory: this.memoryStatus(),
+      };
     }
     const record = this.record;
-    if (!record) return { available: true, enabled: false, live: false, sessionPresent: false };
+    if (!record) return { available: true, enabled: false, live: false, sessionPresent: false, memory: this.memoryStatus() };
     return {
       available: true,
       enabled: record.enabled,
@@ -153,6 +159,7 @@ export class HomeOwner {
       model: { ...record.model },
       live: this.options.sessions.hasLiveRuntime(record.sessionId),
       sessionPresent: await this.options.sessions.sessionPresent(record.sessionId),
+      memory: this.memoryStatus(),
     };
   }
 
@@ -184,6 +191,7 @@ export class HomeOwner {
     if (!policy) {
       policy = new HomeRequestPolicy({
         prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => this.memoryView(activation, signal),
+        ...(this.options.requestDiagnostic ? { onRecord: this.options.requestDiagnostic } : {}),
       });
       this.policies.set(sessionId, policy);
     }
@@ -241,6 +249,30 @@ export class HomeOwner {
       : { configured: false, open: false };
   }
 
+  /**
+   * `home.context`: the bounded request context of Home's current or last
+   * activation. Sizes and identifiers only, never a message body: the frozen
+   * view text stays in the request that carried it.
+   */
+  contextStatus(): HomeContextProjection {
+    const record = this.record;
+    if (!record) return { available: false };
+    const policy = this.policies.get(record.sessionId);
+    const step = policy?.requestLog().at(-1);
+    if (!policy || !step) return { available: false };
+    const refusal = policy.refusalLog().at(-1);
+    return {
+      available: true,
+      activationStartEntryId: step.boundaryEntryId,
+      activationOpen: policy.currentOperationId() !== undefined,
+      viewLines: step.viewLines,
+      viewBytes: step.viewBytes,
+      effectiveTokens: step.effectiveTokens,
+      contextWindow: step.contextWindow,
+      ...(refusal ? { lastRefusalReason: refusal.reason, lastRefusalDetail: refusal.detail } : {}),
+    };
+  }
+
   /** Release the memory store and the request seams. */
   async dispose(): Promise<void> {
     this.policies.clear();
@@ -254,7 +286,7 @@ export class HomeOwner {
    * (decision D4's no-defaults rule), must be able to place the activation's
    * start entry, and must be able to cover it before the request is built.
    */
-  private async memoryView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<string> {
+  private async memoryView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     // Reachable only through a seam, which exists only for the enabled Home
     // session or for the session a designation in flight is creating.
     const record = this.record;

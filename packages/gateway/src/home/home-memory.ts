@@ -1,12 +1,12 @@
 import { stat } from "node:fs/promises";
 import {
   createEpisodicTokenBudget, EpisodicMemoryError,
-  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer,
+  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
 } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
-import type { ModelRef } from "../protocol/types.js";
+import type { HomeMemoryStatus, ModelRef } from "../protocol/types.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
-import { HomeMemoryRefusal, type HomeActivationIdentity } from "./home-request-policy.js";
+import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView } from "./home-request-policy.js";
 
 /*
  * Tron Home's memory for one Home session: ONE `EpisodicMemory` over that
@@ -57,22 +57,6 @@ export interface HomeMemoryOptions {
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
   diagnostic?: (record: EpisodicDiagnostic) => void;
   limits?: Partial<EpisodicLimits>;
-}
-
-/** What `home.status` and the request seam can read about the memory. */
-export interface HomeMemoryStatus {
-  /** The record holds a model and a budget. */
-  configured: boolean;
-  model?: ModelRef;
-  tokenBudget?: number;
-  /** The store is open and serving requests. */
-  open: boolean;
-  /** The episodic owner's bounded status, once its store is open. */
-  memory?: EpisodicMemoryStatus;
-  /** The memory's own blocked state, which is what a refusal names. */
-  blocked?: EpisodicBlocked | null;
-  /** Why the memory is not serving, when it is not. */
-  reason?: string;
 }
 
 interface MemoryBinding {
@@ -159,7 +143,7 @@ export class HomeMemory {
    * request's signal, so the user's Stop cancels it and their message stays in
    * the log, unanswered.
    */
-  async activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<string> {
+  async activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     const binding = await this.bindingForView();
     try {
       // Ingest only: the wait below is for the lines this activation will send,
@@ -180,6 +164,7 @@ export class HomeMemory {
         "the Home memory cannot place the activation's start entry in the history it has read",
       );
     }
+    const waitingSince = performance.now();
     try {
       await binding.memory.whenReady(cut, signal ? { signal } : {});
     } catch (error) {
@@ -189,7 +174,7 @@ export class HomeMemory {
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not cover the activation start: ${messageOf(error)}`);
     }
     const view = binding.memory.renderView(cut);
-    return `${VIEW_HEADER}\n${view.text}\n${VIEW_FOOTER}`;
+    return { text: `${VIEW_HEADER}\n${view.text}\n${VIEW_FOOTER}`, waitedMs: Math.round(performance.now() - waitingSince) };
   }
 
   /** The bounded memory status, for `home.status` and for the seam's evidence. */
@@ -204,8 +189,8 @@ export class HomeMemory {
       open: true,
       model: { ...config.model },
       tokenBudget: config.tokenBudget,
-      memory,
-      blocked: memory.blocked,
+      episodic: memory,
+      ...(memory.blocked ? { blocked: memory.blocked.reason } : {}),
     };
   }
 

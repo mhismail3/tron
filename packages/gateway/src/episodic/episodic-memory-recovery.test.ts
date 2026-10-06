@@ -176,6 +176,71 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 }
 
 describe("episodic memory crash recovery", () => {
+  it("keeps the token spend a killed child had already recorded", async () => {
+    // Spend is the one piece of a memory that no restart may hand back: a budget
+    // bounded in name is unbounded in practice if a crash resets it. The child is
+    // killed mid-pump, and the parent's reopen must both restore the spend and
+    // charge it against the same budget.
+    const fx = await fixture("spend-crash", 12);
+    const hook = join(fx.root, "hook.mjs");
+    const program = join(fx.root, "spend-child.mjs");
+    await writeFile(hook, `import { registerHooks } from "node:module";\nimport { pathToFileURL } from "node:url";\nregisterHooks({\n  resolve(specifier, context, nextResolve) {\n    try { return nextResolve(specifier, context); }\n    catch (error) {\n      if (specifier.endsWith(".js")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n      throw error;\n    }\n  },\n});\nawait import(pathToFileURL(process.argv[1]).href);\n`, "utf8");
+    await writeFile(program, `import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { createEpisodicTokenBudget } from ${JSON.stringify(CONTRACT_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId] = process.argv.slice(2);\nconst usage = { input: 80, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 100, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  budget: createEpisodicTokenBudget(100000),\n  limits: { viewBytes: 4096, jobs: 1, retryMs: 1 },\n  summarizer: async (request) => ({\n    role: "assistant", content: [{ type: "text", text: \`spend line \${request.turns.length}\` }],\n    api: "faux", provider: "faux", model: "child", usage, stopReason: "stop", timestamp: Date.now(),\n  }),\n  sleep: async () => {},\n});\nprocess.stdout.write("opened\\n");\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write(\`spent \${memory.status().tokens.used}\\n\`);\nfor (;;) await new Promise(resolve => setTimeout(resolve, 5));\n`, "utf8");
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId], { stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    const statePath = join(fx.storeRoot, "state.json");
+    const spendOf = async (): Promise<number> => {
+      try {
+        const state = JSON.parse(await readFile(statePath, "utf8")) as { spend?: number };
+        return state.spend ?? 0;
+      } catch { return 0; }
+    };
+    const deadline = Date.now() + 30_000;
+    while ((await spendOf()) <= 0) {
+      if (Date.now() > deadline) throw new Error(`child recorded no spend; output: ${output}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const durableSpend = await spendOf();
+    child.kill("SIGKILL");
+    await new Promise(resolve => child.once("exit", resolve));
+    const lock = join(fx.home, "gateway", "workspace-state.lock");
+    const past = new Date(Date.now() - 120_000);
+    await utimes(lock, past, past);
+
+    // Reopened with the same budget, the memory starts from what the child spent.
+    const reopened = await EpisodicMemory.open({
+      workspace: fx.workspace,
+      sessionId: fx.sessionId,
+      sessionFile: fx.sessionFile,
+      budget: createEpisodicTokenBudget(100_000),
+      summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
+      sleep: async () => {},
+    });
+    const reopenedUsed = reopened.status().tokens.used;
+    expect(durableSpend).toBeGreaterThanOrEqual(100);
+    expect(reopenedUsed).toBeGreaterThanOrEqual(durableSpend);
+    await reopened.dispose();
+
+    // The restored spend is charged: a budget that is already spent is blocked
+    // rather than handed a fresh ceiling.
+    const exhausted = await EpisodicMemory.open({
+      workspace: fx.workspace,
+      sessionId: fx.sessionId,
+      sessionFile: fx.sessionFile,
+      budget: createEpisodicTokenBudget(reopenedUsed),
+      summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
+      sleep: async () => {},
+    });
+    expect(exhausted.status().tokens.used).toBe(reopenedUsed);
+    expect(exhausted.status().tokens.limit).toBe(reopenedUsed);
+    await exhausted.dispose();
+  }, 120_000);
+
   it("reopens a store a killed child was writing, proves it consistent, and refolds a valid view", async () => {
     const fx = await fixture("sigkill", 60);
     const marker = join(fx.root, "commit-marker");
