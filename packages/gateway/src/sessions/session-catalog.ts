@@ -650,8 +650,19 @@ export class SessionCatalog {
     while (frontier.length > 0) {
       const nextFrontier: string[] = [];
       for (const candidate of frontier) {
-        const entries = await readdir(candidate, { withFileTypes: true }).catch(() => undefined);
-        if (entries === undefined) return undefined;
+        let entries;
+        try {
+          entries = await readdir(candidate, { withFileTypes: true });
+        } catch (error) {
+          // A folder removed after it was listed (an `rm -rf` still in progress
+          // under a folder the platform named) is absence, not an unreadable
+          // folder: only the rows published at or under it can be affected, so
+          // they are re-read and dropped like any other absent path (#406).
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT" && code !== "ENOTDIR") return undefined;
+          transcripts.push(...this.indexedBeneath(candidate));
+          continue;
+        }
         for (const entry of entries) {
           const path = join(candidate, entry.name);
           if (entry.isDirectory()) {
