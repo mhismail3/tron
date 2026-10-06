@@ -8,6 +8,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
 import { StallSampler, type HostMemory } from "./stall-diagnostics.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes this file exists to catch (real sockets, injected host probe):
 // 1. A phone's `connection.closed` and `connection.opened` records say nothing
@@ -60,14 +61,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("probe did not bind");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
-}
-
-async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
 }
 
 interface Harness {
@@ -140,7 +133,7 @@ async function startGateway(): Promise<Harness> {
       sockets.push(socket);
       await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
-      await waitUntil(() => records("connection.opened").length === before + 1, "connection opened record");
+      await waitFor(() => records("connection.opened").length === before + 1, "connection opened record");
       return socket;
     },
   };
@@ -160,7 +153,7 @@ describe("host memory in connection records", () => {
     expect(opened[1]).toContain(`memoryPressure=${DURING_SQUEEZE.pressure}`);
 
     socket.close();
-    await waitUntil(() => harness.records("connection.closed").length === 1, "connection closed record");
+    await waitFor(() => harness.records("connection.closed").length === 1, "connection closed record");
     const closed = harness.records("connection.closed")[0]!;
     expect(closed[0]).toBe("info");
     expect(closed[1]).toContain(`hostFreeBytes=${DURING_SQUEEZE.freeBytes}`);
@@ -171,7 +164,7 @@ describe("host memory in connection records", () => {
     const reconnect = await harness.connect(harness.pairedToken);
     expect(harness.records("connection.opened").at(-1)![1]).toContain(`swapUsedBytes=${DURING_SQUEEZE.swapUsedBytes}`);
     reconnect.close();
-    await waitUntil(() => harness.records("connection.closed").length === 2, "second close record");
+    await waitFor(() => harness.records("connection.closed").length === 2, "second close record");
   });
 
   // Failure mode 2: four boundary records must not become four host probes.
@@ -179,10 +172,10 @@ describe("host memory in connection records", () => {
     const harness = await startGateway();
     const paired = await harness.connect(harness.pairedToken);
     paired.close();
-    await waitUntil(() => harness.records("connection.closed").length === 1, "paired close");
+    await waitFor(() => harness.records("connection.closed").length === 1, "paired close");
     const local = await harness.connect(harness.localToken);
     local.close();
-    await waitUntil(() => harness.records("connection.closed").length === 2, "local close");
+    await waitFor(() => harness.records("connection.closed").length === 2, "local close");
     expect(harness.probe).toHaveBeenCalledTimes(1);
   });
 
@@ -192,7 +185,7 @@ describe("host memory in connection records", () => {
     const during = await harness.connect(harness.pairedToken);
     expect(harness.records("connection.opened").at(-1)![1]).toContain(`memoryPressure=${DURING_SQUEEZE.pressure}`);
     during.close();
-    await waitUntil(() => harness.records("connection.closed").length === 1, "close during the squeeze");
+    await waitFor(() => harness.records("connection.closed").length === 1, "close during the squeeze");
 
     harness.sample(AFTER_CLEANUP);
     await vi.advanceTimersByTimeAsync(GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs);
@@ -203,7 +196,7 @@ describe("host memory in connection records", () => {
     expect(opened[1]).toContain(`swapUsedBytes=${AFTER_CLEANUP.swapUsedBytes}`);
     expect(opened[1]).toContain(`memoryPressure=${AFTER_CLEANUP.pressure}`);
     after.close();
-    await waitUntil(() => harness.records("connection.closed").length === 2, "close after cleanup");
+    await waitFor(() => harness.records("connection.closed").length === 2, "close after cleanup");
   });
 
   // Failure mode 5: a record can carry pre-squeeze numbers, because the sample
@@ -215,7 +208,7 @@ describe("host memory in connection records", () => {
     const harness = await startGateway();
     const during = await harness.connect(harness.pairedToken);
     during.close();
-    await waitUntil(() => harness.records("connection.closed").length === 1, "close during the squeeze");
+    await waitFor(() => harness.records("connection.closed").length === 1, "close during the squeeze");
 
     // The Mac is no longer squeezed and no tick has run, so the record below
     // still holds the squeeze sample and only its age says so.
@@ -230,7 +223,7 @@ describe("host memory in connection records", () => {
     const ageMs = Number(/hostSampleAgeMs=(\d+)/u.exec(opened[1])?.[1]);
     expect(ageMs).toBeGreaterThanOrEqual(20);
     after.close();
-    await waitUntil(() => harness.records("connection.closed").length === 2, "second close record");
+    await waitFor(() => harness.records("connection.closed").length === 2, "second close record");
   });
 
   // Failure mode 4: the Mac app's local probes reconnect constantly; host facts
@@ -243,7 +236,7 @@ describe("host memory in connection records", () => {
     expect(harness.records("connection.opened").at(-1)![1]).toContain("connection opened (local");
     local.close();
     paired.close();
-    await waitUntil(() => harness.records("connection.closed").length === 2, "both close records");
+    await waitFor(() => harness.records("connection.closed").length === 2, "both close records");
     expect(harness.records("connection.closed").find(([level]) => level === "info")![1]).toContain("swapUsedBytes=");
     const localMessages = harness.records("connection.opened")
       .concat(harness.records("connection.closed"))

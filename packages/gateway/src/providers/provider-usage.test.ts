@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProviderUsageOwner, providerLocalOnly, providerUsageSupported } from "./provider-usage.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const model = (provider: string, baseUrl: string, api = "openai-completions") => ({ provider, id: "fixture", api, baseUrl });
 function runtime(provider: string, baseUrl: string, auth: unknown = { auth: { apiKey: "fixture-secret" } }, api = "openai-completions", oauth = false) {
@@ -23,14 +24,6 @@ const moonshotBalanceBody = { code: 0, data: { available_balance: 49.58894, vouc
 function response(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers });
 }
-async function waitFor(condition: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error("fixture condition was not reached");
-}
-
 describe("provider usage owner", () => {
   it("queries exact first-party OpenRouter config and projects capped key spend", async () => {
     let now = 1_700_000_000_000;
@@ -343,7 +336,7 @@ describe("provider usage owner", () => {
     const cancelled = new AbortController();
     const first = owner.read(fixture, "openrouter", cancelled.signal);
     const second = owner.read(fixture, "openrouter");
-    await waitFor(() => fetch.mock.calls.length === 1);
+    await waitFor(() => fetch.mock.calls.length === 1, "the first fetch");
     expect(fetch).toHaveBeenCalledTimes(1);
     cancelled.abort();
     await expect(first).rejects.toMatchObject({ name: "AbortError" });
@@ -359,7 +352,7 @@ describe("provider usage owner", () => {
     fixture.getAuth.mockResolvedValueOnce({ auth: { apiKey: "old-account" } }).mockResolvedValue({ auth: { apiKey: "new-account" } });
     const owner = new ProviderUsageOwner({ fetch });
     const pending = owner.read(fixture, "openrouter");
-    await waitFor(() => typeof release === "function");
+    await waitFor(() => typeof release === "function", "the release hook");
     release();
     const observed = await pending;
     expect(observed).toMatchObject({ providers: [{ status: "unavailable", stale: false, windows: [], message: "Provider usage changed while the request was in flight" }] });
@@ -428,7 +421,7 @@ describe("provider usage owner", () => {
     const fixture = runtime("openrouter", "https://openrouter.ai/api/v1");
     const controllers = Array.from({ length: 16 }, () => new AbortController());
     const reads = controllers.map((controller) => owner.read(fixture, "openrouter", controller.signal));
-    await waitFor(() => typeof release === "function");
+    await waitFor(() => typeof release === "function", "the release hook");
     controllers.forEach((controller) => controller.abort());
     await expect(owner.read(fixture, "openrouter")).resolves.toMatchObject({ providers: [{ status: "unavailable", message: "Provider usage is busy" }] });
     release();
@@ -514,7 +507,7 @@ describe("OpenAI ChatGPT-subscription usage borrowed from the Codex login", () =
     const fetch = vi.fn(() => new Promise<Response>((resolve) => { release = () => resolve(response(codexBody)); }));
     const { fixture, state } = pair();
     const pending = new ProviderUsageOwner({ fetch }).read(fixture, "openai");
-    await waitFor(() => typeof release === "function");
+    await waitFor(() => typeof release === "function", "the release hook");
     state.openaiOAuth = false;
     release();
     await expect(pending).resolves.toMatchObject({ providers: [{ providerId: "openai", status: "unavailable", windows: [] }] });

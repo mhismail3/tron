@@ -9,6 +9,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
 import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 // Failure modes this file exists to catch (real sockets, fake heartbeat clock):
 // 1. Skipping pings delays dead-client retirement past today's fourth tick.
@@ -58,14 +59,6 @@ async function unusedPort(): Promise<number> {
   if (!address || typeof address === "string") throw new Error("probe did not bind");
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return address.port;
-}
-
-async function realWait(predicate: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`${label} timed out`);
-    await new Promise((resolve) => setImmediate(resolve));
-  }
 }
 
 interface ClientScript {
@@ -195,7 +188,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
   // The hello is client-initiated inbound at virtual second 0.
   socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, diagnostics: PEER_DIAGNOSTICS }));
-  await realWait(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "hello");
+  await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "hello");
   const connection = () => [...(gateway as unknown as { clients: Map<string, { unansweredHeartbeats: number; lastClientInitiatedInboundAt: number | null }> }).clients.values()][0];
 
   const observations: TickObservation[] = [];
@@ -218,28 +211,28 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
         // received any ping that tick wrote to the same socket, or the close.
         const sequence = tick;
         gateway.broadcast("test.barrier", { sequence });
-        await realWait(() => barrier === sequence || closed, `tick ${tick} barrier`);
+        await waitFor(() => barrier === sequence || closed, `tick ${tick} barrier`);
       }
       observations.push({ tick, serverPings, closed });
       // Let the Gateway observe an automatic pong before the next tick, as a
       // live peer's pong would arrive well within one interval.
       const pingedThisTick = serverPings > (observations.at(-2)?.serverPings ?? 0);
       if (!closed && !blackholed && script.autoPong && pingedThisTick) {
-        await realWait(() => connection()?.unansweredHeartbeats === 0, `tick ${tick} pong`);
+        await waitFor(() => connection()?.unansweredHeartbeats === 0, `tick ${tick} pong`);
       }
     }
     if (!closed && script.pingsAt?.(second)) {
       const expected = clientPongs + 1;
       socket.ping();
       // The Gateway handles the ping in the same callback that answers it.
-      await realWait(() => clientPongs === expected || closed, `second ${second} client ping`);
+      await waitFor(() => clientPongs === expected || closed, `second ${second} client ping`);
     }
     if (!closed && options.messagesAt?.(second) === true) {
       const before = connection()?.lastClientInitiatedInboundAt ?? null;
       // An application frame, not a ping: it makes the next tick skip its ping
       // without arming the client's own-ping liveness signal.
       socket.send(JSON.stringify({ type: "probe" }));
-      await realWait(() => (connection()?.lastClientInitiatedInboundAt ?? null) !== before, `second ${second} client message`);
+      await waitFor(() => (connection()?.lastClientInitiatedInboundAt ?? null) !== before, `second ${second} client message`);
     }
     options.afterSecond?.(second);
   }

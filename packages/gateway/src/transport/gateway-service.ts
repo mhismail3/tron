@@ -73,6 +73,7 @@ import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../home/home-owner.js";
+import { MAXIMUM_MEMORY_TOKEN_BUDGET } from "../home/home-memory.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
@@ -207,7 +208,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -483,6 +484,29 @@ export class GatewayService {
           rejectUnknownFields(params, ["commandId"], method);
           return safeJson(await this.requireHome().disable());
         });
+      case "home.configureMemory":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "model", "tokenBudget"], method);
+          const model = this.admitNamedHomeModel(params.model);
+          if (!model) throw new GatewayError("invalid_request", "home.configureMemory requires model");
+          // A budget is a spend ceiling, not a trust boundary; its bound keeps a
+          // value no compactor could ever exhaust out of the record.
+          return safeJson(await this.requireHome().configureMemory({
+            model,
+            tokenBudget: integer(params.tokenBudget, "tokenBudget", 1, MAXIMUM_MEMORY_TOKEN_BUDGET),
+          }));
+        });
+      case "home.resumeMemory":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          // A budget block is refused here: its cause is the configured ceiling,
+          // so the answer is home.configureMemory with a raised budget.
+          return safeJson(await this.requireHome().resumeMemory());
+        });
+      case "home.context": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home context accepts no parameters");
+        return safeJson(this.requireHome().contextStatus());
+      }
       case "knowledge.status":
       case "knowledge.observation.coverage":
       case "knowledge.list":

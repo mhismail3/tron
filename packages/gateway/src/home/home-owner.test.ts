@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeOwner, type HomeRecord, type HomeSessionPort } from "./home-owner.js";
 
 const roots: string[] = [];
+const workspaces: TronWorkspace[] = [];
 afterEach(async () => {
+  await Promise.all(workspaces.splice(0).map((workspace) => workspace.dispose()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -44,6 +47,7 @@ async function harness(): Promise<Harness> {
       return sessionId;
     },
     applySessionModel: async () => {},
+    sessionFile: async (sessionId) => (present.has(sessionId) ? join(root, "sessions", `${sessionId}.jsonl`) : undefined),
     sessionPresent: async (sessionId) => present.has(sessionId),
     hasLiveRuntime: (sessionId) => live.has(sessionId),
     replaceRuntimeForProfile: async (sessionId, commit) => {
@@ -51,7 +55,17 @@ async function harness(): Promise<Harness> {
       await commit();
     },
   };
-  const owner = new HomeOwner({ tronHome: join(root, "tron"), trust: new TrustService(agentDir), sessions });
+  const workspace = new TronWorkspace(join(root, "tron"), );
+  workspaces.push(workspace);
+  const owner = new HomeOwner({
+    tronHome: join(root, "tron"),
+    trust: new TrustService(agentDir),
+    sessions,
+    workspace,
+    // Home's memory compactor is resolved from the Gateway's ModelRuntime; this
+    // harness never configures a memory that could use one.
+    memorySummarizer: () => ({ refusal: "unavailable" }),
+  });
   await owner.initialize();
   return {
     root,
@@ -290,5 +304,69 @@ describe("Tron Home record", () => {
     await expect(f.owner.disable()).rejects.toMatchObject({ code: "not_found" });
     await expect(readFile(f.recordPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(f.created).toEqual([]);
+  });
+
+  it("admits a record written before Home's memory existed, and leaves it alone", async () => {
+    // The record keeps version 1 with an optional `memory`: a record without one
+    // is this build's record, and it refuses its activations rather than inventing
+    // a model or a budget (decision D4).
+    const h = await harness();
+    // The record is written first: `initialize` is the only reader that matters.
+    const previous = await harness();
+    await rm(h.recordPath, { force: true });
+    await mkdir(h.directory, { recursive: true });
+    const bytes = recordBytes({ sessionId: "session-1" });
+    expect(bytes.includes("\"memory\"")).toBe(false);
+    await writeFile(h.recordPath, bytes, { mode: 0o600 });
+    const owner = new HomeOwner({
+      tronHome: join(h.root, "tron"),
+      trust: new TrustService(join(h.root, "agent")),
+      sessions: {
+        createHomeSession: async () => "unused",
+        applySessionModel: async () => {},
+        sessionFile: async () => undefined,
+        sessionPresent: async () => true,
+        hasLiveRuntime: () => false,
+        replaceRuntimeForProfile: async (_sessionId, commit) => { await commit(); },
+      },
+      workspace: new TronWorkspace(join(h.root, "tron")),
+      memorySummarizer: () => ({ refusal: "unavailable" }),
+    });
+    await owner.initialize();
+    expect(owner.profileFor("session-1")).toBe("home");
+    const status = await owner.status();
+    expect(status.memory).toEqual({ configured: false, open: false });
+    // The preserved record is never rewritten by a read: only the lifecycle
+    // mutations do that.
+    expect(await readFile(h.recordPath, "utf8")).toBe(bytes);
+    await previous.owner.dispose();
+    await owner.dispose();
+  });
+
+  it("refuses to configure the memory of a disabled Home", async () => {
+    const h = await harness();
+    await mkdir(h.directory, { recursive: true });
+    await writeFile(h.recordPath, recordBytes({ enabled: false }), { mode: 0o600 });
+    await h.owner.initialize();
+    await expect(h.owner.configureMemory({ model: MODEL, tokenBudget: 1_000 })).rejects.toMatchObject({ code: "conflict" });
+    expect((JSON.parse(await readFile(h.recordPath, "utf8")) as HomeRecord).memory).toBeUndefined();
+    await h.owner.dispose();
+  });
+
+  it("keeps the memory configuration when a designation replaces a lost session", async () => {
+    // The configuration is the user's decision about how Home remembers; the
+    // spend belongs to the session, and the new session's store starts its own.
+    const h = await harness();
+    await mkdir(h.directory, { recursive: true });
+    const memory = { model: { provider: "anthropic", id: "haiku-4-5" }, tokenBudget: 5_000 };
+    await writeFile(h.recordPath, recordBytes({ sessionId: "session-gone", memory }), { mode: 0o600 });
+    await h.owner.initialize();
+    expect(h.present.has("session-gone")).toBe(false);
+    const designation = await h.owner.designate({}, defaultModel);
+    const written = JSON.parse(await readFile(h.recordPath, "utf8")) as HomeRecord;
+    expect(designation.sessionId).not.toBe("session-gone");
+    expect(written.memory).toEqual(memory);
+    expect(written.generation).toBe(3);
+    await h.owner.dispose();
   });
 });

@@ -10,6 +10,7 @@ import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -48,19 +49,53 @@ import { toolSegmentId } from "./projection.js";
 import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
+import { waitFor } from "../../test-support/wait-for.js";
+
+/** Test-owned producer for one deterministic status.json replacement.
+ *
+ * `openOwnedExtensionArtifact` (runtime-slot) opens the artifact and then
+ * verifies that the inode it opened is the one it stats; a producer that
+ * atomically renames a new file over `status.json` in that window makes the
+ * read lose, which is the race "retries a status.json read that raced an atomic
+ * replacement" is about. Racing a real producer loop for that window made the
+ * case load-dependent (#430: its sample-size guard was a speed budget), so the
+ * `open` wrapper below performs exactly one real write+rename inside that
+ * window instead. `vi.mock` factories are hoisted, so their state lives here. */
+const statusJsonReplace = vi.hoisted(() => ({
+  /** Armed only by the case that injects the replacement. */
+  armed: false,
+  /** Real replacements performed, and the reads they made lose. */
+  replacements: 0,
+  losses: 0,
+  payload: "",
+  statusPath: "",
+  tempPath: "",
+  /** True only inside the read-with-retry invocation under observation. */
+  insideRetryInvocation: (): boolean => false,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    open: async (path: Parameters<typeof actual.open>[0], ...rest: unknown[]) => {
+      const handle = await (actual.open as unknown as (target: unknown, ...args: unknown[]) => Promise<unknown>)(path, ...rest);
+      if (statusJsonReplace.armed && statusJsonReplace.losses === 0
+        && statusJsonReplace.insideRetryInvocation() && String(path) === statusJsonReplace.statusPath) {
+        statusJsonReplace.losses += 1;
+        await actual.writeFile(statusJsonReplace.tempPath, statusJsonReplace.payload);
+        await actual.rename(statusJsonReplace.tempPath, statusJsonReplace.statusPath);
+        statusJsonReplace.replacements += 1;
+      }
+      return handle;
+    },
+  };
+});
 
 async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const value of stream) chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
   return Buffer.concat(chunks);
-}
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 /** A snapshot is built and broadcast only for a subscriber, so a test that reads
@@ -84,34 +119,41 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
   return { paths: () => reads.mock.calls.map(([path]) => String(path)), restore: () => reads.mockRestore() };
 }
 
-/** A test that writes canonical files itself is an external writer: the folder
- * watcher observes it, but no reader polls for it. Forcing one owner reconcile
- * is the deterministic equivalent of waiting the watcher out, and settling the
- * owner then makes its rows and the durable document current without waiting
- * out the persist debounce. */
+/** Passes `discoverExtensionArtifactsUntil` may run before it stops on its own.
+ * It only stops the loop: the caller's pass assertion is the bound, so a lagging
+ * routing is reported as a pass count instead of a hang. It sits well above the
+ * one pass the production code implies for the cases that assert a count. */
+const DISCOVERY_PASS_LIMIT = 8;
+
 /** Registry discovery is a bounded single owner: a call that arrives while a
  * pass is in flight returns without discovering anything, and the next scheduled
  * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
- * of its own instead of treating the awaited call as a barrier, so wait out any
- * in-flight pass and then await one this call starts; `settled` names the state
- * that pass must publish (T-1). Waiting out a running pass is not bounded by wall
- * clock: a pass walks a production-shaped root of thousands of directory entries
- * and a loaded host stretches that past any fixed guess, which reported a pass
- * that was merely slow as one that would never settle (T-6). The deadline below
- * bounds only the retries this helper starts, and the test's own timeout reports
- * a pass that never ends. */
-async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
+ * of its own instead of treating the awaited call as a barrier; `settled` names
+ * the state that pass must publish (T-1). This helper runs only its own passes
+ * and reports how many, so a caller can assert the pass count the production code
+ * implies instead of a wall-clock budget (epic #400): a loaded host stretches a
+ * pass, which used to report a pass that was merely slow as one that would never
+ * settle (T-6).
+ *
+ * `passLimit` only stops the loop; the caller's assertion is the bound. A pass
+ * that never settles reports its own label at the shared hang bound. */
+async function discoverExtensionArtifactsUntil(
+  registry: RuntimeRegistry,
+  settled: () => boolean = () => true,
+  passLimit = DISCOVERY_PASS_LIMIT,
+): Promise<number> {
   const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
-  // The budget counts only this helper's own passes: time spent waiting out an
-  // interval pass does not spend it.
-  let ownPassMs = 0;
-  do {
-    while (state.artifactDiscoveryInFlight) await new Promise((resolve) => setTimeout(resolve, 10));
-    const startedAt = Date.now();
+  let passes = 0;
+  await waitFor(async () => {
+    // A pass that is already in flight returns without discovering anything; let
+    // it finish first (on the shared poll), so every pass counted here is one
+    // this call ran, and a caller's pass assertion is about its own passes.
+    if (state.artifactDiscoveryInFlight) return false;
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-    ownPassMs += Date.now() - startedAt + 10;
-  } while (!settled() && ownPassMs < 5_000);
-  if (!settled()) throw new Error("extension artifact discovery did not settle");
+    passes += 1;
+    return settled() || passes >= passLimit;
+  }, "extension artifact discovery to settle");
+  return passes;
 }
 
 /** Initialize a registry and wait for the catalog owner's first published cut.
@@ -125,6 +167,11 @@ async function initializeRegistry(
   await catalogOwner(registry).whenPublished();
 }
 
+/** A test that writes canonical files itself is an external writer: the folder
+ * watcher observes it, but no reader polls for it. Forcing one owner reconcile
+ * is the deterministic equivalent of waiting the watcher out, and settling the
+ * owner then makes its rows and the durable document current without waiting
+ * out the persist debounce. */
 async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
   await catalogOwner(registry).reconcile();
   await catalogOwner(registry).settled();
@@ -600,10 +647,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
 
     await slot.prompt("finish while visible");
-    await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
+    await waitFor(() => registry.attentionProjection(slot.id).completionRevision === 1, "the first completion revision");
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: false });
-    await waitUntil(() => suppressAutomatic.mock.calls.length > 0);
+    await waitFor(() => suppressAutomatic.mock.calls.length > 0, "the suppressed automatic title refresh");
     expect(enqueue).not.toHaveBeenCalled();
     expect(suppressAutomatic).toHaveBeenCalledWith({
       sessionId: slot.id,
@@ -614,7 +661,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     enqueue.mockClear();
     suppressAutomatic.mockClear();
     await slot.prompt("finish after presentation closes");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     registry.setPresentationVisibility({
       clientId: "visible-phone",
       sessionId: slot.id,
@@ -623,10 +670,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       visible: false,
     });
     releaseHiddenCompletion();
-    await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 2);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
+    await waitFor(() => registry.attentionProjection(slot.id).completionRevision === 2, "the second completion revision");
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
-    await waitUntil(() => enqueue.mock.calls.length > 0);
+    await waitFor(() => enqueue.mock.calls.length > 0, "the enqueued title refresh");
     expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: slot.id,
       kind: "agent_finished",
@@ -1071,7 +1118,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     await slot.prompt("Update this title immediately");
     try {
-      await waitUntil(() => summaries.some((summary) => summary.firstMessage === "Update this title immediately"));
+      await waitFor(() => summaries.some((summary) => summary.firstMessage === "Update this title immediately"), "the immediate title summary");
 
       expect(slot.isBusy).toBe(true);
       expect(summaries.at(-1)).toMatchObject({
@@ -1086,7 +1133,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally {
       releaseResponse();
     }
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(summaries.at(-1)).toMatchObject({
       phase: "idle",
       messageCount: 2,
@@ -1102,13 +1149,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     try {
       const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
       const manager = (slot as unknown as { sessionManager: SessionManager }).sessionManager;
-      await waitUntil(() => fixture.summaries.length > 0);
+      await waitFor(() => fixture.summaries.length > 0, "the first session summary");
       const before = fixture.summaries.at(-1)!;
       const beforeAt = Date.parse(before.updatedAt);
 
       manager.appendMessage({ role: "user", content: "folded prompt", timestamp: beforeAt + 1_000 });
       await slot.rename("fold one");
-      await waitUntil(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 1);
+      await waitFor(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 1, "the summary after one message");
       expect(fixture.summaries.at(-1)).toMatchObject({
         firstMessage: "folded prompt",
         updatedAt: new Date(beforeAt + 1_000).toISOString(),
@@ -1116,7 +1163,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
       manager.appendMessage({ role: "user", content: "second prompt", timestamp: beforeAt + 2_000 });
       await slot.rename("fold two");
-      await waitUntil(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 2);
+      await waitFor(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 2, "the summary after two messages");
       expect(fixture.summaries.at(-1)).toMatchObject({
         firstMessage: "folded prompt",
         updatedAt: new Date(beforeAt + 2_000).toISOString(),
@@ -1130,7 +1177,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       replacement.appendMessage(fauxAssistantMessage("replacement answer"));
       manager.setSessionFile(replacement.getSessionFile()!);
       await slot.rename("fold three");
-      await waitUntil(() => fixture.summaries.at(-1)!.firstMessage === "replacement prompt");
+      await waitFor(() => fixture.summaries.at(-1)!.firstMessage === "replacement prompt", "the summary of the replacement prompt");
       expect(fixture.summaries.at(-1)).toMatchObject({
         messageCount: 2,
         updatedAt: new Date(beforeAt + 5_000).toISOString(),
@@ -1182,7 +1229,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // A client that opens mid-admission installs the current snapshot, then
     // applies only later sequences, exactly like the phone reducer.
     const midAdmission = slot.snapshot();
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     // Outlive any coalescing window still pending after settlement.
     await new Promise((resolve) => setTimeout(resolve, 60));
 
@@ -1233,7 +1280,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt(`catalog boundary ${"x".repeat(5_000)}`);
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     await slot.rename(`catalog-${"n".repeat(5_000)}`);
     const before = await registry.catalog("user");
     const snapshot = vi.spyOn(slot, "snapshot");
@@ -2085,7 +2132,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const first = registry.acquire(firstManager.getSessionId());
     const duplicate = registry.acquire(firstManager.getSessionId());
     const second = registry.acquire(secondManager.getSessionId());
-    await waitUntil(() => entered === 2);
+    await waitFor(() => entered === 2, "both slots to enter");
     expect(runtimeFactory).toHaveBeenCalledTimes(2);
     await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
     expect(runtimeFactory).toHaveBeenCalledTimes(2);
@@ -3191,7 +3238,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const model = faux.getModel();
     await live.setModel(model.provider, model.id);
     await live.prompt("catalog index create");
-    await waitUntil(() => !live.isBusy);
+    await waitFor(() => !live.isBusy, "the live slot to go idle");
     await catalog.settled();
     await compareToFullScan("create");
     expect(catalog.rows().map((row) => row.id)).toContain(live.id);
@@ -3209,7 +3256,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const forked = await live.fork(userEntry!.id, "at");
     // Pi reserves the forked session's path; its first entry persists the file.
     await live.prompt("catalog index fork entry");
-    await waitUntil(() => !live.isBusy);
+    await waitFor(() => !live.isBusy, "the live slot to go idle");
     await catalog.settled();
     await compareToFullScan("fork");
     expect(catalog.rows().map((row) => row.id)).toContain(forked.sessionId);
@@ -3247,7 +3294,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("persist duplicate ownership fixture");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     await settleCatalog(registry);
     const duplicatePath = join(agentDir, "sessions", "duplicate", `${slot.id}.jsonl`);
     await mkdir(dirname(duplicatePath), { recursive: true });
@@ -3391,7 +3438,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registry.subscribe("phone", second.id);
 
     await Promise.all([first.prompt("one"), second.prompt("two")]);
-    await waitUntil(() => first.isBusy && second.isBusy && faux.state.callCount === 2);
+    await waitFor(() => first.isBusy && second.isBusy && faux.state.callCount === 2, "both slots running their first turn");
     expect(faux.state.callCount).toBe(2);
     expect(summaryUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -3417,7 +3464,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(drainCompleted).toBe(false);
 
-    await waitUntil(() => !first.isBusy && !second.isBusy);
+    await waitFor(() => !first.isBusy && !second.isBusy, "both slots to go idle");
     await drain;
     expect(drainCompleted).toBe(true);
     const hasCompletion = (slot: typeof first) => slot.snapshot().transcript.some(
@@ -3463,7 +3510,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("first");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const queued = await slot.prompt("accepted follow up", [], "followUp");
     expect(slot.snapshot().queuedItems).toMatchObject([{ id: queued.operationId, behavior: "followUp" }]);
     let drained = false;
@@ -3472,7 +3519,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(drained).toBe(false);
     expect(slot.snapshot().queuedItems).toHaveLength(1);
     releaseFirst();
-    await waitUntil(() => faux.state.callCount === 2);
+    await waitFor(() => faux.state.callCount === 2, "the second model call");
     await drain;
     expect(drained).toBe(true);
     expect(slot.snapshot().queuedItems).toEqual([]);
@@ -3506,14 +3553,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("finish while derived capacity is full");
-    await waitUntil(() => slot.catalogPhase === "running");
+    await waitFor(() => slot.catalogPhase === "running", "the catalog phase to run");
     const derived = [0, 1].map(() => workRegistry.beginDerived({
       kind: "administrative-provider-package-operation",
       hostEpoch: workRegistry.runtimeEpoch,
     }));
 
     releaseResponse();
-    await waitUntil(() => slot.catalogPhase === "idle");
+    await waitFor(() => slot.catalogPhase === "idle", "the catalog phase to go idle");
     expect(workRegistry.facts().filter((fact) => fact.sessionId === slot.id)).toEqual([]);
     for (const owner of derived) owner.settle();
   });
@@ -4394,7 +4441,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.startExtensionActivityWatcher(toolCallId, asyncDir);
     try {
-      await waitUntil(() => missingReadCompleted);
+      await waitFor(() => missingReadCompleted, "the missing-artifact read");
       const pendingStatus = join(asyncDir, "status.json.pending");
       await writeFile(pendingStatus, JSON.stringify({
         lifecycleArtifactVersion: 3,
@@ -4408,7 +4455,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         steps: [],
       }));
       await rename(pendingStatus, join(asyncDir, "status.json"));
-      await waitUntil(() => (slot.snapshot().processActivities?.length ?? 0) === 1);
+      await waitFor(() => (slot.snapshot().processActivities?.length ?? 0) === 1, "the first process activity");
       expect(slot.snapshot().processActivities?.[0]).toMatchObject({
         kind: "subagent",
         runId,
@@ -4430,8 +4477,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         steps: [],
       }));
       await rename(completedStatus, join(asyncDir, "status.json"));
-      await waitUntil(() => slot.snapshot().extensionActivities?.some((activity) =>
-        activity.toolCallId === toolCallId && activity.status === "completed") === true);
+      await waitFor(() => slot.snapshot().extensionActivities?.some((activity) =>
+        activity.toolCallId === toolCallId && activity.status === "completed") === true, "the completed extension activity");
       await fixture.registry.waitUntilIdle();
     }
   });
@@ -4514,15 +4561,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     internal.extensionRunOwnership.set(rootRunId, { toolCallId, asyncDir, terminal: false });
     internal.startExtensionActivityWatcher(toolCallId, asyncDir);
-    await waitUntil(() => slot.snapshot().processActivities?.some((activity) =>
-      activity.kind === "subagent" && activity.childSessionRef === undefined) === true);
+    await waitFor(() => slot.snapshot().processActivities?.some((activity) =>
+      activity.kind === "subagent" && activity.childSessionRef === undefined) === true, "the subagent activity without a child reference");
 
     const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "delayed-child-session" });
     childManager.appendMessage(fauxAssistantMessage("published after artifact status"));
     await rename(childManager.getSessionFile()!, childFile);
 
-    await waitUntil(() => slot.snapshot().processActivities?.some((activity) =>
-      activity.kind === "subagent" && activity.childSessionRef === "delayed-child-session") === true);
+    await waitFor(() => slot.snapshot().processActivities?.some((activity) =>
+      activity.kind === "subagent" && activity.childSessionRef === "delayed-child-session") === true, "the delayed subagent child reference");
     const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(process).toMatchObject({ childSessionRef: "delayed-child-session", visibility: "active" });
     expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
@@ -4683,7 +4730,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(fixture.registry.resolveReadOnlySubagentPath(
       "validated-child-session", admission.path, slot.id, "wrong-process", runId,
     )).rejects.toMatchObject({ code: "not_found" });
-    await waitUntil(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1);
+    await waitFor(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1, "the subagent history entry");
     expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
       .toMatchObject({ childSessionRef: "validated-child-session" });
     // Historical opening must derive its exact binding from the canonical
@@ -5120,9 +5167,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     capacityOwner.settle();
     await slot.reconcileOwnedExtensionArtifactsForDrain();
-    await waitUntil(() => slot.snapshot().extensionActivities[0]?.lifecycle?.state === "completed");
+    await waitFor(() => slot.snapshot().extensionActivities[0]?.lifecycle?.state === "completed", "the first extension activity to complete");
     expect(slot.administrativeDrainBlockers()).toEqual([]);
-    await waitUntil(() => workRegistry.size === 0);
+    await waitFor(() => workRegistry.size === 0, "the work registry to drain");
   });
 
   it("does not treat terminal attention presentation as drain work", async () => {
@@ -5634,10 +5681,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         lifecycleArtifactVersion: 3, runId: run.runId, state: "running", startedAt, lastUpdate,
       }));
     };
-    for (const run of runDirectories) {
+    // The whole root has to exist before the registry does. Writing the 1,100 run
+    // directories concurrently instead of one await at a time keeps this
+    // fixture's own cost inside the test's hang bound: the serial version spent
+    // 2,200 event-loop round trips before the case could start, and on a loaded
+    // host that alone pushed the test past its 15 s bound (2026-10-06).
+    await Promise.all(runDirectories.map(async (run) => {
       await mkdir(run.asyncDir, { recursive: true });
       await writeStatus(run, startedAt);
-    }
+    }));
     const fixture = await coldFixture("ambient-change-gate", {
       delegatedRoot: delegated.delegatedRoot,
       artifactDiscoveryTruncated: (counts) => stopped.push(counts),
@@ -5675,7 +5727,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       content: [{ type: "text", text: "launched" }],
       details: { runId: late.runId, asyncDir: late.asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
     });
-    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
+    // The run must be offered by the first pass this call runs. Everything the
+    // pass needs is already derived: the root was walked above, so every
+    // unchanged artifact fact is cached by identity and the walk reaches the end
+    // of the root without spending the `MAX_EXTENSION_DISCOVERY_WORK` read
+    // budget; the per-root routing budget (`rootBudget`, the remaining work split
+    // across the roots and live slots — 512 at most for one root and two slots)
+    // is an upper bound, and candidates no live slot can attribute are filtered
+    // out before that slice, so the late run is the only candidate left to
+    // offer. A second pass means attribution or routing regressed, which is the
+    // bound this case's title claims.
+    const passes = await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
+    expect(passes, "the pass that offers the newly attributed run").toBe(1);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([late.asyncDir]));
     expect(stopped).toHaveLength(1);
     await rm(delegated.root, { recursive: true, force: true });
@@ -5787,6 +5850,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const asyncDir = join(delegated.delegatedRoot, "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    // The registry's own 750 ms pass can offer this same artifact, which would put
+    // a second retry invocation inside the injected window; this case is about the
+    // slot's retry path, so it owns the cadence and makes one read the only one.
+    const registryInternal = fixture.registry as unknown as { artifactDiscoveryTimer?: NodeJS.Timeout };
+    if (registryInternal.artifactDiscoveryTimer) clearInterval(registryInternal.artifactDiscoveryTimer);
+    registryInternal.artifactDiscoveryTimer = undefined;
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
     (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
@@ -5807,32 +5876,63 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(projected()).toMatchObject({ status: "running" });
 
     // A producer replaces an active run's status.json by an atomic rename, so a
-    // read can open one inode and stat another. The discovery lane owns no
-    // watcher for that window and used to report the first losing read as a
-    // rejected artifact.
-    const tempPath = join(asyncDir, "status.tmp");
-    let replacing = true;
-    const replacer = (async () => {
-      while (replacing) {
-        await writeFile(tempPath, payload);
-        await rename(tempPath, statusPath);
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    })();
+    // read can open one inode and stat another. `openOwnedExtensionArtifact`
+    // verifies that the inode it opened is the one it stats, and the discovery
+    // lane used to report the first losing read as a rejected artifact.
+    //
+    // The loss is injected, not raced for: the file-scoped `open` wrapper above
+    // performs exactly one real write+rename between this path's own open and its
+    // verifying stat, so the read it is inside loses by construction. Host
+    // scheduling, the fs threadpool and any load on the machine can therefore no
+    // longer decide whether the case observes its event — the old sample guard
+    // (`passes > 100`) was the speed budget that let them (#430). Only the
+    // test-owned producer is deterministic here; the spies below only observe.
+    const slotInternals = slot as unknown as {
+      readExtensionStatusArtifact: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
+      readExtensionStatusArtifactWithReplacementRetry: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
+    };
+    const readOnce = slotInternals.readExtensionStatusArtifact.bind(slot);
+    const readWithRetry = slotInternals.readExtensionStatusArtifactWithReplacementRetry.bind(slot);
+    // The watcher lane reads the same file through the same inner method
+    // (`refreshExtensionActivityFromArtifact`), so a read count taken across the
+    // retry path's wall-clock window would count its reads too. Scoping the count
+    // to the retry invocation's own async context keeps the observation exact:
+    // more than one read inside it is this path retrying a read that lost the
+    // race with the producer's rename.
+    const retryInvocation = new AsyncLocalStorage<{ reads: number }>();
+    statusJsonReplace.insideRetryInvocation = () => retryInvocation.getStore() !== undefined;
+    let retriedLosingReads = 0;
+    vi.spyOn(slotInternals, "readExtensionStatusArtifact").mockImplementation(async (directory: string) => {
+      const invocation = retryInvocation.getStore();
+      if (invocation) invocation.reads += 1;
+      return readOnce(directory);
+    });
+    vi.spyOn(slotInternals, "readExtensionStatusArtifactWithReplacementRetry")
+      .mockImplementation((directory: string) => retryInvocation.run({ reads: 0 }, async () => {
+        const invocation = retryInvocation.getStore()!;
+        try {
+          return await readWithRetry(directory);
+        } finally {
+          if (invocation.reads > 1) retriedLosingReads += 1;
+        }
+      }));
+    const canonicalAsyncDir = await realpath(asyncDir);
+    statusJsonReplace.armed = true;
+    statusJsonReplace.losses = 0;
+    statusJsonReplace.replacements = 0;
+    statusJsonReplace.payload = payload;
+    statusJsonReplace.statusPath = join(canonicalAsyncDir, "status.json");
+    statusJsonReplace.tempPath = join(canonicalAsyncDir, "status.tmp");
     try {
-      // Several hundred real passes inside a replace storm; the bound is wall
-      // clock so a loaded host cannot turn the storm itself into a timeout.
-      const until = Date.now() + 8_000;
-      let passes = 0;
-      while (Date.now() < until) {
-        await discoverExtensionArtifactsUntil(fixture.registry);
-        passes += 1;
-      }
-      expect(passes).toBeGreaterThan(100);
+      // One read; the product's retry path runs because the injected replace made
+      // that read lose, and its second read succeeds.
+      await slot.discoverExtensionArtifact(asyncDir);
     } finally {
-      replacing = false;
-      await replacer;
+      statusJsonReplace.armed = false;
+      statusJsonReplace.insideRetryInvocation = () => false;
     }
+    expect(statusJsonReplace.replacements, "the injected replace").toBe(1);
+    expect(retriedLosingReads, "the read that lost the race and was retried").toBe(1);
     expect(warnings.filter((warning) => warning.reason === "artifact-replacement-in-progress")).toEqual([]);
     expect(projected()).toMatchObject({ status: "running", runId });
     await rm(delegated.root, { recursive: true, force: true });
@@ -6106,7 +6206,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const originalData = screenshot.data;
     await slot.prompt("Look at this screenshot", [screenshot]);
     expect(screenshot.data).toBe(originalData);
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const entries = (await readFile(slot.sessionFile!, "utf8"))
       .trimEnd().split("\n").map(line => JSON.parse(line) as any);
@@ -6142,7 +6242,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     const prompt = "first line\nsecond line";
     await expect(slot.prompt(prompt)).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const entries = (await readFile(slot.sessionFile!, "utf8"))
       .trimEnd().split("\n").map(line => JSON.parse(line) as any);
@@ -6179,7 +6279,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    await waitUntil(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed");
+    await waitFor(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed", "the oversized widget callback to complete");
     expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
   });
 
@@ -6217,7 +6317,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
-    await waitUntil(() => internal.extensionHost.mountedComponentCount === 1);
+    await waitFor(() => internal.extensionHost.mountedComponentCount === 1, "the mounted extension component");
     expect(internal.extensionHost.isTuiStarted).toBe(true);
     const snapshot = slot.snapshot();
     expect(snapshot.extensionPresentation.semanticState.statuses).toMatchObject({
@@ -6255,7 +6355,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const command = slot.prompt("/semantic-ask");
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the pending interaction");
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     expect(pending.method).toBe("select");
     expect(pending.options).toEqual(["Keep", "Change"]);
@@ -6283,7 +6383,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       visible: true,
     });
     const visibleCommand = slot.prompt("/semantic-ask");
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the pending interaction");
     const visiblePending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     expect(userInputRequired).toHaveBeenLastCalledWith({
       sessionId: slot.id,
@@ -6385,7 +6485,7 @@ export default function (pi) {
     const slot = await registry.create(cwd);
     await slot.setModel(faux.getModel().provider, faux.getModel().id);
     await slot.prompt("original request");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const branch = (slot as unknown as { sessionManager: SessionManager }).sessionManager.getBranch();
     const order = branch.filter(entry => entry.type === "custom" && entry.customType === "context-edit-order")
       .map(entry => {
@@ -6394,17 +6494,17 @@ export default function (pi) {
       });
     expect(order).toEqual(["turn_end", "agent_before_settle", "agent_settled"]);
     expect(branch.some(entry => entry.type === "context_edit" && entry.replacement.content === "replacement from turn_end")).toBe(true);
-    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
+    await waitFor(() => registry.attentionProjection(slot.id).completionRevision === 1, "the first completion revision");
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1 });
 
     await slot.prompt("follow-up");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(contexts).toHaveLength(2);
     expect(contexts[1]!.messages.filter(message => message.role === "user").map(message =>
       message.role === "user" ? contentText(message.content) : "")).toEqual([
       "replacement from turn_end", "follow-up",
     ]);
-    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 2);
+    await waitFor(() => registry.attentionProjection(slot.id).completionRevision === 2, "the second completion revision");
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2 });
   });
 
@@ -6484,12 +6584,12 @@ export default function (pi) {
       .mockImplementation(originalComplete);
     await slot.prompt("start");
 
-    await waitUntil(() => faux.state.callCount === 4);
+    await waitFor(() => faux.state.callCount === 4, "the fourth model call");
     expect(slot.snapshot()).toMatchObject({ phase: "running", operation: { kind: "prompt" } });
     const continuationSnapshotIndex = snapshots.length;
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(snapshots.slice(continuationSnapshotIndex).every((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const settled = slot.snapshot();
     expect(settled).toMatchObject({ phase: "idle" });
     // Producer-hidden continuation context is model input but not ordinary
@@ -6592,7 +6692,7 @@ export default function (pi) {
 
     await slot.prompt("start");
     await secondStampEntry;
-    await waitUntil(() => slot.snapshot().phase === "interrupted");
+    await waitFor(() => slot.snapshot().phase === "interrupted", "the interrupted phase");
     const blockedQueue = (slot as unknown as { completionOwnershipQueue: unknown[] }).completionOwnershipQueue;
     expect(blockedQueue).toHaveLength(1);
     let disposalSettled = false;
@@ -6655,7 +6755,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     const before = events.length;
     const receipt = await slot.prompt("accepted snapshot burst");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const snapshots = events.slice(before).filter((event) => event.topic === "session.snapshot");
     const sizes = snapshots.map((event) => Buffer.byteLength(JSON.stringify(event.payload)));
     expect(sizes.some((size) => size >= 400 * 1_024)).toBe(true);
@@ -6729,7 +6829,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("Write a report");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const declarations = liveSnapshots.filter(({ progress }) => progress?.content?.some(
       (part: any) => part.toolCallId === "call-large-write" && part.arguments?.truncated === true,
@@ -6797,7 +6897,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const promptReceipt = await slot.prompt("stream");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().pendingPrompt).toBeUndefined();
     const canonicalUser = slot.snapshot().transcript.find((item) => item.role === "user");
     expect(canonicalUser).toMatchObject({ presentationId: promptReceipt.operationId });
@@ -6901,9 +7001,9 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const unwatchedPrompt = slot.prompt("stream unobserved");
-    await waitUntil(() => slot.snapshot().streaming !== undefined);
+    await waitFor(() => slot.snapshot().streaming !== undefined, "the streaming projection");
     await unwatchedPrompt;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     // The response streamed to completion (its canonical message is settled),
     // so the absent frames are the rule and not a stream that never ran.
     expect(slot.snapshot().transcript.some((item) => item.kind === "message"
@@ -6912,7 +7012,7 @@ export default function (pi) {
 
     subscribeAudience(registry, slot.id);
     await slot.prompt("stream observed");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const frames = events.filter((event) => event.topic === "session.progress");
     expect(frames.length).toBeGreaterThanOrEqual(2);
     const lastFrame = frames.at(-1)!.payload.data.message;
@@ -6973,7 +7073,7 @@ export default function (pi) {
       await slot.setModel(model.provider, model.id);
 
       const prompt = slot.prompt("stream");
-      await waitUntil(() => existsSync(entered));
+      await waitFor(() => existsSync(entered), "the entered marker file");
       const during = slot.snapshot().streaming;
       expect(during).toMatchObject({ role: "assistant" });
       if (during?.kind !== "message") throw new Error("expected live assistant");
@@ -6982,7 +7082,7 @@ export default function (pi) {
       }
       await writeFile(release, "release");
       await prompt;
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
 
       const finalSnapshot = slot.snapshot();
       expect(finalSnapshot.streaming).toBeUndefined();
@@ -7023,11 +7123,11 @@ export default function (pi) {
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const prompting = slot.prompt("handled without agent");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     await expect(slot.dispose()).rejects.toMatchObject({ code: "busy" });
     const admitted = await prompting;
     expect(admitted).toMatchObject({ operationId: expect.any(String) });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
     expect(slot.snapshot().operation).toBeUndefined();
     const entries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
@@ -7069,7 +7169,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("accepted before cutoff");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const drain = registry.waitUntilIdle();
     await expect(prompt).resolves.toMatchObject({ operationId: expect.any(String) });
     await drain;
@@ -7114,7 +7214,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start");
-    await waitUntil(() => slot.catalogPhase === "running");
+    await waitFor(() => slot.catalogPhase === "running", "the catalog phase to run");
     await registry.waitUntilIdle();
     expect(slot.isDrainBusy).toBe(false);
     expect(failures).not.toEqual([]);
@@ -7246,8 +7346,8 @@ export default function (pi) {
     internal.publishSnapshot();
 
     const { operationId } = await prompting;
-    await waitUntil(() => invoked);
-    await waitUntil(() => slot.snapshot().queuedItems.length === 1 && queued);
+    await waitFor(() => invoked, "the invocation");
+    await waitFor(() => slot.snapshot().queuedItems.length === 1 && queued, "the queued prompt");
     expect(slot.snapshot().queuedItems).toEqual([
       expect.objectContaining({ id: operationId, behavior: "steer", text: "after compaction" }),
     ]);
@@ -7415,7 +7515,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const initial = slot.prompt("initial");
-    await waitUntil(() => slot.snapshot().phase === "running");
+    await waitFor(() => slot.snapshot().phase === "running", "the running phase");
     const queued = await slot.prompt("steer me", [], "steer", {
       text: "steer me",
       attachmentEnvelope: "",
@@ -7432,11 +7532,11 @@ export default function (pi) {
     ]);
 
     releaseResponse();
-    await waitUntil(() => [queued.operationId, duplicate.operationId].some(operationId =>
+    await waitFor(() => [queued.operationId, duplicate.operationId].some(operationId =>
       slot.snapshot().transcript.some(item =>
         item.kind === "message" && item.role === "user" && item.presentationId === operationId,
       ),
-    ));
+    ), "one queued prompt projected");
     const steeringSnapshot = slot.snapshot();
     const consumedSteeringIDs = steeringSnapshot.transcript.flatMap((item) =>
       item.kind === "message" && item.role === "user"
@@ -7447,12 +7547,12 @@ export default function (pi) {
     expect(steeringSnapshot.activeToolSegmentId).toBe(toolSegmentId(consumedSteeringIDs.at(-1)!));
     releaseSteeringResponse();
     await initial;
-    await waitUntil(() => [queued.operationId, duplicate.operationId].every(operationId =>
+    await waitFor(() => [queued.operationId, duplicate.operationId].every(operationId =>
       slot.snapshot().transcript.some(item =>
         item.kind === "message" && item.role === "user" && item.presentationId === operationId,
       ),
-    ));
-    await waitUntil(() => !slot.isBusy);
+    ), "both queued prompts projected");
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const entries = (await readFile(slot.sessionFile!, "utf8"))
       .trimEnd().split("\n").map(line => JSON.parse(line) as any);
@@ -7516,17 +7616,17 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     await slot.prompt("initial");
-    await waitUntil(() => slot.snapshot().acceptsQueuedPrompts);
+    await waitFor(() => slot.snapshot().acceptsQueuedPrompts, "the slot to accept queued prompts");
     const prompting = slot.prompt("became ordinary", [], "steer");
-    await waitUntil(() => existsSync(entered));
+    await waitFor(() => existsSync(entered), "the entered marker file");
     releaseResponse();
-    await waitUntil(() => !slot.snapshot().acceptsQueuedPrompts);
+    await waitFor(() => !slot.snapshot().acceptsQueuedPrompts, "the slot to stop accepting queued prompts");
     await writeFile(releaseInput, "release");
 
     const admitted = await prompting;
-    await waitUntil(() => slot.snapshot().transcript.some(item =>
+    await waitFor(() => slot.snapshot().transcript.some(item =>
       item.kind === "message" && item.role === "user" && item.presentationId === admitted.operationId,
-    ));
+    ), "the admitted prompt in the transcript");
     expect(slot.snapshot().queuedItems).toEqual([]);
     expect(slot.snapshot().pendingPrompt).toBeUndefined();
     const entries = (await readFile(slot.sessionFile!, "utf8"))
@@ -7536,7 +7636,7 @@ export default function (pi) {
       .map(entry => entry.data);
     expect(receipts.find(receipt => receipt.receiptKind === "transition")).toMatchObject({ lifecycle: "accepted" });
     expect(receipts.find(receipt => receipt.receiptKind === "binding")).toBeDefined();
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
   }, 15_000);
 
   it("settles a queued admission when the Pi call rejects before queue evidence", async () => {
@@ -7605,7 +7705,7 @@ export default function (pi) {
     });
 
     const admitted = await slot.prompt("fails after acceptance");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const entries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
     const receipts = entries.filter(entry =>
       entry.customType === INVOCATION_RECEIPT_TYPE
@@ -8039,7 +8139,7 @@ export default function (pi) {
     let slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     await slot.setModel(provider, "router");
     await slot.prompt("trigger automatic retry");
-    await waitUntil(() => !slot!.isBusy);
+    await waitFor(() => !slot!.isBusy, "the slot to go idle");
     const retried = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant");
     expect(retried.at(-1)).toMatchObject({ provider, modelId: "wide", thinkingLevel: "high" });
     expect(faux.state.callCount).toBe(2);
@@ -8071,17 +8171,17 @@ export default function (pi) {
     const forkRouterState = forkSlot.runtime.session.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state");
     expect(forkRouterState.at(-1)?.data).toEqual(restoredState.at(-1)?.data);
     await forkSlot.prompt("fork continues through router");
-    await waitUntil(() => !forkSlot.isBusy);
+    await waitFor(() => !forkSlot.isBusy, "the forked slot to go idle");
     expect(forkSlot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1)).toMatchObject({ provider, modelId: "small", thinkingLevel: "low" });
 
     await slot.setModel(provider, "router");
     await slot.prompt(`route to the alternate physical model ${"context ".repeat(5000)}`);
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1)).toMatchObject({ provider, modelId: "wide", thinkingLevel: "high" });
     expect(slot.snapshot().contextUsage?.contextWindow).toBe(16384);
     await slot.compact("keep the router selection");
     await slot.prompt("after compaction");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.runtime.session.model?.id).toBe("router");
     const postCompactionAssistant = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1);
     expect(postCompactionAssistant).toMatchObject({ provider, modelId: responseModels.at(-1), stopReason: "stop" });
@@ -8119,7 +8219,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     try {
       await slot.prompt("Exercise one transient provider failure");
-      await waitUntil(() => resumed);
+      await waitFor(() => resumed, "the resumed turn");
       expect(faux.state.callCount).toBe(2);
       expect(fixture.events.some(({ topic, payload }) => topic === "session.snapshot"
         && payload.phase === "retrying" && payload.retry?.attempt === 1)).toBe(true);
@@ -8134,7 +8234,7 @@ export default function (pi) {
     } finally {
       releaseResponse();
     }
-    await waitUntil(() => slot.snapshot().phase === "idle");
+    await waitFor(() => slot.snapshot().phase === "idle", "the idle phase");
     expect(slot.snapshot().retry).toBeUndefined();
   });
 
@@ -8151,7 +8251,7 @@ export default function (pi) {
       return { cancelled: false };
     });
     const navigating = slot.navigate("target", { summarize: true });
-    await waitUntil(() => navigate.mock.calls.length === 1);
+    await waitFor(() => navigate.mock.calls.length === 1, "the navigation");
     let drained = false;
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -8172,7 +8272,7 @@ export default function (pi) {
     }).runtime.session.resourceLoader;
     const reload = vi.spyOn(loader, "reload").mockImplementation(async () => { await barrier; });
     const reloading = slot.reload();
-    await waitUntil(() => reload.mock.calls.length === 1);
+    await waitFor(() => reload.mock.calls.length === 1, "the reload");
     let drained = false;
     const drain = registry.waitUntilIdle().then(() => { drained = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -8268,7 +8368,7 @@ export default function (pi) {
       resourceInvocation: { source: "skill", name: "review", arguments: "configurations" },
       attachmentEnvelope: "", attachmentCount: 0,
     })).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     let receipts = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data);
     expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
@@ -8281,7 +8381,7 @@ export default function (pi) {
       resourceInvocation: { source: "prompt", name: "summarize", arguments: "configurations" },
       attachmentEnvelope: "", attachmentCount: 0,
     })).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const allEntries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     receipts = allEntries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data);
     const promptReceipts = receipts.filter(receipt => receipt.source === "prompt");
@@ -8313,12 +8413,12 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("interrupt me");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const aborting = slot.abort("agent");
     release();
     await aborting;
     await expect(prompt).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const terminal = entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
     expect(terminal?.data).toMatchObject({ lifecycle: "interrupted" });
@@ -8373,7 +8473,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
 
     const oversizedDescriptors = Array.from({ length: 11 }, (_, index) => ({
       id: `upload-${index}`, name: `file-${index}.txt`, mimeType: "text/plain", size: 1,
@@ -8481,7 +8581,7 @@ export default function (pi) {
       .rejects.toMatchObject({ code: "conflict" });
 
     releaseResponse();
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
   });
 
   it("queues one manual compaction behind an active run and keeps its receipt pending", async () => {
@@ -8537,9 +8637,9 @@ export default function (pi) {
     });
 
     promptOperationId = (await slot.prompt("start")).operationId;
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const queuedCompaction = slot.compact("Preserve exact decisions");
-    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    await waitFor(() => slot.snapshot().compactionQueued === true, "the queued compaction");
 
     expect(slot.snapshot()).toMatchObject({
       phase: "running",
@@ -8554,7 +8654,7 @@ export default function (pi) {
     expect(compact).not.toHaveBeenCalled();
 
     releaseResponse();
-    await waitUntil(() => compact.mock.calls.length === 1);
+    await waitFor(() => compact.mock.calls.length === 1, "the compaction call");
     expect(compact).toHaveBeenCalledWith("Preserve exact decisions");
     expect(slot.snapshot()).toMatchObject({ phase: "compacting", compactionQueued: false });
     expect(registry.activeSessionIds()).toContain(slot.id);
@@ -8562,13 +8662,13 @@ export default function (pi) {
     let queuedSettled = false;
     void queuedCompaction.then(() => { queuedSettled = true; }, () => {});
     releaseCompaction();
-    await waitUntil(() => clearMarker.mock.calls.some(([, id]) => id !== promptOperationId));
+    await waitFor(() => clearMarker.mock.calls.some(([, id]) => id !== promptOperationId), "a marker clear for another operation");
     await Promise.resolve();
     expect(queuedSettled).toBe(false);
     expect(registry.activeSessionIds()).toContain(slot.id);
     releaseMarker();
     await expect(queuedCompaction).resolves.toEqual({ queued: true });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
     expect(registry.activeSessionIds()).not.toContain(slot.id);
     expect(await markerStore.evidenceFor(slot.id)).toEqual([]);
@@ -8607,7 +8707,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const first = await slot.prompt("first");
-    await waitUntil(() => slot.snapshot().phase === "running");
+    await waitFor(() => slot.snapshot().phase === "running", "the running phase");
     const markers = (slot as unknown as {
       dependencies: {
         markers: {
@@ -8620,8 +8720,8 @@ export default function (pi) {
     expect(await markers.evidenceFor(slot.id)).toEqual([]);
 
     releaseResponse();
-    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
-    await waitUntil(() => slot.snapshot().phase === "idle");
+    await waitFor(() => registry.attentionProjection(slot.id).completionRevision === 1, "the first completion revision");
+    await waitFor(() => slot.snapshot().phase === "idle", "the idle phase");
     await expect(slot.reconcileAttention()).resolves.toBeUndefined();
     expect(await markers.evidenceFor(slot.id)).toEqual([]);
 
@@ -8629,7 +8729,7 @@ export default function (pi) {
       operationId: expect.any(String),
     });
     const drain = registry.waitUntilIdle();
-    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 2);
+    await waitFor(() => registry.attentionProjection(slot.id).completionRevision === 2, "the second completion revision");
     await drain;
     expect(slot.snapshot().phase).toBe("idle");
     expect(registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
@@ -8670,7 +8770,7 @@ export default function (pi) {
     const complete = vi.spyOn(attention, "complete").mockRejectedValue(new Error("attention persistence failed"));
 
     await slot.prompt("first");
-    await waitUntil(() => slot.snapshot().phase === "interrupted");
+    await waitFor(() => slot.snapshot().phase === "interrupted", "the interrupted phase");
     expect(complete).toHaveBeenCalledTimes(3);
     await expect(slot.prompt("second")).resolves.toMatchObject({ operationId: expect.any(String) });
     expect(complete.mock.calls.map(([, completionId]) => completionId))
@@ -8678,7 +8778,7 @@ export default function (pi) {
 
     complete.mockRestore();
     await slot.reconcileAttention();
-    await waitUntil(() => slot.snapshot().phase === "idle");
+    await waitFor(() => slot.snapshot().phase === "idle", "the idle phase");
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
   });
 
@@ -8721,13 +8821,13 @@ export default function (pi) {
     vi.spyOn(session, "compact").mockRejectedValue(new Error("manual compaction failed"));
 
     await slot.prompt("start");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const queuedCompaction = slot.compact();
     const failure = expect(queuedCompaction).rejects.toThrow("manual compaction failed");
-    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    await waitFor(() => slot.snapshot().compactionQueued === true, "the queued compaction");
     releaseResponse();
     await failure;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
     expect(slot.snapshot().operation).toBeUndefined();
   });
@@ -8777,9 +8877,9 @@ export default function (pi) {
     });
 
     promptOperationId = (await slot.prompt("start")).operationId;
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const queuedCompaction = slot.compact();
-    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    await waitFor(() => slot.snapshot().compactionQueued === true, "the queued compaction");
     releaseResponse();
     await expect(queuedCompaction).resolves.toEqual({ queued: true });
     expect(maintenanceAttempts).toBe(2);
@@ -8823,7 +8923,7 @@ export default function (pi) {
     const clearMarker = vi.spyOn(markerStore, "clear").mockRejectedValueOnce(new Error("transient clear failure"));
 
     const first = slot.compact("Keep decisions");
-    await waitUntil(() => slot.snapshot().phase === "compacting");
+    await waitFor(() => slot.snapshot().phase === "compacting", "the compacting phase");
     expect(registry.activeSessionIds()).toContain(slot.id);
     await expect(slot.compact()).rejects.toMatchObject({
       code: "busy",
@@ -8836,7 +8936,7 @@ export default function (pi) {
     releaseCompaction();
     await expect(first).resolves.toEqual({ queued: false });
     expect(clearMarker.mock.calls.length).toBeGreaterThanOrEqual(2);
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
   });
 
@@ -9037,9 +9137,9 @@ export default function (pi) {
     }).lane;
 
     await slot.prompt("first");
-    await waitUntil(() => runtimeSession.isStreaming);
+    await waitFor(() => runtimeSession.isStreaming, "the runtime to start streaming");
     const queuedCompaction = slot.compact();
-    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    await waitFor(() => slot.snapshot().compactionQueued === true, "the queued compaction");
 
     let releaseLane!: () => void;
     let laneEntered!: () => void;
@@ -9052,19 +9152,19 @@ export default function (pi) {
     await laneWasEntered;
     const newerPrompt = slot.prompt("newer");
     releaseFirst();
-    await waitUntil(() => !runtimeSession.isStreaming);
+    await waitFor(() => !runtimeSession.isStreaming, "the runtime to stop streaming");
     releaseLane();
     await blocker;
     await newerPrompt;
-    await waitUntil(() => runtimeSession.isStreaming);
+    await waitFor(() => runtimeSession.isStreaming, "the runtime to start streaming");
     await lane.run(() => {});
     expect(compact).not.toHaveBeenCalled();
     expect(slot.snapshot().compactionQueued).toBe(true);
 
     releaseSecond();
-    await waitUntil(() => compact.mock.calls.length === 1);
+    await waitFor(() => compact.mock.calls.length === 1, "the compaction call");
     await expect(queuedCompaction).resolves.toEqual({ queued: true });
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const markers = (slot as unknown as { dependencies: { markers: RunMarkerStore } }).dependencies.markers;
     expect(await markers.evidenceFor(slot.id)).toEqual([]);
   });
@@ -9106,13 +9206,13 @@ export default function (pi) {
     const compact = vi.spyOn(session, "compact").mockResolvedValue({});
 
     await slot.prompt("start");
-    await waitUntil(() => slot.isBusy);
+    await waitFor(() => slot.isBusy, "the slot to take work");
     const queuedCompaction = slot.compact();
     const queuedOutcome = queuedCompaction.then(
       () => ({ status: "fulfilled" as const }),
       (error: unknown) => ({ status: "rejected" as const, error }),
     );
-    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    await waitFor(() => slot.snapshot().compactionQueued === true, "the queued compaction");
     const shutdown = registry.dispose();
     releaseResponse();
 
@@ -9162,7 +9262,7 @@ export default function (pi) {
     });
 
     const compaction = slot.compact();
-    await waitUntil(() => slot.snapshot().phase === "compacting");
+    await waitFor(() => slot.snapshot().phase === "compacting", "the compacting phase");
     const shutdown = registry.dispose();
     await expect(compaction).resolves.toEqual({ queued: false });
     await shutdown;
@@ -9242,7 +9342,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("accepted work");
-    await waitUntil(() => slot.catalogPhase === "running");
+    await waitFor(() => slot.catalogPhase === "running", "the catalog phase to run");
     const sessionID = slot.id;
     await slot.shutdown();
     const markerStore = (registry as unknown as { markers: { interruptedSessionIds(): Promise<Set<string>> } }).markers;
@@ -9498,7 +9598,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const prompting = slot.prompt("run the owned command");
-    await waitUntil(() => existsSync(detachedPidPath));
+    await waitFor(() => existsSync(detachedPidPath), "the detached process id file");
     const detachedPid = Number(await readFile(detachedPidPath, "utf8"));
     expect(() => process.kill(detachedPid, 0)).not.toThrow();
     const operationId = slot.snapshot().operation?.id;
@@ -9508,10 +9608,10 @@ export default function (pi) {
     // classification must not bypass the agent run or exact process owner.
     await slot.abort("bash", operationId);
     await expect(prompting).resolves.toMatchObject({ operationId });
-    await waitUntil(() => {
+    await waitFor(() => {
       try { process.kill(detachedPid, 0); return false; }
       catch { return true; }
-    });
+    }, "the detached process to exit");
     expect(slot.snapshot().toolExecutions).toEqual([]);
   });
 
@@ -9555,7 +9655,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("run tools");
-    await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.status === "running"));
+    await waitFor(() => slot.snapshot().toolExecutions.some((tool) => tool.status === "running"), "a running tool execution");
     const activeSnapshot = slot.snapshot();
     expect(activeSnapshot.activeToolSegmentId).toBeDefined();
     expect(activeSnapshot.acceptsQueuedPrompts).toBe(true);
@@ -9563,9 +9663,9 @@ export default function (pi) {
       (tool) => tool.toolSegmentId === activeSnapshot.activeToolSegmentId,
     )).toBe(true);
     await prompting;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().activeToolSegmentId).toBeUndefined();
-    await waitUntil(() => registry.attentionProjection(slot.id).isUnread);
+    await waitFor(() => registry.attentionProjection(slot.id).isUnread, "the unread attention mark");
     expect(registry.attentionProjection(slot.id).completionRevision).toBe(1);
 
     const progress = events
@@ -9734,14 +9834,14 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("run nested tools");
-    await waitUntil(() => slot.snapshot().toolExecutions.some((tool) =>
-      tool.toolCallId === "codemode-parent" && (tool.nestedCalls?.calls.length ?? 0) === 3));
+    await waitFor(() => slot.snapshot().toolExecutions.some((tool) =>
+      tool.toolCallId === "codemode-parent" && (tool.nestedCalls?.calls.length ?? 0) === 3), "the codemode parent's nested calls");
     const live = slot.snapshot();
     const liveParent = live.toolExecutions.find((tool) => tool.toolCallId === "codemode-parent");
     expect(liveParent?.nestedCalls?.calls.map((call) => call.toolName).sort()).toEqual(["bash", "read", "test_fail"]);
     expect(live.toolExecutions.map((tool) => tool.toolCallId)).toEqual(["codemode-parent"]);
     await prompting;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const settled = slot.snapshot();
     const canonicalParent = settled.transcript.find((item) =>
       item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-parent");
@@ -9834,7 +9934,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run many nested calls");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const argumentBytes = (calls: Array<{ arguments?: unknown }>) =>
       calls.reduce((total, call) => total + (call.arguments === undefined ? 0 : Buffer.byteLength(JSON.stringify(call.arguments))), 0);
@@ -9901,7 +10001,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("inspect structured bash results");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const parent = slot.snapshot().transcript.find((item) =>
       item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-bash-output");
     expect(parent).toMatchObject({
@@ -9977,17 +10077,17 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("run nested process");
-    await waitUntil(() => existsSync(pidPath));
+    await waitFor(() => existsSync(pidPath), "the process id file");
     const childPid = Number(await readFile(pidPath, "utf8"));
     expect(() => process.kill(childPid, 0)).not.toThrow();
     const operationId = slot.snapshot().operation?.id;
     expect(operationId).toBeDefined();
     await slot.abort("codemode", operationId);
     await expect(prompting).resolves.toMatchObject({ operationId });
-    await waitUntil(() => {
+    await waitFor(() => {
       try { process.kill(childPid, 0); return false; }
       catch { return true; }
-    });
+    }, "the child process to exit");
     expect(slot.snapshot().toolExecutions).toEqual([]);
   });
 
@@ -10020,7 +10120,7 @@ export default function (pi) {
     });
     const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
     try {
-      await waitUntil(() => existsSync(httpPortFile));
+      await waitFor(() => existsSync(httpPortFile), "the HTTP port file");
       const port = Number(await readFile(httpPortFile, "utf8"));
       await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
         stdio: { command: process.execPath, args: [fixtureScript, "stdio", stdioState, stdioPidFile, stdioChildPidFile], exposure: "direct" },
@@ -10063,13 +10163,13 @@ export default function (pi) {
       // The faux model names tools unconditionally, unlike a real model whose
       // catalog is supplied at dispatch. Join actual asynchronous registration
       // before issuing those calls; runtime creation alone is not MCP readiness.
-      await waitUntil(() => {
+      await waitFor(() => {
         const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
         return ["mcp__stdio__echo", "mcp__http__echo"].every(name =>
           tools.some(tool => tool.name === name && tool.exposure === "direct"));
-      });
+      }, "the direct MCP tools");
       await slot.prompt("call MCP fixtures and resource tools");
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       const transcript = slot.snapshot().transcript;
       for (const [id, text] of [
         ["mcp-stdio-call", "fixture:echo:{\"value\":\"stdio\"}"],
@@ -10085,21 +10185,21 @@ export default function (pi) {
       const stdioPid = Number(await readFile(stdioPidFile, "utf8"));
       const stdioChildPid = Number(await readFile(stdioChildPidFile, "utf8"));
       await writeFile(stdioState, JSON.stringify({ tools: [{ ...tools[0], name: "added", description: "Changed fixture tool" }] }));
-      await waitUntil(() => {
+      await waitFor(() => {
         const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
         return tools.some((tool) => tool.name === "mcp__stdio__added" && tool.exposure === "direct")
           && tools.some((tool) => tool.name === "mcp__stdio__echo" && tool.exposure === "hidden");
-      });
+      }, "the refreshed MCP tool exposure");
       await slot.prompt("call the newly listed MCP tool");
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       const addedResult = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "mcp-list-changed-call");
       expect(addedResult?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain("fixture:added");
       process.kill(-stdioPid, "SIGKILL");
-      await waitUntil(() => {
+      await waitFor(() => {
         try { process.kill(stdioPid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
-      });
+      }, "the stdio MCP process to exit");
       await slot.prompt("retry after the MCP server crash");
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       const reconnectedPid = Number(await readFile(stdioPidFile, "utf8"));
       const reconnectedChildPid = Number(await readFile(stdioChildPidFile, "utf8"));
       expect(reconnectedPid).not.toBe(stdioPid);
@@ -10109,9 +10209,9 @@ export default function (pi) {
       expect([stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every(Number.isInteger)).toBe(true);
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
-      await waitUntil(() => [stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every((pid) => {
+      await waitFor(() => [stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every((pid) => {
         try { process.kill(pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
-      }));
+      }), "the MCP processes to exit");
       const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-fixtures.json");
       await mkdir(dirname(artifactPath), { recursive: true });
       await writeFile(artifactPath, `${JSON.stringify({ transport: ["stdio", "streamable-http"], exposure: ["direct", "codemode", "deferred"], transcript: allResults }, null, 2)}\n`);
@@ -10164,7 +10264,7 @@ export default function (pi) {
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
       await slot.prompt("load an untrusted project");
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       expect(existsSync(pidFile)).toBe(false);
       expect((slot as any).runtime.session.getAllTools().some((tool: { name: string }) => tool.name === "mcp__project_fixture__project_echo")).toBe(false);
       const sessionId = slot.id;
@@ -10177,7 +10277,7 @@ export default function (pi) {
       slot = await registry.acquire(sessionId);
       await slot.setModel(model.provider, model.id);
       await slot.prompt("load trusted project MCP");
-      await waitUntil(() => !slot.isBusy && existsSync(pidFile));
+      await waitFor(() => !slot.isBusy && existsSync(pidFile), "the idle slot and its process id file");
       const trustedResult = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "trusted-project-call");
       expect(trustedResult?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain("fixture:project_echo");
       const processId = Number(await readFile(pidFile, "utf8"));
@@ -10185,17 +10285,17 @@ export default function (pi) {
       const secondCwd = join(root, "second-workspace");
       await mkdir(secondCwd, { recursive: true });
       await registry.create(secondCwd);
-      await waitUntil(() => {
+      await waitFor(() => {
         try { process.kill(processId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
-      });
-      await waitUntil(() => {
+      }, "the process to exit");
+      await waitFor(() => {
         try { process.kill(childProcessId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
-      });
+      }, "the child process to exit");
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
-      await waitUntil(() => {
+      await waitFor(() => {
         try { process.kill(processId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
-      });
+      }, "the process to exit");
       const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-project-trust.json");
       await mkdir(dirname(artifactPath), { recursive: true });
       await writeFile(artifactPath, `${JSON.stringify({ untrustedProjectServerStarted: false, trustedProjectServerCalled: true, capacityEvictedProcessGroupTerminated: true }, null, 2)}\n`);
@@ -10253,20 +10353,20 @@ export default function (pi) {
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
       const sleepPrompt = slot.prompt("run sleeping codemode script");
-      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-sleep"));
+      await waitFor(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-sleep"), "the codemode sleep tool");
       await slot.abort("agent");
       await sleepPrompt;
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       expect(slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-sleep")).toMatchObject({ isError: true });
       const loopPrompt = slot.prompt("run tool-looping codemode script");
-      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-loop" && (tool.nestedCalls?.calls.length ?? 0) > 0)).catch(() => { throw new Error(`codemode loop did not call tools: ${JSON.stringify(slot.snapshot().transcript.slice(-6))}`); });
+      await waitFor(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-loop" && (tool.nestedCalls?.calls.length ?? 0) > 0), "the codemode loop's nested calls").catch(() => { throw new Error(`codemode loop did not call tools: ${JSON.stringify(slot.snapshot().transcript.slice(-6))}`); });
       await slot.abort("agent");
       await loopPrompt;
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       const stoppedLoop = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-loop");
       expect(stoppedLoop).toMatchObject({ isError: true, nestedCalls: { calls: [expect.objectContaining({ toolName: "hold" })] } });
       const drainPrompt = slot.prompt("run codemode under administrative drain");
-      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-drain"));
+      await waitFor(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-drain"), "the codemode drain tool");
       let drained = false;
       const drain = registry.waitUntilIdle().then(() => { drained = true; });
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -10330,7 +10430,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run sequential tools");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const segmentByCall = new Map(progress.map(event => [event.toolCallId, event.toolSegmentId]));
     expect(segmentByCall.get("call-one")).toMatch(/^tool-segment:/);
@@ -10388,7 +10488,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run tools around a visible barrier");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const toolProgress = events
       .filter((event) => event.topic === "session.toolProgress")
@@ -10479,7 +10579,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run tools around visible extension input");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const segmentByCall = new Map(progress.map((event) => [event.toolCallId, event.toolSegmentId]));
     const beforeSegment = segmentByCall.get("call-before-custom");
@@ -10532,7 +10632,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const command = slot.prompt("/start-after-confirm");
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the pending interaction");
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     const drain = registry.waitUntilIdle();
     slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
@@ -10578,8 +10678,8 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     await slot.prompt("/start-failed-turn").catch(() => {});
-    await waitUntil(() => slot.catalogPhase === "idle" || slot.catalogPhase === "interrupted");
-    await waitUntil(() => workRegistry.size === 0);
+    await waitFor(() => slot.catalogPhase === "idle" || slot.catalogPhase === "interrupted", "the catalog phase to settle");
+    await waitFor(() => workRegistry.size === 0, "the work registry to drain");
     expect(faux.state.callCount).toBeGreaterThan(0);
     expect(derivedAdmissions.mock.calls.some(([admission]) =>
       admission.kind === "foreground-agent-operation"
@@ -10667,14 +10767,14 @@ export default function (pi) {
       .mockImplementation(originalClear);
 
     const drain = fixture.registry.waitUntilIdle();
-    await waitUntil(() => clear.mock.calls.length === 1);
+    await waitFor(() => clear.mock.calls.length === 1, "the marker clear");
     internal.phase = "running";
     internal.activeOperationId = "racing-operation";
     internal.operation = {
       id: "racing-operation", kind: "prompt", startedAt: new Date().toISOString(),
     };
     releaseClear();
-    await waitUntil(() => mark.mock.calls.length === 1);
+    await waitFor(() => mark.mock.calls.length === 1, "the marker write");
     await expect(internal.dependencies.markers.evidenceFor(slot.id)).resolves.toEqual([
       expect.objectContaining({ operationId: "racing-operation" }),
     ]);
@@ -10782,18 +10882,18 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start foreground streaming");
-    await waitUntil(() => slot.catalogPhase === "running");
+    await waitFor(() => slot.catalogPhase === "running", "the catalog phase to run");
 
     const markerDependencies = (slot as unknown as {
       dependencies: { markers: { mark: (sessionId: string, operationId: string) => Promise<void> } };
     }).dependencies.markers;
     const failedMarker = vi.spyOn(markerDependencies, "mark").mockRejectedValueOnce(new Error("injected marker failure"));
     const recoveredCommand = slot.prompt("/during-stream");
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the pending interaction");
     const recoveredPending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     slot.respondToInteraction(recoveredPending.id, recoveredPending.hostEpoch, recoveredPending.presentationRevision, false, true);
     await expect(recoveredCommand).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => (slot as any).pendingExtensionCommand === undefined);
+    await waitFor(() => (slot as any).pendingExtensionCommand === undefined, "the pending extension command to clear");
     expect(failedMarker.mock.calls.length).toBeGreaterThanOrEqual(2);
     failedMarker.mockRestore();
 
@@ -10807,7 +10907,7 @@ export default function (pi) {
       resolveAdmission,
     );
     await expect(admission).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await waitFor(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1, "the pending interaction");
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     const during = slot.snapshot();
     expect(during.phase).toBe("running");
@@ -10823,7 +10923,7 @@ export default function (pi) {
     expect(drainSettled).toBe(false);
     slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
     await expect(command).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => (slot as any).pendingExtensionCommand === undefined);
+    await waitFor(() => (slot as any).pendingExtensionCommand === undefined, "the pending extension command to clear");
     expect(slot.snapshot().extensionPresentation.semanticState.statuses["stream-command"]).toBe("accepted");
     let releaseMarkerClear!: () => void;
     const markerClearBarrier = new Promise<void>((resolve) => { releaseMarkerClear = resolve; });
@@ -10833,13 +10933,13 @@ export default function (pi) {
     const originalClear = markerStore.clear.bind(markerStore);
     const markerClear = vi.spyOn(markerStore, "clear").mockImplementationOnce(async () => markerClearBarrier);
     const aborting = slot.abort();
-    await waitUntil(() => markerClear.mock.calls.length === 1);
+    await waitFor(() => markerClear.mock.calls.length === 1, "the marker clear");
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(drainSettled).toBe(false);
     markerClear.mockImplementation(originalClear);
     releaseMarkerClear();
     await aborting;
-    await waitUntil(() => slot.catalogPhase === "idle");
+    await waitFor(() => slot.catalogPhase === "idle", "the catalog phase to go idle");
     await drain;
     expect(drainSettled).toBe(true);
   });
@@ -10941,10 +11041,10 @@ export default function (pi) {
     const slot = await registry.create(cwd);
 
     await expect(slot.prompt("/notify-command count to 20")).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => slot.snapshot().transcript.some(item =>
-      item.kind === "customEntry" && item.semantic?.kind === "status"));
-    await waitUntil(() => slot.snapshot().transcript.filter(item =>
-      item.kind === "customMessage" && item.semantic?.origin.kind === "extension").length === 2);
+    await waitFor(() => slot.snapshot().transcript.some(item =>
+      item.kind === "customEntry" && item.semantic?.kind === "status"), "the status entry in the transcript");
+    await waitFor(() => slot.snapshot().transcript.filter(item =>
+      item.kind === "customMessage" && item.semantic?.origin.kind === "extension").length === 2, "both extension messages in the transcript");
     const snapshot = slot.snapshot();
     const command = snapshot.transcript.find(item => item.semantic?.kind === "command");
     const commandOwnerID = command?.semantic?.origin.ownerId;
@@ -11015,7 +11115,7 @@ export default function (pi) {
     const slot = await registry.create(cwd);
 
     await expect(slot.prompt("/fail-command")).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => (slot as any).pendingExtensionCommand === undefined);
+    await waitFor(() => (slot as any).pendingExtensionCommand === undefined, "the pending extension command to clear");
     const command = slot.snapshot().transcript.find(item => item.semantic?.kind === "command");
     expect(command).toMatchObject({
       semantic: {
@@ -11035,13 +11135,13 @@ export default function (pi) {
       .mockImplementationOnce(originalDispose);
 
     (slot as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
-    await waitUntil(() => dispose.mock.calls.length === 1);
+    await waitFor(() => dispose.mock.calls.length === 1, "the disposal");
     expect(fixture.registry.administrativeWorkRegistry.facts()).toMatchObject([{
       kind: "extension-command-prompt-ui",
       sessionId: slot.id,
     }]);
-    await waitUntil(() => dispose.mock.calls.length === 2, 3_000);
-    await waitUntil(() => fixture.registry.administrativeWorkRegistry.size === 0);
+    await waitFor(() => dispose.mock.calls.length === 2, "the second disposal");
+    await waitFor(() => fixture.registry.administrativeWorkRegistry.size === 0, "the administrative work registry to drain");
     expect(slot.isDisposed).toBe(true);
   });
 
@@ -11141,13 +11241,13 @@ export default function (pi) {
       // `publishSnapshot` is what a real close path observes as the persisted
       // commit; the row it queues cannot land while the build is held.
       created.publishSnapshot();
-      await waitUntil(() => created.persistedSessionFile !== undefined);
-      await waitUntil(() => (fixture.registry as unknown as { latestSummaries: Map<string, unknown> }).latestSummaries.has(created.id));
+      await waitFor(() => created.persistedSessionFile !== undefined, "the persisted session file");
+      await waitFor(() => (fixture.registry as unknown as { latestSummaries: Map<string, unknown> }).latestSummaries.has(created.id), "the latest summary for the created session");
       expect(catalogOwner(fixture.registry).rows().some((row) => row.id === created.id)).toBe(false);
 
       (created as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
-      await waitUntil(() => created.isDisposed
-        && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id));
+      await waitFor(() => created.isDisposed
+        && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id), "the disposed session to leave the slot map");
       // The reopen lands in that window: it must wait for the queued row rather
       // than report the session as gone.
       const reopening = fixture.registry.acquire(created.id);
@@ -11202,7 +11302,7 @@ export default function (pi) {
     expect(ownership.latestSummaries.has(closingID)).toBe(true);
 
     await closing.prompt("/close-owning-session");
-    await waitUntil(() => !ownership.slots.has(closingID));
+    await waitFor(() => !ownership.slots.has(closingID), "the closing session to leave the slot map");
     expect(() => other.context()).not.toThrow();
     expect(ownership.summaryRevisions.has(closingID)).toBe(false);
     expect(ownership.latestSummaries.has(closingID)).toBe(false);
@@ -11222,7 +11322,7 @@ export default function (pi) {
     const structuralChangesBeforeClose = listChanges;
 
     await persisted.prompt("/close-owning-session");
-    await waitUntil(() => !ownership.slots.has(persistedID));
+    await waitFor(() => !ownership.slots.has(persistedID), "the persisted session to leave the slot map");
     expect(listChanges).toBe(structuralChangesBeforeClose);
     expect(ownership.summaryRevisions.get(persistedID)).toBeGreaterThanOrEqual(revisionBeforeClose);
     expect(ownership.latestSummaries.get(persistedID)).toMatchObject({
@@ -11307,7 +11407,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("cache stats");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
 
     const snapshot = slot.snapshot();
     const assistant = snapshot.transcript.find((item) => item.role === "assistant");
@@ -11521,7 +11621,7 @@ export default function (pi) {
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
       const admitted = await slot.prompt("persist the first turn");
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
       const sessionFile = slot.sessionFile!;
       const entries = (await readFile(sessionFile, "utf8"))
         .trimEnd().split("\n").map(line => JSON.parse(line) as Record<string, any>);
@@ -11589,7 +11689,7 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("fork this");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const original = slot.id;
     expect(registry.attentionProjection(original).isUnread).toBe(true);
     const userEntry = slot.snapshot().transcript.find((item) => item.role === "user");
@@ -11674,7 +11774,7 @@ export default function (pi) {
     // without losing identity, classification, or retained history.
     faux.setResponses([fauxAssistantMessage("continued")]);
     await slot.prompt("continue here");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.persistedSessionFile).toBeDefined();
     const boundary = slot.snapshot().forkBoundary;
     expect(boundary).toEqual(prePromptBoundary);
@@ -11771,7 +11871,7 @@ export default function (pi) {
     const clearMarker = vi.spyOn(markerStore, "clear").mockRejectedValueOnce(new Error("transient clear failure"));
 
     const bash = slot.executeBash("printf ok", true);
-    await waitUntil(() => execute.mock.calls.length === 1);
+    await waitFor(() => execute.mock.calls.length === 1, "the tool execution");
     expect(internal.activityHeartbeat).toBeDefined();
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
     const markerPath = join((registry as unknown as { options: { tronHome: string } }).options.tronHome,
@@ -11853,7 +11953,7 @@ export default function (pi) {
     const forceDispose = vi.spyOn(internals.runtime.session, "dispose");
 
     const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
-    await waitUntil(() => gracefulDispose.mock.calls.length === 1);
+    await waitFor(() => gracefulDispose.mock.calls.length === 1, "the graceful disposal");
     let acquisitionSettled = false;
     const acquisition = registry.acquire(sessionId).finally(() => { acquisitionSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -11949,7 +12049,7 @@ export default function (pi) {
     await laneEnteredPromise;
 
     const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
-    await waitUntil(() => (registry as unknown as { idleEvictions: Map<string, { slot: unknown }> }).idleEvictions.get(sessionId)?.slot === slot);
+    await waitFor(() => (registry as unknown as { idleEvictions: Map<string, { slot: unknown }> }).idleEvictions.get(sessionId)?.slot === slot, "the idle eviction of the exact slot");
 
     const [acquired] = await Promise.all([
       registry.acquire(sessionId),
@@ -12275,8 +12375,8 @@ export default function (pi) {
     (slot as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
     // `session.closed` is emitted in the same synchronous block as the slot's
     // close hook, so observing it means the registry's close handling has run.
-    await waitUntil(() => fixture.events.some(({ topic }) => topic === "session.closed"));
-    await waitUntil(() => slot.isDisposed);
+    await waitFor(() => fixture.events.some(({ topic }) => topic === "session.closed"), "the session closed event");
+    await waitFor(() => slot.isDisposed, "the slot disposal");
     expect(fixture.registry.isSubscribed("phone", sessionId)).toBe(true);
 
     const reacquired = await fixture.registry.acquire(sessionId);
@@ -12340,7 +12440,7 @@ export default function (pi) {
     await writeFile(child, `${JSON.stringify({
       type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
     })}\n`);
-    await waitUntil(() => catalog.row(child)?.id === "id-child");
+    await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
     expect(catalog.row(child)?.delegated).toBe(true);
 
     const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
@@ -12348,7 +12448,7 @@ export default function (pi) {
     await appendFile(child, `${JSON.stringify({
       type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
     })}\n`);
-    await waitUntil(() => catalog.row(child)?.messageCount === 1, 3_000);
+    await waitFor(() => catalog.row(child)?.messageCount === 1, "the child's first catalog message");
 
     // The watcher's own hint, not a walk: the row is current within a second of
     // the append and the sampler saw no catalog structure walk at all.
@@ -12382,7 +12482,7 @@ export default function (pi) {
 
     const first = fixture.registry.acquire(fixture.manager.getSessionId());
     const second = fixture.registry.acquire(queued.getSessionId());
-    await waitUntil(() => loads.length === 2);
+    await waitFor(() => loads.length === 2, "the second catalog load");
     const controller = new AbortController();
     const abandoned = fixture.registry.acquire(abandonedSession.getSessionId(), controller.signal);
     // The third waits for one of the two places instead of loading beside them.
@@ -12425,7 +12525,7 @@ export default function (pi) {
     // Two loads hold both places, so the shared session's start queues behind
     // them and the waiters of that one start are what this case counts.
     const held = [fixture.registry.acquire(fixture.manager.getSessionId()), fixture.registry.acquire(filler.getSessionId())];
-    await waitUntil(() => loads.length === 2);
+    await waitFor(() => loads.length === 2, "the second catalog load");
     const firstLeaving = new AbortController();
     const secondLeaving = new AbortController();
     const firstWaiter = fixture.registry.acquire(shared.getSessionId(), firstLeaving.signal);
@@ -12453,7 +12553,7 @@ export default function (pi) {
     await tick();
     expect(loads).toHaveLength(2);
     releaseLoads.shift()!();
-    await waitUntil(() => loads.length === 3);
+    await waitFor(() => loads.length === 3, "the third catalog load");
     expect(loads[2]).toBe(shared.getSessionId());
     const otherWaiter = fixture.registry.acquire(other.getSessionId());
     await tick();

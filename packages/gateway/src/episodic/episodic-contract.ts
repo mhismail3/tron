@@ -39,6 +39,11 @@ export interface EpisodicLimits {
    * memory is visible state and `resume()` restarts it, so the retries are
    * bounded. */
   maxRetries: number;
+  /** Bound on one compactor call before it is abandoned as transient. A call
+   * that never returns would hold its build slot forever: the pump would neither
+   * block nor retry, and every turn waiting on that node would wait for the life
+   * of the process. 0 disables the bound (tests that drive the pump by hand). */
+  compactorTimeoutMs: number;
   /** One canonical JSONL line larger than this refuses the read. */
   maxSourceLineBytes: number;
   /** One stored JSONL record larger than this refuses the store. */
@@ -58,6 +63,11 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   recordCapChars: 128 * 1_024,
   retryMs: 10_000,
   maxRetries: 3,
+  // The recipe has no such bound: its compactor retries forever because its next
+  // turn waits on the summary and it never gives up. Here a blocked memory is
+  // visible state with an operator resume, so a call that is simply gone has to
+  // become a block instead of an unbounded wait.
+  compactorTimeoutMs: 120_000,
   maxSourceLineBytes: 16 * 1_024 * 1_024,
   maxStoreLineBytes: 1_024 * 1_024,
 };
@@ -196,6 +206,10 @@ export interface EpisodicStoreState {
   generation: number;
   cursor: EpisodicSourceCursor | null;
   blocked: EpisodicBlocked | null;
+  /** Tokens this memory's compactor calls have spent, over the whole life of the
+   * store. Durability is the point: a restart must not reset spend, or a budget
+   * bounded in name would be unbounded in practice. */
+  spend: number;
 }
 
 export interface EpisodicViewPartStatus {
@@ -249,6 +263,9 @@ export type EpisodicSummarizer = (request: EpisodicCompactorRequest) => Promise<
 export interface EpisodicTokenBudget {
   reserve(tokens: number): boolean;
   settle(reserved: number, used: number): void;
+  /** Account for spend a previous process persisted, so a restart never resets
+   * it (`EpisodicMemory.open` calls this with the store's recorded spend). */
+  restore(usedTokens: number): void;
   snapshot(): { limit: number; reserved: number; used: number };
 }
 
@@ -265,6 +282,10 @@ export function createEpisodicTokenBudget(limitTokens: number): EpisodicTokenBud
     settle(estimate, actual) {
       reserved = Math.max(0, reserved - estimate);
       used += actual;
+    },
+    restore(usedTokens) {
+      if (!Number.isSafeInteger(usedTokens) || usedTokens < 0) throw new EpisodicMemoryError("invalid-request", "Restored token spend must be a non-negative integer");
+      used = Math.max(used, usedTokens);
     },
     snapshot: () => ({ limit: limitTokens, reserved, used }),
   };

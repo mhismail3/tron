@@ -13,6 +13,7 @@ import {
   signInMcpServer,
 } from "../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/oauth.js";
 import { parseWwwAuthenticate } from "../../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-mcp/dist/oauth/index.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 const servers: Array<ReturnType<typeof createServer>> = [];
@@ -48,10 +49,6 @@ function recordedEvents() {
   return {
     events,
     emit: (clientId: string, topic: string, payload: JsonValue) => events.push({ clientId, topic, payload }),
-    waitFor: async (predicate: () => boolean) => {
-      for (let turn = 0; turn < 512 && !predicate(); turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
-      if (!predicate()) throw new Error("fixture event did not arrive");
-    },
   };
 }
 
@@ -150,7 +147,7 @@ describe("MCP auth relay integration", () => {
       });
       interaction.notify({ type: "progress", message: "MCP sign-in completed" });
     });
-    await recorder.waitFor(() => recorder.events.some((event) => event.topic === "auth.event"));
+    await waitFor(() => recorder.events.some((event) => event.topic === "auth.event"), "the auth event");
     const authEvent = recorder.events.find((event) => event.topic === "auth.event")!.payload as Record<string, any>;
     const authorizationUrl = new URL(authEvent.event.url as string);
     expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe("S256");
@@ -158,7 +155,7 @@ describe("MCP auth relay integration", () => {
     const browserResponse = await fetch(authorizationUrl, { redirect: "manual" });
     const redirected = new URL(browserResponse.headers.get("location")!);
     expect(await broker.forwardCallback("device-1", admission.operationId, authEvent.callbackCapture.id, redirected.search.slice(1))).toBe(true);
-    await recorder.waitFor(() => recorder.events.some((event) => event.topic === "auth.completed"));
+    await waitFor(() => recorder.events.some((event) => event.topic === "auth.completed"), "the auth completion event");
 
     const persisted = JSON.parse(await readFile(authFile, "utf8")) as Record<string, any>;
     const serverState = persisted[`${origin}/mcp`];

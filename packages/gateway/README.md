@@ -646,9 +646,21 @@ Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns the bounded projection
 `{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
-  sessionPresent }`, `home.designate` and `home.disable` are
-command-id-receipted mutations, and `home.v1` is advertised in
-`hello`/`system.info`. Home runs in the neutral
+  sessionPresent, memory }`, where `memory` is
+`{ configured, open, model?, tokenBudget?, spentTokens?, episodic?, blocked?,
+  reason? }`, `episodic` is the memory owner's own bounded status and
+`spentTokens` is the persisted spend (present whenever a store exists, open or
+not, because a restart restores it and charges it against the budget). `home.designate`,
+`home.disable`, `home.configureMemory` and `home.resumeMemory` are
+command-id-receipted mutations,
+`home.context` (a read) returns the bounded request context of Home's current or
+last activation — its start entry id, whether it is open, its view line and byte
+counts, effective tokens, model window and its own refusal reason (the sizes are
+absent when it was refused before it prepared a request), and never a message
+body — and
+`home.v1` is advertised in `hello`/`system.info`. There are no memory defaults:
+Home refuses its activations until `home.configureMemory` records a physical
+model and a token budget. Home runs in the neutral
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
@@ -656,7 +668,11 @@ agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
 disabled, a fixed physical model, and zero cache-warming requests), and its
 designation is keyed by session id, so a fork is ordinary. A profile change
 replaces the live runtime in place inside the session's own lane, and a record
-whose session is gone is given a fresh one. Ordinary sessions are byte-for-byte
+whose session is gone is given a fresh one. Every activation (one admitted input
+and its whole tool loop) sends the model only the system messages that precede
+it, ONE frozen memory view and its own messages: prior activations are never
+re-sent, the view is never persisted, and a request waits for the lines it will
+send (abortably) before it is made. Ordinary sessions are byte-for-byte
 unaffected. The record, the profile, the RPCs, fork and loadout semantics and
 what is not built yet are owned by [`docs/home.md`](docs/home.md).
 
@@ -2805,6 +2821,30 @@ connection opened by an in-process socket in the Vitest worker and fails the
 current test (or the file, for async work that outlives its test), so an unstubbed in-process fetch cannot pass or
 hang depending on the host's network. It does not cover child processes or DNS
 lookups.
+
+Waits are hang bounds, not speed budgets. Every condition a test waits for — a
+turn settling, a frame arriving, a record landing — is correct at any speed.
+`test-support/wait-for.ts` owns that bound: `waitFor(condition, label)` polls a
+sync or async condition on real timers and `awaitsWithin(promise, label)` bounds
+an event or promise the code already exposes. Both fail with their label at
+`WAIT_HANG_BOUND_MS` (12 s, kept below the 15-second `testTimeout` so the failure
+names the condition instead of being cut off), and neither moves a fake clock a
+test installed: a file that fakes timers advances them itself. A wait that a
+hook runs (`beforeEach`/`afterEach` and the cleanup callbacks they await) passes
+`HOOK_HANG_BOUND_MS` (5 s), because Vitest's 10-second `hookTimeout` would
+truncate the label. A call site with its own measurement budget passes its own
+`boundMs` and says why. Waits converted by #433 go through this helper; several
+of those files still carry `vi.waitFor` budgets and file-local poll helpers that
+were outside that change (94 `vi.waitFor` call sites across 23 files), and the
+follow-up list is recorded on #433 rather than claimed as converted here.
+
+A bound tuned to host speed turns unrelated CPU contention (parallel agent
+builds, hosted runners) into a false failure that lands on a different test each
+run (epic #400). Prefer awaiting the event or promise the owning code already
+exposes. Where elapsed time, a pass count or an attempt count is itself the
+contract — a throughput or latency relationship the test measures, a bounded
+number of discovery passes, an event storm whose length is the assertion — keep
+that explicit bound or count and say why at the call site.
 
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 

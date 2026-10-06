@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -28,16 +29,6 @@ function responseStatus(outgoing: ReturnType<typeof request>): Promise<{ respons
   });
 }
 
-async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer!: NodeJS.Timeout;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out`)), 2_500);
-    timer.unref();
-  });
-  try { return await Promise.race([promise, timeout]); }
-  finally { clearTimeout(timer); }
-}
-
 describe("Gateway HTTP admission and retirement", () => {
   it("rejects non-object pairing JSON with bounded invalid_request responses", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-pair-body-"));
@@ -49,11 +40,11 @@ describe("Gateway HTTP admission and retirement", () => {
       auth: {} as any, service: { info: () => ({ protocolVersion: 7 }) } as any, logger: { log: () => {} } as any,
     });
     await gateway.listen();
-    cleanups.push(async () => { await bounded(gateway.close(), "pair gateway close"); await rm(root, { recursive: true, force: true }); });
+    cleanups.push(async () => { await awaitsWithin(gateway.close(), "pair gateway close", HOOK_HANG_BOUND_MS); await rm(root, { recursive: true, force: true }); });
     for (const body of ["null", "[]", JSON.stringify("x"), "123"]) {
       const outgoing = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/pair", headers: { "content-type": "application/json" } });
       outgoing.end(body);
-      const result = await bounded(responseStatus(outgoing), "pair invalid body");
+      const result = await awaitsWithin(responseStatus(outgoing), "pair invalid body");
       const chunks: Buffer[] = [];
       for await (const chunk of result.response) chunks.push(Buffer.from(chunk));
       expect(result.status).toBe(400);
@@ -81,18 +72,18 @@ describe("Gateway HTTP admission and retirement", () => {
     cleanups.push(async () => {
       fail(); peer?.destroy();
       await starting.catch(() => {});
-      try { await bounded(gateway.close(), "failed-startup cleanup"); }
+      try { await awaitsWithin(gateway.close(), "failed-startup cleanup", HOOK_HANG_BOUND_MS); }
       finally { await rm(root, { recursive: true, force: true }); }
     });
-    await bounded(bound, "startup listener");
+    await awaitsWithin(bound, "startup listener");
     peer = createConnection({ host: "127.0.0.1", port });
     peer.on("error", () => {});
     const closed = new Promise<void>(resolve => peer!.once("close", resolve));
     peer.write("GET /health HTTP/1.1\r\nHost: fixture");
-    await bounded(headers, "partial header receipt");
+    await awaitsWithin(headers, "partial header receipt");
     fail();
-    await expect(bounded(starting, "bounded startup failure")).rejects.toThrow("fixture warmup failed");
-    await bounded(closed, "failed-startup peer close");
+    await expect(awaitsWithin(starting, "bounded startup failure")).rejects.toThrow("fixture warmup failed");
+    await awaitsWithin(closed, "failed-startup peer close");
     expect(gateway.close()).toBe(gateway.close());
   });
   it("rechecks shutdown after asynchronous upgrade authentication", async () => {
@@ -121,16 +112,16 @@ describe("Gateway HTTP admission and retirement", () => {
     await gateway.listen();
     cleanups.push(async () => {
       releaseAuthentication();
-      await bounded(gateway.close(), "upgrade gateway close");
+      await awaitsWithin(gateway.close(), "upgrade gateway close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
 
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     socket.on("error", () => {});
-    await bounded(authenticationStarted, "upgrade authentication");
+    await awaitsWithin(authenticationStarted, "upgrade authentication");
     const closing = gateway.close();
     releaseAuthentication();
-    await bounded(closing, "pending upgrade close");
+    await awaitsWithin(closing, "pending upgrade close");
     expect(invoke).not.toHaveBeenCalled();
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened")).toBe(false);
     socket.terminate();
@@ -169,34 +160,34 @@ describe("Gateway HTTP admission and retirement", () => {
     await gateway.listen();
     cleanups.push(async () => {
       stream.destroy();
-      await bounded(gateway.close(), "HTTP gateway close");
+      await awaitsWithin(gateway.close(), "HTTP gateway close", HOOK_HANG_BOUND_MS);
       await rm(root, { recursive: true, force: true });
     });
 
     const slow = request({ host: "127.0.0.1", port, path: "/v1/blobs/slow", headers: { authorization: `Bearer ${token}` } });
     slow.on("error", () => {});
     slow.end();
-    const slowResponse = await bounded(responseStatus(slow), "slow response headers");
-    await bounded((async () => { while (!acquired) await new Promise((resolve) => setImmediate(resolve)); })(), "slow lease admission");
+    const slowResponse = await awaitsWithin(responseStatus(slow), "slow response headers");
+    await awaitsWithin((async () => { while (!acquired) await new Promise((resolve) => setImmediate(resolve)); })(), "slow lease admission");
     expect(slowResponse.status).toBe(200);
 
     const healthy = request({ host: "127.0.0.1", port, path: "/health" });
     healthy.end();
-    const healthyResponse = await bounded(responseStatus(healthy), "healthy response");
+    const healthyResponse = await awaitsWithin(responseStatus(healthy), "healthy response");
     healthyResponse.response.resume();
     expect(healthyResponse.status).toBe(200);
 
     const saturated = request({ host: "127.0.0.1", port, path: "/v1/blobs/other", headers: { authorization: `Bearer ${token}` } });
     saturated.end();
-    const saturatedResponse = await bounded(responseStatus(saturated), "saturated response");
+    const saturatedResponse = await awaitsWithin(responseStatus(saturated), "saturated response");
     saturatedResponse.response.resume();
     expect(saturatedResponse.status).toBe(503);
     expect(sessions.acquireBlob).toHaveBeenCalledTimes(1);
 
     const started = Date.now();
-    await bounded(gateway.close(), "stalled HTTP close");
+    await awaitsWithin(gateway.close(), "stalled HTTP close");
     expect(Date.now() - started).toBeLessThan(2_000);
-    await bounded(new Promise<void>((resolve) => {
+    await awaitsWithin(new Promise<void>((resolve) => {
       if (released.mock.calls.length > 0) resolve();
       else released.mockImplementation(() => resolve());
     }), "blob lease release");

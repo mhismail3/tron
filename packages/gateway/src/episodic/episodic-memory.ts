@@ -2,12 +2,12 @@ import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
-  EpisodicMemoryError, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
-  EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
+  EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_INVALIDATION_CHUNK, EPISODIC_OMITTED_TEXT,
+  EPISODIC_PLACEHOLDER, EPISODIC_STATUS_PARTS, EPISODIC_STORE_VERSION, defaultSleep, resolveLimits,
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
-  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicSummarizer,
-  type EpisodicTokenBudget, type EpisodicViewPartStatus,
+  type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState,
+  type EpisodicSummarizer, type EpisodicTokenBudget, type EpisodicViewPartStatus,
 } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
@@ -47,6 +47,15 @@ class EpisodicBlockedSignal extends Error {
   }
 }
 
+/** One compactor call that overran its bound. Its own class, so the retry loop
+ * classifies it as transient without reading its message. */
+class EpisodicCallTimeout extends Error {
+  constructor(readonly boundMs: number) {
+    super(`the compactor call exceeded its ${boundMs}ms bound`);
+    this.name = "EpisodicCallTimeout";
+  }
+}
+
 /** The owner is closing; in-flight work ends without blocking. */
 class EpisodicClosedSignal extends Error {
   constructor() { super("Episodic memory is closing"); this.name = "EpisodicClosedSignal"; }
@@ -67,6 +76,26 @@ interface BuildStamp {
   inputs: Array<{ address: string; revision: number }>;
   messageIndex?: number;
   messageRevision?: number;
+}
+
+/**
+ * The persisted state of one session's memory without opening it: the blocked
+ * state and the spend a later open would restore. `home.status` reports both
+ * while no activation has opened the store yet, and a session with no store at
+ * all reads as undefined.
+ */
+export async function readEpisodicState(options: {
+  workspace: import("../workspace/tron-workspace.js").TronWorkspace;
+  sessionId: string;
+  maxStoreLineBytes?: number;
+}): Promise<EpisodicStoreState | undefined> {
+  const store = new EpisodicStore(
+    options.workspace,
+    options.sessionId,
+    options.maxStoreLineBytes ?? EPISODIC_DEFAULTS.maxStoreLineBytes,
+  );
+  const snapshot = await store.read();
+  return snapshot.state ?? undefined;
 }
 
 export class EpisodicMemory {
@@ -142,6 +171,9 @@ export class EpisodicMemory {
       if (snapshot.state) {
         memory.sourceCursor = snapshot.state.cursor;
         memory.blocked = snapshot.state.blocked;
+        // Spend is restored before any compactor call, so a restarted Gateway
+        // cannot spend a second budget on the same history.
+        memory.budget.restore(snapshot.state.spend);
       }
       if (snapshot.recoveredTornBytes > 0) {
         memory.diagnostic({
@@ -163,13 +195,26 @@ export class EpisodicMemory {
   /** Re-read the canonical session, ingest what the cursor has not seen, and
    * drain the pump. A source read failure blocks with `source-unavailable`. */
   async entriesCommitted(sessionId: string): Promise<void> {
+    await this.entriesIngested(sessionId);
+    await this.drain();
+  }
+
+  /**
+   * Re-read the canonical session and ingest what the cursor has not seen,
+   * WITHOUT waiting for the pump: the pump is started, not awaited. A turn loop
+   * waits only for the lines it will send (`whenReady`), never for summaries of
+   * messages that come after them, so a request's latency cannot depend on
+   * summarizing its own input and a slow compactor cannot stall a turn that does
+   * not need its output.
+   */
+  async entriesIngested(sessionId: string): Promise<void> {
     this.assertOpen();
     if (sessionId !== this.dependencies.sessionId) throw new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session");
     await this.mutex.run(async () => {
       if (this.blocked) return;
       await this.ingest();
     });
-    await this.drain();
+    void this.drain().catch(() => {});
   }
 
   /** Resolves when every part of the view covering messages before `cut` is a
@@ -194,9 +239,73 @@ export class EpisodicMemory {
     });
   }
 
-  /** Clear the blocked state and restart the pump (departure 5). The cause must
-   * have been fixed by the caller: a larger budget, a reachable source. */
+  /**
+   * How many of the messages this memory holds are at or before one canonical
+   * entry of the branch it last read: gist §6's cut, the number of view lines a
+   * request that starts at that entry covers. `null` is an empty history, so the
+   * cut is 0.
+   *
+   * Undefined when the entry is not on the branch this memory last read, or when
+   * it has not read the source at all: a cut cannot be guessed, because a wrong
+   * cut would render a view that does not stop where the activation starts.
+   */
+  cutAtEntry(entryId: string | null): number | undefined {
+    this.assertOpen();
+    if (entryId === null) return 0;
+    const position = this.sourceBranch.findIndex(entry => entry.id === entryId);
+    if (position < 0 || this.sourceCursor === null) return undefined;
+    let cut = 0;
+    for (let index = 0; index <= position; index += 1) {
+      const messageIndex = this.entryIndex.get(this.sourceBranch[index]!.id);
+      if (messageIndex !== undefined && messageIndex + 1 > cut) cut = messageIndex + 1;
+    }
+    return cut;
+  }
+
+  /**
+   * The agent-facing view up to `cut` (gist §5.1): one `id+n|text` line per
+   * part, oldest first, newlines flattened to single spaces. It covers the
+   * whole history before the cut, so a request that starts there never sends a
+   * message it does not own.
+   *
+   * A part that straddles the cut is expanded into the children under it: those
+   * are built whenever their parent is (a parent is composed from its children
+   * and revoked with them), so the expansion cannot render a placeholder. The
+   * placeholder is still the value for a part `whenReady` did not cover, which
+   * is display state, never a served request (the request layer waits first).
+   */
+  renderView(cut: number): { text: string; lines: number; bytes: number } {
+    this.assertOpen();
+    const parts: EpisodicViewPart[] = [];
+    const add = (part: EpisodicViewPart): void => {
+      if (part.start >= cut) return;
+      if (part.level === 0 || part.start + part.span <= cut) { parts.push(part); return; }
+      const half = part.span / 2;
+      add({ level: part.level - 1, index: part.index * 2, start: part.start, span: half });
+      add({ level: part.level - 1, index: part.index * 2 + 1, start: part.start + half, span: half });
+    };
+    for (const part of this.view) add(part);
+    const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${viewLine(this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
+    const text = lines.join("\n");
+    return { text, lines: lines.length, bytes: utf8Bytes(text) };
+  }
+
+  /** Clear the blocked state, re-read the source and restart the pump
+   * (departure 5). The cause must have been fixed by the caller: a larger budget,
+   * a different model, a reachable source. */
   async resume(): Promise<void> {
+    await this.resumeIngested();
+    await this.drain();
+  }
+
+  /**
+   * The same, WITHOUT waiting for the pump: the block is cleared and the source
+   * re-read under the lock, and the pump is started, not awaited. An operator
+   * command (a raised budget, `home.resumeMemory`) must return once the memory is
+   * unblocked, not after the whole summary backlog; a caller that needs the lines
+   * it will send waits on `whenReady` as a turn does.
+   */
+  async resumeIngested(): Promise<void> {
     this.assertOpen();
     await this.mutex.run(async () => {
       if (this.blocked) {
@@ -205,7 +314,7 @@ export class EpisodicMemory {
         await this.ingest();
       }
     });
-    await this.drain();
+    void this.drain().catch(() => {});
   }
 
   status(): EpisodicMemoryStatus {
@@ -469,7 +578,26 @@ export class EpisodicMemory {
   private async drain(): Promise<void> {
     if (this.closed || this.blocked) return;
     if (!this.draining) {
-      this.draining = this.pump().finally(() => { this.draining = null; });
+      this.draining = (async () => {
+        try {
+          await this.pump();
+        } catch (error) {
+          // The pump handles every failure it can classify; anything that
+          // escapes it (a store append that fails on I/O, say) would otherwise
+          // leave the pump dead, the memory unblocked and every waiter waiting
+          // for a node that can never come. For a caller that never awaits the
+          // drain — the turn loop, which only waits on `whenReady` — an
+          // unexpected failure of the owner's own loop is a permanent failure,
+          // so it blocks with the reason and releases the waiters. The
+          // settlement runs in a `finally`: a block that cannot be persisted
+          // still must not strand a waiter.
+          try {
+            await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
+          } finally {
+            this.settleWaiters();
+          }
+        }
+      })().finally(() => { this.draining = null; });
     }
     await this.draining;
   }
@@ -653,11 +781,13 @@ export class EpisodicMemory {
       }
       let message: AssistantMessage;
       try {
-        message = await this.summarizer(request);
+        message = await this.summarizerWithinBound(request);
       } catch (error) {
         this.budget.settle(estimate, 0);
         if (this.closed || error instanceof EpisodicClosedSignal) throw new EpisodicClosedSignal();
-        const verdict = classifyThrown(error);
+        // A call that overran its bound answered too late to be used, so it is a
+        // transient failure and its reservation was released above.
+        const verdict = error instanceof EpisodicCallTimeout ? "transient" : classifyThrown(error);
         const detail = error instanceof Error ? error.message : "the compactor call failed";
         if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
         if (attempt >= this.limits.maxRetries) throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail });
@@ -665,6 +795,8 @@ export class EpisodicMemory {
         continue;
       }
       this.budget.settle(estimate, usageTokens(message.usage));
+      // Durable before the next call: a crash must not hand the budget back.
+      await this.saveState();
       const verdict = classifyReply(message);
       if (verdict === "ok") return summarizerText(message);
       if (verdict === "permanent") {
@@ -674,6 +806,35 @@ export class EpisodicMemory {
         throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: message.errorMessage ?? "the compactor call kept failing" });
       }
       await this.wait(this.limits.retryMs);
+    }
+  }
+
+  /**
+   * One compactor call under its own bound, injectable through the limits. The
+   * call's signal is aborted at the bound so a real provider stops reading, the
+   * late promise is neutralized (its rejection must not surface unhandled and its
+   * answer is never used), and the caller sees a transient failure.
+   */
+  private async summarizerWithinBound(request: EpisodicCompactorRequest): Promise<AssistantMessage> {
+    const bound = this.limits.compactorTimeoutMs;
+    if (bound <= 0) return await this.summarizer(request);
+    const controller = new AbortController();
+    const forward = () => controller.abort();
+    this.abort.signal.addEventListener("abort", forward, { once: true });
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => { controller.abort(); resolve("timeout"); }, bound);
+      timer.unref();
+    });
+    const call = this.summarizer({ ...request, signal: controller.signal });
+    call.catch(() => {});
+    try {
+      const settled = await Promise.race([call.then(value => ({ message: value }) as const), expired]);
+      if (settled === "timeout") throw new EpisodicCallTimeout(bound);
+      return settled.message;
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.abort.signal.removeEventListener("abort", forward);
     }
   }
 
@@ -752,8 +913,21 @@ export class EpisodicMemory {
     this.settleWaiters();
   }
 
-  private async saveState(): Promise<void> {
-    await this.store.saveState({ version: EPISODIC_STORE_VERSION, generation: this.generation, cursor: this.sourceCursor, blocked: this.blocked });
+  /**
+   * Persist the memory's state, chained behind every earlier append and state
+   * write and with its snapshot taken *inside* that step. Two concurrent savers
+   * would otherwise both be in flight with snapshots taken at call time, and the
+   * older one could land last: spend would go backwards, and a block written by
+   * one path could be overwritten by another path's earlier, unblocked state.
+   */
+  private saveState(): Promise<void> {
+    return this.enqueueAppend(() => this.store.saveState({
+      version: EPISODIC_STORE_VERSION,
+      generation: this.generation,
+      cursor: this.sourceCursor,
+      blocked: this.blocked,
+      spend: this.budget.snapshot().used,
+    }));
   }
 
   /** Every append is chained, so the durable order equals the request order and
@@ -800,4 +974,10 @@ export class EpisodicMemory {
   private assertOpen(): void {
     if (this.closed) throw new EpisodicMemoryError("closed", "Episodic memory was disposed");
   }
+}
+
+/** One view line's text: newlines flattened to single spaces (gist §5.1), and
+ * the placeholder for a part whose node is not built. */
+function viewLine(text: string | undefined): string {
+  return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/\n+/gu, " ");
 }

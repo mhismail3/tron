@@ -13,6 +13,7 @@ import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";
 import type { NotificationService as NotificationServiceType } from "../notifications/notification-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -20,14 +21,6 @@ afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 describe("codemode nested interactive tools", () => {
   it("serializes nested forms, cancels the pending form on Stop, and preserves notify and schedule owners", async () => {
@@ -132,7 +125,10 @@ describe("codemode nested interactive tools", () => {
       version: 1, answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }],
     }, false);
     const answered = new Set([first.id]);
-    for (let attempt = 0; attempt < 40 && slot.isBusy; attempt += 1) {
+    // The slot keeps raising interactions until the run settles, so answering one
+    // is part of the wait's own step; the shared hang bound names the state that
+    // never arrived (epic #400).
+    await waitFor(() => {
       const pending = slot.snapshot().extensionPresentation.pendingInteractions.find((item) => !answered.has(item.id));
       if (pending) {
         answered.add(pending.id);
@@ -141,12 +137,11 @@ describe("codemode nested interactive tools", () => {
             ? { version: 1, answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }] }
             : true,
           false);
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 25));
       }
-    }
+      return !slot.isBusy;
+    }, "the nested interactions to settle");
     await prompting;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
 
     const parentResult = slot.snapshot().transcript.find((item) =>
@@ -190,7 +185,7 @@ describe("codemode nested interactive tools", () => {
     expect(pending.method).toBe("form");
     await slot.abort("agent");
     await stopPrompt;
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().extensionPresentation.pendingInteractions).toEqual([]);
     expect(slot.snapshot().transcript.some((item) =>
       item.kind === "message" && item.role === "toolResult" && item.toolCallId === pending.id)).toBe(false);

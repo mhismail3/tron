@@ -9,14 +9,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
+import { waitFor } from "../../test-support/wait-for.js";
 
 function barrier() {
   let release!: () => void;
@@ -101,8 +94,8 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       });
     }
     const settle = async () => {
-      await waitUntil(() => !slot.isBusy);
-      await waitUntil(() => enqueue.mock.calls.length + suppressAutomatic.mock.calls.length > 0);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
+      await waitFor(() => enqueue.mock.calls.length + suppressAutomatic.mock.calls.length > 0, "the title refresh");
       // A mock call is visible before its async admission recorder settles.
       await Promise.allSettled(enqueue.mock.results.map((result) => result.value));
     };
@@ -162,7 +155,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     const previousSource = value.enqueue.mock.calls[0]![0].sourceId;
     value.enqueue.mockClear();
     await value.slot.prompt("cancel retry request");
-    await waitUntil(() => value.slot.snapshot().phase === "retrying");
+    await waitFor(() => value.slot.snapshot().phase === "retrying", "the retrying phase");
     expect(value.enqueue).not.toHaveBeenCalled();
     await value.slot.abort();
     await value.settle();
@@ -258,7 +251,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     const terminal = value.canonicalAtAdmission[0]!.find((entry) => entry.customType === INVOCATION_RECEIPT_TYPE
       && entry.data.receiptKind === "terminal" && entry.data.operationId === queuedOperationId);
     expect(terminal?.data.lifecycle).toBe("failed");
-    await waitUntil(() => !value.slot.isDrainBusy);
+    await waitFor(() => !value.slot.isDrainBusy, "the slot to stop draining");
   });
 
   it("announces drain-cutoff interruption without overwriting the preceding completion receipt", async () => {
@@ -283,7 +276,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       value.slot.beginAdministrativeDrainCutoff();
     } finally { release.release(); }
     await value.settle();
-    await waitUntil(() => !value.slot.isDrainBusy);
+    await waitFor(() => !value.slot.isDrainBusy, "the slot to stop draining");
     expect(value.sdkEvents).toEqual(["agent_start", "agent_end", "agent_start", "agent_end", "agent_settled"]);
     expect(value.enqueue.mock.calls, JSON.stringify(value.enqueue.mock.calls)).toHaveLength(1);
     expect(value.enqueue.mock.calls[0]![0].message).toBe("The agent was stopped.");
@@ -365,7 +358,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       retry: { enabled: true, maxRetries: 2, baseDelayMs: 60_000 },
     });
     await value.slot.prompt("interrupted request");
-    await waitUntil(() => value.slot.snapshot().phase === "retrying");
+    await waitFor(() => value.slot.snapshot().phase === "retrying", "the retrying phase");
     await value.slot.shutdown();
     expect(value.enqueue).toHaveBeenCalledTimes(1);
     expect(value.enqueue.mock.calls[0]![0].message).toBe("The agent was interrupted before its outcome could be confirmed.");

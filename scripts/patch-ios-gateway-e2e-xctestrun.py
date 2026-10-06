@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Patch the unique Tron unit-test target in a generated xctestrun plist."""
+"""Patch one Tron test target in a generated xctestrun plist with the fixture environment.
+
+The unit target's runner is a hosted process; the UI target's runner is the
+XCUITest runner that drives the app through its real interface. Both read the
+real-Gateway fixture from their own environment, so the same values are written
+to whichever target the command selected.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +17,12 @@ import tempfile
 from pathlib import Path
 
 MAX_XCTESTRUN_BYTES = 16 * 1024 * 1024
-TARGET_BLUEPRINT = "TronMobileTests"
+# Blueprint name to the IsUITestBundle value that identifies that target: the
+# hosted unit target is not a UI-test bundle, the XCUITest target is.
+TARGETS = {
+    "TronMobileTests": False,
+    "TronMobileUITests": True,
+}
 ENVIRONMENT_KEYS = (
     "TRON_E2E_PORT",
     "TRON_E2E_CODE",
@@ -25,13 +36,16 @@ def fail(message: str) -> "NoReturn":
     raise ValueError(message)
 
 
-def patch_document(document: object, values: dict[str, str]) -> dict[str, object]:
+def patch_document(document: object, target_blueprint: str, values: dict[str, str]) -> dict[str, object]:
+    if target_blueprint not in TARGETS:
+        fail(f"unknown test target: {target_blueprint}")
     if not isinstance(document, dict):
         fail("xctestrun root must be a dictionary")
     configurations = document.get("TestConfigurations")
     if not isinstance(configurations, list):
         fail("xctestrun TestConfigurations is missing or malformed")
 
+    expected_ui_bundle = TARGETS[target_blueprint]
     matches: list[dict[str, object]] = []
     for configuration in configurations:
         if not isinstance(configuration, dict):
@@ -44,11 +58,14 @@ def patch_document(document: object, values: dict[str, str]) -> dict[str, object
         for target in targets:
             if not isinstance(target, dict):
                 fail("xctestrun contains a malformed test target")
-            if target.get("BlueprintName") == TARGET_BLUEPRINT and target.get("IsUITestBundle") is not True:
+            if target.get("BlueprintName") == target_blueprint and target.get("IsUITestBundle") is expected_ui_bundle:
                 matches.append(target)
 
     if len(matches) != 1:
-        fail(f"xctestrun must contain exactly one enabled {TARGET_BLUEPRINT} unit-test target (found {len(matches)})")
+        fail(
+            f"xctestrun must contain exactly one enabled {target_blueprint} "
+            f"test target (found {len(matches)})"
+        )
 
     target = matches[0]
     current = target.get("EnvironmentVariables")
@@ -61,7 +78,7 @@ def patch_document(document: object, values: dict[str, str]) -> dict[str, object
     return document
 
 
-def patch_file(path: Path, values: dict[str, str]) -> None:
+def patch_file(path: Path, target_blueprint: str, values: dict[str, str]) -> None:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or path.is_symlink():
         fail("xctestrun must be a regular non-symlink file")
@@ -69,7 +86,7 @@ def patch_file(path: Path, values: dict[str, str]) -> None:
         fail("xctestrun is empty or exceeds its byte limit")
     with path.open("rb") as handle:
         document = plistlib.load(handle)
-    encoded = plistlib.dumps(patch_document(document, values))
+    encoded = plistlib.dumps(patch_document(document, target_blueprint, values))
     if len(encoded) > MAX_XCTESTRUN_BYTES:
         fail("patched xctestrun exceeds its byte limit")
 
@@ -92,13 +109,18 @@ def patch_file(path: Path, values: dict[str, str]) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 7:
-        print("usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN PORT CODE WORKSPACE PI_VERSION PROXY_TOKEN", file=sys.stderr)
+    if len(argv) != 8:
+        print(
+            "usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN TARGET PORT CODE WORKSPACE PI_VERSION PROXY_TOKEN",
+            file=sys.stderr,
+        )
+        print(f"       TARGET is one of: {', '.join(sorted(TARGETS))}", file=sys.stderr)
         return 64
     path = Path(argv[1])
-    values = dict(zip(ENVIRONMENT_KEYS, argv[2:]))
+    target_blueprint = argv[2]
+    values = dict(zip(ENVIRONMENT_KEYS, argv[3:]))
     try:
-        patch_file(path, values)
+        patch_file(path, target_blueprint, values)
     except (OSError, ValueError, plistlib.InvalidFileException) as error:
         print(f"xctestrun patch failed: {error}", file=sys.stderr)
         return 1
