@@ -321,6 +321,15 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   Jobs keep real failure conclusions;
   only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
   unapplied by maintainer decision; no schedule or deployment is added.
+  The workflow's concurrency group stays ref-scoped, and it cancels in progress
+  only for `pull_request` events. A started base-branch push run therefore always
+  finishes - its result is the evidence the epic's consecutive green `main`
+  pushes need - while GitHub's one pending run per group still lets the newest
+  pending `main` run supersede an older pending one. So the advisory-CI section's
+  base-branch evidence is that push run's own result, not the next land's
+  cancellation of it, and `land` cancels a merged pull request's own runs
+  (step 8) so it stops holding the macOS queue the base push run and later lands
+  need.
 - **CI policy's iOS infrastructure test** uses
   `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
   The workflow compares the available base and head trees directly (two-dot
@@ -669,6 +678,11 @@ work is committed. The `land` section of `.github/work.json` configures it.
    requires up-to-date branches and these checks, GitHub auto-merge could
    replace the wait in step 5; `land` does not rely on it.
 8. **After the merge.** Once GitHub reports the pull request as MERGED:
+   - It cancels the merged pull request's own queued or in-progress runs for the
+     merged head, `pull_request` runs only, one reported line per run. The
+     merged run is stale and its macOS jobs hold the queue later lands need.
+     This is best effort: a failure to list or cancel the runs is printed as a
+     warning and never fails a land that already merged.
    - With `--needs-user-validation`, it reopens the issue if GitHub closed it.
      It then comments the exact text, adds `land.userValidationLabel` and sets
      Status to `dashboard.needsYouStatus`. The issue stays open until the
@@ -800,6 +814,12 @@ Project state and records every call. The live E2E covers GitHub itself.
     earlier run finished it. Another session's claim and a
     validation text that contradicts the merged body are refused. A merge at
     an older head or from a fork is not a resume.
+66. **A merged pull request's own runs keep holding the queue.** After the
+    merge, and on a resume or a `steward --land` merge, `land` cancels the
+    merged head's queued or in-progress `pull_request` runs and reports one line
+    per run. Completed runs, another event's runs and another head's runs are
+    left alone. A refused run list or cancellation is a warning, and never fails
+    a land that already merged.
 
 ## `cleanup`
 
