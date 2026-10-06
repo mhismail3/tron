@@ -57,15 +57,16 @@ so a fork or a reset, which produce a new session id, is never Home.
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles` | agent directory and trusted project resources |
 | System prompt | the agent directory's `SYSTEM.md` and `APPEND_SYSTEM.md` are dropped through `systemPromptOverride`/`appendSystemPromptOverride` | loaded |
-| Executable tool allowlist | `ask_user`, `display`, `notify` | the SDK defaults plus Tron's direct bash tool |
+| Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Cache warming | zero requests | unchanged |
 
 `tron-home` is a first-party module loaded only for Home. It contributes Home's
-operating context and is the single answer to the SDK's per-session
-`cache_warming_decision`. It is not in `modules.list`, which reports what every
-session registers.
+operating context, registers the three memory tools (see
+[The memory tools](#the-memory-tools)) and is the single answer to the SDK's
+per-session `cache_warming_decision`. It is not in `modules.list`, which reports
+what every session registers.
 
 The cache-warming exclusion is the mechanism, not a setting: the SDK's warmer
 calls the model runtime directly (outside every request wrapper), its decision
@@ -172,13 +173,16 @@ canonical compaction budget, and is not cache-warming excluded.
 
 A profile change does not rewrite the chat's tool loadout, because Pi replays
 the *declared* loadout from the canonical transcript at every runtime creation.
-So both a fork of Home and a disabled Home start with the Home tool set
-**active** while the ordinary tools are merely registered, exactly as every
-other session keeps the loadout its chat declared
-(`runtime-tool-loadout.integration.test.ts`). The user restores the ordinary
-tools with `session.setTools`, which is the same control every session has; the
-integration suite asserts the active set across a disable and that `setTools`
-restores it.
+So both a fork of Home and a disabled Home start with the Home tools this
+profile can activate — `ask_user`, `display`, `notify` — while the ordinary
+tools are merely registered, exactly as every other session keeps the loadout
+its chat declared (`runtime-tool-loadout.integration.test.ts`). The three memory
+tools belong to the Home-only module, so an ordinary profile neither registers
+nor activates them: a fork of Home can never read Home's memory, and its memory
+tool accessor answers `undefined` for that session id. The user restores the
+ordinary tools with `session.setTools`, which is the same control every session
+has; the integration suite asserts the active set across a disable and that
+`setTools` restores it.
 
 ## Diagnostics
 
@@ -283,6 +287,63 @@ don't cut"): the wait covers the lines the view will carry, so an unbuilt line i
 never sent, and it is abortable, so the user's Stop cancels it and leaves their
 message in the log unanswered. Later steps of the same activation reuse the frozen
 text byte-for-byte.
+
+## The memory tools
+
+Home reads the memory directly, and three tools are how it opens a line back up
+(the recipe's `zoom` and `date`, plus Tron's own `memory_search`). `tron-home`
+registers them and `HOME_TOOL_NAMES` is the executable allowlist, so a Home
+runtime can neither call a tool outside it nor have one registered that it cannot
+call.
+
+| tool | what it answers |
+| --- | --- |
+| `zoom(id, n)` | Line `id+n` of the view, opened into the two lines of `n/2` under it; `n = 1` gives message `id` whole, as `id+0|kind: text` |
+| `date(id)` | The local date and time of message `id`, from its canonical entry: `2026-01-02 15:04:05 -07:00` |
+| `memory_search(query, from?, to?)` | A case-insensitive substring search over the projected messages in an index range: at most 20 lines `id+0|kind: snippet`, each snippet bounded to 300 characters, plus the range's match count |
+
+Rules the tool results hold to:
+
+- **The answer is the projection, never the source.** `zoom(id, 1)` returns the
+  catalog's current projected text: reasoning excluded, credentials redacted,
+  file paths kept, oversized text capped. A child line that is not built right
+  now — never built, or invalidated by a context edit and not yet rebuilt —
+  answers the recipe's `(not summarized yet: zoom it)` placeholder, never the
+  text it held before, and an `[omitted]` message answers `[omitted]`.
+- **The projection is never stale.** Every tool ingests the canonical commits
+  appended since the last read before it answers, and never waits for the pump
+  the ingest starts.
+- **An address that is not a line is refused**, not guessed at: a power-of-two
+  `n`, `id % n == 0` and `id + n <= T` are required, and anything else answers
+  `No line id+n.` with the numbers. A `date` for a message that does not exist
+  answers `No line id+1.` the same way, and a query that is empty or over 200
+  characters is refused with the bound it broke.
+- **Absence is never proof.** The search header reports how many messages in the
+  range are `[omitted]` and how many hold capped text, so a message that could
+  not be searched is named rather than looking like a message that never matched.
+- **A result is bounded.** Every tool result is capped at the recipe's `CAP`
+  (30,000 characters, head and tail kept with a marker), so a 128 KiB message
+  cannot enter the transcript whole.
+- **The tools belong to Home.** They resolve their memory through the Home owner
+  at every call, so a session that is not the enabled Home — or a memory that is
+  not configured, not open, or stopped — answers a typed `unavailable` result
+  with its reason: `not-home-session`, `memory-not-configured`,
+  `memory-unavailable`, `memory-blocked` or `timestamp-unavailable`. A tool call
+  is only reachable from an activation, which has already opened and waited for
+  this memory; a call never opens, configures or resumes one.
+
+The view preamble carries the navigation paragraph the recipe's `VIEW_DOC`
+requires (the line format, the kinds, zooming before acting on a summary, and
+`date`). That preamble is constant text, so the system prompt, the tool list and
+the preamble that opens every view are byte-identical across activations: they are
+the head of every cached prefix, and only the summaries below the preamble move.
+The summaries themselves stay request-local evidence, never instructions.
+
+`memory_search` is a Tron addition to the recipe's tools, not a recipe section.
+The recipe's tree navigation is otherwise unchanged, and both surfaces are
+exercised end to end by
+`packages/gateway/src/sessions/home-memory-tools.e2e.test.ts`
+(`test-results/home-memory-tools/report.json`).
 
 ## Not built yet
 

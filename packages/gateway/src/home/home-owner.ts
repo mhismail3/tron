@@ -11,8 +11,8 @@ import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
-  HomeMemory, MAXIMUM_MEMORY_TOKEN_BUDGET,
-  type HomeMemoryDiagnostic, type HomeMemoryModelResolution,
+  HomeMemory, homeMemoryToolUnavailable, MAXIMUM_MEMORY_TOKEN_BUDGET,
+  type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 
@@ -218,6 +218,25 @@ export class HomeOwner {
   }
 
   /**
+   * The memory tools for one session id, or undefined for every session that is
+   * not the enabled Home. The slot builds a Home runtime's extension factories
+   * once, but the answer is resolved at each call: the record, the open store, a
+   * block and a reconfiguration all change while a runtime is alive, and no tool
+   * may read a superseded memory. A tool call is only reachable from an
+   * activation, which has already opened the memory it runs on, so this accessor
+   * never opens or configures one.
+   */
+  memoryToolsFor(sessionId: string): HomeMemoryToolAccess | undefined {
+    const record = this.record;
+    if (!record || !record.enabled || record.sessionId !== sessionId) return undefined;
+    return {
+      zoom: (id, n) => this.toolMemory(sessionId, memory => memory.zoom(id, n)),
+      date: id => this.toolMemory(sessionId, memory => memory.date(id)),
+      search: (query, from, to) => this.toolMemory(sessionId, memory => memory.search(query, from, to)),
+    };
+  }
+
+  /**
    * `home.configureMemory`: record the model and the token budget Home's memory
    * spends on its compactor calls. The memory is opened (or re-opened, when the
    * model or the budget changed) before the record is written, so a refused
@@ -326,6 +345,19 @@ export class HomeOwner {
       } : {}),
       ...(evidence.refusal ? { lastRefusalReason: evidence.refusal.reason, lastRefusalDetail: evidence.refusal.detail } : {}),
     };
+  }
+
+  /** The memory a tool read runs against, or the typed answer for why there is
+   * none. A missing memory is `memory-not-configured` when the record holds no
+   * configuration and `memory-unavailable` when it holds one the store has not
+   * opened. */
+  private toolMemory(sessionId: string, read: (memory: HomeMemory) => Promise<HomeMemoryToolResult>): Promise<HomeMemoryToolResult> {
+    const record = this.record;
+    const memory = record && record.enabled && record.sessionId === sessionId && this.memory?.sessionId === sessionId
+      ? this.memory.owner
+      : undefined;
+    if (memory) return read(memory);
+    return Promise.resolve(homeMemoryToolUnavailable(record?.memory ? "memory-unavailable" : "memory-not-configured"));
   }
 
   /** Release the memory store and the request seams. */

@@ -125,9 +125,12 @@ its own right; it never invents one for a hidden custom message or a state entry
   omission. The compactor then sees the capped text, exactly as it sees a capped
   tool result.
 - Each message records `sourceDigest` (sha256 of the canonical entry's JSON
-  line), `projectedDigest` (sha256 of the projected text), and its omissions
+  line), `projectedDigest` (sha256 of the projected text), its omissions
   (`thinking`, `attachment`, `capped`, `credentials`, `context-edit`,
-  `off-branch`, `empty`, `unsupported-part`).
+  `off-branch`, `empty`, `unsupported-part`), and `timestamp`: the canonical
+  entry's instant. `timestamp` is optional, and absent on a record written before
+  it existed: `entryTimestamp` reads the source for that one entry instead (see
+  **Navigation**).
 
 ## The algorithm
 
@@ -156,6 +159,41 @@ The tree, the view, and the pump are the recipe's:
   Up to `JOBS` build at once, and the pump refills **after each completion**, as
   the recipe does. Every published node fits the view first, so the view is the
   same sequence the durable log replays. Rule 3 is what keeps leaves in order.
+
+## Navigation
+
+The memory answers three navigation reads, which Home's `zoom`, `date` and
+`memory_search` tools expose ([home.md](home.md)). They are the memory's own
+contract: the recipe's tree addresses, and the projection, not the canonical
+text.
+
+- **`zoomLines(id, n)`** (the recipe's `zoom`, gist §7.1) returns line `id+n`
+  opened into the two lines of `n/2` under it, rendered exactly as the view
+  renders a line; at `n = 1` it returns the message as `id+0|kind: text` from the
+  catalog's current projection. `undefined` is the answer for an address that is
+  not a line of this memory: `n` not a power of two, `id % n != 0`, or
+  `id + n > T`. A child whose node is not built right now renders the
+  placeholder, and a revoked node's text is gone from the map, so a stale child
+  cannot be served.
+- **`entryTimestamp(id)`** returns the catalog record's own instant, or — for a
+  record written before the optional field — the instant the canonical source
+  proves for that entry id. That read is the bounded canonical reader the owner
+  already uses, it is not `SessionManager`, and it happens at most once per
+  memory: an entry's instant never changes. `unavailable` is the source's own
+  answer that it can no longer prove it (the entry left the branch it read, or
+  the read failed) — the memory never invents a time.
+- **`searchMessages(query, from, to)`** is Tron's addition to the recipe's tools:
+  one case-insensitive substring pass over the projected catalog, bounded by
+  `EPISODIC_SEARCH_HITS` (20) lines whose snippets are bounded by
+  `EPISODIC_SEARCH_SNIPPET_CHARS` (300), with the whole range's match count and
+  its `[omitted]` and capped counts, so a message that holds no searchable text
+  is named instead of silently absent. An empty query, or one over
+  `EPISODIC_SEARCH_QUERY_CHARS` (200), is refused; omitted bounds default to the
+  whole memory and are clamped to it.
+
+These reads never ingest, open, or start anything: their caller does, and the
+caller (`HomeMemory`) ingests the latest commits before every call so a
+projection is never stale.
 
 ## Concurrency
 
@@ -306,6 +344,11 @@ count, the blocked state and its reason, and reserved/used tokens.
 - `packages/gateway/test-results/episodic-memory/report.json` — the end-to-end
   run's counts, invalidation sizes, concurrency, budget, oversized-record and
   blocked outcomes (`npx vitest run src/episodic`).
+- `packages/gateway/test-results/home-memory-tools/report.json` — the memory
+  tools' end-to-end run: the zoom children and refusals, the projected text, the
+  placeholder and the rebuilt line, `[omitted]`, the search counts and bounds,
+  the stopped-memory answer and the byte-identical request head
+  (`npx vitest run src/sessions/home-memory-tools.e2e.test.ts`).
 - `packages/gateway/test-results/episodic-memory/scale.json` — the refold
   timings and worst synchronous slice, the context-encoding sizes, and the
   1,000-message invalidation (`npm run test:scale`).
@@ -324,8 +367,14 @@ count, the blocked state and its reason, and reserved/used tokens.
 - `renderView(cut)` is the agent-facing view (`id+n|text`, oldest first); Home
   wraps it in its attribution block. A line that `whenReady` did not cover still
   renders the placeholder, which is display state: no served request can see it.
+- Home's three memory tools call `zoomLines`, `entryTimestamp` and
+  `searchMessages` through `HomeMemory`, which ingests the latest commits first,
+  never awaits the pump, and answers a typed result for a memory that is not
+  open, not configured or stopped.
 - The model and the budget are the Home record's (`home.configureMemory`); what
   this module persists about spend, blocking and its cursor is described above.
 
-Still the request layer's business: the `zoom`/`date` tools, and any per-project
-compactor instructions.
+Still outside this module: any per-project compactor instructions, and the tool
+surface itself — the memory answers `zoomLines`, `entryTimestamp` and
+`searchMessages`, and Home owns the names, schemas, texts and bounds its model
+sees ([home.md](home.md#the-memory-tools)).
