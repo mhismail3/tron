@@ -150,7 +150,10 @@
 
 The live Gateway shares this Mac with every agent session. When memory runs
 short, host swapping slows it enough that phone reconnects fail. Clean up every
-process you start.
+process you start. Whoever creates a temporary file, directory, process, fixture,
+simulator lane, worktree or test artifact removes it through its creating owner
+when done, on success and failure; never rely on a later sweep. Run third-party
+test suites with an isolated `HOME` and `TMPDIR`.
 
 - The iOS test tooling owns its simulators, not agent discipline. Each linked
   worktree tests in its own simulator lane by default (the primary checkout in

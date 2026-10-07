@@ -1491,6 +1491,18 @@ and actual in-flight work uses existing control/selection loading. Preserve touc
 and VoiceOver access, Dynamic Type, identity, focus, and native layout. Approved
 pattern changes update the shared component and this owning contract together.
 
+Document-style sheets use the shared `TronDocumentSheet` for the standard
+`TronSheetTitle`/Done chrome, top-blur configuration, hidden drag indicator, and
+`tronPresentation` configuration. The blur modifier sets an environment value;
+the concrete content surface owns any custom blur overlay. Default detents remain
+unchanged; a caller may explicitly provide an initial detent, in which case the
+shared owner keeps the other configured detents available for native dragging.
+Video display sheets open at medium with large available and use native safe-area
+placement without a content-level custom blur surface. Playback at medium and
+expansion to large are covered by hosted UI tests. Paused-control icon rendering
+at medium is unverified and tracked in #563; this contract does not claim the
+controls are visibly usable at medium.
+
 `TronPresentation.swift` is the app-wide presentation boundary. The app root
 installs the selected type family and emerald interaction tint; every app-owned
 Form/List uses the Tron collection surface; section headers, navigation titles,
@@ -1935,7 +1947,11 @@ JSON only as the arbitrary-data fallback. Gateway connection state is driven by
 the current authenticated socket, ignores stale cancellation from replaced
 receivers, and its ten-second foreground WebSocket pings keep Tailscale/iOS idle
 paths alive; the Gateway pings only a client that has gone quiet. Canonical settings determine the default model; catalog order is never a
-default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
+default-selection policy. When no configured default exists, fallback uses the
+first currently available catalog model and never gives `openai-codex` a special
+preference. Gateway availability is the authoritative new-choice boundary; the
+picker keeps its established presentation and only renders available entries.
+Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session begins with an emerald usage card and a purple model card matching Settings' Agent group.
 The model card replaces the Configuration section. Its selected model name uses the same
