@@ -14,6 +14,7 @@ import acceptance  # noqa: E402
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import cleanup  # noqa: E402
+import comments  # noqa: E402
 import dashboard  # noqa: E402
 import issues  # noqa: E402
 import land  # noqa: E402
@@ -49,6 +50,9 @@ def main(argv: list) -> int:
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
+    comment = commands.add_parser("comment", help="post a privacy-checked public issue comment through the audited GitHub boundary")
+    comment.add_argument("issue", type=int, help="positive issue number")
+    comment.add_argument("--body-file", required=True, type=Path, help="Markdown file to post; payloads are not logged")
     corpus = commands.add_parser("issues", help="print every open issue as a bounded JSON corpus for related-issue checks")
     corpus.add_argument("--closed", action="store_true", help="also include recently updated closed issues")
     corpus.add_argument("--closed-limit", type=int, default=200, metavar="N",
@@ -92,6 +96,8 @@ def main(argv: list) -> int:
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
         if args.command == "issues":
             return issues.run(Gh(root), config, args.closed_limit if args.closed else 0)
+        if args.command == "comment":
+            return comments.post(Gh(root), root, config, args.issue, args.body_file)
         if args.command == "land":
             return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
                              args.needs_user_validation, args.irreducible, args.acceptance,

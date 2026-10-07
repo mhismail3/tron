@@ -278,6 +278,11 @@ tasks, claims, progress, decisions and evidence. There are no plan documents.
 Every agent assumes many other agents are working in this repository at the
 same time. The commands are owned by [tools/work/README.md](tools/work/README.md),
 and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
+Agents make GitHub work writes only through `scripts/tron work`; do not invoke
+`gh` mutation commands directly. The typed commands privacy-check public text
+and record every GitHub mutation in the private, bounded local audit described
+in the work-tooling guide. `gh` reads remain read-only and credentials stay in
+gh's credential store.
 
 - **See the state:** `scripts/tron work dashboard`. The tron-work skill renders it
   for the user.

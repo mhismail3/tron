@@ -27,6 +27,42 @@ Tron runs it through `scripts/tron work`.
 Agent shells can inherit a PATH without Homebrew, which is why step 3 exists.
 Authentication stays in gh's own credential store.
 
+## GitHub writes and the local audit
+
+Every GitHub mutation made by this tool uses `Gh`, which records the attempt
+before invoking `gh` and appends its terminal outcome afterwards. This covers
+all typed work commands (claim/status/comment, receipt publication, bootstrap,
+landing, handoff and cleanup-related reads/writes); callers do not construct an
+alternate `gh` writer. It is deliberately not a generic `work gh` passthrough.
+
+The append-only JSONL audit lives in the repository's private Git common
+metadata at `work/github-writes.jsonl`, shared safely by linked worktrees. A
+separate lock file serializes each append across threads and processes. Each
+mutation has a stable random ID, timestamp, operation class and an `attempted`
+record followed by `succeeded`, `failed` or `uncertain`; an interrupted command
+therefore remains visibly attempted, never silently successful. Explicit HTTP
+4xx rejections are failed; transport/opaque errors are uncertain because the
+server may have committed before the client lost its response. No request body,
+credential, CLI arguments, response body, or issue text enters the audit. Files
+are owner-only, symlinks are refused, and history is capped at 16 MiB. Capacity
+is reserved for terminal outcomes before a mutation starts; a full, malformed,
+or unwritable audit refuses the GitHub mutation instead of dropping history.
+
+`scripts/tron work comment <issue> --body-file <markdown>` is the typed command
+for public progress/evidence comments. It bounds and privacy-checks the body
+with the configured scrub command before GitHub is called, and suppresses guard
+output so private offending text is not copied to the terminal. Read operations
+such as `work issues` remain reads and do not appear in the audit.
+
+### Failure modes
+
+`test_gh.py` runs the real CLI/GitHub boundary against an executable stand-in.
+It checks that reads are not audited, every CLI/REST/GraphQL mutation has
+attempt and outcome records, concurrent writers produce complete records,
+privacy refusal prevents a public write, rejected and ambiguous/partial errors
+remain distinct, payloads are absent, and a full audit fails closed. This
+stand-in does not prove remote GitHub availability or server-side behavior.
+
 ## `bootstrap`
 
 Declares the tracking vocabulary, and converges GitHub to it when you pass
@@ -694,6 +730,20 @@ lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
     bytes is refused with nothing on stdout, never cut off mid-JSON.
 52. **Success output is not pure JSON.** On success stderr is empty and stdout
     holds only the bounded corpus.
+
+## `comment`
+
+`scripts/tron work comment <issue> --body-file <markdown>` posts one public
+issue comment. It accepts only a positive issue number and a nonempty UTF-8 body
+up to 64 KiB. The configured privacy guard runs before any GitHub call; a
+refusal reports only that the guard refused, not the guard's potentially
+sensitive matching lines. The command requires `WORK_SESSION_ID` or
+`PI_SESSION_ID` and appends a work-session marker, so milestone comments retain
+agent attribution. The comment is sent on stdin rather than as a process
+argument. The common `Gh` boundary audits the operation without retaining its
+body. This is the supported agent path for reproduced, candidate, blocked and
+other milestone evidence; GitHub reads remain available through read-only
+commands.
 
 ## `land`
 

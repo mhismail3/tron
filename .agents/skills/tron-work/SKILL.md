@@ -105,7 +105,11 @@ took. If they ask for options, list the top three and wait.
      `needs-decision`, set Status Needs you and ask for the missing detail
      instead of guessing a fix.
 5. **Post evidence as you go.** Comment on the issue at each milestone, not
-   only at the end, so the issue alone shows where the work stands:
+   only at the end, so the issue alone shows where the work stands. Write the
+   comment to a local Markdown file and post it with
+   `scripts/tron work comment <issue> --body-file <file>`; never use a direct
+   `gh` mutation. The command privacy-checks the body and the shared GitHub
+   boundary records the mutation in the private local audit:
    - **Reproduced:** what failed, the command or CI run, the retained log, and
      which cause is proven and which is still a lead.
    - **Candidate:** the root-cause evidence, the change, the negative control
@@ -113,8 +117,9 @@ took. If they ask for options, list the top three and wait.
    - **Blocked or replanned:** what, why, and the decision needed.
 
    Label each claim verified or inferred. Cite commits, run IDs and retained
-   log names, never local paths, device exports or personal data, and run
-   `scripts/personal-info-guard.sh --stdin` on the text before posting.
+   log names, never local paths, device exports or personal data. The typed
+   comment command runs `scripts/personal-info-guard.sh --stdin` (or the
+   configured scrubber) before posting.
    Screenshots and full logs go to the private evidence repository through
    `verify --evidence-manifest`. When delegating, put this rule in every child
    task and read the issue yourself rather than trusting the child's report.

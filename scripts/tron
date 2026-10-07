@@ -48,6 +48,8 @@ Commands:
                                     Print every open issue (optionally recent closed
                                     ones) as a bounded JSON corpus for related-issue
                                     checks
+  work comment <issue> --body-file <md>
+                                    Privacy-check and audit a public issue comment
   work land [--title <t>] [--summary-file <md>] [--needs-user-validation <text>]
                                     From a claim worktree: merge the base in, verify,
                                     push, open or update the PR, wait for required

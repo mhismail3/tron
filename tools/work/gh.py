@@ -1,16 +1,23 @@
-"""The only boundary between the work tooling and GitHub: the gh CLI."""
+"""The audited boundary between work tooling and the GitHub CLI."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import re
 import shutil
+import stat
 import subprocess
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
 # Agent shells can inherit a PATH without Homebrew; these are gh's standard
 # install locations, checked only after WORK_GH and PATH.
 _FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+AUDIT_MAX_BYTES = 16 * 1024 * 1024
+_AUDIT_RESERVE_BYTES = 128
 
 
 class GhError(RuntimeError):
@@ -32,13 +39,167 @@ def resolve_gh() -> str:
     raise GhError("GitHub CLI not found; install gh or set WORK_GH")
 
 
+def _audit_directory(cwd: Path) -> Path:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=cwd, capture_output=True, text=True,
+    )
+    if completed.returncode:
+        raise GhError("cannot locate the repository's private Git metadata for the write audit")
+    return Path(completed.stdout.strip()) / "work"
+
+
+def _write_kind(args: tuple[str, ...]) -> Optional[str]:
+    if len(args) >= 2 and args[0] in {"issue", "pr", "project", "label", "release", "repo"}:
+        verbs = {
+            "issue": {"comment", "edit", "close", "reopen", "create", "delete"},
+            "pr": {"comment", "edit", "close", "reopen", "create", "merge", "ready"},
+            "project": {"item-add", "item-edit", "item-delete", "field-create", "field-delete"},
+            "label": {"create", "edit", "delete"},
+            "release": {"create", "edit", "delete", "upload"},
+            "repo": {"edit", "sync"},
+        }
+        if args[1] in verbs[args[0]]:
+            return f"{args[0]}.{args[1]}"
+    if args and args[0] == "api":
+        method = "GET"
+        for index, argument in enumerate(args[:-1]):
+            if argument in ("-X", "--method"):
+                method = args[index + 1].upper()
+                break
+        if method != "GET":
+            return f"api.{method}"
+    return None
+
+
+def _failed_status(completed: subprocess.CompletedProcess) -> str:
+    # A CLI response that explicitly rejects a request is a known failure.
+    # Transport errors and otherwise opaque failures may follow a server commit.
+    text = (completed.stderr or "") + "\n" + (completed.stdout or "")
+    if re.search(r"\bHTTP\s+4\d\d\b|\bGraphQL:.*(?:validation|syntax|not authorized|forbidden)", text, re.I):
+        return "failed"
+    return "uncertain"
+
+
 class Gh:
     def __init__(self, cwd: Path) -> None:
         self.binary = resolve_gh()
         self.cwd = cwd
+        self._audit_dir: Optional[Path] = None
 
-    def _exec(self, *args: str, stdin: Optional[str] = None) -> subprocess.CompletedProcess:
-        return subprocess.run([self.binary, *args], cwd=self.cwd, input=stdin, capture_output=True, text=True)
+    @staticmethod
+    def audit_path(cwd: Path) -> Path:
+        return _audit_directory(cwd) / "github-writes.jsonl"
+
+    def _audit_location(self) -> tuple[Path, Path]:
+        if self._audit_dir is None:
+            self._audit_dir = _audit_directory(self.cwd)
+        self._audit_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory = os.lstat(self._audit_dir)
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid():
+            raise GhError("local GitHub write audit directory is not privately owned")
+        os.chmod(self._audit_dir, 0o700)
+        return self._audit_dir / "github-writes.jsonl", self._audit_dir / "github-writes.lock"
+
+    @staticmethod
+    def _open_private(path: Path, flags: int, mode: int = 0o600) -> int:
+        fd = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), mode)
+        details = os.fstat(fd)
+        if not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid():
+            os.close(fd)
+            raise GhError("local GitHub write audit file is not privately owned")
+        os.fchmod(fd, mode)
+        return fd
+
+    def _with_audit_lock(self, action):
+        path, lock_path = self._audit_location()
+        fd = self._open_private(lock_path, os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return action(path)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def _begin_write(self, operation: str) -> str:
+        record_id = uuid.uuid4().hex
+        record = {
+            "id": record_id,
+            "at": time.time_ns(),
+            "event": "attempt",
+            "operation": operation,
+            "status": "attempted",
+        }
+        line = (json.dumps(record, separators=(",", ":")) + "\n").encode()
+
+        def append(path: Path) -> None:
+            flags = os.O_CREAT | os.O_APPEND | os.O_WRONLY
+            fd = self._open_private(path, flags)
+            try:
+                current = os.fstat(fd).st_size
+                reserved = 0
+                if current:
+                    scan_fd = self._open_private(path, os.O_RDONLY)
+                    with os.fdopen(scan_fd, "rb") as stream:
+                        pending = set()
+                        for old_line in stream:
+                            try:
+                                old = json.loads(old_line)
+                            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                                raise GhError("local GitHub write audit contains an unreadable record") from error
+                            if old.get("event") == "attempt":
+                                pending.add(old["id"])
+                            elif old.get("event") == "result":
+                                pending.discard(old["id"])
+                        reserved = len(pending) * _AUDIT_RESERVE_BYTES
+                if current + reserved + len(line) + _AUDIT_RESERVE_BYTES > AUDIT_MAX_BYTES:
+                    raise GhError("local GitHub write audit is full; no GitHub write was attempted")
+                view = memoryview(line)
+                while view:
+                    count = os.write(fd, view)
+                    view = view[count:]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        self._with_audit_lock(append)
+        return record_id
+
+    def _finish_write(self, record_id: str, status: str) -> None:
+        record = {"id": record_id, "at": time.time_ns(), "event": "result", "status": status}
+        line = (json.dumps(record, separators=(",", ":")) + "\n").encode()
+
+        def append_result(path: Path) -> None:
+            fd = self._open_private(path, os.O_APPEND | os.O_WRONLY)
+            try:
+                view = memoryview(line)
+                while view:
+                    count = os.write(fd, view)
+                    view = view[count:]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        self._with_audit_lock(append_result)
+
+    def _exec(self, *args: str, stdin: Optional[str] = None,
+              operation_override: Optional[str] = None) -> subprocess.CompletedProcess:
+        operation = operation_override or _write_kind(args)
+        record_id = self._begin_write(operation) if operation else None
+        try:
+            completed = subprocess.run(
+                [self.binary, *args], cwd=self.cwd, input=stdin,
+                capture_output=True, text=True,
+            )
+        except BaseException:
+            if record_id:
+                self._finish_write(record_id, "uncertain")
+            raise
+        if record_id:
+            status = "succeeded" if completed.returncode == 0 else _failed_status(completed)
+            try:
+                self._finish_write(record_id, status)
+            except BaseException as error:
+                raise GhError("GitHub request outcome is uncertain because its local audit could not be completed") from error
+        return completed
 
     def run(self, *args: str, stdin: Optional[str] = None) -> str:
         completed = self._exec(*args, stdin=stdin)
@@ -48,12 +209,11 @@ class Gh:
         return completed.stdout
 
     def graphql(self, query: str, missing_ok: bool = False, **variables: Any) -> dict:
-        """Run a query; with missing_ok, NOT_FOUND errors below a top-level field leave that field null.
-
-        A NOT_FOUND top-level field (the repository itself) still fails.
-        """
+        """Run a query; with missing_ok, NOT_FOUND errors below a top-level field leave that field null."""
         body = json.dumps({"query": query, "variables": variables})
-        completed = self._exec("api", "graphql", "--input", "-", stdin=body)
+        operation = "graphql.mutation" if re.search(r"\bmutation\b", query) else None
+        completed = self._exec("api", "graphql", "--input", "-", stdin=body,
+                               operation_override=operation)
         # gh exits non-zero whenever the response carries errors, but still
         # prints the response; anything unparseable is a transport failure.
         try:
