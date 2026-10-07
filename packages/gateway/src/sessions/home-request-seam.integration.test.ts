@@ -333,6 +333,37 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(item.requests).toHaveLength(originalRequestCount);
   }, 30_000);
 
+  it("refuses a sealed first activation before the SDK first flush can materialize a file", async () => {
+    const item = await open("sealed-first-flush", { home: true, memory: true });
+    item.faux.setResponses([item.response("unexpected sealed mutation response")]);
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      runtime: { session: AgentSession };
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalSessionFile = item.slot.sessionFile;
+    const originalRequestCount = item.requests.length;
+    const fileBefore = originalSessionFile
+      ? await readFile(originalSessionFile, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error))
+      : undefined;
+
+    await expect(item.slot.prompt("must not materialize sealed Home")).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "sealed-chapter", sessionId: item.slot.id },
+    });
+    expect(manager.getEntries()).toEqual(originalEntries);
+    expect(manager.getLeafId()).toBe(originalLeaf);
+    expect(item.slot.sessionFile).toBe(originalSessionFile);
+    expect(item.requests).toHaveLength(originalRequestCount);
+    if (originalSessionFile) {
+      const fileAfter = await readFile(originalSessionFile, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+      expect(fileAfter).toBe(fileBefore);
+    }
+  }, 30_000);
+
   it("keeps a pre-append sealed custom-entry refusal out of the uncertain-write fence", async () => {
     const item = await open("sealed-custom-entry", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);
