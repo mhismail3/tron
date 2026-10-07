@@ -18,6 +18,7 @@ function fixture() {
     intentRevision: 1,
     intentDigest: "intent-digest-1",
     target: "/trusted/project",
+    authorizationScope: "project-work",
     workerProfile: "home-task-v1",
     policyRevision: 1,
     restoreEpoch: "epoch-1",
@@ -61,7 +62,7 @@ describe("HomeTaskAuthorization", () => {
 
     const mismatched = fixture();
     await mismatched.owner.recordDecisionAndGrant(mismatched.request, { decisionId: "mismatch", expiresAt: 2_000 });
-    await expect(mismatched.owner.authorize({ ...mismatched.request, intentRevision: 2 })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(mismatched.owner.authorize({ ...mismatched.request, authorizationScope: "read-only" })).rejects.toMatchObject({ code: "grant-required" });
 
     const revoked = fixture();
     const grant = await revoked.owner.recordDecisionAndGrant(revoked.request, { decisionId: "revoked", expiresAt: 2_000 });

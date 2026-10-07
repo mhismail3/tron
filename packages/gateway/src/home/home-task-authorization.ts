@@ -5,6 +5,7 @@ export interface HomeTaskAuthorizationRequest {
   intentRevision: number;
   intentDigest: string;
   target: string;
+  authorizationScope: string;
   workerProfile: string;
   policyRevision: number;
   /** Supplied by the restore authority; this owner never creates or advances it. */
@@ -31,6 +32,7 @@ export interface HomeTaskOneUseGrant {
   intentRevision: number;
   intentDigest: string;
   target: string;
+  authorizationScope: string;
   workerProfile: string;
   policyRevision: number;
   restoreEpoch: string;
@@ -136,7 +138,8 @@ export class HomeTaskAuthorization {
       const grant: HomeTaskOneUseGrant = {
         id: randomUUID(), decisionId: decision.id,
         intentRevision: request.intentRevision, intentDigest: request.intentDigest,
-        target, workerProfile: request.workerProfile, policyRevision: request.policyRevision,
+        target, authorizationScope: request.authorizationScope,
+        workerProfile: request.workerProfile, policyRevision: request.policyRevision,
         restoreEpoch: request.restoreEpoch, expiresAt: input.expiresAt, state: "available",
       };
       await this.options.store.save({
@@ -171,6 +174,7 @@ export class HomeTaskAuthorization {
         && candidate.intentRevision === request.intentRevision
         && candidate.intentDigest === request.intentDigest
         && candidate.target === target
+        && candidate.authorizationScope === request.authorizationScope
         && candidate.workerProfile === request.workerProfile
         && candidate.policyRevision === request.policyRevision
         && candidate.restoreEpoch === request.restoreEpoch);

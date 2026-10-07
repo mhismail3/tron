@@ -43,8 +43,9 @@ ordinary project directories remain unaffected.
 the initial standing scope covers any currently trusted project, and trust is
 resolved again at admission. A request outside an active scope requires a
 one-use grant recorded separately from the human decision. The grant binds the
-intent revision and digest, canonical trusted target, worker profile, policy
-revision, expiry, and restore epoch; admission atomically consumes it. Revoked,
+intent revision and digest, canonical trusted target, requested authorization
+scope, worker profile, policy revision, expiry, and restore epoch; admission
+atomically consumes it. Revoked,
 expired, spent, mismatched, or stale-epoch grants do not authorize work. The
 restore authority supplies the epoch; this owner does not infer restore from
 ordinary startup. This owner is not wired to task dispatch in this slice, and
