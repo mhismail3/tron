@@ -103,16 +103,6 @@ function parseEntry(line: string): EpisodicCanonicalEntry {
   return { id, parentId, timestamp, type: raw.type, raw, line };
 }
 
-/** The last complete line that is not blank, as read from the file. */
-function lastLine(lines: readonly string[]): { line: string; entry: EpisodicCanonicalEntry } | undefined {
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]!;
-    if (line.trim() === "") continue;
-    return { line, entry: parseEntry(line) };
-  }
-  return undefined;
-}
-
 /** Extend the remembered branch with entries read after the cursor. `undefined`
  * means the new entries do not chain onto it and the caller must read the whole
  * file. */
@@ -191,7 +181,7 @@ export async function readCanonicalSession(options: {
         const extended = extendBranch(previous.branch, entries);
         if (extended) {
           const end = await handle.stat();
-          const tail = lastLine(batch.lines);
+          const tail = entries.at(-1);
           const branchLeaf = extended.at(-1) ?? null;
           return {
             sessionId: options.sessionId,
@@ -203,7 +193,7 @@ export async function readCanonicalSession(options: {
             cursor: {
               dev: end.dev, ino: end.ino, size: end.size,
               completeBytes: batch.completeBytes,
-              leafEntryId: tail?.entry.id ?? previous.cursor.leafEntryId,
+              leafEntryId: tail?.id ?? previous.cursor.leafEntryId,
               leafLineDigest: tail ? digestOf(tail.line) : previous.cursor.leafLineDigest,
             },
           };
@@ -222,7 +212,7 @@ export async function readCanonicalSession(options: {
     }
     branch.reverse();
     const end = await handle.stat();
-    const tail = lastLine(batch.lines);
+    const tail = entries.at(-1);
     return {
       sessionId: options.sessionId,
       branch,
@@ -233,7 +223,7 @@ export async function readCanonicalSession(options: {
       cursor: {
         dev: end.dev, ino: end.ino, size: end.size,
         completeBytes: batch.completeBytes,
-        leafEntryId: tail?.entry.id ?? null,
+        leafEntryId: tail?.id ?? null,
         leafLineDigest: tail ? digestOf(tail.line) : null,
       },
     };
