@@ -3692,6 +3692,7 @@ final class AppModel {
     }
 
     private func invalidateSessionConnectionOwnership() {
+        homeStatus.connectionRetired()
         cancelAllExtensionEditorSynchronization()
         // Transcript media is profile/lifecycle-owned HTTP state. A disposable
         // WebSocket epoch handoff must not cancel an open preview or evict its
@@ -5448,7 +5449,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleInvalidateSessionConnectionOwnership() {
         diagnosticsAreReady = false
-        homeStatus.connectionRetired()
         invalidateSessionConnectionOwnership()
     }
 
@@ -5611,6 +5611,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRetireProjection(final: Bool) async {
         diagnosticsAreReady = false
+        // Revoke connection-bound owners before this transition can suspend or fail.
+        invalidateSessionConnectionOwnership()
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = nil
         mountedOptionalRefreshTask?.cancel()
@@ -5634,7 +5636,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
-        invalidateSessionConnectionOwnership()
         chatMedia.removeAll()
         clearGatewayProjection()
 
