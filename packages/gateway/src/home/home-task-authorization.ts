@@ -16,6 +16,7 @@ export interface HomeTaskAuthorizationScope {
   id: string;
   kind: "all-trusted-projects";
   active: boolean;
+  restoreEpoch: string;
   createdAt: number;
   revokedAt?: number;
 }
@@ -86,15 +87,20 @@ export class HomeTaskAuthorization {
     this.now = options.now ?? Date.now;
   }
 
-  async enableInitialScope(): Promise<HomeTaskAuthorizationScope> {
+  async enableInitialScope(restoreEpoch: string): Promise<HomeTaskAuthorizationScope> {
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
-      const existing = state.scopes.find((scope) => scope.kind === "all-trusted-projects" && scope.active);
+      const existing = state.scopes.find((scope) => scope.kind === "all-trusted-projects"
+        && scope.active && scope.restoreEpoch === restoreEpoch);
       if (existing) return existing;
+      const createdAt = this.now();
       const scope: HomeTaskAuthorizationScope = {
-        id: randomUUID(), kind: "all-trusted-projects", active: true, createdAt: this.now(),
+        id: randomUUID(), kind: "all-trusted-projects", active: true, restoreEpoch, createdAt,
       };
-      await this.options.store.save({ ...state, scopes: [...state.scopes, scope] });
+      const scopes = state.scopes.map((scope) => scope.kind === "all-trusted-projects" && scope.active
+        ? { ...scope, active: false, revokedAt: createdAt }
+        : scope);
+      await this.options.store.save({ ...state, scopes: [...scopes, scope] });
       this.diagnostic("scope-enabled", scope.id);
       return scope;
     });
@@ -121,11 +127,13 @@ export class HomeTaskAuthorization {
   ): Promise<HomeTaskOneUseGrant> {
     const target = await this.resolveTarget(request.target);
     if (!input.decisionId || !Number.isFinite(input.expiresAt) || input.expiresAt <= this.now()) {
+      this.diagnostic("refused", undefined, "invalid-decision");
       throw new HomeTaskAuthorizationError("invalid-decision");
     }
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
       if (state.decisions.some((decision) => decision.id === input.decisionId)) {
+        this.diagnostic("refused", undefined, "invalid-decision");
         throw new HomeTaskAuthorizationError("invalid-decision");
       }
       const decision: HomeTaskAuthorizationDecision = {
@@ -133,6 +141,8 @@ export class HomeTaskAuthorization {
       };
       if (!decision.approved) {
         await this.options.store.save({ ...state, decisions: [...state.decisions, decision] });
+        this.diagnostic("decision-recorded", decision.id);
+        this.diagnostic("refused", undefined, "grant-required");
         throw new HomeTaskAuthorizationError("grant-required");
       }
       const grant: HomeTaskOneUseGrant = {
@@ -166,9 +176,9 @@ export class HomeTaskAuthorization {
     const target = await this.resolveTarget(request.target);
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
-      if (state.scopes.some((scope) => scope.kind === "all-trusted-projects" && scope.active)) {
-        return { kind: "standing-scope", scopeId: state.scopes.find((scope) => scope.kind === "all-trusted-projects" && scope.active)!.id };
-      }
+      const scope = state.scopes.find((candidate) => candidate.kind === "all-trusted-projects"
+        && candidate.active && candidate.restoreEpoch === request.restoreEpoch);
+      if (scope) return { kind: "standing-scope", scopeId: scope.id }
       const grant = state.grants.find((candidate) => candidate.state === "available"
         && candidate.expiresAt > this.now()
         && candidate.intentRevision === request.intentRevision

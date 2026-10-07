@@ -41,7 +41,9 @@ ordinary project directories remain unaffected.
 
 `HomeTaskAuthorization` owns the authorization rules separately from execution:
 the initial standing scope covers any currently trusted project, and trust is
-resolved again at admission. A request outside an active scope requires a
+resolved again at admission. The standing scope is bound to the externally
+supplied restore epoch; after that epoch changes, the old scope cannot authorize
+work until the maintainer explicitly reconfirms it for the new epoch. A request outside an active scope requires a
 one-use grant recorded separately from the human decision. The grant binds the
 intent revision and digest, canonical trusted target, requested authorization
 scope, worker profile, policy revision, expiry, and restore epoch; admission

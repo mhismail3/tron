@@ -3,6 +3,7 @@ import { HomeTaskAuthorization, type HomeTaskAuthorizationState } from "./home-t
 
 function fixture() {
   let state: HomeTaskAuthorizationState = { scopes: [], grants: [], decisions: [] };
+  const diagnostics: unknown[] = [];
   const store = {
     load: async () => structuredClone(state),
     save: async (next: HomeTaskAuthorizationState) => { state = structuredClone(next); },
@@ -13,6 +14,7 @@ function fixture() {
     store,
     now: () => now,
     resolveTrustedTarget: async (target) => trusted.has(target) ? target : undefined,
+    diagnostic: (record) => diagnostics.push(record),
   });
   const request = {
     intentRevision: 1,
@@ -23,21 +25,32 @@ function fixture() {
     policyRevision: 1,
     restoreEpoch: "epoch-1",
   };
-  return { owner, store, request, advance: (delta: number) => { now += delta; }, revokeTrust: (path: string) => trusted.delete(path) };
+  return { owner, store, request, diagnostics, advance: (delta: number) => { now += delta; }, revokeTrust: (path: string) => trusted.delete(path) };
 }
 
 describe("HomeTaskAuthorization", () => {
-  it("allows all currently trusted project targets under the initial standing scope and rechecks trust at admission", async () => {
-    const { owner, request, revokeTrust } = fixture();
-    const scope = await owner.enableInitialScope();
+  it("binds a standing scope to its restore epoch and requires explicit reconfirmation after restore", async () => {
+    const { owner, request } = fixture();
+    const scope = await owner.enableInitialScope(request.restoreEpoch);
     await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "standing-scope", scopeId: scope.id });
+    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "grant-required" });
+    const confirmed = await owner.enableInitialScope("epoch-2");
+    expect(confirmed.id).not.toBe(scope.id);
+    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).resolves.toMatchObject({ kind: "standing-scope", scopeId: confirmed.id });
+    await expect(owner.authorize(request)).rejects.toMatchObject({ code: "grant-required" });
+  });
+
+  it("allows all currently trusted project targets under a same-epoch standing scope and rechecks trust at admission", async () => {
+    const { owner, request, revokeTrust } = fixture();
+    await owner.enableInitialScope(request.restoreEpoch);
+    await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "standing-scope" });
     revokeTrust(request.target);
     await expect(owner.authorize(request)).rejects.toMatchObject({ code: "untrusted-target" });
   });
 
   it("revokes a standing scope and requires explicit authorization outside any active scope", async () => {
     const { owner, request } = fixture();
-    const scope = await owner.enableInitialScope();
+    const scope = await owner.enableInitialScope(request.restoreEpoch);
     await owner.revokeScope(scope.id);
     await expect(owner.authorize(request)).rejects.toMatchObject({ code: "grant-required" });
   });
@@ -52,6 +65,35 @@ describe("HomeTaskAuthorization", () => {
     expect(grant).not.toHaveProperty("decision");
     await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "one-use-grant", grantId: grant.id });
     await expect(owner.authorize(request)).rejects.toMatchObject({ code: "grant-required" });
+  });
+
+  it("records denied decisions and emits bounded diagnostics for denied, invalid, and duplicate decisions", async () => {
+    const { owner, request, store, diagnostics } = fixture();
+    await expect(owner.recordDecisionAndGrant(request, {
+      decisionId: "denied", approved: false, expiresAt: 2_000,
+    })).rejects.toMatchObject({ code: "grant-required" });
+    expect(await store.load()).toMatchObject({
+      decisions: [{ id: "denied", approved: false }], grants: [],
+    });
+    expect(diagnostics).toEqual([
+      { event: "home.task.authorization", outcome: "decision-recorded", referenceHash: expect.any(String) },
+      { event: "home.task.authorization", outcome: "refused", reason: "grant-required" },
+    ]);
+
+    diagnostics.length = 0;
+    await expect(owner.recordDecisionAndGrant(request, {
+      decisionId: "expired-input", expiresAt: 1_000,
+    })).rejects.toMatchObject({ code: "invalid-decision" });
+    await owner.recordDecisionAndGrant(request, { decisionId: "duplicate", expiresAt: 2_000 });
+    await expect(owner.recordDecisionAndGrant(request, {
+      decisionId: "duplicate", expiresAt: 2_000,
+    })).rejects.toMatchObject({ code: "invalid-decision" });
+    expect(diagnostics).toContainEqual({
+      event: "home.task.authorization", outcome: "refused", reason: "invalid-decision",
+    });
+    expect(diagnostics).toContainEqual({
+      event: "home.task.authorization", outcome: "decision-recorded", referenceHash: expect.any(String),
+    });
   });
 
   it("rejects expired, mismatched, revoked, spent and restore-epoch-stale grants", async () => {
