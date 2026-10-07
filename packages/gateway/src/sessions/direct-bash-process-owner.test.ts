@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -218,17 +218,21 @@ describe("DirectBashProcessOwner", () => {
     process.env.TRON_DATA_DIR = join(root, "overridden-live-home");
     process.env.TRON_HOME_NAME = "alternate-live-home";
     const previousPath = process.env.PATH;
-    process.env.PATH = `${join(root, "overridden-live-home", "bin")}${delimiter}${previousPath ?? ""}`;
+    const agentBin = join(root, "overridden-live-home", "agent", "bin");
+    await mkdir(agentBin, { recursive: true });
+    await writeFile(join(agentBin, "tron-agent-tool"), "#!/bin/sh\nprintf agent-tool-available\n", { mode: 0o755 });
+    process.env.PATH = `${agentBin}${delimiter}${previousPath ?? ""}`;
     try {
       const result = await owner.toolDefinition(root).execute(
-        "environment", { command: "env | sort" }, undefined, undefined, undefined,
+        "environment", { command: "tron-agent-tool; env | sort" }, undefined, undefined, undefined,
       );
       const output = result.content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
+      expect(output).toContain("agent-tool-available");
       expect(output).toContain("PI_SESSION_ID=opaque-session-561");
       for (const name of names.filter(name => name !== "PI_SESSION_ID")) {
         expect(output).not.toContain(`${name}=`);
       }
-      expect(output).not.toContain("overridden-live-home");
+      expect(output).toContain(agentBin);
       expect(output).not.toContain("alternate-live-home");
     } finally {
       if (previousPath === undefined) delete process.env.PATH;

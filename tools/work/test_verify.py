@@ -80,6 +80,27 @@ class VerifyFixture(unittest.TestCase):
             with self.assertRaisesRegex(verify.VerifyError, "Tron-home environment"):
                 verify.verify(root, {})
 
+    def test_tron_home_path_entries_are_allowed_but_data_roots_are_rejected(self):
+        root = Path(__file__).resolve().parents[2]
+        user_home = self.tmp / "user-home"
+        agent_bin = user_home / ".tron" / "agent" / "bin"
+        policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
+        environment = {"HOME": str(user_home), "PATH": str(agent_bin)}
+        node = subprocess.check_output(["which", "node"], text=True).strip()
+        allowed = subprocess.run(
+            [node, str(policy)],
+            env=environment, capture_output=True, text=True,
+        )
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+        rejected = subprocess.run(
+            [allowed.args[0], str(policy)],
+            env={**environment, "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent")},
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+        self.assertIn("PI_CODING_AGENT_DIR=", rejected.stderr)
+
     def test_node_test_runner_rejects_home_name_selector(self):
         root = Path(__file__).resolve().parents[2]
         node_bin = str(Path(subprocess.check_output(["which", "node"], text=True).strip()).parent)

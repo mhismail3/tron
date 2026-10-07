@@ -33,7 +33,8 @@ export function isTronHomePath(value, homes) {
 
 export function tronHomeEnvironmentLeaks(environment, homes) {
   return Object.entries(environment).flatMap(([name, value]) => {
-    if (typeof value !== "string") return [];
+    // PATH locates executables; it does not select or name a Tron data root.
+    if (name === "PATH" || typeof value !== "string") return [];
     if (name === "TRON_HOME_NAME") {
       if (environment.TRON_DATA_DIR) return [];
       const selected = resolveTronHomePath(environment);

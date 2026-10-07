@@ -1,7 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { delimiter, join } from "node:path";
-import { isTronHomePath } from "../tron-home-environment-policy.mjs";
-import { resolveTronHome } from "../tron-home.js";
+import { join } from "node:path";
 import {
   createBashToolDefinition,
   getShellConfig,
@@ -99,11 +97,6 @@ export class DirectBashProcessOwner {
         !name.startsWith("PI_") && !name.startsWith("TRON_GATEWAY_") && name !== "TRON_DATA_DIR" && name !== "TRON_HOME_NAME"),
     );
     commandEnvironment.PI_SESSION_ID = this.sessionId;
-    const liveHomes = [resolveTronHome()];
-    if (commandEnvironment.PATH) {
-      commandEnvironment.PATH = commandEnvironment.PATH.split(delimiter)
-        .filter((entry) => !isTronHomePath(entry, liveHomes)).join(delimiter);
-    }
     return commandEnvironment;
   }
 
