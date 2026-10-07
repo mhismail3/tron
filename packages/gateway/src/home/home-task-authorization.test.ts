@@ -3,7 +3,7 @@ import { HomeTaskAuthorization, type HomeTaskAuthorizationState } from "./home-t
 
 function fixture() {
   let state: HomeTaskAuthorizationState = { scopes: [], grants: [], decisions: [] };
-  const diagnostics: unknown[] = [];
+  const diagnostics: Array<{ event: string; outcome: string; reason?: string }> = [];
   const store = {
     load: async () => structuredClone(state),
     save: async (next: HomeTaskAuthorizationState) => { state = structuredClone(next); },
@@ -91,6 +91,8 @@ describe("HomeTaskAuthorization", () => {
     expect(diagnostics).toContainEqual({
       event: "home.task.authorization", outcome: "refused", reason: "invalid-decision",
     });
+    expect(diagnostics.filter((record) => record.event === "home.task.authorization"
+      && record.outcome === "refused" && record.reason === "invalid-decision")).toHaveLength(2);
     expect(diagnostics).toContainEqual({
       event: "home.task.authorization", outcome: "decision-recorded", referenceHash: expect.any(String),
     });
