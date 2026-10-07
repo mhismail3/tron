@@ -33,6 +33,7 @@ async function namespaceBytes(path: string): Promise<number> {
 describe("episodic memory reclamation scale", () => {
   it("keeps store bytes bounded by live state over repeated early edits", async () => {
     const measurements: number[] = [];
+    const liveNodeCounts: number[] = [];
     for (const edits of [1, 3, 10]) {
       const root = await mkdtemp(join(tmpdir(), "tron-episodic-reclaim-scale-"));
       roots.push(root);
@@ -41,30 +42,32 @@ describe("episodic memory reclamation scale", () => {
       await Promise.all([mkdir(cwd, { recursive: true }), mkdir(sessions, { recursive: true })]);
       const manager = SessionManager.create(cwd, sessions);
       manager.appendMessage({ role: "user", content: "first stable message", timestamp: Date.now() });
-      for (let index = 1; index < 20; index += 1) {
+      for (let index = 1; index < 50; index += 1) {
         manager.appendMessage({ role: "user", content: `stable prompt ${index}`, timestamp: Date.now() } satisfies Message);
         manager.appendMessage(fauxAssistantMessage(`stable reply ${index}`));
       }
+      manager.appendMessage({ role: "user", content: "stable final message", timestamp: Date.now() });
       const workspace = new TronWorkspace(join(root, "home"));
       owners.push(workspace);
       const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
       await memory.entriesCommitted(manager.getSessionId());
       const target = manager.getBranch().find(entry => entry.type === "message")!;
       for (let edit = 0; edit < edits; edit += 1) {
-        manager.appendContextEdit(target.id, { content: `replacement ${edit} ${"x".repeat(512)}` });
+        manager.appendContextEdit(target.id, { content: `replacement ${edit} ${"x".repeat(4_096)}` });
         await memory.entriesCommitted(manager.getSessionId());
       }
-      expect(memory.status().messages).toBe(39);
+      expect(memory.status().messages).toBe(100);
       expect(memory.status().blocked).toBeNull();
+      liveNodeCounts.push(memory.status().nodes.total);
+      expect(memory.searchMessages(`replacement ${edits - 1}`, 0, 1).matches).toBe(1);
       const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
       const names = await readdir(namespace);
-      expect(names.filter(name => name.startsWith("checkpoint-")).length).toBe(1);
+      expect(names.filter(name => /^checkpoint-[A-Za-z0-9.-]+$/u.test(name)).length).toBe(1);
       measurements.push(await namespaceBytes(namespace));
       await memory.dispose();
     }
-    const largest = Math.max(...measurements);
-    expect(measurements.every(bytes => bytes <= largest)).toBe(true);
+    expect(new Set(liveNodeCounts).size).toBe(1);
     expect(Math.max(...measurements) - Math.min(...measurements)).toBeLessThan(32_768);
-    console.log(`episodic reclamation scale bytes N=20 K=1,3,10: ${measurements.join(",")}`);
+    console.log(`episodic reclamation scale bytes N=100 K=1,3,10: ${measurements.join(",")}`);
   }, 120_000);
 });

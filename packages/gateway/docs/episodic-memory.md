@@ -82,9 +82,10 @@ state/episodic/<sourceSessionId>/
   renames it to an immutable directory and publishes `checkpoint.current.json`.
   The pointer watermark identifies records represented by that checkpoint.
   Reads validate the checkpoint and every log record, then apply only tail
-  records above the watermark. `state.json` remains authoritative; its exact
-  captured value is also stored in the checkpoint and must match on open.
-  Superseded checkpoint data is reclaimed only after pointer publication.
+  records above the watermark. `state.json` remains the sole state authority;
+  the checkpoint copy records the captured cut and is shape-validated, but is
+  not compared with later `state.json` updates. Superseded checkpoint data is
+  reclaimed only after pointer publication.
 - A **torn trailing line** is a write that never became durable. It is
   discarded and the file is truncated to its last complete record, because
   leaving it would let the next append concatenate onto it. The bytes discarded
@@ -106,12 +107,15 @@ state/episodic/<sourceSessionId>/
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
   budget; #420 owns restore).
-- A successful source ingestion and every open of an existing store publish a
-  fold-forward checkpoint before returning/admitting further writes. Once the
+- Every open of an existing store folds replayed tails and repairs forward into
+  a checkpoint before returning. While running, the owner checkpoints when log
+  bytes exceed the live-record estimate by the internal superseded-record margin
+  or cross the internal byte trigger; small ordinary appends do not rewrite the
+  live store. Large invalidations contribute to the same log threshold. Once the
   pointer is durable, append logs are replaced by empty owner-only files and
-  superseded checkpoint directories are removed. Legacy JSONL logs seed this
-  same checkpoint representation; no schema migration or canonical history
-  mutation is performed.
+  superseded checkpoint directories and recognized interrupted temp files are
+  removed. Legacy JSONL logs seed this same checkpoint representation; no schema
+  migration or canonical history mutation is performed.
 - The version is `EPISODIC_STORE_VERSION` (1). There is no migration path: a
   store this owner cannot read is refused rather than guessed at.
 

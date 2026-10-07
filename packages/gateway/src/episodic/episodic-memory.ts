@@ -16,8 +16,8 @@ import {
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import {
-  projectBranch, readCanonicalEntryInstants, readCanonicalSession, episodicDigest,
-  type EpisodicCanonicalCut, type EpisodicCanonicalEntry,
+  projectBranch, readCanonicalBranchAtCursor, readCanonicalEntryInstants, readCanonicalSession, readCanonicalSimpleAppend, episodicDigest,
+  type EpisodicCanonicalCut,
 } from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
@@ -146,9 +146,9 @@ export class EpisodicMemory {
   private readonly building = new Set<string>();
   private view: EpisodicViewPart[] = [];
   private revision = 1;
+  private committedRevision = 0;
   private generation = 0;
   private sourceCursor: EpisodicSourceCursor | null = null;
-  private sourceBranch: EpisodicCanonicalEntry[] = [];
   private blocked: EpisodicBlocked | null = null;
   private waiters: Waiter[] = [];
   private draining: Promise<void> | null = null;
@@ -159,6 +159,7 @@ export class EpisodicMemory {
    * instant never changes. */
   private legacyTimestamps: Promise<Map<string, string>> | undefined;
   private closed = false;
+  private checkpointFailure: Error | undefined;
 
   private constructor(private readonly dependencies: EpisodicMemoryDependencies, limits: EpisodicLimits) {
     this.limits = limits;
@@ -193,11 +194,11 @@ export class EpisodicMemory {
         }
         throw error;
       }
-      const replayed = EpisodicStore.replay(snapshot);
-      for (const [index, record] of replayed.messages) memory.messages.set(index, record);
-      for (const [address, record] of replayed.nodes) memory.nodes.set(address, record);
-      for (const record of replayed.messages.values()) memory.entryIndex.set(record.entryId, record.index);
+      for (const [index, record] of snapshot.messages) memory.messages.set(index, record);
+      for (const [address, record] of snapshot.nodes) memory.nodes.set(address, record);
+      for (const record of memory.messages.values()) memory.entryIndex.set(record.entryId, record.index);
       memory.revision = snapshot.highestRevision + 1;
+      memory.committedRevision = snapshot.highestRevision;
       memory.generation = Math.max(snapshot.state?.generation ?? 0, snapshot.highestGeneration);
       if (snapshot.state) {
         memory.sourceCursor = snapshot.state.cursor;
@@ -216,9 +217,7 @@ export class EpisodicMemory {
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
-      if (snapshot.present) await memory.enqueueAppend(() => memory.store.checkpoint({
-        messages: memory.messages.values(), nodes: memory.nodes.values(), state: memory.currentStoreState(), watermark: memory.revision - 1,
-      }));
+      if (snapshot.present) await memory.enqueueAppend(() => memory.publishCheckpoint());
       return memory;
     } catch (error) {
       EpisodicMemory.openStores.delete(storeKey);
@@ -231,6 +230,7 @@ export class EpisodicMemory {
   async entriesCommitted(sessionId: string): Promise<void> {
     await this.entriesIngested(sessionId);
     await this.drain();
+    await this.checkpointIfNeeded();
   }
 
   /**
@@ -248,7 +248,7 @@ export class EpisodicMemory {
       if (this.blocked) return;
       await this.ingest();
     });
-    void this.drain().catch(() => {});
+    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
   }
 
   /** Resolves when every part of the view covering messages before `cut` is a
@@ -283,17 +283,26 @@ export class EpisodicMemory {
    * it has not read the source at all: a cut cannot be guessed, because a wrong
    * cut would render a view that does not stop where the activation starts.
    */
-  cutAtEntry(entryId: string | null): number | undefined {
+  async cutAtEntry(entryId: string | null): Promise<number | undefined> {
     this.assertOpen();
     if (entryId === null) return 0;
-    const position = this.sourceBranch.findIndex(entry => entry.id === entryId);
-    if (position < 0 || this.sourceCursor === null) return undefined;
-    let cut = 0;
-    for (let index = 0; index <= position; index += 1) {
-      const messageIndex = this.entryIndex.get(this.sourceBranch[index]!.id);
-      if (messageIndex !== undefined && messageIndex + 1 > cut) cut = messageIndex + 1;
-    }
-    return cut;
+    const cursor = this.sourceCursor;
+    if (!cursor) return undefined;
+    try {
+      const branch = await readCanonicalBranchAtCursor({
+        path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId,
+        maxLineBytes: this.limits.maxSourceLineBytes, cursor,
+      });
+      if (!branch) return undefined;
+      let result = 0;
+      let found = false;
+      for (const entry of branch) {
+        const index = this.entryIndex.get(entry.id);
+        if (index !== undefined && index + 1 > result) result = index + 1;
+        if (entry.id === entryId) { found = true; break; }
+      }
+      return found ? result : undefined;
+    } catch { return undefined; }
   }
 
   /**
@@ -514,14 +523,24 @@ export class EpisodicMemory {
 
   private async ingest(): Promise<void> {
     let cut: EpisodicCanonicalCut;
-    const previous = this.sourceCursor && this.sourceBranch.length > 0 ? { cursor: this.sourceCursor, branch: this.sourceBranch } : undefined;
     try {
-      cut = await readCanonicalSession({
+      cut = this.sourceCursor ? await readCanonicalSimpleAppend({
         path: this.dependencies.sessionFile,
         sessionId: this.dependencies.sessionId,
         maxLineBytes: this.limits.maxSourceLineBytes,
-        ...(previous ? { previous } : {}),
+        cursor: this.sourceCursor,
+      }) ?? await readCanonicalSession({
+        path: this.dependencies.sessionFile,
+        sessionId: this.dependencies.sessionId,
+        maxLineBytes: this.limits.maxSourceLineBytes,
+      }) : await readCanonicalSession({
+        path: this.dependencies.sessionFile,
+        sessionId: this.dependencies.sessionId,
+        maxLineBytes: this.limits.maxSourceLineBytes,
       });
+      if (cut.incremental && cut.branch.some(entry => this.entryIndex.has(entry.id))) {
+        cut = await readCanonicalSession({ path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId, maxLineBytes: this.limits.maxSourceLineBytes });
+      }
     } catch (error) {
       if (error instanceof EpisodicMemoryError && error.kind === "source") {
         await this.block("source-unavailable", error.message);
@@ -529,9 +548,8 @@ export class EpisodicMemory {
       }
       throw error;
     }
-    if (previous && cut.completeBytes === previous.cursor.completeBytes && cut.leafEntryId === previous.cursor.leafEntryId) {
+    if (this.sourceCursor && cut.completeBytes === this.sourceCursor.completeBytes && cut.leafEntryId === this.sourceCursor.leafEntryId) {
       this.sourceCursor = cut.cursor;
-      this.sourceBranch = cut.branch;
       return;
     }
 
@@ -561,23 +579,25 @@ export class EpisodicMemory {
         changed.push(existing);
       }
 
-      // Navigation: an entry the branch no longer holds keeps its index and
-      // becomes `[omitted]`, so no later message is ever renumbered.
-      for (const [entryId, index] of this.entryIndex) {
-        if (seen.has(entryId)) continue;
-        const current = this.messages.get(index);
-        if (!current || current.omitted) continue;
-        const record: EpisodicMessageRecord = {
-          ...current,
-          revision: this.takeRevision(),
-          text: EPISODIC_OMITTED_TEXT,
-          omitted: true,
-          projectedDigest: episodicDigest(EPISODIC_OMITTED_TEXT),
-          omissions: [...new Set([...current.omissions, "off-branch"])],
-        };
-        await this.appendCatalog(record);
-        this.messages.set(index, record);
-        changed.push(index);
+      if (!cut.incremental) {
+        // Navigation: an entry the branch no longer holds keeps its index and
+        // becomes `[omitted]`, so no later message is ever renumbered.
+        for (const [entryId, index] of this.entryIndex) {
+          if (seen.has(entryId)) continue;
+          const current = this.messages.get(index);
+          if (!current || current.omitted) continue;
+          const record: EpisodicMessageRecord = {
+            ...current,
+            revision: this.takeRevision(),
+            text: EPISODIC_OMITTED_TEXT,
+            omitted: true,
+            projectedDigest: episodicDigest(EPISODIC_OMITTED_TEXT),
+            omissions: [...new Set([...current.omissions, "off-branch"])],
+          };
+          await this.appendCatalog(record);
+          this.messages.set(index, record);
+          changed.push(index);
+        }
       }
 
       if (changed.length > 0) await this.invalidate(changed);
@@ -591,11 +611,27 @@ export class EpisodicMemory {
       throw error;
     }
     this.sourceCursor = cut.cursor;
-    this.sourceBranch = cut.branch;
     await this.saveState();
-    await this.enqueueAppend(() => this.store.checkpoint({
-      messages: this.messages.values(), nodes: this.nodes.values(), state: this.currentStoreState(), watermark: this.revision - 1,
-    }));
+    if (await this.store.shouldCheckpoint(this.messages.values(), this.nodes.values())) {
+      await this.enqueueAppend(() => this.publishCheckpoint());
+    }
+  }
+
+  private async checkpointIfNeeded(): Promise<void> {
+    await this.mutex.run(async () => {
+      if (await this.store.shouldCheckpoint(this.messages.values(), this.nodes.values())) {
+        await this.enqueueAppend(() => this.publishCheckpoint());
+      }
+    });
+  }
+
+  private async publishCheckpoint(): Promise<void> {
+    try {
+      await this.store.checkpoint({ messages: this.messages.values(), nodes: this.nodes.values(), state: this.currentStoreState(), watermark: this.committedRevision });
+    } catch (error) {
+      this.checkpointFailure = error instanceof Error ? error : new Error("Episodic checkpoint failed");
+      throw this.checkpointFailure;
+    }
   }
 
   private currentStoreState(): EpisodicStoreState {
@@ -712,7 +748,9 @@ export class EpisodicMemory {
         };
         // Durable before use: a crash between revoking and rebuilding must not
         // leave a revoked child under a live parent.
+        record.revision = this.revision++;
         await this.store.appendNode(record);
+        this.committedRevision = record.revision;
         for (const address of chunk) this.nodes.delete(address);
         this.expandInvalidatedParts(new Set(chunk));
         this.fit();
@@ -839,7 +877,9 @@ export class EpisodicMemory {
       // the same queue operation as the durable append.
       await this.enqueueAppend(async () => {
         if (this.stale(stamp)) return;
+        record.revision = this.revision++;
         await this.store.appendNode(record);
+        this.committedRevision = record.revision;
         this.nodes.set(address, record);
         this.fit();
       });
@@ -1106,11 +1146,19 @@ export class EpisodicMemory {
   /** Every append is chained, so the durable order equals the request order and
    * a concurrent build can never interleave a line. */
   private appendCatalog(record: EpisodicMessageRecord): Promise<void> {
-    return this.enqueueAppend(() => this.store.appendCatalog(record));
+    return this.enqueueAppend(async () => {
+      record.revision = this.revision++;
+      await this.store.appendCatalog(record);
+      this.committedRevision = record.revision;
+      this.messages.set(record.index, record);
+    });
   }
 
   private enqueueAppend(operation: () => Promise<void>): Promise<void> {
-    const next = this.appending.then(operation);
+    const next = this.appending.then(() => {
+      if (this.checkpointFailure) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint failed; reopen is required before further writes");
+      return operation();
+    });
     this.appending = next.catch(() => {});
     return next;
   }

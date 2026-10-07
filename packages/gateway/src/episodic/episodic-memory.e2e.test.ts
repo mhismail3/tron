@@ -820,20 +820,22 @@ describe("episodic memory end to end", () => {
     const memory = await openMemory(fx);
     await memory.entriesCommitted(fx.sessionId);
     const first = fx.manager.getBranch()[0]!;
-    expect(memory.cutAtEntry(null)).toBe(0);
-    expect(memory.cutAtEntry(first.id)).toBe(1);
-    expect(memory.cutAtEntry("entry-that-no-branch-holds")).toBeUndefined();
+    expect(await memory.cutAtEntry(null)).toBe(0);
+    expect(await memory.cutAtEntry(first.id)).toBe(1);
+    expect(await memory.cutAtEntry("entry-that-no-branch-holds")).toBeUndefined();
 
     // A non-message entry between two messages: the cut counts the messages at or
     // before the named entry, whatever the entry's own type is.
     fx.manager.appendMessage(fauxAssistantMessage(fauxText("first reply")));
+    const unIngested = fx.manager.getLeafId()!;
+    expect(await memory.cutAtEntry(unIngested)).toBeUndefined();
     fx.manager.appendCustomEntry("tron.bookkeeping", { private: "bookkeeping" });
     const bookkeeping = fx.manager.getLeafId()!;
     fx.manager.appendMessage(userMessage("third message"));
     await memory.entriesCommitted(fx.sessionId);
-    expect(memory.cutAtEntry(bookkeeping)).toBe(2);
+    expect(await memory.cutAtEntry(bookkeeping)).toBe(2);
     const leaf = fx.manager.getLeafId()!;
-    expect(memory.cutAtEntry(leaf)).toBe(3);
+    expect(await memory.cutAtEntry(leaf)).toBe(3);
 
     const view = memory.renderView(2);
     const lines = view.text.split("\n");
