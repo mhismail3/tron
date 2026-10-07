@@ -86,11 +86,14 @@ state/episodic/<sourceSessionId>/
   live node whose children are missing or rebuilt refuses the store visibly
   (`invalid-store` / `unsafe-store`), and `episodic.store-refused` is raised.
   Nothing is silently skipped or migrated.
-- The workspace's feature marker records that the shared `state/episodic`
-  container was initialized, so a **deleted container is lost state**: it refuses
-  instead of restarting and re-spending every compactor call. The marker describes
-  the container, never one session. Each session's namespace is created lazily
-  inside it, so a session without one, such as a new Home session after another
+- The workspace feature record at
+  `gateway/workspace-state/episodic-initialized.json` records that the shared
+  `state/episodic` container was initialized, so a **deleted container is lost
+  state**: it refuses instead of restarting and re-spending every compactor call.
+  This strict version-1 record is separate from the frozen shared workspace
+  record. It describes the container, never one session. Each session's namespace
+  is created lazily inside it, so a session without one, such as a new Home
+  session after another
   session's memory set the marker, starts fresh (#483). Spend is recorded inside
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
@@ -227,9 +230,11 @@ projection is never stale.
   the same mutex before it releases the opener, so the one opener per store is
   released only once the store has no writer.
 - The pump runs outside that mutex. Every build carries the generation and the
-  input revisions it started from, and a result whose generation changed, whose
+  input revisions it started from. Its final stamp check, durable append, and
+  in-memory publication share the append queue with invalidation, so an edit
+  cannot miss a node being published. A result whose generation changed, whose
   child was revoked or rebuilt, or whose message record was superseded is
-  **discarded, never appended**: a stale summary cannot survive an invalidation.
+  **discarded, never appended**.
 - A node whose source is gone (no message, no children) cannot be composed. That
   is a blocked state with a reason, not a busy loop.
 
@@ -266,10 +271,10 @@ projection is never stale.
    parent stands in for its children, so a revoked child under a live parent
    would be an inconsistent store.
 6. **An invalidation is written in ancestor-first chunks**, each a compact
-   durable record (base-36 node codes, at most 2,048 nodes). Any prefix of that
-   order leaves every live parent with live children, so a crash between chunks
-   is a consistent store; and because a catalog revision is written *before* the
-   invalidation, a crash inside that window is repaired at the next `open`.
+   durable record (base-36 node codes, at most 2,048 nodes). A crash between
+   chunks can leave live context dependents of a revoked node; `open` scans for
+   absent context dependencies and inconsistent child links, invalidates their
+   closure durably, and only then serves the memory.
 7. **A blocked memory is persisted state**, and the retries are bounded
    (below). The recipe retries forever because its next turn waits on the
    summary; here the blocked state is visible and `resume()` restarts the pump.
@@ -292,13 +297,14 @@ projection is never stale.
 ## Crash window between the catalog and its invalidation
 
 `entriesCommitted` writes the changed catalog revision first and the invalidation
-chunks second, and fsyncs each before use. A crash between the two leaves a store
-that is *consistent* (no revoked child under a live parent) but under-invalidated:
-a live leaf whose summary still describes the old text. `open` therefore checks
-every live leaf against its catalog record — `sourceDigest` must equal the digest
-of `kind + ": " + text` — and treats a mismatch as a changed leaf, running the
-invalidation closure again. That choice keeps the write order simple and makes
-recovery self-healing without a second file or a marker.
+chunks second, and fsyncs each before use. A crash between these steps is repaired
+at `open`: live leaves are checked against their catalog record, and any leaf
+whose `sourceDigest` no longer matches is invalidated. A crash during chunked
+invalidation is repaired separately: before consistency validation or serving,
+`open` finds live nodes whose recorded context references an absent node (or
+whose child links are incomplete/stale) and invalidates those nodes and their
+transitive dependents. This makes the existing node records sufficient; no
+intent marker or additional retry/spend path is needed.
 
 ## Known cost of a large backlog
 

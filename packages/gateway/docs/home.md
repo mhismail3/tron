@@ -96,7 +96,7 @@ sends zero warm requests, while an ordinary session in the same Gateway and on
 the same model does warm.
 
 MCP is excluded structurally — no MCP extension is loaded for Home — rather than
-by omission from the allowlist, because from SDK 1.0.0 an allowlist that names no
+by omission from the allowlist, because from SDK 1.0.4 an allowlist that names no
 `mcp__*` tool keeps MCP tools registered.
 
 Compaction is disabled through the constructor option of the existing
@@ -253,6 +253,12 @@ and the refusal is a canonical assistant error entry the user can read):
 | `prepareRequest` | outermost | cuts the request into system messages + memory view + the activation's own messages |
 | `transformContext` | outermost | refuses unless the activation's non-system messages survived the SDK's context stages unchanged, then records the single-use digest expectation |
 | `streamFunction` | innermost | refuses unless the outgoing request carries the activation nonce exactly once with the recorded digest |
+
+The digest expectation uses that agent's own settings-aware message converter,
+the same one Pi invokes in its agent loop. Thus `images.blockImages` replaces
+images with Pi's disabled-image placeholder without triggering a false refusal,
+including when the setting changes between turns. Non-system context mutation
+and subsequent outgoing message mutation still fail closed.
 
 Only a runtime whose profile is Home's gets them. A fork of the Home session is a
 different session id, hence an ordinary session with no seam and no activation.

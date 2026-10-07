@@ -208,6 +208,9 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
+  workspaceUnavailable: cause => logger.log("warning", "Tron internal workspace is unavailable", {
+    event: "workspace.unavailable", source: "workspace", cause,
+  }),
   agentDir: config.agentDir,
   gatewayModelRuntime: modelRuntime,
   tronHome: config.tronHome,
