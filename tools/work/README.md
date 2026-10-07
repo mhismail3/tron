@@ -1055,12 +1055,14 @@ Project state and records every call. The live E2E covers GitHub itself.
     resume cannot quietly drop or change the irreducible part.
 79. **A malformed bug summary is published or merged.** `test_land.py` runs
     the real `cli.py land` process against its isolated Git/fake-GitHub fixture.
-    It refuses missing, empty, reordered, nested or fenced headings and a
-    user-supplied Verification heading before any publication, including when
-    adopting an existing open PR or resuming a merged one. A valid bug summary
-    retains the tool-generated receipt Verification section; valid non-bug
-    summaries remain unchanged. The same stored-body validation runs in
-    `steward --land` before merging.
+    It refuses missing or empty sections (including headings/content hidden in
+    comments, a sibling heading with no section body, empty fenced blocks and an
+    unclosed fence), reordered/nested/fenced headings, duplicate wrapper headings
+    and a user-supplied Verification heading before publication. It checks
+    adopted open and merged PR bodies as well. Non-empty fenced evidence and
+    harmless comments remain valid. Valid non-bug summaries remain unchanged;
+    stewarding and merged-resume paths preserve the generated Verification and
+    Maintainer validation sections.
 
 ## `cleanup`
 

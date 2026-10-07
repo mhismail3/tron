@@ -259,85 +259,134 @@ def acceptance_evidence(records: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def validate_issue_summary(summary: str, labels: List[str]) -> None:
-    """Require a bug's evidence headings in the Summary, before any landing writes.
+def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool]:
+    """Blank HTML comments and fence delimiters while retaining code payload and line positions."""
+    visible: List[str] = []
+    code_lines: List[bool] = []
+    fence: Optional[Tuple[str, int]] = None
+    in_comment = False
+    for line in text.replace("\r\n", "\n").splitlines():
+        fence_match = re.match(r"(`{3,}|~{3,})", line.lstrip())
+        if not in_comment and fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+                visible.append("")
+                code_lines.append(False)
+                continue
+            if marker[0] == fence[0] and len(marker) >= fence[1]:
+                fence = None
+                visible.append("")
+                code_lines.append(False)
+                continue
+        if fence is not None:
+            visible.append(line)
+            code_lines.append(True)
+            continue
 
-    Verification is the separate, receipt-generated PR section, so it is not
-    user-authored summary content. Fenced code and nested headings are payload,
-    not section delimiters; this also prevents an apparent heading in an example
-    from satisfying the contract.
-    """
+        output: List[str] = []
+        cursor = 0
+        while cursor < len(line):
+            if in_comment:
+                end = line.find("-->", cursor)
+                if end < 0:
+                    output.append(" " * (len(line) - cursor))
+                    cursor = len(line)
+                else:
+                    output.append(" " * (end + 3 - cursor))
+                    cursor = end + 3
+                    in_comment = False
+            else:
+                start = line.find("<!--", cursor)
+                if start < 0:
+                    output.append(line[cursor:])
+                    cursor = len(line)
+                else:
+                    output.append(line[cursor:start])
+                    end = line.find("-->", start + 4)
+                    if end < 0:
+                        output.append(" " * (len(line) - start))
+                        cursor = len(line)
+                        in_comment = True
+                    else:
+                        output.append(" " * (end + 3 - start))
+                        cursor = end + 3
+        visible.append("".join(output))
+        code_lines.append(False)
+    return visible, code_lines, fence is None
+
+
+def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool]:
+    """Return ATX heading depth/title/line outside comments and fenced code."""
+    lines, code_lines, balanced_fence = _visible_markdown(text)
+    headings: List[Tuple[str, int, int]] = []
+    for index, line in enumerate(lines):
+        if code_lines[index]:
+            continue
+        match = re.fullmatch(r"(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*", line)
+        if match:
+            headings.append((match.group(2).strip(), len(match.group(1)), index))
+    return headings, balanced_fence
+
+
+def _has_meaningful_content(lines: List[str]) -> bool:
+    for line in lines:
+        if re.match(r"^[ \t]*#{1,6}[ \t]+", line):
+            continue
+        # Blank lines, Markdown delimiters, and empty list/table scaffolding are not evidence.
+        payload = re.sub(r"[\s#>*_~`|!()\[\]{}+\-]", "", line)
+        if payload:
+            return True
+    return False
+
+
+def validate_issue_summary(summary: str, labels: List[str]) -> None:
+    """Require meaningful, ordered bug evidence before any landing writes."""
     if "kind:bug" not in labels:
         return
-    headings: Dict[str, List[int]] = {name: [] for name in _BUG_SUMMARY_SECTIONS}
-    sections: Dict[str, List[str]] = {}
+    lines, code_lines, balanced_fence = _visible_markdown(summary)
+    headings, _ = _markdown_headings(summary)
+    required = {name: [] for name in _BUG_SUMMARY_SECTIONS}
+    sections: Dict[str, List[str]] = {name: [] for name in _BUG_SUMMARY_SECTIONS}
+    reserved: List[str] = []
+    for title, depth, index in headings:
+        if depth != 2:
+            continue
+        if title in ("Summary", "Verification", "Maintainer validation"):
+            reserved.append(title)
+        elif title in required:
+            required[title].append(index)
+    heading_at = {index: (title, depth) for title, depth, index in headings}
     current: Optional[str] = None
-    fence: Optional[Tuple[str, int]] = None
-    verification_heading = False
-    for index, line in enumerate(summary.replace("\r\n", "\n").splitlines()):
-        stripped = line.lstrip()
-        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
-        if fence_match:
-            marker = fence_match.group(1)
-            if fence is None:
-                fence = (marker[0], len(marker))
-            elif marker[0] == fence[0] and len(marker) >= fence[1]:
-                fence = None
-            if current:
-                sections[current].append(line)
-            continue
-        if fence is not None:
-            if current:
-                sections[current].append(line)
-            continue
-        heading = re.fullmatch(r"##[ \t]+([^#\n]+?)[ \t]*#*[ \t]*", line)
-        if heading and heading.group(1) in headings:
-            current = heading.group(1)
-            headings[current].append(index)
-            sections.setdefault(current, [])
-            continue
-        if re.match(r"^##[ \t]+Verification(?:[ \t]+#*)?[ \t]*$", line):
-            verification_heading = True
-            current = None
-            continue
-        if current:
+    for index, line in enumerate(lines):
+        if current is not None and index not in heading_at:
             sections[current].append(line)
-    absent = [name for name in _BUG_SUMMARY_SECTIONS if len(headings[name]) != 1]
-    positions = [headings[name][0] for name in _BUG_SUMMARY_SECTIONS if len(headings[name]) == 1]
+        if index in heading_at:
+            title, depth = heading_at[index]
+            if depth <= 2:
+                current = title if depth == 2 and title in required else None
+    # The loop above assigns content following each required heading, stopping at every H1/H2.
+    absent = [name for name in _BUG_SUMMARY_SECTIONS if len(required[name]) != 1]
+    positions = [required[name][0] for name in _BUG_SUMMARY_SECTIONS if len(required[name]) == 1]
     ordered = len(positions) == len(_BUG_SUMMARY_SECTIONS) and positions == sorted(positions)
-    empty = [name for name in _BUG_SUMMARY_SECTIONS if len(headings[name]) == 1
-             and not any(line.strip() and not re.match(r"^#{1,6}[ \t]+", line)
-                         for line in re.sub(r"<!--.*?-->", "", "\n".join(sections.get(name, [])),
-                                            flags=re.DOTALL).splitlines())]
-    if absent or empty or not ordered or verification_heading:
-        missing = absent + [name for name in empty if name not in absent]
+    empty = [name for name in _BUG_SUMMARY_SECTIONS if len(required[name]) == 1
+             and not _has_meaningful_content(sections[name])]
+    if absent or empty or not ordered or reserved or not balanced_fence:
+        reasons = absent + [name for name in empty if name not in absent]
         if not ordered and not absent:
-            missing.append("sections in Repro, Cause, Fix order")
-        if verification_heading:
-            missing.append("generated `## Verification` (do not include it in the summary)")
-        raise LandError("bug summary requires exactly one non-empty `## Repro`, `## Cause`, and `## Fix` "
-                        "section before the generated `## Verification`; missing or empty: "
-                        + ", ".join(missing))
+            reasons.append("sections in Repro, Cause, Fix order")
+        if reserved:
+            reasons.append("generated heading(s): " + ", ".join(reserved))
+        if not balanced_fence:
+            reasons.append("unclosed fenced example")
+        raise LandError("bug summary requires exactly one meaningful `## Repro`, `## Cause`, and `## Fix` "
+                        "section in order before the generated `## Verification`; " + ", ".join(reasons))
 
 
-def _markdown_h2_sections(text: str) -> List[Tuple[str, int]]:
-    """Return top-level H2 headings outside fenced code, with their line indexes."""
-    sections: List[Tuple[str, int]] = []
-    fence: Optional[Tuple[str, int]] = None
-    for index, line in enumerate(text.splitlines()):
-        fence_match = re.match(r"(`{3,}|~{3,})", line.lstrip())
-        if fence_match:
-            marker = fence_match.group(1)
-            if fence is None:
-                fence = (marker[0], len(marker))
-            elif marker[0] == fence[0] and len(marker) >= fence[1]:
-                fence = None
-            continue
-        if fence is None:
-            heading = re.fullmatch(r"##[ \t]+([^#\n]+?)[ \t]*#*[ \t]*", line)
-            if heading:
-                sections.append((heading.group(1), index))
-    return sections
+def _markdown_h2_sections(text: str) -> Tuple[List[Tuple[str, int]], bool]:
+    """Return top-level H2 headings outside comments/fences, with line indexes."""
+    headings, balanced_fence = _markdown_headings(text)
+    return [(title, index) for title, depth, index in headings if depth == 2], balanced_fence
 
 
 def validate_existing_bug_body(body: str, labels: List[str], pull: int) -> None:
@@ -345,10 +394,11 @@ def validate_existing_bug_body(body: str, labels: List[str], pull: int) -> None:
     if "kind:bug" not in labels:
         return
     text = (body or "").replace("\r\n", "\n")
-    headings = _markdown_h2_sections(text)
+    headings, balanced_fence = _markdown_h2_sections(text)
     summaries = [index for title, index in headings if title == "Summary"]
     verifications = [index for title, index in headings if title == "Verification"]
-    if len(summaries) != 1 or len(verifications) != 1 or summaries[0] >= verifications[0]:
+    if (not balanced_fence or len(summaries) != 1 or len(verifications) != 1
+            or summaries[0] >= verifications[0]):
         raise LandError(f"#{pull} bug pull request must have one Summary and one generated Verification section")
     summary = "\n".join(text.splitlines()[summaries[0] + 1:verifications[0]])
     validate_issue_summary(summary, labels)
@@ -372,11 +422,17 @@ def merge_intent(pull: int, body: str, number: int) -> Tuple[str, Optional[str]]
     keyword = re.match(rf"(Closes|Refs) #{number}(?!\d)", text)
     if keyword is None:
         raise LandError(f"#{pull} neither closes nor refers to #{number}")
-    # Searched after the Verification heading: the summary may use the same heading.
-    summary = _SUMMARY.search(text)
-    rest = text[summary.end():] if summary else ""
-    at = rest.find(_VALIDATION)
-    action = rest[at + len(_VALIDATION):].strip() if at >= 0 else None
+    headings, _ = _markdown_h2_sections(text)
+    summary_index = next((index for title, index in headings if title == "Summary"), None)
+    verification_index = next((index for title, index in headings
+                               if title == "Verification" and (summary_index is None or index > summary_index)), None)
+    handoff_index = next((index for title, index in headings
+                          if title == "Maintainer validation" and verification_index is not None
+                          and index > verification_index), None)
+    action = None
+    if handoff_index is not None:
+        lines = text.splitlines()
+        action = "\n".join(lines[handoff_index + 1:]).strip() or None
     if keyword.group(1) == "Refs" and not action:
         raise LandError(f"#{pull} refers to #{number} but has no Maintainer validation text to hand off")
     if keyword.group(1) == "Closes" and action is not None:
@@ -647,7 +703,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     elif pull is not None and "kind:bug" in issue["labels"]:
         validate_existing_bug_body(pull["body"], issue["labels"], pull["number"])
         body_lines = pull["body"].replace("\r\n", "\n").splitlines()
-        headings = _markdown_h2_sections(pull["body"].replace("\r\n", "\n"))
+        headings, _ = _markdown_h2_sections(pull["body"].replace("\r\n", "\n"))
         summary_index = next(index for title, index in headings if title == "Summary")
         verification_index = next(index for title, index in headings if title == "Verification")
         summary = "\n".join(body_lines[summary_index + 1:verification_index])

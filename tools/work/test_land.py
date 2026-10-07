@@ -643,6 +643,35 @@ class TypeSpecificPullBodyTests(LandFixture):
         self.assert_rejected_without_publication(
             self.BUG_SUMMARY + "\n## Verification\n\nThis would shadow generated evidence.\n")
 
+    def test_sibling_heading_ends_a_required_section(self):
+        self.assert_rejected_without_publication(
+            "## Repro\n\n## Notes\n\nNotes are not reproduction evidence.\n\n"
+            "## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+
+    def test_empty_fenced_block_is_not_meaningful_content(self):
+        self.assert_rejected_without_publication(
+            "## Repro\n\nShown.\n\n## Cause\n\n```text\n```\n\n## Fix\n\nDone.\n")
+
+    def test_html_comments_cannot_supply_required_sections(self):
+        self.assert_rejected_without_publication(
+            "<!--\n## Repro\n\nShown.\n\n## Cause\n\nKnown.\n\n## Fix\n\nDone.\n-->\n")
+
+    def test_commented_duplicate_heading_does_not_satisfy_or_duplicate_a_section(self):
+        summary = ("## Repro\n\nThe behavior reproduces.\n<!-- ## Repro -->\n\n"
+                   "## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_unclosed_fence_and_duplicate_summary_wrapper_are_refused(self):
+        self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n```md\nexample\n")
+        self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n## Summary\n\nconflicting wrapper\n")
+
+    def test_nonempty_fenced_evidence_and_harmless_comments_are_valid(self):
+        summary = ("<!-- issue evidence -->\n## Repro\n\n```text\nexpected failure\n```\n\n"
+                   "## Cause\n\nThe parser lost the boundary.\n\n<!-- note -->\n## Fix\n\nRestore it.\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
     def test_valid_bug_summary_lands_through_cli_with_generated_verification(self):
         result = self.cli_land(self.BUG_SUMMARY, labels=["task", "kind:bug"])
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -679,6 +708,19 @@ class TypeSpecificPullBodyTests(LandFixture):
                                existing_body=malformed_body, merged=True)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.writes(before), [])
+
+    def test_merged_bug_resume_preserves_fenced_headings_and_maintainer_handoff(self):
+        summary = (self.BUG_SUMMARY + "\n```md\n\n## Verification\n\n## Maintainer validation\n\n"
+                   "Not the handoff.\n```\n")
+        body = ("Refs #7\n\n## Summary\n\n" + summary + "\n## Verification\n\nGenerated receipt.\n"
+                "\n## Maintainer validation\n\nIrreducible: physical device\n\nRun the stated check.\n")
+        result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False,
+                               existing_body=body, merged=True)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(self.issue()["state"], "OPEN")
+        self.assertEqual(self.issue()["status"], "Needs you")
+        self.assertIn("Run the stated check.", self.issue()["comments"][-1])
+        self.assertNotIn("Not the handoff.", self.issue()["comments"][-1])
 
 
 class ReceiptTests(LandFixture):
@@ -1654,6 +1696,20 @@ class StackedStewardTests(StackedFixture):
         self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
         self.assertEqual(self.remote_file(HELD, "app/a.txt"), "two")
         self.assertEqual(self.remote_file(BASE, "app/a.txt"), "one")
+
+    def test_steward_lands_valid_bug_body_with_fenced_evidence_and_handoff(self):
+        self.open_pull(HELD)
+        issues = self.state()["issues"]
+        issues[str(NUMBER)]["labels"] = ["task", "kind:bug"]
+        pulls = self.state()["pulls"]
+        summary = ("## Repro\n\n```text\nfailed case\n```\n\n## Cause\n\nCause.\n\n## Fix\n\nFix.\n")
+        pulls[0]["body"] = ("Refs #7\n\n## Summary\n\n" + summary
+                             + "\n## Verification\n\nGenerated.\n\n## Maintainer validation\n\n"
+                             "Irreducible: physical device\n\nRun the check.\n")
+        self.set_state(issues=issues, pulls=pulls)
+        self.assertEqual(self.steward_land(), 0)
+        self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
+        self.assertIn("Run the check.", self.issue()["comments"][-1])
 
     def test_steward_refuses_a_bug_pull_request_with_missing_evidence_sections(self):
         self.open_pull(HELD)
