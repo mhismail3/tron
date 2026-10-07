@@ -210,11 +210,14 @@ describe("episodic memory crash recovery", () => {
   it("completes an interrupted chunked invalidation before serving memory", async () => {
     const fx = await fixture("chunk-boundary", 0);
     // Persist a realistic-sized dependency fanout directly through the store's
-    // durable append API; exercising chunk recovery does not need 2,100 real
+    // supported checkpoint API; exercising chunk recovery does not need 2,100 real
     // session messages or compactor/view work.
     const initial = await openMemory(fx);
+    await initial.entriesCommitted(fx.sessionId);
     await initial.dispose();
     const seedStore = new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+    const state = (await seedStore.read()).state;
+    if (!state) throw new Error("initial memory did not persist its store state");
     const digest = (value: string) => createHash("sha256").update(value).digest("hex");
     const messages: EpisodicMessageRecord[] = [];
     const nodes: EpisodicNodeRecord[] = [];
@@ -246,8 +249,8 @@ describe("episodic memory crash recovery", () => {
     await seedStore.checkpoint({
       messages,
       nodes,
-      state: { version: 1, generation: 0, cursor: null, blocked: null, spend: 0 },
-      watermark: 4_200,
+      state,
+      watermark: nodes.at(-1)!.revision,
     });
     const memory = await openMemory(fx);
     const owner = memory as unknown as {
