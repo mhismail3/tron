@@ -252,9 +252,18 @@ export class HomeOwner {
    * successor entries fail closed until their owning lifecycle transition lands. */
   chapterStateFor(sessionId: string): HomeChapterState {
     const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
-    if (chapter?.state === "materializing") return { sessionId, sealed: true, materializing: true, ordinal: chapter.ordinal };
-    if (chapter?.state === "sealed" || chapter?.state === "reserved") return { sessionId, sealed: true, ordinal: chapter.ordinal };
-    return chapter ? { sessionId, sealed: false, ordinal: chapter.ordinal } : unsealedHomeChapterState(sessionId);
+    if (chapter?.state === "materializing") return {
+      sessionId, sealed: true, materializing: true, homeId: this.record!.homeId,
+      ordinal: chapter.ordinal,
+      ...(chapter.attemptId ? { attemptId: chapter.attemptId } : {}),
+      ...(chapter.expectedPath ? { expectedPath: chapter.expectedPath } : {}),
+    };
+    if (chapter?.state === "sealed" || chapter?.state === "reserved") {
+      return { sessionId, sealed: true, homeId: this.record!.homeId, ordinal: chapter.ordinal };
+    }
+    return chapter
+      ? { sessionId, sealed: false, homeId: this.record!.homeId, ordinal: chapter.ordinal }
+      : unsealedHomeChapterState(sessionId);
   }
 
   /** Claim a durable reserved successor for the Registry's single-flight owner.

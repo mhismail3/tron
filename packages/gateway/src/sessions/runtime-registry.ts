@@ -986,7 +986,18 @@ export class RuntimeRegistry {
         // rebinds it before any runtime can submit canonical input.
         await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
       }
-      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, "home");
+      const chapterState = this.home.chapterStateFor(sessionId);
+      if (!chapterState.materializing || !chapterState.homeId || chapterState.ordinal !== chapter.ordinal
+        || chapterState.attemptId !== attemptId || chapterState.expectedPath !== expectedPath) {
+        throw new GatewayError("conflict", "Home materialization authority no longer matches its durable reservation", true);
+      }
+      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, "home", {
+        homeId: chapterState.homeId,
+        ordinal: chapterState.ordinal,
+        sessionId,
+        attemptId,
+        expectedPath,
+      });
       if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
         throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
       }

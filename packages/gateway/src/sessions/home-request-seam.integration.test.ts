@@ -330,7 +330,28 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       state: "materializing", attemptId: stored.chapters[1]!.attemptId,
       expectedPath: stored.chapters[1]!.expectedPath,
     });
-    cases.push({ case: "reservation-owner-through-first-flush", firstPathPreserved: true, contenderJoined: true, providerDispatchesBeforePrompt: item.faux.state.callCount });
+    const home = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const authoritative = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    for (const mismatch of [
+      { attemptId: "different-attempt", expectedPath: stored.chapters[1]!.expectedPath },
+      { attemptId: stored.chapters[1]!.attemptId, expectedPath: `${stored.chapters[1]!.expectedPath}.other` },
+    ]) {
+      await home.writeLocked({
+        ...authoritative,
+        chapters: authoritative.chapters.map((entry, index) => index === 1 ? { ...entry, ...mismatch } : entry),
+      });
+      await expect(firstSlot.prompt("mismatched slot authority"))
+        .rejects.toMatchObject({ details: { reason: "sealed-chapter" } });
+      expect(existsSync(firstSlot.sessionFile!)).toBe(false);
+    }
+    await home.writeLocked(authoritative);
+    item.faux.setResponses([item.response("first reserved response")]);
+    await firstSlot.prompt("first reserved prompt without operation permit");
+    await waitUntil(() => !firstSlot.isBusy);
+    expect(existsSync(firstSlot.sessionFile!)).toBe(true);
+    expect(firstSlot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "user"))
+      .toBe(true);
+    cases.push({ case: "reservation-owner-through-first-flush", firstPathPreserved: true, contenderJoined: true, firstAppendAuthorizedBySlot: true });
   });
 
   it("blocks Registry materialization on uncertain scan evidence without creating a runtime", async () => {

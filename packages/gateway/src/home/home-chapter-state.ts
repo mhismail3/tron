@@ -4,9 +4,11 @@ import { GatewayError } from "../errors.js";
 export interface HomeChapterState {
   sessionId: string;
   sealed: boolean;
-  /** Only the Home prompt route may cross this temporary materialization state. */
   materializing?: boolean;
+  homeId?: string;
   ordinal?: number;
+  attemptId?: string;
+  expectedPath?: string;
 }
 
 export class SealedChapterMutationError extends GatewayError {
@@ -24,8 +26,8 @@ export function unsealedHomeChapterState(sessionId: string): HomeChapterState {
   return { sessionId, sealed: false };
 }
 
-/** Slot-owner refusal; callers invoke this inside their serialized mutation lane. */
-export function assertChapterWritable(state: HomeChapterState, homeMaterializationPermit = false): void {
-  if (!state.sealed || (state.materializing && homeMaterializationPermit)) return;
+/** Slot-owner refusal; materialization is allowed only for the slot bound to the exact durable attempt and path. */
+export function assertChapterWritable(state: HomeChapterState, ownsMaterialization = false): void {
+  if (!state.sealed || (state.materializing && ownsMaterialization)) return;
   throw new SealedChapterMutationError(state);
 }

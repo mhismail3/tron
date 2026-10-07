@@ -1485,7 +1485,6 @@ export class GatewayService {
           });
           const execution = slot.prompt(text, [], undefined, {
             text, attachmentEnvelope: "", attachmentCount: 0,
-            ...(reserved ? { homeMaterializationPermit: true } : {}),
           }, resolveAdmission);
           void execution.then(resolveAdmission, rejectAdmission);
           const accepted = await admission;

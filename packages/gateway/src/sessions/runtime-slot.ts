@@ -205,8 +205,6 @@ type PromptQueueDisplay = {
   photoCount?: number;
   fileAttachmentCount?: number;
   attachments?: QueuedMessageState["attachments"];
-  /** Constructed only by the logical Home route for its first materializing prompt. */
-  homeMaterializationPermit?: boolean;
 };
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
@@ -215,6 +213,14 @@ const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
 const HOME_HARD_ENTRIES = 100_000;
 const HOME_ADMISSION_RESERVE_BYTES = 64 * 1_024;
 const HOME_ADMISSION_RESERVE_ENTRIES = 4;
+
+type HomeMaterializationAuthority = Readonly<{
+  homeId: string;
+  ordinal: number;
+  sessionId: string;
+  attemptId: string;
+  expectedPath: string;
+}>;
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
   resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
@@ -635,7 +641,6 @@ export class RuntimeSlot {
    * continuation from restart reconciliation. */
   private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
   private readonly completionWorkOwners = new Map<string, string>();
-  private readonly homeMaterializationPermitOperations = new Set<string>();
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** The session replacement a running extension command requested. */
@@ -839,6 +844,7 @@ export class RuntimeSlot {
    * profile, before the Home record named it. One-shot: cleared by that first
    * runtime creation. */
   private explicitHomeSessionId: string | undefined;
+  private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -850,8 +856,12 @@ export class RuntimeSlot {
     private readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
+    homeMaterializationAuthority?: HomeMaterializationAuthority,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
+    this.homeMaterializationAuthority = homeMaterializationAuthority
+      ? Object.freeze({ ...homeMaterializationAuthority })
+      : undefined;
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
@@ -879,9 +889,7 @@ export class RuntimeSlot {
             0,
           );
           const projectedBytes = stagedBytes + Buffer.byteLength(JSON.stringify(entry)) + 1;
-          const permit = this.activeOperationId !== undefined
-            && this.homeMaterializationPermitOperations.has(this.activeOperationId);
-          this.assertChapterWritable(permit, projectedBytes, 1);
+          this.assertChapterWritable(projectedBytes, 1);
         }
       }
       appendEntry(entry);
@@ -1053,8 +1061,9 @@ export class RuntimeSlot {
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
+    homeMaterializationAuthority?: HomeMaterializationAuthority,
   ): Promise<RuntimeSlot> {
-    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile);
+    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority);
     await slot.initialize();
     slot.installCanonicalWriteGuard();
     return slot;
@@ -3230,14 +3239,13 @@ export class RuntimeSlot {
     describe: string;
     existing: () => "absent" | "matching" | "contradictory";
     append: () => void;
-    homeMaterializationPermit?: boolean;
   }): void {
     const state = options.existing();
     if (state === "contradictory") {
       throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
     }
     if (state === "matching") return;
-    this.assertChapterWritable(options.homeMaterializationPermit === true);
+    this.assertChapterWritable();
     try {
       options.append();
     } catch (error) {
@@ -3256,7 +3264,6 @@ export class RuntimeSlot {
     data: JsonValue,
     identity: string,
     owner?: GatewayWorkHandle,
-    homeMaterializationPermit = false,
   ): Promise<void> {
     // A receipt belongs to the session bound when it was requested. Retries run
     // after a delay and must not follow a rebind into the replacement's file.
@@ -3265,7 +3272,6 @@ export class RuntimeSlot {
       () => this.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
         this.persistVerifiedCustomEntry({
           describe: "canonical receipt",
-          homeMaterializationPermit,
           existing: () => {
             const entry = manager.getBranch().find((candidate) => {
               if (candidate.type !== "custom" || candidate.customType !== customType) return false;
@@ -3286,9 +3292,7 @@ export class RuntimeSlot {
 
   private persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
     if (this.handedOffInvocations.has(receipt.invocationId)) return Promise.resolve();
-    const permit = receipt.operationId !== undefined && this.homeMaterializationPermitOperations.has(receipt.operationId);
-    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner, permit)
-      .finally(() => { if (receipt.operationId) this.homeMaterializationPermitOperations.delete(receipt.operationId); });
+    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
   }
 
   private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
@@ -6889,7 +6893,6 @@ export class RuntimeSlot {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
     this.assertChapterWritable(
-      queueDisplay?.homeMaterializationPermit === true,
       Buffer.byteLength(text) + HOME_ADMISSION_RESERVE_BYTES,
       HOME_ADMISSION_RESERVE_ENTRIES,
     );
@@ -7044,14 +7047,9 @@ export class RuntimeSlot {
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
       this.assertChapterWritable(
-        queueDisplay?.homeMaterializationPermit === true,
         Buffer.byteLength(queueDisplay?.text ?? "") + HOME_ADMISSION_RESERVE_BYTES,
         HOME_ADMISSION_RESERVE_ENTRIES,
       );
-      if (queueDisplay?.homeMaterializationPermit) {
-        this.homeMaterializationPermitOperations.add(operationId);
-        while (this.homeMaterializationPermitOperations.size > 32) this.homeMaterializationPermitOperations.delete(this.homeMaterializationPermitOperations.values().next().value!);
-      }
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -9220,10 +9218,20 @@ export class RuntimeSlot {
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
-  private assertChapterWritable(homeMaterializationPermit = false, addedBytes = 0, addedEntries = 1): void {
+  private assertChapterWritable(addedBytes = 0, addedEntries = 1): void {
     const state = this.dependencies.homeChapterState?.(this.id);
     if (state) {
-      try { assertChapterWritable(state, homeMaterializationPermit); }
+      const authority = this.homeMaterializationAuthority;
+      const ownsMaterialization = Boolean(authority
+        && state.materializing
+        && state.homeId === authority.homeId
+        && state.ordinal === authority.ordinal
+        && state.sessionId === authority.sessionId
+        && state.attemptId === authority.attemptId
+        && state.expectedPath === authority.expectedPath
+        && this.sessionManager.getSessionId() === authority.sessionId
+        && this.sessionManager.getSessionFile() === authority.expectedPath);
+      try { assertChapterWritable(state, ownsMaterialization); }
       catch (error) {
         if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
         throw error;

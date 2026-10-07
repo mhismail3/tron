@@ -27,8 +27,12 @@ profile. The chapter-state check is physical-session-owned and is not bypassed
 when Home is disabled. The Registry materializer claims one attempt per reserved
 chapter, scans every candidate before adoption or creation, and durably records
 the exact SDK path and attempt ID before the caller can receive the runtime.
-Unreadable, malformed, torn, duplicate, symlinked, or path-mismatched evidence
-blocks recovery without changing canonical bytes. Gateway JSONL and HTML exports
+The constructed RuntimeSlot owns immutable authority for that exact Home chapter,
+attempt, and path through its disposal; receipt persistence and the first
+conversation append use that same owner. Authority is checked against the live
+ledger and exact session identity, not granted by an individual operation or
+receipt lifetime. Unreadable, malformed, torn, duplicate, symlinked, or
+path-mismatched evidence blocks recovery without changing canonical bytes. Gateway JSONL and HTML exports
 are noncanonical destination writes owned by RuntimeSlot's existing temporary-
 artifact export boundary: it snapshots the canonical source into a fresh temporary
 directory, then registers that artifact. Home does not expose arbitrary SDK export
