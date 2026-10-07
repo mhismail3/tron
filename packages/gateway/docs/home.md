@@ -455,7 +455,10 @@ entry the file no longer holds is `timestamp-unavailable`.
 The recipe's tree navigation is otherwise unchanged, and both surfaces are
 exercised end to end by
 `packages/gateway/src/sessions/home-memory-tools.e2e.test.ts`
-(`test-results/home-memory-tools/report.json`).
+(`test-results/home-memory-tools/report.json`). The runtime lifecycle cases also
+retain `packages/gateway/test-results/home-provider-runtime/report.json`;
+regenerate it with `npx vitest run
+src/sessions/home-provider-runtime.e2e.test.ts`.
 
 ## Not built yet
 

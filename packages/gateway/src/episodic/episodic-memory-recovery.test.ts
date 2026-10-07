@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { constants, readFileSync } from "node:fs";
+import { constants, existsSync, readFileSync } from "node:fs";
 import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,6 +14,7 @@ import {
 } from "./episodic-contract.js";
 import { decodeContextRuns } from "./episodic-tree.js";
 import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /*
  * Crash and store recovery: a child process is SIGKILLed while it is writing
@@ -176,37 +177,26 @@ async function writeChildProgram(fx: RecoveryFixture, readyMarker: string): Prom
   const program = join(fx.root, "child.mjs");
   const hook = join(fx.root, "hook.mjs");
   await writeFile(hook, `import { registerHooks } from "node:module";\nimport { pathToFileURL } from "node:url";\nregisterHooks({\n  resolve(specifier, context, nextResolve) {\n    try { return nextResolve(specifier, context); }\n    catch (error) {\n      if (specifier.endsWith(".js")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n      throw error;\n    }\n  },\n});\nawait import(pathToFileURL(process.argv[1]).href);\n`, "utf8");
-  await writeFile(program, `import { existsSync } from "node:fs";\nimport { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId, marker] = process.argv.slice(2);\nconst zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  limits: { viewBytes: 4096, jobs: 4, retryMs: 1 },\n  summarizer: async (request) => {\n    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);\n    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };\n  },\n  sleep: async () => {},\n});\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("ready\\n");\n// The parent appends the edit and then drops this marker; the window we are\n// testing is inside the commit that follows.\nfor (;;) {\n  if (existsSync(marker)) break;\n  await new Promise(resolve => setTimeout(resolve, 1));\n}\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("done\\n");\n`, "utf8");
+  await writeFile(program, `import { existsSync } from "node:fs";\nimport { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId, marker] = process.argv.slice(2);\nconst zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  limits: { viewBytes: 4096, jobs: 4, retryMs: 1 },\n  summarizer: async (request) => {\n    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);\n    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };\n  },\n  sleep: async () => {},\n});\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("ready\\n");\n// The parent appends the edit and then drops this marker. Intercept the exact\n// invalidation append, after the catalog revision is durable and before it lands.\nfor (;;) {\n  if (existsSync(marker)) break;\n  await new Promise(resolve => setTimeout(resolve, 1));\n}\nconst owner = memory;\nconst append = owner.store.appendNode.bind(owner.store);\nowner.store.appendNode = async record => {\n  if (record.nodes) {\n    process.stdout.write("invalidation-window\\n");\n    // The unresolved await alone does not keep Node alive; retain a live handle\n    // so the parent can observe the exact crash window even when descheduled.\n    setInterval(() => {}, 1_000);\n    await new Promise(() => {});\n  }\n  await append(record);\n};\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("done\\n");\n`, "utf8");
   return { program, hook };
 }
 
-/** Polls a predicate on real timers. The bound is the test's: nothing here owns
- * a wall-clock deadline. */
-async function waitUntil(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  for (;;) {
-    if (await predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 2));
-  }
+/** Polling is test-owned, but every child observation has a local hang bound. */
+async function waitUntil(predicate: () => boolean | Promise<boolean>, label = "recovery condition"): Promise<void> {
+  await waitFor(async () => (await predicate()) || undefined, label);
 }
 
-/** Waits for the child's output to contain a line, without a deadline of its own:
- * the test's own timeout is the bound, and a child that exits first fails the
- * wait instead of hanging it. */
 async function waitForChildLine(child: ReturnType<typeof spawn>, text: string, output: () => string): Promise<void> {
-  for (;;) {
-    if (output().includes(text)) return;
+  await waitFor(() => {
+    if (output().includes(text)) return true;
     if (child.exitCode !== null || child.signalCode !== null) throw new Error(`child exited before printing ${text}: ${output()}`);
-    await new Promise(resolve => setTimeout(resolve, 2));
-  }
+    return undefined;
+  }, `child output line ${text}`);
 }
 
 async function waitForFileGrowth(path: string, lines: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if ((await readRecords(path)).length >= lines) return;
-    if (Date.now() > deadline) throw new Error(`store did not reach ${lines} records`);
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
+  await waitFor(async () => (await readRecords(path)).length >= lines || undefined,
+    `store to reach ${lines} records`, { boundMs: timeoutMs });
 }
 
 describe("episodic memory crash recovery", () => {
@@ -341,11 +331,12 @@ describe("episodic memory crash recovery", () => {
         return state.spend ?? 0;
       } catch { return 0; }
     };
-    const deadline = Date.now() + 30_000;
-    while ((await spendOf()) <= 0) {
-      if (Date.now() > deadline) throw new Error(`child recorded no spend; output: ${output}`);
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    await waitFor(async () => {
+      const spend = await spendOf();
+      if (spend > 0) return spend;
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error(`child exited before recording spend; output: ${output}`);
+      return undefined;
+    }, "child to durably record token spend", { boundMs: 30_000 });
     const durableSpend = await spendOf();
     child.kill("SIGKILL");
     await new Promise(resolve => child.once("exit", resolve));
@@ -572,11 +563,8 @@ describe("episodic memory crash recovery", () => {
   }, 120_000);
 
   it("repairs a catalog revision whose invalidation a crash lost", async () => {
-    // Enough nodes that the window between the catalog append and the
-    // invalidation is comfortably wider than the parent's poll interval, and a
-    // tree this test builds itself: the child's start-up commit is then a no-op
-    // read, so the ONLY work it does is the edit's invalidation and `ready` means
-    // ready rather than "the whole tree is finally built".
+    // Build once so the child reaches only the edit's invalidation. The exact
+    // append hook below, rather than tree size or a polling race, owns the crash.
     const fx = await fixture("window", 600);
     const prebuild = new TronWorkspace(fx.home);
     owners.push(prebuild);
@@ -597,44 +585,29 @@ describe("episodic memory crash recovery", () => {
 
     const marker = join(fx.root, "commit-marker");
     const { program, hook } = await writeChildProgram(fx, marker);
-    let editedText = "";
-    let hit = false;
-    // Each attempt owns its edit, its child and its marker: a missed window
-    // leaves nothing behind for the next attempt to trip over.
-    for (let attempt = 0; attempt < 3 && !hit; attempt += 1) {
-      const text = `edited in the crash window ${attempt}`;
-      const target = fx.manager.getBranch().filter(entry => entry.type === "message")[2 + attempt]!;
-      const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId, marker], { stdio: ["ignore", "pipe", "pipe"] });
-      children.push(child);
-      let output = "";
-      child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-      child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-      await waitForChildLine(child, "ready", () => output);
-      fx.manager.appendContextEdit(target.id, { content: text });
-      await writeFile(marker, "go", "utf8");
-      // Kill exactly inside the window: the catalog holds the new text and no
-      // invalidation record exists yet. No wall-clock deadline of its own — the
-      // test's own timeout is the bound, and a child that dies first fails here.
-      for (;;) {
-        if (readFileSync(fx.catalogPath, "utf8").includes(text) && !readFileSync(fx.nodesPath, "utf8").includes("\"nodes\":")) {
-          child.kill("SIGKILL");
-          await new Promise(resolve => child.once("exit", resolve));
-          hit = !readFileSync(fx.nodesPath, "utf8").includes("\"nodes\":");
-          if (hit) editedText = text;
-          break;
-        }
-        if (child.exitCode !== null) throw new Error(`child exited before the window: ${output}`);
-        await new Promise(resolve => setTimeout(resolve, 1));
-      }
-      if (!hit) {
-        if (child.exitCode === null) {
-          child.kill("SIGKILL");
-          await new Promise(resolve => child.once("exit", resolve));
-        }
-        await rm(marker, { force: true });
-      }
-    }
-    expect(hit, "the child was never killed inside the catalog/invalidation window").toBe(true);
+    const editedText = "edited in the crash window";
+    const target = fx.manager.getBranch().filter(entry => entry.type === "message")[2]!;
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId, marker], { stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    let output = "";
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    await waitForChildLine(child, "ready", () => output);
+    fx.manager.appendContextEdit(target.id, { content: editedText });
+    await writeFile(marker, "go", "utf8");
+    await waitForChildLine(child, "invalidation-window", () => output);
+    // Deliberately delay the observer: the child must remain parked, not exit
+    // naturally while the parent is descheduled after receiving its signal.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(child.exitCode, "child exited before the parent could kill it").toBeNull();
+    expect(readFileSync(fx.catalogPath, "utf8")).toContain(editedText);
+    expect(readFileSync(fx.nodesPath, "utf8")).not.toContain("\"nodes\":");
+    expect(child.kill("SIGKILL")).toBe(true);
+    const exit = await awaitsWithin(exited, "crash-window child to exit after SIGKILL");
+    expect(exit.signal).toBe("SIGKILL");
 
     // The window really is the inconsistent state: the live leaf's recorded
     // source digest no longer matches the catalog record it summarizes.
