@@ -51,6 +51,15 @@ restore authority supplies the epoch; this owner does not infer restore from
 ordinary startup. This owner is not wired to task dispatch in this slice, and
 there is no user-facing task authorization control yet.
 
+The shared `OwnedSessionDispatch` seam contains a fixed 24-hour wall-time
+ceiling. Only a caller that opts in owns that deadline; ordinary sessions and
+Automations do not inherit it. Expiry cancels the exact operation and waits for
+its terminal completion before reporting a joined stop. The
+`owned-operation.deadline-stop` diagnostic records only an opaque operation
+hash, elapsed time and whether cancellation joined. This helper is not task
+dispatch and does not prove the adversarial runaway contract until the
+step-4 faux-provider RuntimeSlot cases pass.
+
 ## The neutral working directory
 
 `<tronHome>/gateway/home/workspace` is created 0700 on the first designation and
