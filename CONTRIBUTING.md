@@ -52,7 +52,10 @@ agent execution, session state, inbox, badge, or reminder policy.
    that version range under `knownOneWayDeltas`; `package.json` remains the
    current-version authority. The updater performs online metadata preflight, uses the npm
    paired with the repository-pinned Node runtime, runs normal repository
-   lifecycle scripts with `--engine-strict`, and restores only its owned manifests plus
+   lifecycle scripts with `--engine-strict` and disables Python bytecode writes
+   during npm installs. Tests that require the pinned runtime use its verified
+   `.ci-tools` cache, not a mutable developer Node installation. The updater
+   restores only its owned manifests plus
    the disposable installed tree with `npm ci` if anything fails. No deployment or
    Gateway lifecycle command is part of dependency maintenance.
 9. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
