@@ -67,9 +67,19 @@ describe("episodic memory scale", () => {
         return built.has(nodeAddress(part.level, part.index)) ? { built: true, bytes: 250 } : { built: false, bytes: PLACEHOLDER_BYTES };
       };
       const started = performance.now();
-      const parts = await foldViewSliced(messages, 128_000, bytesOf, key => built.has(key));
+      let eventLoopTurns = 0;
+      let done = false;
+      const countTurn = (): void => {
+        eventLoopTurns += 1;
+        if (!done) setImmediate(countTurn);
+      };
+      setImmediate(countTurn);
+      const folding = foldViewSliced(messages, 128_000, bytesOf, key => built.has(key)).finally(() => { done = true; });
+      const parts = await folding;
+      const reference = foldView(messages, 128_000, bytesOf, key => built.has(key));
       report.refold.push({ messages, ms: performance.now() - started, parts: parts.length, worstSliceMs: worstSlice, sliceMessages: 2_000 });
-      expect(parts.length).toBeGreaterThan(0);
+      expect(parts).toEqual(reference);
+      expect(eventLoopTurns).toBeGreaterThan(1);
     }
     expect(report.refold).toHaveLength(2);
     // The sliced fold hands the loop back, so no single synchronous stretch is

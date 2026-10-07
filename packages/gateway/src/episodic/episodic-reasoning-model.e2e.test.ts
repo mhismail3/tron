@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { COMPACTOR_MAX_TOKENS, compactorRequest, createModelRuntimeSummarizer, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
@@ -39,6 +40,17 @@ async function endpoint(reply: () => Reply) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return { server, bodies, port: (server.address() as AddressInfo).port };
 }
+
+const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-reasoning-model/report.json");
+const report = { generatedAt: new Date().toISOString(), cases: [
+  "reasoning effort is minimized for supported and unsupported models",
+  "reasoning-only output blocks with an explicit reason",
+] };
+afterAll(async () => {
+  await mkdir(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model"), { recursive: true });
+  await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+});
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });

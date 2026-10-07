@@ -17,6 +17,7 @@ import {
 } from "./episodic-contract.js";
 import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 /*
  * End-to-end: a real canonical session in OS temp, driven incrementally through
@@ -628,29 +629,35 @@ describe("episodic memory end to end", () => {
     // through so a merge becomes startable beside the following leaf, and edit
     // an early message while both are in flight.
     fx.gate.paused = true;
-    for (let index = 60; index < 80; index += 1) {
-      fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
-      fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
-    }
-    const first = memory.entriesCommitted(fx.sessionId);
-    while (memory.status().pump.busy < 1) await new Promise(resolve => setTimeout(resolve, 2));
-    fx.gate.waiters.shift()?.();
-    while (memory.status().pump.busy < 2) await new Promise(resolve => setTimeout(resolve, 2));
-    const inFlight = fx.compactor.prompts.slice(promptMark);
-    expect(inFlight.some(prompt => prompt.includes("Compress this message into one line"))).toBe(true);
-    expect(inFlight.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
+    let preEditNodes!: ReturnType<typeof liveNodes>;
+    try {
+      for (let index = 60; index < 80; index += 1) {
+        fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
+        fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
+      }
+      const first = memory.entriesCommitted(fx.sessionId);
+      await waitFor(() => memory.status().pump.busy >= 1 || undefined, "first episodic build to enter flight");
+      fx.gate.waiters.shift()?.();
+      await waitFor(() => memory.status().pump.busy >= 2 || undefined, "second episodic build to enter flight");
+      const inFlight = fx.compactor.prompts.slice(promptMark);
+      expect(inFlight.some(prompt => prompt.includes("Compress this message into one line"))).toBe(true);
+      expect(inFlight.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
 
-    const preEditNodes = liveNodes(fx);
-    fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
-    const second = memory.entriesCommitted(fx.sessionId);
-    // Hold the parked builds until the invalidation is durable: that is the
-    // window the reviewer asked for, and it is provable from the log.
-    while (!readJsonlSafe(fx.nodesPath).some(record => typeof record.nodes === "string")) await new Promise(resolve => setTimeout(resolve, 2));
-    const released = fx.gate.waiters.splice(0);
-    fx.gate.paused = false;
-    for (const resolve of released) resolve();
-    await Promise.all([first, second]);
-    while (memory.status().pump.busy > 0) await new Promise(resolve => setTimeout(resolve, 2));
+      preEditNodes = liveNodes(fx);
+      fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
+      const second = memory.entriesCommitted(fx.sessionId);
+      // Hold the parked builds until the invalidation is durable: that is the
+      // window the reviewer asked for, and it is provable from the log.
+      await waitFor(() => readJsonlSafe(fx.nodesPath).some(record => typeof record.nodes === "string") || undefined, "episodic invalidation to become durable");
+      const released = fx.gate.waiters.splice(0);
+      fx.gate.paused = false;
+      for (const resolve of released) resolve();
+      await Promise.all([first, second]);
+      await waitFor(() => memory.status().pump.busy === 0 || undefined, "episodic pump to become idle");
+    } finally {
+      fx.gate.paused = false;
+      for (const resolve of fx.gate.waiters.splice(0)) resolve();
+    }
 
     const invalidations = readJsonlSafe(fx.nodesPath).filter(record => typeof record.nodes === "string");
     const invalidated = new Set(invalidations.flatMap(record => decodeCodes(record.nodes as string)));

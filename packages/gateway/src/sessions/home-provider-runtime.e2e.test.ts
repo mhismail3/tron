@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { GatewayConfig } from "../config.js";
@@ -26,6 +27,18 @@ const client = { id: "terminal", identity: "device:home-provider", isLocal: fals
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const summarizer: EpisodicSummarizer = async () => ({ role: "assistant", content: [{ type: "text", text: "user: summarized" }],
   api: "faux", provider: "faux", model: "summarizer", usage: zero, stopReason: "stop", timestamp: Date.now() }) as AssistantMessage;
+
+const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const REPORT_PATH = join(GATEWAY_ROOT, "test-results/home-provider-runtime/report.json");
+const report = { generatedAt: new Date().toISOString(), cases: [
+  "provider lifecycle reaches the Gateway-wide runtime",
+  "context-window override remains session-local",
+  "unregistered provider remains unreachable",
+] };
+afterAll(async () => {
+  await mkdir(join(GATEWAY_ROOT, "test-results/home-provider-runtime"), { recursive: true });
+  await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+});
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
