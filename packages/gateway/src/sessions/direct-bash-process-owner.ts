@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { join } from "node:path";
 import {
   createBashToolDefinition,
   getShellConfig,
@@ -7,7 +8,28 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const POST_EXIT_OUTPUT_GRACE_MS = 100;
+/** The most output after the shell exits may extend a call: a descendant that
+ * keeps writing to the inherited pipe (and may have left the process group)
+ * would otherwise re-arm the grace forever (#499 review). Settling destroys the
+ * pipe, so such a writer then fails on its next write. */
+const POST_EXIT_OUTPUT_MAX_MS = 2_000;
 const ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
+/** Pi's own bound on a bash timeout (the largest `setTimeout` delay). */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * The tool's `timeout` (seconds) as milliseconds, validated exactly as Pi's own
+ * bash operations do. `BashOperations.exec` owns the timeout: Pi's tool only
+ * passes it through, so operations that ignore it leave every command unbounded
+ * (#499: a call with timeout 900 ran 57 minutes until it was aborted).
+ */
+function resolveTimeoutMs(timeout: number | undefined): number | undefined {
+  if (timeout === undefined) return undefined;
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new Error("Invalid timeout: must be a finite number of seconds");
+  const timeoutMs = timeout * 1_000;
+  if (timeoutMs > MAX_TIMEOUT_MS) throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_MS / 1_000} seconds`);
+  return timeoutMs;
+}
 
 interface ActiveProcess {
   readonly child: ChildProcess;
@@ -68,6 +90,8 @@ export class DirectBashProcessOwner {
   private operations(): BashOperations {
     return {
       exec: async (command, cwd, options) => {
+        // Validated before the abort check, in Pi's order.
+        const timeoutMs = resolveTimeoutMs(options.timeout);
         if (options.signal?.aborted) throw new Error("aborted");
         const shell = getShellConfig(this.settings.getShellPath());
         const fromStdin = shell.commandTransport === "stdin";
@@ -108,12 +132,24 @@ export class DirectBashProcessOwner {
           if (options.signal.aborted) onAbort();
           else options.signal.addEventListener("abort", onAbort, { once: true });
         }
+        // The same freeze-then-kill of the owned tree as an abort, so a timed-out
+        // command cannot leave a descendant behind; `waitForChild` already settles
+        // shortly after the shell exits even if a straggler holds its output.
+        let timedOut = false;
+        const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+          timedOut = true;
+          this.terminateOwnedTree(child);
+        }, timeoutMs);
 
         try {
           const exitCode = await completion;
           if (active.aborted || options.signal?.aborted) throw new Error("aborted");
+          // Pi's tool reports this as "Command timed out after N seconds",
+          // keeping the output the command wrote.
+          if (timedOut) throw new Error(`timeout:${options.timeout}`);
           return { exitCode };
         } finally {
+          if (timer) clearTimeout(timer);
           options.signal?.removeEventListener("abort", onAbort);
           if (this.active.get(pid)?.child === child) this.active.delete(pid);
         }
@@ -125,15 +161,26 @@ export class DirectBashProcessOwner {
    * a child from escaping between discovery and termination. */
   private terminateOwnedTree(child: ChildProcess): void {
     const pid = child.pid;
-    if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+    if (pid === undefined) return;
     if (process.platform === "win32") {
+      if (child.exitCode !== null || child.signalCode !== null) return;
       try {
-        spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
+        // The trusted System32 executable, as Pi uses: cleanup must not depend on PATH.
+        const killer = spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], {
           detached: true,
           stdio: "ignore",
           windowsHide: true,
         });
+        // A failed spawn emits "error" asynchronously; an unconsumed one would crash the Gateway.
+        killer.once("error", () => {});
       } catch { /* process already exited */ }
+      return;
+    }
+    if (child.exitCode !== null || child.signalCode !== null) {
+      // The shell has exited, but descendants it left in its process group can
+      // still run and hold its output: kill the group, as Pi does. Descendants
+      // can no longer be found by ancestry once the root is gone.
+      try { process.kill(-pid, "SIGKILL"); } catch { /* group already gone */ }
       return;
     }
 
@@ -197,11 +244,13 @@ export class DirectBashProcessOwner {
       let exited = false;
       let exitCode: number | null = null;
       let grace: NodeJS.Timeout | undefined;
+      let postExitLimit: NodeJS.Timeout | undefined;
       let stdoutEnded = child.stdout === null;
       let stderrEnded = child.stderr === null;
 
       const cleanup = () => {
         if (grace) clearTimeout(grace);
+        if (postExitLimit) clearTimeout(postExitLimit);
         child.removeListener("error", onError);
         child.removeListener("exit", onExit);
         child.removeListener("close", onClose);
@@ -238,7 +287,10 @@ export class DirectBashProcessOwner {
         exited = true;
         exitCode = code;
         maybeFinish();
-        if (!settled) armGrace();
+        if (!settled) {
+          armGrace();
+          postExitLimit = setTimeout(() => finish(exitCode), POST_EXIT_OUTPUT_MAX_MS);
+        }
       };
       const onClose = (code: number | null) => finish(code);
 
