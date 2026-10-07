@@ -264,6 +264,10 @@ describe("Tron Home designation", () => {
     });
     expect(await homeStatus(f)).toEqual(before);
     expect(home.snapshot().model).toEqual(runtimeModel);
+    expect(f.diagnostics).toEqual([
+      { outcome: "designated" },
+      { outcome: "refused", reason: "model-change-requires-session-set-model" },
+    ]);
 
     const sameModel = await designate(f, "home-designate-enabled-same-model", MODEL);
     expect(sameModel).toEqual(original);

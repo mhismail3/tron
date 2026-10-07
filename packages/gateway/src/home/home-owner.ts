@@ -475,6 +475,7 @@ export class HomeOwner {
       if (existing && await this.options.sessions.sessionPresent(existing.sessionId)) {
         if (existing.enabled) {
           if (input.model && (input.model.provider !== existing.model.provider || input.model.id !== existing.model.id)) {
+            this.options.diagnostic?.({ outcome: "refused", reason: "model-change-requires-session-set-model" });
             throw new GatewayError("conflict", "Tron Home is already enabled with a different model; use session.setModel to change its model");
           }
           return designation(existing);
