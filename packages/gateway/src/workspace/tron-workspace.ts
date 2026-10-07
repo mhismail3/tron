@@ -174,8 +174,9 @@ export class TronWorkspace {
   }
 
   async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {
-    // Serialize read/check/publication, including duplicate initialization by
-    // concurrent sessions. Knowledge is the sole writer of the frozen record.
+    // Separate feature files remove cross-feature lost updates. This queue
+    // serializes same-feature check/publication so concurrent initialization
+    // does not republish valid evidence. Knowledge alone writes the frozen record.
     const write = this.markerWrites.then(async () => {
       if (await this.featureInitialized(feature)) return;
       await durableAtomicWriteJson(this.featureMarker(feature), feature === "knowledge"

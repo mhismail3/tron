@@ -26,11 +26,15 @@ function owner(home: string, unavailable?: (cause: TronWorkspaceUnavailableCause
   owners.push(value);
   return value;
 }
-/** The keys every shipped build accepts in the shared record. A shipped build
- * makes the whole workspace unavailable on any other key, and a rollback reads
- * what this build wrote, so this set is an external contract that never grows:
- * a new feature records its setup in its own file (#507). */
-const SHIPPED_SHARED_RECORD_KEYS = ["knowledgeInitialized", "version"];
+/** Verbatim contract from the shipped validator: rollback builds make the
+ * whole workspace unavailable if a newer build writes any other schema. */
+function shippedMainAcceptsSharedRecord(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return !Object.keys(record).some(key => key !== "version" && key !== "knowledgeInitialized")
+    && record.version === 1
+    && (record.knowledgeInitialized === undefined || typeof record.knowledgeInitialized === "boolean");
+}
 
 describe("Tron internal workspace", () => {
   it("initializes once, retains content, and does not create speculative namespaces", async () => {
@@ -189,15 +193,14 @@ describe("Tron internal workspace", () => {
     expect((await owner(home).describe()).available).toBe(true);
   });
 
-  // #507 F1, F2: every feature's setup leaves the shared record readable by
-  // shipped builds (a rollback), and concurrent first-time setup of two
-  // features keeps both records.
+  // #507 F1, F2: a rollback's shipped validator accepts the shared record,
+  // while concurrent first-time setup stores both features independently.
   it("records each feature's setup without changing what shipped builds read", async () => {
     const home = join(await fixture(), "home");
     const first = owner(home);
     await Promise.all([first.markFeatureInitialized("knowledge"), first.markFeatureInitialized("episodic")]);
-    const shared = JSON.parse(await readFile(join(home, "gateway/workspace-state/initialized.json"), "utf8")) as Record<string, unknown>;
-    expect(Object.keys(shared).filter(key => !SHIPPED_SHARED_RECORD_KEYS.includes(key))).toEqual([]);
+    const shared = JSON.parse(await readFile(join(home, "gateway/workspace-state/initialized.json"), "utf8")) as unknown;
+    expect(shippedMainAcceptsSharedRecord(shared)).toBe(true);
     await first.dispose();
     const reopened = owner(home);
     expect((await reopened.describe()).available).toBe(true);
@@ -245,12 +248,13 @@ describe("Tron internal workspace", () => {
     expect((await lstat(path)).ino).toBe(before.ino);
   });
 
-  it("does not republish valid feature evidence", async () => {
+  it("serializes concurrent duplicate feature marks into one publication", async () => {
     const value = owner(join(await fixture(), "home"));
-    await value.markFeatureInitialized("episodic");
+    await value.describe();
     const publish = vi.spyOn(durableJson, "durableAtomicWriteJson");
+    await Promise.all([value.markFeatureInitialized("episodic"), value.markFeatureInitialized("episodic")]);
     await value.markFeatureInitialized("episodic");
-    expect(publish).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 
   it("disposal closes initialization and releases its lock idempotently", async () => {

@@ -81,8 +81,8 @@ export class EpisodicStore {
     const paths = await this.paths();
     const initialized = await this.featureInitialized();
     if (!(await directoryExists(paths.root))) {
-      // The workspace-wide marker describes the shared container, never one
-      // session: reading it per session refused every Home after the first (#483).
+      // The feature record describes the shared container, never one session:
+      // reading it per session refused every Home after the first (#483).
       // Marker first: `ensureRoot` creates the container before it sets the
       // marker, so a set marker proves the container existed, and a container
       // created concurrently after a missing-container read cannot look lost.
@@ -188,8 +188,8 @@ export class EpisodicStore {
     await assertOwnerDirectory(paths.root, true);
     if (!(await fileExists(paths.initialized))) {
       await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
-      // The workspace marker is what tells a later start that a missing shared
-      // container is lost state rather than a fresh installation.
+      // The feature record tells a later start that a missing shared container
+      // is lost state rather than a fresh installation.
       try { await this.workspace.markFeatureInitialized("episodic"); }
       catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record could not be recorded"); }
     }
