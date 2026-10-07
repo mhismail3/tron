@@ -31,7 +31,10 @@ group/world-readable** one is **preserved and reported as unavailable**
 refuses with a conflict. Only `version` gates admission, so a record written
 against a newer `policyRevision` is still read, preserved and re-enabled. A
 record is never overwritten or migrated: an unusable one is not evidence that
-the user has no Home.
+the user has no Home. Runtime admission from Home's neutral workspace also
+refuses with a typed conflict while the record is unavailable; this is the
+installation's stable evidence that the session may be Home's. Sessions in
+ordinary project directories remain unaffected.
 
 ## The neutral working directory
 
@@ -158,7 +161,10 @@ prompt admission uses the same lane. The session identity, its subscribers, its
 presentation and its (possibly never-persisted) in-memory session manager all
 survive. If the session is not idle the mutation is refused with a retryable
 `busy` error and nothing changes. A session with no live runtime needs no
-rebuild: the next runtime creation reads the record.
+rebuild: the next runtime creation reads the record. Durable record commits use
+one serialization authority for memory and model updates; it is separate from
+the lifecycle mutex so a model callback arriving from a slot lane cannot invert
+the slot/lifecycle lock order.
 
 ## The terminal client
 

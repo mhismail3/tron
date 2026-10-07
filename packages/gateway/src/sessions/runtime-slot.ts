@@ -468,7 +468,7 @@ export interface RuntimeSlotDependencies {
    * creation, so a profile change is never cached past the runtime it applies
    * to. `unnamed` is the only state in which the explicit creation profile
    * applies. */
-  homeProfile?: (sessionId: string) => "home" | "ordinary" | "unnamed";
+  homeProfile?: (sessionId: string, cwd: string) => "home" | "ordinary" | "unnamed";
   /** Tron Home's request seam for one session id. Asked once per runtime
    * creation, never for a fork or an ordinary session. */
   homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
@@ -1578,7 +1578,7 @@ export class RuntimeSlot {
    * names it, and never a fork or a reset (which produce a new session id). */
   private isHomeProfile(sessionManager: SessionManager): boolean {
     const sessionId = sessionManager.getSessionId();
-    const decision = this.dependencies.homeProfile?.(sessionId) ?? "unnamed";
+    const decision = this.dependencies.homeProfile?.(sessionId, this.cwd) ?? "unnamed";
     if (decision === "home") return true;
     if (decision === "ordinary") return false;
     return this.explicitHomeSessionId === sessionId;

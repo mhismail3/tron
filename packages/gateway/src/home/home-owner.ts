@@ -120,6 +120,9 @@ export class HomeOwner {
   private readonly recordPath: string;
   private readonly workspacePath: string;
   private readonly mutex = new AsyncMutex();
+  /** Serializes durable record commits with model callbacks that arrive from a
+   * slot lane while a Home lifecycle mutation owns `mutex`. */
+  private readonly recordMutex = new AsyncMutex();
   /** One memory per Home session id. Released when the record stops naming it. */
   private memory: { sessionId: string; owner: HomeMemory } | undefined;
   /** One request seam per Home session id, so a runtime replacement reuses the
@@ -170,8 +173,11 @@ export class HomeOwner {
   /** What the record says about one session id. Runtime creation reads this for
    * every runtime it builds, so a replacement is never built from a stale
    * profile decision. */
-  profileFor(sessionId: string): HomeSessionProfile {
+  profileFor(sessionId: string, cwd?: string): HomeSessionProfile {
     const record = this.record;
+    if (this.unavailable && cwd === this.workspacePath) {
+      throw new GatewayError("conflict", `Tron Home is unavailable: ${this.unavailable}`);
+    }
     if (!record || record.sessionId !== sessionId) return "unnamed";
     return record.enabled ? "home" : "ordinary";
   }
@@ -256,7 +262,13 @@ export class HomeOwner {
       const memory = { model: { ...input.model } };
       const owner = this.ownerFor(record.sessionId);
       await owner.configure(memory);
-      await this.write({ ...record, memory, updatedAt: new Date().toISOString() });
+      await this.recordMutex.run(async () => {
+        const current = this.record;
+        if (!current || current.sessionId !== record.sessionId || !current.enabled) {
+          throw new GatewayError("conflict", "Tron Home changed while configuring its memory");
+        }
+        await this.writeLocked({ ...current, memory, updatedAt: new Date().toISOString() });
+      });
       // No designation diagnostic: configuring the memory is not a Home
       // lifecycle outcome. The memory reports itself on its own channel.
       return owner.status();
@@ -525,10 +537,12 @@ export class HomeOwner {
    * session while it is disabled is an ordinary session's change and is not.
    */
   async noteModelApplied(sessionId: string, model: ModelRef): Promise<void> {
-    const record = this.record;
-    if (!record || !record.enabled || record.sessionId !== sessionId) return;
-    if (record.model.provider === model.provider && record.model.id === model.id) return;
-    await this.write({ ...record, model: { ...model }, updatedAt: new Date().toISOString() });
+    await this.recordMutex.run(async () => {
+      const record = this.record;
+      if (!record || !record.enabled || record.sessionId !== sessionId) return;
+      if (record.model.provider === model.provider && record.model.id === model.id) return;
+      await this.writeLocked({ ...record, model: { ...model }, updatedAt: new Date().toISOString() });
+    });
   }
 
   private assertAvailable(): void {
@@ -559,6 +573,10 @@ export class HomeOwner {
   }
 
   private async write(record: HomeRecord): Promise<void> {
+    await this.recordMutex.run(() => this.writeLocked(record));
+  }
+
+  private async writeLocked(record: HomeRecord): Promise<void> {
     await durableAtomicWriteJson(this.recordPath, record);
     this.record = record;
   }

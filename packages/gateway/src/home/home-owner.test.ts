@@ -62,9 +62,9 @@ async function harness(): Promise<Harness> {
     trust: new TrustService(agentDir),
     sessions,
     workspace,
-    // Home's memory compactor is resolved from the Gateway's ModelRuntime; this
-    // harness never configures a memory that could use one.
-    memorySummarizer: () => ({ refusal: "unavailable" }),
+    // This deterministic summarizer lets record tests configure memory without
+    // reaching an external provider.
+    memorySummarizer: () => ({ summarizer: async () => "summary" }),
   });
   await owner.initialize();
   return {
@@ -119,6 +119,15 @@ describe("Tron Home record", () => {
     });
     expect(control.owner.profileFor("session-1")).toBe("home");
     expect(control.owner.profileFor("session-2")).toBe("unnamed");
+  });
+
+  it("refuses runtime admission from Home's workspace when the record is unavailable", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, "{broken", { mode: 0o600 });
+    await f.owner.initialize();
+    expect(() => f.owner.profileFor("session-1", f.workspacePath)).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(f.owner.profileFor("ordinary-session", f.root)).toBe("unnamed");
   });
 
   it("preserves an unknown-version record instead of migrating it", async () => {
@@ -277,6 +286,19 @@ describe("Tron Home record", () => {
     f.live.delete(first.sessionId);
     await f.owner.designate({}, () => other);
     expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ model: other });
+  });
+
+  it("preserves concurrent memory and chat-model updates", async () => {
+    const f = await harness();
+    const designated = await f.owner.designate({ model: MODEL }, defaultModel);
+    const memoryModel = { provider: "openai", id: "memory-model" };
+    const chatModel = { provider: "openai", id: "chat-model" };
+    await Promise.all([
+      f.owner.configureMemory({ model: memoryModel }),
+      f.owner.noteModelApplied(designated.sessionId, chatModel),
+    ]);
+    expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ model: chatModel, memory: { model: memoryModel } });
+    await f.owner.dispose();
   });
 
   it("tracks a model applied to the enabled Home session, and ignores other sessions", async () => {

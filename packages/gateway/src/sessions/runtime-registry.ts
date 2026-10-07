@@ -1655,7 +1655,7 @@ export class RuntimeRegistry {
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
-      homeProfile: (sessionId: string) => this.home.profileFor(sessionId),
+      homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
