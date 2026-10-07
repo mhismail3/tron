@@ -96,7 +96,7 @@ sends zero warm requests, while an ordinary session in the same Gateway and on
 the same model does warm.
 
 MCP is excluded structurally — no MCP extension is loaded for Home — rather than
-by omission from the allowlist, because from SDK 1.0.0 an allowlist that names no
+by omission from the allowlist, because from SDK 1.0.4 an allowlist that names no
 `mcp__*` tool keeps MCP tools registered.
 
 Compaction is disabled through the constructor option of the existing
