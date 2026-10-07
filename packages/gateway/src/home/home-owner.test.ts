@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,21 +23,30 @@ interface Harness {
   replaced: string[];
   present: Set<string>;
   live: Set<string>;
+  holdProfileCommit(): { entered: Promise<void>; release(): void };
 }
 
 /** A port that records the calls the owner makes, so the assertions stay about
  * the owner's own decisions (record bytes, generations, session identity) and
  * never about a mocked mechanism. */
-async function harness(): Promise<Harness> {
+async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "tron-home-owner-"));
   roots.push(root);
   const agentDir = join(root, "agent");
+  const tronHome = join(root, options.symlinkHome ? "tron-link" : "tron");
+  const actualTronHome = options.symlinkHome ? join(root, "tron-real") : tronHome;
   await mkdir(agentDir);
+  if (options.symlinkHome) {
+    await mkdir(actualTronHome);
+    await symlink(actualTronHome, tronHome);
+  }
   const created: string[] = [];
   const replaced: string[] = [];
   const present = new Set<string>();
   const live = new Set<string>();
   let sequence = 0;
+  let replaceGate: Promise<void> | undefined;
+  let replaceEntered!: () => void;
   const sessions: HomeSessionPort = {
     createHomeSession: async () => {
       const sessionId = `session-${++sequence}`;
@@ -52,13 +61,17 @@ async function harness(): Promise<Harness> {
     hasLiveRuntime: (sessionId) => live.has(sessionId),
     replaceRuntimeForProfile: async (sessionId, commit) => {
       replaced.push(sessionId);
+      if (replaceGate) {
+        replaceEntered();
+        await replaceGate;
+      }
       await commit();
     },
   };
-  const workspace = new TronWorkspace(join(root, "tron"), );
+  const workspace = new TronWorkspace(join(root, "tron-workspace"));
   workspaces.push(workspace);
   const owner = new HomeOwner({
-    tronHome: join(root, "tron"),
+    tronHome,
     trust: new TrustService(agentDir),
     sessions,
     workspace,
@@ -70,13 +83,22 @@ async function harness(): Promise<Harness> {
   return {
     root,
     owner,
-    recordPath: join(root, "tron", "gateway", "home", "home.json"),
-    directory: join(root, "tron", "gateway", "home"),
-    workspacePath: join(root, "tron", "gateway", "home", "workspace"),
+    recordPath: join(tronHome, "gateway", "home", "home.json"),
+    directory: join(tronHome, "gateway", "home"),
+    workspacePath: join(actualTronHome, "gateway", "home", "workspace"),
     created,
     replaced,
     present,
     live,
+    holdProfileCommit: () => {
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      let enteredResolve!: () => void;
+      const entered = new Promise<void>(resolve => { enteredResolve = resolve; });
+      replaceEntered = enteredResolve;
+      replaceGate = gate;
+      return { entered, release: () => { replaceGate = undefined; release(); } };
+    },
   };
 }
 
@@ -123,10 +145,25 @@ describe("Tron Home record", () => {
 
   it("refuses runtime admission from Home's workspace when the record is unavailable", async () => {
     const f = await harness();
+    await mkdir(f.workspacePath, { recursive: true });
     await mkdir(f.directory, { recursive: true });
     await writeFile(f.recordPath, "{broken", { mode: 0o600 });
     await f.owner.initialize();
-    expect(() => f.owner.profileFor("session-1", f.workspacePath)).toThrow(expect.objectContaining({ code: "conflict" }));
+    await f.owner.initialize();
+    const canonicalWorkspace = await realpath(f.workspacePath);
+    expect(() => f.owner.profileFor("session-1", canonicalWorkspace)).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(f.owner.profileFor("ordinary-session", f.root)).toBe("unnamed");
+  });
+
+  it("matches unavailable Home workspace identity through a symlinked installation path", async () => {
+    const f = await harness({ symlinkHome: true });
+    await mkdir(f.workspacePath, { recursive: true });
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, "{broken", { mode: 0o600 });
+    await f.owner.initialize();
+    await f.owner.initialize();
+    const canonicalWorkspace = await realpath(f.workspacePath);
+    expect(() => f.owner.profileFor("former-home", canonicalWorkspace)).toThrow(expect.objectContaining({ code: "conflict" }));
     expect(f.owner.profileFor("ordinary-session", f.root)).toBe("unnamed");
   });
 
@@ -286,6 +323,19 @@ describe("Tron Home record", () => {
     f.live.delete(first.sessionId);
     await f.owner.designate({}, () => other);
     expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ model: other });
+  });
+
+  it("merges a model update completed while disable waits for the slot lane", async () => {
+    const f = await harness();
+    const designated = await f.owner.designate({ model: MODEL }, defaultModel);
+    const chatModel = { provider: "openai", id: "chat-model-during-disable" };
+    const gate = f.holdProfileCommit();
+    const disabling = f.owner.disable();
+    await gate.entered;
+    await f.owner.noteModelApplied(designated.sessionId, chatModel);
+    gate.release();
+    await disabling;
+    expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ enabled: false, model: chatModel });
   });
 
   it("preserves concurrent memory and chat-model updates", async () => {

@@ -469,6 +469,9 @@ export interface RuntimeSlotDependencies {
    * to. `unnamed` is the only state in which the explicit creation profile
    * applies. */
   homeProfile?: (sessionId: string, cwd: string) => "home" | "ordinary" | "unnamed";
+  /** Recorded chat model for an enabled Home, applied when reconstructing an
+   * unloaded runtime instead of restoring the transcript's incidental model. */
+  homeModel?: (sessionId: string) => { provider: string; id: string } | undefined;
   /** Tron Home's request seam for one session id. Asked once per runtime
    * creation, never for a fork or an ordinary session. */
   homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
@@ -1695,10 +1698,18 @@ export class RuntimeSlot {
       }
       const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager);
       this.directBashProcesses = directBashProcesses;
+      const recordedHomeModel = home ? this.dependencies.homeModel?.(sessionManager.getSessionId()) : undefined;
+      const homeModel = recordedHomeModel
+        ? modelRuntime.getModel(recordedHomeModel.provider, recordedHomeModel.id)
+        : undefined;
+      if (recordedHomeModel && !homeModel) {
+        throw new GatewayError("conflict", "Tron Home's recorded model is no longer available");
+      }
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
+        ...(homeModel ? { model: homeModel } : {}),
         // The allowlist is Home's executable ceiling. MCP tools cannot appear
         // under it because no MCP extension is loaded, and Tron's direct bash
         // tool is not registered at all for Home.

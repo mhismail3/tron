@@ -303,7 +303,7 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
     .map((entry) => (entry as { message?: Record<string, unknown> }).message!);
 }
 
-describe.sequential("Tron Home activations end to end", () => {
+describe("Tron Home activations end to end", () => {
   // progress.md C12 (#466), the property Home exists for: the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -41,7 +41,7 @@ function homeCase(name: string, body: () => Promise<void>): void {
       report.cases.push({ name, outcome: "failed", detail: error instanceof Error ? error.message : String(error) });
       throw error;
     }
-  });
+  }, 30_000);
 }
 
 const roots: string[] = [];
@@ -131,13 +131,18 @@ function openRegistry(f: {
   return { registry, service };
 }
 
-async function fixture(label: string, options: { cacheWarming?: boolean; virtualModel?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { cacheWarming?: boolean; virtualModel?: boolean; symlinkHome?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
-  const tronHome = join(root, "tron");
+  const tronHome = join(root, options.symlinkHome ? "tron-link" : "tron");
   await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+  if (options.symlinkHome) {
+    const actualTronHome = join(root, "tron-real");
+    await mkdir(actualTronHome);
+    await symlink(actualTronHome, tronHome);
+  }
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     defaultProvider: PROVIDER,
     defaultModel: MODEL_ID,
@@ -242,7 +247,48 @@ const HOME_EXTENSIONS = [
  * the assertions read it. */
 const HOME_TOOLS = ["ask_user", "date", "display", "memory_search", "notify", "zoom"];
 
-describe.sequential("Tron Home designation", () => {
+describe("Tron Home designation", () => {
+  homeCase("refuses a former Home after record corruption without blocking ordinary provider requests", async () => {
+    const f = await fixture("corrupt-record", { symlinkHome: true });
+    const designation = await designate(f, "home-designate-corrupt-record");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-before-corruption" });
+    await home.setModel(PROVIDER, MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("before corruption")]);
+    await home.prompt("establish the session transcript");
+    await waitUntil(() => f.faux.state.callCount === 1);
+    await waitUntil(() => !home.isBusy);
+    const requestsBeforeCorruption = f.faux.state.callCount;
+    expect(requestsBeforeCorruption).toBe(1);
+
+    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), "{broken", { mode: 0o600 });
+    await reopen(f);
+    await waitForCatalog(f);
+    let admissionError: unknown;
+    try {
+      const admitted = await f.registry.acquire(designation.sessionId);
+      // Negative-control path: without the guard the former Home is an ordinary
+      // runtime and sends its canonical transcript to the provider.
+      f.faux.setResponses([fauxAssistantMessage("unprotected Home request")]);
+      await admitted.prompt("must not reach provider after corruption");
+      await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
+      await waitUntil(() => !admitted.isBusy);
+    } catch (error) {
+      admissionError = error;
+    }
+    if (!admissionError) expect(f.faux.state.callCount).toBe(requestsBeforeCorruption + 1);
+    expect(admissionError).toMatchObject({ code: "conflict" });
+    expect(f.faux.state.callCount).toBe(requestsBeforeCorruption);
+
+    const ordinary = await f.registry.create(f.cwd);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("ordinary remains available")]);
+    await ordinary.prompt("ordinary control");
+    await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
+    await waitUntil(() => !ordinary.isBusy);
+    expect(f.faux.state.callCount).toBe(requestsBeforeCorruption + 1);
+  });
+
   homeCase("gives a new Home the curated first runtime and leaves ordinary sessions unchanged", async () => {
     // Failure modes 12-17, 19, 21, 22.
     const f = await fixture("profile", { virtualModel: true });
@@ -499,6 +545,27 @@ describe.sequential("Tron Home designation", () => {
     const home = await f.registry.acquire(fresh.sessionId);
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
     expect(await homeStatus(f)).toMatchObject({ enabled: true, sessionId: fresh.sessionId, live: true, sessionPresent: true });
+  });
+
+  homeCase("restores the recorded model when re-enabling an unloaded Home", async () => {
+    const f = await fixture("model-unloaded", { virtualModel: true });
+    const designation = await designate(f, "home-designate-model-unloaded");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-model-unloaded" });
+    await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
+    expect(home.snapshot().model).toMatchObject({ id: VIRTUAL_MODEL_ID });
+    expect((await homeStatus(f)).model).toEqual(MODEL);
+    f.faux.setResponses([fauxAssistantMessage("persist disabled transcript")]);
+    await home.prompt("persist the disabled session");
+    await waitUntil(() => !home.isBusy);
+
+    await reopen(f);
+    await waitForCatalog(f);
+    expect((await homeStatus(f)).live).toBe(false);
+    await designate(f, "home-reenable-model-unloaded");
+    const restored = await f.registry.acquire(designation.sessionId);
+    expect(restored.snapshot().model).toMatchObject({ provider: PROVIDER, id: MODEL_ID });
+    expect((await homeStatus(f)).model).toEqual(MODEL);
   });
 
   homeCase("applies the recorded physical model when re-enabling a Home whose session moved on", async () => {

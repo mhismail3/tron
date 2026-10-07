@@ -33,7 +33,8 @@ against a newer `policyRevision` is still read, preserved and re-enabled. A
 record is never overwritten or migrated: an unusable one is not evidence that
 the user has no Home. Runtime admission from Home's neutral workspace also
 refuses with a typed conflict while the record is unavailable; this is the
-installation's stable evidence that the session may be Home's. Sessions in
+canonical installation workspace identity that distinguishes sessions which
+may be Home's, including installations reached through a symlink. Sessions in
 ordinary project directories remain unaffected.
 
 ## The neutral working directory
@@ -112,7 +113,9 @@ The model is resolved at designation: the model named in the request, or — onl
 for a fresh session — this Gateway's default for new sessions. Re-enabling a
 disabled Home resolves the request's model, else the one the record was last
 designated with, and applies it to the live session through the normal
-`session.setModel` path when the live model differs. A virtual (routed) model is
+`session.setModel` path when the live model differs. When the runtime is unloaded,
+runtime construction supplies the recorded Home model explicitly rather than
+restoring an incidental model from the transcript. A virtual (routed) model is
 refused at every one of those points, because routing runs on the canonical
 transcript, which the Home profile does not own. `session.setModel` refuses a
 virtual model for a Home session too, and any model applied to the *enabled* Home
@@ -161,10 +164,11 @@ prompt admission uses the same lane. The session identity, its subscribers, its
 presentation and its (possibly never-persisted) in-memory session manager all
 survive. If the session is not idle the mutation is refused with a retryable
 `busy` error and nothing changes. A session with no live runtime needs no
-rebuild: the next runtime creation reads the record. Durable record commits use
-one serialization authority for memory and model updates; it is separate from
-the lifecycle mutex so a model callback arriving from a slot lane cannot invert
-the slot/lifecycle lock order.
+rebuild: the next runtime creation reads the record, including its model.
+Lifecycle updates merge against the current record at the serialized profile
+commit boundary. Durable record commits use one serialization authority for
+memory and model updates; it is separate from the lifecycle mutex so a model
+callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 
 ## The terminal client
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeStatus, ModelRef } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
@@ -118,7 +118,7 @@ export interface HomeOwnerOptions {
 export class HomeOwner {
   private readonly directory: string;
   private readonly recordPath: string;
-  private readonly workspacePath: string;
+  private workspacePath: string;
   private readonly mutex = new AsyncMutex();
   /** Serializes durable record commits with model callbacks that arrive from a
    * slot lane while a Home lifecycle mutation owns `mutex`. */
@@ -144,6 +144,15 @@ export class HomeOwner {
 
   /** Load the durable record once, before any runtime can ask for a profile. */
   async initialize(): Promise<void> {
+    // Runtime cwd is canonicalized by TrustService; match that identity even
+    // when the installation path itself contains symlinks.
+    try {
+      this.workspacePath = await realpath(this.workspacePath);
+    } catch {
+      // A malformed record can still coexist with an uncreated workspace. Its
+      // existing parent is enough to canonicalize the future child identity.
+      try { this.workspacePath = join(await realpath(this.directory), "workspace"); } catch { /* no Home directory yet */ }
+    }
     await this.load();
   }
 
@@ -168,6 +177,13 @@ export class HomeOwner {
       sessionPresent: await this.options.sessions.sessionPresent(record.sessionId),
       memory,
     };
+  }
+
+  /** The admitted model for the enabled Home at the runtime construction
+   * boundary; ordinary sessions keep their transcript-selected model. */
+  modelFor(sessionId: string): ModelRef | undefined {
+    const record = this.record;
+    return record?.enabled && record.sessionId === sessionId ? { ...record.model } : undefined;
   }
 
   /** What the record says about one session id. Runtime creation reads this for
@@ -436,19 +452,19 @@ export class HomeOwner {
         // The model is the request's, else the one the record was last
         // designated with; both were admitted before they were recorded.
         const model = input.model ?? existing.model;
-        const next: HomeRecord = {
-          ...existing,
-          enabled: true,
-          generation: existing.generation + 1,
-          // Re-enabling applies this build's profile, so the record states the
-          // revision that is now in force rather than a superseded one.
-          policyRevision: HOME_POLICY_REVISION,
-          model: { ...model },
-          updatedAt: new Date().toISOString(),
-        };
-        await this.commitProfileChange(next.sessionId, next);
-        // A recorded session that is not live needs no runtime work; the next
-        // runtime creation reads the record and the model with it.
+        let next: HomeRecord | undefined;
+        await this.commitProfileChange(existing.sessionId, current => {
+          next = {
+            ...current,
+            enabled: true,
+            generation: current.generation + 1,
+            policyRevision: HOME_POLICY_REVISION,
+            model: { ...model },
+            updatedAt: new Date().toISOString(),
+          };
+          return next;
+        });
+        if (!next) throw new Error("Home re-enable did not commit its record");
         if (this.options.sessions.hasLiveRuntime(next.sessionId)) {
           await this.options.sessions.applySessionModel(next.sessionId, model);
         }
@@ -508,19 +524,23 @@ export class HomeOwner {
       const existing = this.record;
       if (!existing) throw new GatewayError("not_found", "Tron Home is not designated");
       if (!existing.enabled) return designation(existing);
-      const next: HomeRecord = {
-        ...existing,
-        enabled: false,
-        generation: existing.generation + 1,
-        updatedAt: new Date().toISOString(),
+      let next: HomeRecord | undefined;
+      const update = (current: HomeRecord): HomeRecord => {
+        next = { ...current, enabled: false, generation: current.generation + 1, updatedAt: new Date().toISOString() };
+        return next;
       };
       // A session that is gone needs no runtime work; a live one is rebuilt in
       // place, which is also where a running session is refused.
-      if (await this.options.sessions.sessionPresent(next.sessionId)) {
-        await this.commitProfileChange(next.sessionId, next);
+      if (await this.options.sessions.sessionPresent(existing.sessionId)) {
+        await this.commitProfileChange(existing.sessionId, update);
       } else {
-        await this.write(next);
+        await this.recordMutex.run(async () => {
+          const current = this.record;
+          if (!current || current.sessionId !== existing.sessionId) throw new GatewayError("conflict", "Tron Home changed while disabling");
+          await this.writeLocked(update(current));
+        });
       }
+      if (!next) throw new Error("Home disable did not commit its record");
       // Only once the change is committed: a refused (busy) disable must leave
       // the memory and the activation waiting in it exactly as they were.
       // Re-enabling re-opens the memory from the record and the store keeps every
@@ -553,9 +573,15 @@ export class HomeOwner {
 
   /** Commit the record and rebuild the live runtime in one serialized step, so a
    * prompt cannot be admitted between the idle check, the write and the rebuild. */
-  private async commitProfileChange(sessionId: string, record: HomeRecord): Promise<void> {
+  private async commitProfileChange(sessionId: string, update: (current: HomeRecord) => HomeRecord): Promise<void> {
     try {
-      await this.options.sessions.replaceRuntimeForProfile(sessionId, async () => { await this.write(record); });
+      await this.options.sessions.replaceRuntimeForProfile(sessionId, async () => {
+        await this.recordMutex.run(async () => {
+          const current = this.record;
+          if (!current || current.sessionId !== sessionId) throw new GatewayError("conflict", "Tron Home changed during profile update");
+          await this.writeLocked(update(current));
+        });
+      });
     } catch (error) {
       if (error instanceof GatewayError && error.code === "busy") {
         this.options.diagnostic?.({ outcome: "refused", reason: "session-busy" });
@@ -569,7 +595,8 @@ export class HomeOwner {
   private async ensureWorkspace(): Promise<string> {
     await mkdir(this.workspacePath, { recursive: true, mode: 0o700 });
     await chmod(this.workspacePath, 0o700);
-    return this.options.trust.canonicalDirectory(this.workspacePath);
+    this.workspacePath = await this.options.trust.canonicalDirectory(this.workspacePath);
+    return this.workspacePath;
   }
 
   private async write(record: HomeRecord): Promise<void> {
