@@ -366,9 +366,9 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   full suite instead, because `vitest related` cannot select a test that still
   imports a deleted module and the build excludes tests.
 - **Gateway scale** runs the dedicated scale suite when one of its own
-  `*.scale.test.ts` files or an explicitly exercised Knowledge source/helper
-  changes. It stays separate from the ordinary source selector so unrelated
-  Gateway changes do not pay for the large corpus tests.
+  `*.scale.test.ts` files, `vitest.scale.config.ts`, or an explicitly exercised
+  Knowledge source/helper changes. It stays separate from the ordinary source
+  selector so unrelated Gateway changes do not pay for the large corpus tests.
 - **iOS** runs the source, build-matrix and archive-privacy policy scripts,
   then `scripts/tron-ios-test build`. For changed test files, verify derives
   their declared suites only when every non-private top-level declaration is a

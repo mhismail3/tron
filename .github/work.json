@@ -332,7 +332,9 @@
           "packages/gateway/src/knowledge/*.scale.test.ts",
           "packages/gateway/src/knowledge/knowledge-catalog.ts",
           "packages/gateway/src/knowledge/knowledge-contract.ts",
+          "packages/gateway/src/knowledge/knowledge-curation.ts",
           "packages/gateway/src/knowledge/knowledge-observation.ts",
+          "packages/gateway/src/knowledge/paid-budget-ledger.ts",
           "packages/gateway/src/knowledge/knowledge-service.ts",
           "packages/gateway/src/knowledge/knowledge-store.ts",
           "packages/gateway/src/knowledge/knowledge-tagger.ts",
@@ -341,7 +343,8 @@
           "packages/gateway/src/knowledge/source-capture.ts",
           "packages/gateway/src/workspace/tron-workspace.ts",
           "packages/gateway/src/protocol/json-budget.ts",
-          "packages/gateway/test-support/connector-credentials.ts"
+          "packages/gateway/test-support/connector-credentials.ts",
+          "packages/gateway/vitest.scale.config.ts"
         ],
         "command": "cd packages/gateway && npx vitest run --config vitest.scale.config.ts --maxWorkers=2"
       },
