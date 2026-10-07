@@ -56,7 +56,10 @@ export interface AgentInstructionsInput {
   tools: { name: string; promptGuidelines?: string[]; sourceInfo: SourceInfoLike }[];
 }
 
-const SESSION_SECTIONS = new Set(["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd"]);
+// Pi 0.99.2's MCP extension sets this section before each prompt and appends
+// changed content to the conversation (changelog, issue #10212), so this is
+// session context rather than a turn-only addition.
+const SESSION_SECTIONS = new Set(["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd", "mcp_servers"]);
 const TRON_HEADING = "## Tron operating context\n";
 const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 

@@ -235,8 +235,8 @@ describe("persisted-state upgrade corpus recorder", () => {
       await rich.setModel(CORPUS_FAUX_PROVIDER, CORPUS_FAUX_MODEL_ALT);
       await rich.setModel(CORPUS_FAUX_PROVIDER, CORPUS_FAUX_MODEL);
       await rich.setThinking("high");
-      const stdioTool = `mcp__${CORPUS_MCP_SERVERS[0]}__echo`;
-      const oauthTool = `mcp__${CORPUS_MCP_SERVERS[1]}__echo`;
+      const stdioTool = `mcp__${CORPUS_MCP_SERVERS[0]!.replaceAll("-", "_")}__echo`;
+      const oauthTool = `mcp__${CORPUS_MCP_SERVERS[1]!.replaceAll("-", "_")}__echo`;
       await waitFor(async () => ((await rich.context()) as { availableTools: Array<{ name: string }> }).availableTools
         .some((tool) => tool.name === stdioTool), "the stdio MCP tool");
 
@@ -297,15 +297,16 @@ describe("persisted-state upgrade corpus recorder", () => {
       await waitFor(() => !rich.isBusy, "the second corpus turn to settle");
       await rich.compact("Corpus compaction summary");
       await waitFor(() => rich.snapshot().phase === "idle", "the corpus compaction to settle");
-      // The transcript's last model change names the provider 1.0.3 renames and
-      // the model whose synthetic key `auth.json` holds, so reopening this
-      // session restores the saved selection instead of falling back to a
-      // default.
+      // The transcript's last model change names the provider key and model
+      // whose synthetic credential `auth.json` holds, so reopening restores
+      // the saved selection instead of falling back to a default.
       await rich.setModel(CORPUS_AZURE_PROVIDER, CORPUS_AZURE_MODEL);
-      const generationTools = ((await rich.context()) as { availableTools: Array<{ name: string }> }).availableTools.map((tool) => tool.name);
+      // `availableTools` is prompt-specific and does not necessarily include
+      // every exposure the scenario exercised. Persist the fixture-declared tool
+      // names so reopen must prove both MCP servers resolve them.
       const servers: CorpusServerObservation[] = CORPUS_MCP_SERVERS.map((name) => ({
         name,
-        tools: generationTools.filter((tool) => tool.startsWith(`mcp__${name}__`)).sort(),
+        tools: CORPUS_STDIO_TOOLS.map((tool) => `mcp__${name.replaceAll("-", "_")}__${tool.name}`).sort(),
       }));
       const richFile = rich.sessionFile!;
 
@@ -314,9 +315,8 @@ describe("persisted-state upgrade corpus recorder", () => {
       faux.setResponses([fauxAssistantMessage("corpus provider key turn complete")]);
       await providerKey.prompt("corpus turn: the saved provider key session");
       await waitFor(() => !providerKey.isBusy, "the provider key turn to settle");
-      // Its last model change names the provider 1.0.3 renames, so reopening it
-      // is what proves a persisted selection still resolves without the scenario
-      // provider the recording streamed with.
+      // Reopening it proves the persisted selection resolves without the
+      // scenario provider the recording streamed with.
       await providerKey.setModel(CORPUS_AZURE_PROVIDER, CORPUS_AZURE_MODEL);
       const providerKeyFile = providerKey.sessionFile!;
       await registry.dispose();

@@ -31,15 +31,18 @@ and the test assert that from the JSONL rather than from this list:
 | Tron invocation receipts | `custom` entries with `customType: "tron.chat-invocation.v1"` |
 | the per-chat tool selection | the first system message's `toolsAdded` |
 | a user image | the first user message's image content block |
-| a direct hyphenated MCP tool call | a `toolResult` naming `mcp__corpus-mcp__echo` |
+| a direct hyphenated MCP tool call | a `toolResult` naming `mcp__corpus_mcp__echo` |
 | codemode nested calls | the `codemode` `toolResult`'s `nestedCalls` (a successful call) |
 | a tool-search loadout delta | the `tool_search` result's `details.loaded`, and the later system message that declares the loaded tool |
-| the searched tool called afterwards | a `toolResult` naming `mcp__corpus-oauth__echo` |
+| the searched tool called afterwards | a `toolResult` naming `mcp__corpus_oauth__echo` |
 | `context_edit`, compaction | their own canonical entries |
 | a sibling branch | two entries sharing one parent |
 
 `src/sessions/pi-persisted-state-corpus.integration.test.ts` reopens the corpus
-with the **installed** SDK and compares it against the manifest.
+with the **installed** SDK and compares it against the manifest. For a differential
+reopen of a prior corpus outside the worktree, set
+`TRON_PI_PERSISTED_STATE_CORPUS_DIR` to that corpus directory; the same assertions
+then compare its recorded manifest with the current SDK's observations.
 
 Absolute host paths, the Node installation, the fixture paths, the live MCP port
 and the extension owner ids (a sha256 of an extension's source and resolved path)
@@ -68,10 +71,10 @@ would notice an SDK that stopped reading an old user's session.
 
 The rollback probe (`packages/gateway/scripts/pi-session-compatibility-probe.mjs`,
 driven by `packages/gateway/scripts/check-pi-sdk-rollback.mjs`) writes and rereads
-0.99-only payloads through Pi's public `SessionManager` APIs: `codemode-store`,
+current-SDK payloads through Pi's public `SessionManager` APIs: `codemode-store`,
 virtual-model state and `model_change`, tool-search loadout deltas, canonical
-`nestedCalls`, and parent `details.tronNested`. It checks that both 0.99 and the
-0.87.1 reader preserve the JSONL entries, parent result content and structured
+`nestedCalls`, and parent `details.tronNested`. It checks that both the current
+reader and the rollback reader (`pi-sdk-baseline.json` `rollbackVersion`) preserve the JSONL entries, parent result content and structured
 content through read/append/reopen cycles. Files are isolated in disposable
 directories; they are not a Tron session format.
 

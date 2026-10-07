@@ -38,7 +38,7 @@ describe("codemode classifier usage projection", () => {
     await trust.set(cwd, true);
     const faux = fauxProvider({ provider: "tron-codemode-classify-cost", tokensPerSecond: 10_000 });
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("codemode", { code: `const model = await models.getModelOfType("classifier", "typesafe", "jev-latest"); const result = await models.classify(model, { state: { text: "classifier usage fixture" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?" } } }); return JSON.stringify(result);` }, { id: "classify-parent" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("codemode", { code: `const model = await models.getModelOfType("classifier", "typesafe", "jev-latest"); const result = await models.classify(model, { state: { text: "classifier usage fixture" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?", criteria: { true: "Relevant.", false: "Not relevant." } } } }); return JSON.stringify(result);` }, { id: "classify-parent" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("classification complete"),
     ]);
     const modelRuntimeFactory = async () => {

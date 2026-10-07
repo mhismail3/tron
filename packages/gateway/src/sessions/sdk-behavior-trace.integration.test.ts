@@ -79,12 +79,12 @@ const CODEMODE_SCRIPT = [
   'const model = await models.getModelOfType("classifier", "typesafe", "jev-latest");',
   'let classified = "classify-unavailable";',
   "try {",
-  '  const answer = await models.classify(model, { state: { text: "boundary state" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?" } } });',
+  '  const answer = await models.classify(model, { state: { text: "boundary state" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?", criteria: { true: "Relevant.", false: "Not relevant." } } } });',
   "  classified = JSON.stringify(answer);",
   '} catch (error) { classified = "classify-error: " + String(error && error.message ? error.message : error); }',
   'let scripted = "scripted-mcp-unavailable";',
-  // Pi exposes a codemode tool under its JavaScript-safe identifier, which is
-  // how the scripted MCP server (a hyphenated name) is reachable from a script.
+  // Pi's normalized tool name uses underscores for the configured hyphenated
+  // MCP server, and that same identifier is available in codemode.
   'try { scripted = asText(await tools.mcp__tron_script__echo({ value: "scripted" })); } catch (error) { scripted = "scripted-mcp-unavailable"; }',
   'lines.push("classified=" + classified);',
   'lines.push("scripted=" + scripted);',
@@ -245,7 +245,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     recordRequest(context);
     await delay();
     return fauxAssistantMessage([
-      fauxToolCall("mcp__tron-fixture__echo", { value: "direct" }, { id: "trace-mcp-direct" }),
+      fauxToolCall("mcp__tron_fixture__echo", { value: "direct" }, { id: "trace-mcp-direct" }),
       fauxToolCall("tool_search", { query: "Echo the boundary fixture value" }, { id: "trace-tool-search" }),
     ], { stopReason: "toolUse" });
   });
@@ -254,7 +254,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
   steps.push(async (context) => {
     recordRequest(context);
     await delay();
-    return fauxAssistantMessage([fauxToolCall("mcp__tron-script__echo", { value: "loaded-by-search" }, { id: "trace-mcp-loaded" })], { stopReason: "toolUse" });
+    return fauxAssistantMessage([fauxToolCall("mcp__tron_script__echo", { value: "loaded-by-search" }, { id: "trace-mcp-loaded" })], { stopReason: "toolUse" });
   });
   steps.push(async (context) => {
     recordRequest(context);
@@ -443,13 +443,22 @@ function expectScenarioValid(trace: BehaviorTrace): void {
   const results = trace.transcript.filter((item) => field(item, "kind") === "message" && field(item, "role") === "toolResult");
   const resultText = (item: TraceValue): string => traceText(field(item, "content"));
   expect(results.map(resultText).filter((text) => text.includes("not found"))).toEqual([]);
-  for (const name of ["read", "codemode", "mcp__tron-fixture__echo", "tool_search", "mcp__tron-script__echo"]) {
+  for (const name of ["read", "codemode", "mcp__tron_fixture__echo", "tool_search", "mcp__tron_script__echo"]) {
     expect(results.some((item) => field(item, "toolName") === name && field(item, "isError") === false), `${name} must have succeeded`).toBe(true);
   }
   const search = results.find((item) => field(item, "toolName") === "tool_search");
-  expect(field(field(search, "details"), "loaded")).toEqual(["mcp__tron-script__echo"]);
-  const codemode = resultText(results.find((item) => field(item, "toolName") === "codemode") ?? null);
+  expect(field(field(search, "details"), "loaded")).toEqual(["mcp__tron_script__echo"]);
+  const codemodeResult = results.find((item) => field(item, "toolName") === "codemode");
+  const codemode = resultText(codemodeResult ?? null);
   expect(codemode).toContain("nested=boundary notes");
+  expect(codemode).not.toContain("[Image saved to ");
+  expect(Array.isArray(field(codemodeResult, "content"))
+    && (field(codemodeResult, "content") as TraceValue[]).some((part) => field(part, "type") === "image"))
+    .toBe(true);
+  const canonicalCodemodeResult = trace.canonicalJsonl.find((entry) =>
+    field(field(entry, "message"), "role") === "toolResult"
+    && field(field(entry, "message"), "toolName") === "codemode");
+  expect(traceText(field(field(canonicalCodemodeResult, "message"), "content"))).toContain("[Image saved to ");
   // The classifier answered through the real TypeSafe path: a request was made
   // and Pi parsed its response.
   expect(codemode).toContain('"api":"typesafe-system-one"');

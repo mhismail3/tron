@@ -6,7 +6,7 @@ import { fauxAssistantMessage, fauxProvider, getCurrentSystemPrompt, type Transc
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
-import type { AgentInstructions } from "./agent-instructions.js";
+import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 // The Agent Instructions sheet claims to show what the model receives. These
@@ -100,6 +100,18 @@ async function turn(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("Agent Instructions projection through the pinned runtime", () => {
+  it("classifies Pi's MCP server section as persisted session context", () => {
+    const instructions = projectAgentInstructions({
+      prompt: "Pi prompt.\n\n<mcp_servers>\nMCP servers whose tools are not declared to you.\n- mcp__example (codemode): Example server\n</mcp_servers>\n\n<cwd>\n/work\n</cwd>",
+      tronContext: "## Tron operating context\nTron context.",
+      append: [], contextFiles: [], skills: [], tools: [],
+    });
+
+    expect(instructions.sections.find(section => section.id === "mcp_servers")).toMatchObject({
+      timing: "session", source: { kind: "pi" },
+    });
+  });
+
   it("accounts for every byte the model receives, idle and mid-turn, with attributed sections", async () => {
     const f = await fixture();
     const idle = await instructions(f.slot);

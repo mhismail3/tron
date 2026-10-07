@@ -62,41 +62,6 @@ it identifies the backing SDK contract.
 
 ## Pi SDK boundary map
 
-The SDK host composes Pi's `codemode`, `tool-search`, and `mcp` built-in
-extension factories for session runtimes and session-free resource loads; the
-SDK does not load these factories automatically. Scoped `-builtin:<name>`
-settings control the shared list. MCP may activate codemode or tool-search when
-server exposure requires them, even when they are not `defaultTools` entries.
-
-Pi owns nested execution and canonical session JSONL. Nested tool calls remain
-children of the parent result, never independent transcript rows or receipts.
-New sessions materialize at the first user or assistant message; setup-only
-state before that remains in memory, and receipts appended before first-message
-materialization flush with that message. `runtime-registry.integration.test.ts`
-covers first-message persistence and cold reopen.
-
-Pi's built-in MCP extension and its `mcp.json` files are the only MCP client and
-configuration authority. Gateway binds global config and credentials to its
-agent directory and admits project config only through the trust owner. The
-session-bound sign-in relay routes Pi's own authorization URL and loopback
-callback; see [MCP servers](docs/mcp.md) for accepted transport and credential
-deltas.
-
-`GlobalProviderResources` replays virtual-model registrations. The picker marks
-them virtual, while routed physical responses own effective context limits and
-usage/cost attribution. Process-global Pi markdown/select/settings helpers pin
-the `dark` theme because the Gateway has no terminal and the SDK exposes no
-per-instance global setter; the host-owned RPC callback palette is separate.
-P99-19 tracks an upstream setter request.
-
-Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
-Knowledge, session search, and the first-party tool. Tron retains bounded input,
-qualified pre-dispatch price ceilings, assessment versions, and dispatch
-certainty; credentials remain in Pi's provider store. TypeSafe model behavior
-and actual pricing can change without a Tron release.
-
-## Pi SDK boundary map
-
 `RuntimeSlot` composes Pi's `codemode`, `tool-search`, and `mcp` built-in
 extension factories for session runtimes; session-free hook/package loads use
 the same composition. The SDK does not load these built-ins automatically.
@@ -106,6 +71,11 @@ activate codemode or tool-search for its exposure needs even when neither is a
 
 Pi owns nested execution and canonical session JSONL. Nested tool calls remain
 children of their parent result, not independent transcript rows or receipts.
+Pi's codemode `image()` label (`[Image saved to <temp path> …]`, written ahead
+of each image) stays in canonical JSONL and the model-facing result, but every
+client projection hides it (`visibleToolResultContent` in
+`src/sessions/projection.ts`): transcript rows and live tool output, result and
+partial result. The raw-entry history inspector shows canonical text unchanged.
 New sessions materialize at the first user or assistant message; earlier
 setup-only state remains in memory, while accepted receipts appended before
 that message are flushed with the first persisted message. The
@@ -228,6 +198,10 @@ otherwise it marks the cut unavailable with an explicit reason.
 
 ## Pi SDK maintenance
 
+Provider IDs and credentials follow the Pi catalog. Tron does not migrate or
+alias a retired provider ID (including `azure-openai-responses` to `azure`), so
+persisted selections that name a removed ID may no longer resolve.
+
 `packages/gateway/package.json` is the sole Pi SDK version authority. The four
 runtime dependencies (`pi-agent-core`, `pi-ai`, `pi-coding-agent`, and `pi-tui`)
 must always be exact, equal versions. The checker validates every recognized Pi
@@ -236,9 +210,10 @@ cohort and the canonical registry; it does not require optional historical
 packages that a newer coding-agent no longer depends on. The published package
 preflight covers the known family (`pi-client`, `pi-protocol`, `pi-telemetry`,
 and `chord` included); 0.87.1 adds `chord` and removes coding-agent's direct
-`pi-client`/`pi-protocol` dependencies. npm's native nested `pi-coding-agent`
-shrinkwrap entries may omit integrity while retaining their canonical registry
-URL. The executable authority is npm's `node_modules/.bin/pi` projection: it must
+`pi-client`/`pi-protocol` dependencies. The checker also recognizes legacy
+coding-agent shrinkwrap entries when they occur in a rollback dependency graph;
+those entries may omit integrity while retaining a canonical registry URL. The
+executable authority is npm's `node_modules/.bin/pi` projection: it must
 be a symlink to the declared `bin.pi` executable inside `pi-coding-agent`, and
 payload runtime aliases must target `../../app/node_modules/.bin/pi` exactly.
 Check the source state offline with `npm run check:pi-sdk`. Staged production
@@ -311,11 +286,12 @@ input path, which can be removed with the upload; it is not a guaranteed
 navigable parent. Imported entries remain self-contained for reopen and context. Pi 0.87 also applies the active model's initial image-resize
 profile before attachments, `read` results and tool-result images enter history;
 Gateway must preserve the source upload and avoid pre-resizing prompt images a
-second time. Pi 0.99 does not normalize images on its queued steer/follow-up path
-and cannot decode HEIC on either path, so `UploadStore` inlines only png, jpeg,
-gif and webp uploads. Any other `image/*` is claimed as a path-envelope file
-attachment. An inline image a provider rejects would be replayed by every later
-request in its session (#407). Update focused owner tests and this boundary map when ownership
+second time. `UploadStore` inlines only png, jpeg, gif and webp uploads; any other
+`image/*` is claimed as a path-envelope file attachment. Pi's 1.0.4 queue APIs
+accept supplied `AgentMessage` values directly, so images queued as steer or
+follow-up must already be valid for the provider rather than relying on Pi to
+normalize them. An inline image a provider rejects would be replayed by every
+later request in its session (#407). Update focused owner tests and this boundary map when ownership
 changes. Keep a candidate's detailed version matrix in its GitHub epic until
 closeout; do not turn this paragraph into a second change tracker.
 
@@ -382,21 +358,21 @@ and its description and rule lines reach the prompt. The Gateway check that runs
 this file is macOS. Tron-owned prompt text (Tron's tool snippets, rule lines and
 operating context) is part of what the model is sent, so it is part of the
 golden: a Tron change to those surfaces updates this golden in the same pull
-request, and the diff names exactly which text moved. Masking it was rejected
-because the SDK's own tool-declaration wording sits in the same field: four of
-the 1.0.4 trial's 42 hunks rewrite the codemode declaration of Tron's own
-`display`, `computer`, `ask_user` and `jev` tools, and masking those descriptions
-would hide them.
+request, and the diff names exactly which text moved. Keep the full field: it
+contains Tron-owned prompt text alongside the SDK's own tool declarations, so
+masking one would hide changes to the other.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
 any event, persistence, projection, packaging, UI, or UX difference as a
 behavior-delta stop: do not normalize it silently; compare current and candidate
 behavior and obtain an explicit product decision before continuing. For this
-seam the comparison is the trace above: an SDK-upgrade pull request reviews that
-diff hunk by hunk, classifies each hunk as inherited, adapted with evidence, or
-not applicable, and only then updates the golden. A hunk the reviewer cannot
-explain is the stop, not a reason to normalize the trace further.
+seam, the comparison is the trace above: review its diff hunk by hunk, classify
+each hunk as inherited, adapted with evidence, or not applicable, and only then
+update the golden. A hunk the reviewer cannot explain is the stop, not a reason
+to normalize the trace further. Keep candidate-specific evidence and accepted
+exceptions in the issue and the owning focused documentation rather than
+repeating the ledger here.
 
 ## Ownership
 

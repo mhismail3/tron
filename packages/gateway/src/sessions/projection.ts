@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 
@@ -246,7 +247,7 @@ function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; 
  * detail objects remain structured JSON and are never guessed into user-facing
  * output. The newest tail is retained because command tools stream cumulative
  * output and the current lines are the most useful audit evidence. */
-export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES): {
+export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES, toolName?: string): {
   output?: string;
   outputTruncated?: true;
 } {
@@ -283,11 +284,19 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
     retainedBytes += textBytes + 1;
     return false;
   };
-  const visitReverse = (candidate: unknown, depth = 0): boolean => {
+  const visitReverse = (candidate: unknown, depth = 0, filterCodemodeImageLabels = false): boolean => {
     if (depth > 4 || candidate === null || candidate === undefined) return false;
     if (typeof candidate === "string") return addNewest(candidate);
     if (Array.isArray(candidate)) {
       for (let index = candidate.length - 1; index >= 0; index -= 1) {
+        if (filterCodemodeImageLabels && index > 0) {
+          const visiblePair = visibleToolResultContent("codemode", [candidate[index - 1], candidate[index]]);
+          if (visiblePair.length === 1) {
+            if (visitReverse(visiblePair[0], depth + 1)) return true;
+            index -= 1;
+            continue;
+          }
+        }
         if (visitReverse(candidate[index], depth + 1)) return true;
       }
       return false;
@@ -300,7 +309,16 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
     if (typeof record.text === "string") return addNewest(record.text);
     return false;
   };
-  visitReverse(value);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.content)) {
+      visitReverse(record.content, 1, toolName === "codemode");
+    } else {
+      visitReverse(value);
+    }
+  } else {
+    visitReverse(value);
+  }
   if (retainedNewestFirst.length === 0) return {};
   // Reverse traversal prepends each older block, so the collector is already
   // in display order. Reversing it here would make newest output appear first.
@@ -344,7 +362,7 @@ export function mergeLiveToolOutput(
 /** The JSON frame stays bounded independently from the readable live-output
  * channel. If Pi streams a huge text result, retain only a recent tail here too
  * rather than serializing the whole value before projectJson can compact it. */
-export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonValue {
+export function projectToolResult(value: unknown, maximumBytes = 24_000, toolName?: string): JsonValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return projectJson(value, maximumBytes);
   const record = value as Record<string, unknown>;
   if (!Array.isArray(record.content)) {
@@ -362,7 +380,7 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonVa
   // Retain at most the newest content rows before cloning any row. Each row is
   // projected independently so a giant detail object cannot be spread into an
   // unbounded intermediate result.
-  const content = record.content.slice(-128).map((part) => {
+  const content = visibleToolResultContent(toolName ?? "", record.content.slice(-128)).map((part) => {
     if (!part || typeof part !== "object" || Array.isArray(part)) return part;
     const source = part as Record<string, unknown>;
     // Tail the source scalar before generic JSON projection. Otherwise
@@ -1024,7 +1042,16 @@ export function fitSessionSnapshot(
 type MessageContentBlock<M> = M extends { content: infer C } ? C extends readonly unknown[] ? C[number] : never : never;
 export type PiMessageContentBlock = MessageContentBlock<AgentMessage>;
 
-type ProjectableContent = string | Array<PiMessageContentBlock>;
+type ProjectableContent = string | readonly PiMessageContentBlock[];
+
+const PI_CODEMODE_IMAGE_SAVED_TEXT = /^\[Image saved to ([^\r\n]+) \((image\/(?:png|jpeg|gif|webp)), (?:\d+B|\d+\.\d(?:KB|MB))\)\]$/;
+const PI_CODEMODE_IMAGE_PATH = /(?:^|[\\/])pi-codemode-[a-f0-9]{16}\.(png|jpg|gif|webp)$/;
+const PI_CODEMODE_IMAGE_MIME_BY_EXTENSION = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+} as const;
 
 const ATTACHMENT_TAG = /<attachment\b([^<>]*?)\s*\/>/g;
 const ATTACHMENT_ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
@@ -1232,6 +1259,48 @@ function projectContent(
   return decorateToolGroups(projected, ownerId, finalizedToolGroups, segmentId);
 }
 
+function isPiCodemodeImageSavedText(text: string, followingImageMimeType: string): boolean {
+  const saved = PI_CODEMODE_IMAGE_SAVED_TEXT.exec(text);
+  if (!saved || saved[2] !== followingImageMimeType || !isAbsolute(saved[1]!)) return false;
+  const file = PI_CODEMODE_IMAGE_PATH.exec(saved[1]!);
+  return file !== null && PI_CODEMODE_IMAGE_MIME_BY_EXTENSION[file[1] as keyof typeof PI_CODEMODE_IMAGE_MIME_BY_EXTENSION] === saved[2];
+}
+
+/**
+ * Pi's `image()` adds this label before the image block (pi-coding-agent's
+ * `extensions/codemode/execute.js:243`). Hide only that exact pair in client
+ * projections; the source result remains authoritative and unchanged.
+ */
+export function visibleToolResultContent<T>(toolName: string, content: readonly T[]): readonly T[] {
+  if (toolName !== "codemode") return content;
+  let visible: T[] | undefined;
+  for (let index = 0; index < content.length; index += 1) {
+    const part = content[index] as unknown;
+    const following = content[index + 1] as unknown;
+    const isText = part !== null && typeof part === "object"
+      && (part as Record<string, unknown>).type === "text"
+      && typeof (part as Record<string, unknown>).text === "string";
+    const isImage = following !== null && typeof following === "object"
+      && (following as Record<string, unknown>).type === "image"
+      && typeof (following as Record<string, unknown>).mimeType === "string";
+    if (isText && isImage && isPiCodemodeImageSavedText(
+      (part as { text: string }).text,
+      (following as { mimeType: string }).mimeType,
+    )) {
+      visible ??= content.slice(0, index);
+      continue;
+    }
+    visible?.push(content[index]!);
+  }
+  return visible ?? content;
+}
+
+function projectToolResultContent(content: ProjectableContent, toolName: string, blobs: BlobStore, ownerId: string): ContentPart[] {
+  return projectContent(visibleToolResultContent(toolName, typeof content === "string" ? [
+    { type: "text", text: content } as PiMessageContentBlock,
+  ] : content), blobs, ownerId);
+}
+
 export interface ToolProjectionMetadata {
   toolSegmentId?: string;
   groupId?: string;
@@ -1303,7 +1372,7 @@ export function projectMessage(
         kind: "message",
         role: "toolResult",
         presentationId,
-        content: projectContent(message.content, blobs, presentationId),
+        content: projectToolResultContent(message.content, message.toolName, blobs, presentationId),
         toolCallId: message.toolCallId,
         toolName: message.toolName,
         ...(toolLabels?.get(message.toolName) ? { toolLabel: toolLabels.get(message.toolName)! } : {}),

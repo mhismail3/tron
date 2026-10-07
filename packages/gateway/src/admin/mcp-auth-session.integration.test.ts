@@ -169,12 +169,12 @@ describe("MCP auth through a live Gateway session", () => {
     expect(requests).toContain(`GET ${challengePath}`);
     expect(requests).not.toContain("GET /.well-known/oauth-protected-resource");
     const persisted = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
-    expect(Object.keys(persisted)).toEqual([`${origin}/mcp`]);
+    expect(Object.keys(persisted)).toEqual([`mcp__fixture|${origin}/mcp`]);
     expect(registrationCount).toBe(1);
     expect(authQuery?.get("code_challenge_method")).toBe("S256");
     // The fixture expires the sign-in token in one second, so Pi refreshes it and
     // persists the rotation before the session's next turn.
-    expect(persisted[`${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
+    expect(persisted[`mcp__fixture|${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
     expect(refreshCount).toBe(1);
 
     faux.setResponses([
@@ -188,7 +188,7 @@ describe("MCP auth through a live Gateway session", () => {
     expect(toolResult?.content?.map((block: any) => block.type === "text" ? block.text : "").join("\\n")).toContain("worked:next-turn");
     expect(events.filter((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url")).toHaveLength(1);
     const afterTurn = JSON.parse(await readFile(join(agentDir, "mcp-auth.json"), "utf8"));
-    expect(afterTurn[`${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
+    expect(afterTurn[`mcp__fixture|${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
     expect(refreshCount).toBe(1);
     const toolOutput = toolResult?.content?.map((block: any) => block.type === "text" ? block.text : "").join("\\n") ?? "";
     const artifact = { rpcStarted: true, authTarget: authEvent.target, authUrlRelayed: true, callbackForwarded: callbackResult.forwarded,
