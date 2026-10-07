@@ -80,6 +80,34 @@ function catalogRecords(text: string): Array<Record<string, unknown>> {
 }
 
 describe("episodic canonical source reader", () => {
+  it("treats a SessionManager-created header-only session as an empty history", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-episodic-source-header-only-"));
+    roots.push(root);
+    const sessionDir = join(root, "sessions");
+    const projectDir = join(root, "project");
+    await Promise.all([mkdir(sessionDir, { recursive: true }), mkdir(projectDir, { recursive: true })]);
+    const sessionFile = join(sessionDir, "header-only.jsonl");
+    await writeFile(sessionFile, "");
+    // Opening the empty file makes Pi's SessionManager initialize it with its
+    // canonical session header and no entries.
+    const manager = SessionManager.open(sessionFile, sessionDir, projectDir);
+    const sessionId = manager.getSessionId();
+    const cut = await readCanonicalSession({ path: sessionFile, sessionId, maxLineBytes: 1_024 * 1_024 });
+    expect(cut.branch).toEqual([]);
+    expect(cut.leafEntryId).toBeNull();
+
+    const workspace = new TronWorkspace(join(root, "home"));
+    owners.push(workspace);
+    const memory = await EpisodicMemory.open({
+      workspace, sessionId, sessionFile, summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+    });
+    await memory.entriesCommitted(sessionId);
+    expect(memory.status().messages).toBe(0);
+    expect(memory.status().blocked).toBeNull();
+    await memory.dispose();
+  });
+
   it("ignores a trailing partial line, leaves the file byte-identical, and ingests it once completed", async () => {
     const fx = await fixture("partial");
     fx.manager.appendMessage(fauxAssistantMessage([{ type: "text", text: "second reply" }]));

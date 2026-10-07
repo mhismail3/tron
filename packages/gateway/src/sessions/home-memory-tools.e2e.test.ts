@@ -24,6 +24,7 @@
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { waitFor } from "../../test-support/wait-for.js";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall,
@@ -209,14 +210,8 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
 const sessionOf = (f: Fixture): AgentSession => (f.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
 const managerOf = (f: Fixture) => sessionOf(f).sessionManager;
 
-function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 20_000): Promise<void> {
-  const deadline = performance.now() + timeoutMs;
-  return (async () => {
-    while (!(await predicate())) {
-      if (performance.now() >= deadline) throw new Error("condition timed out");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  })();
+function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 12_000): Promise<void> {
+  return waitFor(async () => (await predicate()) || undefined, "Home memory tool condition", { boundMs: timeoutMs });
 }
 
 async function memoryStatus(f: Fixture): Promise<HomeMemoryStatus> {

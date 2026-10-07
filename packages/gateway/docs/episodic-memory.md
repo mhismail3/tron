@@ -36,8 +36,13 @@ it the commits the runtime reports, and sends each activation the view it render
   When the file only grew, it reads from the offset and extends the branch it
   already knows; it falls back to a whole-file read when the identity changed,
   the file shrank, the line before the offset no longer matches, or the new
-  entries do not chain onto that branch. A whole-file read is bounded per line
-  and never repairs or migrates the file.
+  entries do not chain onto that branch. This is an append-only contract: Pi
+  owns the session file and appends entries; an external same-length in-place
+  rewrite outside the checked 8 KiB prefix window is not detected. We do not
+  hash the retained prefix on each read: that would add O(session size) I/O and
+  hashing to each incremental commit (50 MB per read for a 50 MB session) to
+  defend against an external edit Pi does not perform. A whole-file read is
+  bounded per line and never repairs or migrates the file.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
@@ -425,6 +430,9 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 - `packages/gateway/test-results/episodic-memory/scale.json` — the refold
   timings and worst synchronous slice, the context-encoding sizes, and the
   1,000-message invalidation (`npm run test:scale`).
+- `packages/gateway/test-results/episodic-reasoning-model/report.json` — the
+  reasoning-model end-to-end cases (`npx vitest run
+  src/episodic/episodic-reasoning-model.e2e.test.ts`).
 
 ## Home's use of this module
 
