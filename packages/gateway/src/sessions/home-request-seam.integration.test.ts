@@ -271,6 +271,119 @@ async function open(label: string, options: FixtureOptions = {}) {
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe.sequential("Home request seam inside the Gateway runtime", () => {
+  // F1: Pi's supported image replacement must not look like a context mutation.
+  // Disable resizing here to isolate the settings-aware converter at the guard.
+  it("C21 image conversion follows live session settings without rebuilding", async () => {
+    const item = await open("c21", { home: true, memory: true, settings: { images: { blockImages: true, autoResize: false } } });
+    const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
+    item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
+    for (const blocked of [true, false]) {
+      item.session.settingsManager.setBlockImages(blocked);
+      const text = `C21 image input blocked=${blocked}`;
+      const before = item.requests.length;
+      await item.slot.prompt(text, [image]);
+      await waitUntil(() => !item.slot.isBusy);
+      const requests = item.requests.slice(before);
+      item.record("C21", { autoResize: false, blocked, requests, refusals: item.policy()!.refusalLog() });
+      expect(requests).toHaveLength(1);
+      const messages = JSON.parse(requests[0]!.blob) as Array<{ role: string; content: unknown }>;
+      const input = messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes(text));
+      expect(input?.content).toEqual([
+        { type: "text", text },
+        blocked ? { type: "text", text: "Image reading is disabled." } : image,
+      ]);
+    }
+  }, 30_000);
+
+  // F2: accepting the SDK converter must not authorize arbitrary stream edits.
+  it("C22 arbitrary message mutation after context conversion is refused", async () => {
+    const item = await open("c22", { home: true, memory: true });
+    item.faux.setResponses([item.response("prior activation response")]);
+    await item.slot.prompt(longInput("C22 prior input"));
+    await waitUntil(() => !item.slot.isBusy);
+    const policy = item.policy()!;
+    policy.admit("c22", null);
+    const prepared = policy.wrapPrepareRequest(item.session, undefined);
+    const projection = item.session.sessionManager.buildSessionProjection();
+    const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
+    const transformed = await policy.wrapTransformContext(undefined, item.session.agent.convertToLlm)((update as { context: { messages: AgentMessage[] } }).context.messages, undefined);
+    const messages = convertToLlm(transformed);
+    const input = messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes("C22 prior input"))!;
+    input.content = [{ type: "text", text: "C22 mutated input" }];
+    let innerCalls = 0;
+    const inner = (() => {
+      innerCalls += 1;
+      return { [Symbol.asyncIterator]: async function* () {} };
+    }) as unknown as StreamFn;
+    const guard = policy.wrapStreamFunction(inner);
+    let outcome = "returned";
+    try {
+      guard(item.faux.getModel(), { messages } as unknown as Parameters<StreamFn>[1], {} as Parameters<StreamFn>[2]);
+    } catch (error) {
+      outcome = error instanceof Error ? error.message : String(error);
+    }
+    const row = { outcome, refusal: policy.refusalLog().at(-1)?.reason, innerCalls };
+    item.record("C22", row);
+    expect(row.refusal).toBe("stream-digest");
+    expect(row.innerCalls).toBe(0);
+    policy.settle("c22");
+  }, 30_000);
+
+  // F4: the default SDK image path must behave identically for Home and an
+  // ordinary session. Exercise Pi's resize routine directly on this fixture too.
+  it("C23 default image handling matches an ordinary session for both block states", async () => {
+    const item = await open("c23", { home: true, memory: true });
+    const ordinary = await item.extra("ordinary");
+    const ordinarySession = (ordinary.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
+    const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
+    const cases = [] as Array<Record<string, unknown>>;
+    for (const blocked of [true, false]) {
+      item.session.settingsManager.setBlockImages(blocked);
+      ordinarySession.settingsManager.setBlockImages(blocked);
+      const text = `C23 default image input blocked=${blocked}`;
+      const homeStart = item.requests.length;
+      item.faux.setResponses([item.response("home response")]);
+      await item.slot.prompt(text, [image]);
+      await waitUntil(() => !item.slot.isBusy);
+      const homeRequests = item.requests.slice(homeStart);
+      expect(homeRequests).toHaveLength(1);
+      const homeRequest = homeRequests.at(-1);
+      const ordinaryStart = item.requests.length;
+      item.faux.setResponses([item.response("ordinary response")]);
+      await ordinary.slot.prompt(text, [image]);
+      await waitUntil(() => !ordinary.slot.isBusy);
+      const ordinaryRequests = item.requests.slice(ordinaryStart);
+      expect(ordinaryRequests).toHaveLength(1);
+      const ordinaryRequest = ordinaryRequests.at(-1);
+      const userContent = (request: CapturedRequest | undefined) => {
+        const messages = JSON.parse(request?.blob ?? "[]") as Array<{ role: string; content: unknown }>;
+        return messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes(text))?.content;
+      };
+      const homeContent = userContent(homeRequest);
+      const ordinaryContent = userContent(ordinaryRequest);
+      expect(homeContent).toBeDefined();
+      expect(ordinaryContent).toBeDefined();
+      cases.push({ blocked, homeContent, ordinaryContent, equal: JSON.stringify(homeContent) === JSON.stringify(ordinaryContent) });
+    }
+    const resizeCoreUrl = new URL("../../node_modules/@earendil-works/pi-coding-agent/dist/utils/image-resize-core.js", import.meta.url);
+    const { resizeImageInProcess } = await import(resizeCoreUrl.href);
+    const resizeResult = await resizeImageInProcess(Buffer.from(image.data, "base64"), image.mimeType);
+    let photonImportError: string | undefined;
+    let photonDecodeError: string | undefined;
+    try {
+      const photon = await import(new URL("../../node_modules/@earendil-works/pi-coding-agent/node_modules/@silvia-odwyer/photon-node/photon_rs.js", import.meta.url).href);
+      let decoded: { free(): void } | undefined;
+      try {
+        decoded = photon.PhotonImage.new_from_byteslice(Buffer.from(image.data, "base64"));
+      } catch (error) { photonDecodeError = error instanceof Error ? error.message : String(error); }
+      finally { decoded?.free(); }
+    } catch (error) { photonImportError = error instanceof Error ? error.message : String(error); }
+    const row = { cases, resizeSucceeded: resizeResult !== null, photonImportError: photonImportError ?? null, photonDecodeError: photonDecodeError ?? null };
+    item.record("C23", row);
+    expect(cases).toHaveLength(2);
+    expect(cases.every((entry) => entry.equal === true)).toBe(true);
+  }, 30_000);
+
   it("C1 control: an ordinary session re-sends canonical history", async () => {
     const item = await open("c1");
     item.faux.setResponses([item.response("first activation response"), item.response("second activation response")]);
@@ -761,7 +874,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     // Exactly the SDK's context stage: it clones, and one handler adds a message.
     const injected = { role: "user", content: "INJECTED-BY-CONTEXT-HANDLER", timestamp: Date.now() } as unknown as AgentMessage;
     const outer = async (value: AgentMessage[]) => [...value, injected];
-    const outcome = await policy.wrapTransformContext(outer)(messages, undefined)
+    const outcome = await policy.wrapTransformContext(outer, item.session.agent.convertToLlm)(messages, undefined)
       .then(() => "accepted", (error: unknown) => error instanceof Error ? error.message : String(error));
     const refusal = policy.refusalLog().at(-1);
     policy.settle("c16");
@@ -789,7 +902,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const prepared = policy.wrapPrepareRequest(item.session, undefined);
     const projection = item.session.sessionManager.buildSessionProjection();
     const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
-    const transformed = await policy.wrapTransformContext(undefined)((update as { context: { messages: AgentMessage[] } }).context.messages, undefined);
+    const transformed = await policy.wrapTransformContext(undefined, item.session.agent.convertToLlm)((update as { context: { messages: AgentMessage[] } }).context.messages, undefined);
     const llmContext = { messages: convertToLlm(transformed) } as unknown as Parameters<StreamFn>[1];
     const options = {} as Parameters<StreamFn>[2];
     let first = "returned";

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AgentMessage, PrepareRequest, StreamFn } from "@earendil-works/pi-agent-core";
+import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "@earendil-works/pi-agent-core";
 import {
   convertToLlm,
   estimateTokens,
@@ -466,6 +466,7 @@ export class HomeRequestPolicy {
    */
   wrapTransformContext(
     inner: ((messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>) | undefined,
+    convertMessages: Agent["convertToLlm"],
   ): (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]> {
     return async (messages, signal) => {
       const activation = this.requireActivation();
@@ -479,7 +480,9 @@ export class HomeRequestPolicy {
         );
       }
       this.assertContextNotMutated(transformed, activation);
-      this.expectedDigest = digestLlmMessages(convertToLlm(transformed));
+      // Use the same settings-aware converter as this agent's loop; bare
+      // conversion would reject Pi's supported image-blocking replacement.
+      this.expectedDigest = digestLlmMessages(await convertMessages(transformed));
       return transformed;
     };
   }
