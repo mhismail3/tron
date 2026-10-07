@@ -168,9 +168,13 @@ merges and silently drop the work.
 repositories, local bare remotes and the fake `gh`. The land fixtures disable
 Git auto-GC and automatic maintenance for every child Git process, so repository
 temporary-directory cleanup does not race detached maintenance.
-`GitMaintenanceCleanupTests` makes auto-GC eligible and uses its real hook to
-reproduce a late writer during `TemporaryDirectory` cleanup without that fixture
-configuration, then verifies cleanup succeeds with the configuration.
+The fixture-level test process owner tracks every child process and applies the
+Git auto-GC/maintenance configuration. It terminates and joins any remaining
+children before fixture-directory cleanup, including on test failures.
+`GitMaintenanceCleanupTests` makes auto-GC eligible with auto-detachment disabled,
+then uses an owner-tracked writer to reproduce a late write during
+`TemporaryDirectory` cleanup without the fixture configuration. It verifies
+cleanup succeeds with the fixture configuration.
 
 75. **A stacked claim uses the wrong base.** `verify`, `land` (update, pull
     request, merge, resume and the closing comment), `steward` and `cleanup`

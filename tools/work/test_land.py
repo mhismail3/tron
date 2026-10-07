@@ -342,7 +342,7 @@ def git(cwd: Path, *args: str) -> str:
 
 
 @contextlib.contextmanager
-def _fixture_git_config(disable_automatic_maintenance: bool):
+def _owned_test_processes(disable_automatic_maintenance: bool = True):
     saved = {key: value for key, value in os.environ.items() if key.startswith("GIT_CONFIG_")}
     for key in tuple(os.environ):
         if key.startswith("GIT_CONFIG_"):
@@ -351,13 +351,33 @@ def _fixture_git_config(disable_automatic_maintenance: bool):
         os.environ.update({"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "gc.auto",
                            "GIT_CONFIG_VALUE_0": "0", "GIT_CONFIG_KEY_1": "maintenance.auto",
                            "GIT_CONFIG_VALUE_1": "false"})
+    original_popen = subprocess.Popen
+    processes = []
+
+    def owned_popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    subprocess.Popen = owned_popen
     try:
         yield
     finally:
-        for key in tuple(os.environ):
-            if key.startswith("GIT_CONFIG_"):
-                os.environ.pop(key)
-        os.environ.update(saved)
+        subprocess.Popen = original_popen
+        try:
+            for process in processes:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+        finally:
+            for key in tuple(os.environ):
+                if key.startswith("GIT_CONFIG_"):
+                    os.environ.pop(key)
+            os.environ.update(saved)
 
 
 class GitMaintenanceCleanupTests(unittest.TestCase):
@@ -365,6 +385,27 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
         temporary_directory = tempfile.TemporaryDirectory()
         temporary = temporary_directory.name
         with temporary_directory:
+            process_owner = _owned_test_processes(disable_automatic_maintenance)
+            process_owner.__enter__()
+            owner_closed = False
+
+            def close_process_owner():
+                nonlocal owner_closed
+                if not owner_closed:
+                    owner_closed = True
+                    process_owner.__exit__(None, None, None)
+
+            original_cleanup = temporary_directory.cleanup
+            cleanup_body = None
+
+            def owned_cleanup():
+                if cleanup_body is None:
+                    close_process_owner()
+                    original_cleanup()
+                else:
+                    cleanup_body()
+
+            temporary_directory.cleanup = owned_cleanup
             root = Path(temporary)
             remote = root / "remote.git"
             subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
@@ -372,7 +413,7 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
             subprocess.run(["git", "config", "maintenance.auto", "true"], cwd=remote, check=True)
             subprocess.run(["git", "config", "core.hooksPath", str(remote / "hooks")],
                            cwd=remote, check=True)
-            # The hook's child waits until cleanup has enumerated remote.git, then writes before rmdir.
+            # The owned writer waits until cleanup has enumerated remote.git, then writes before rmdir.
             objects = remote / "objects"
             for index in range(7001):
                 content = f"loose-object-{index}".encode()
@@ -382,39 +423,32 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
                 object_path.parent.mkdir(parents=True, exist_ok=True)
                 object_path.write_bytes(zlib.compress(data))
 
-            ready, trigger, done = (root / name for name in ("ready", "trigger", "done"))
-            for fifo in (ready, trigger, done):
+            ready, trigger = (root / name for name in ("ready", "trigger"))
+            for fifo in (ready, trigger):
                 os.mkfifo(fifo)
             writer = root / "writer.py"
             writer.write_text(
                 f"#!{sys.executable}\n"
-                "import os, pathlib, sys\n"
+                "import pathlib, sys\n"
                 "remote = pathlib.Path(sys.argv[1])\n"
-                "ready, trigger, done, pid_file = map(pathlib.Path, sys.argv[2:])\n"
-                "pid_file.write_text(str(os.getpid()))\n"
-                "with trigger.open('rb') as wait_handle, done.open('wb') as done_handle:\n"
-                "    with ready.open('wb') as ready_handle:\n"
-                "        ready_handle.write(b'ready')\n"
+                "trigger = pathlib.Path(sys.argv[2])\n"
+                "with trigger.open('rb') as wait_handle:\n"
                 "    wait_handle.read(1)\n"
-                "    (remote / 'late-writer').write_text('concurrent child\\n')\n"
-                "    done_handle.write(b'done')\n")
+                "(remote / 'late-writer').write_text('concurrent child\\n')\n")
             writer.chmod(0o755)
             hook = remote / "hooks" / "pre-auto-gc"
-            pid_file = root / "writer.pid"
             hook.write_text(
                 f"#!{sys.executable}\n"
-                "import subprocess, sys\n"
-                f"subprocess.Popen([sys.executable, {str(writer)!r}, {str(remote)!r}, "
-                f"{str(ready)!r}, {str(trigger)!r}, {str(done)!r}, {str(pid_file)!r}], "
-                "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
-                "stderr=subprocess.DEVNULL, start_new_session=True)\n")
+                "import os\n"
+                f"fd = os.open({str(ready)!r}, os.O_WRONLY)\n"
+                "os.write(fd, b'hook')\n"
+                "os.close(fd)\n")
             hook.chmod(0o755)
             ready_fd = os.open(ready, os.O_RDWR | os.O_NONBLOCK)
             trigger_fd = os.open(trigger, os.O_RDWR | os.O_NONBLOCK)
-            done_fd = os.open(done, os.O_RDWR | os.O_NONBLOCK)
             child_started = False
             child_released = False
-            child_pid = None
+            writer_process = None
             original_scandir = shutil.os.scandir
 
             def release_child():
@@ -423,14 +457,24 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
                     return
                 child_released = True
                 os.write(trigger_fd, b"x")
-                readable, _, _ = select.select([done_fd], [], [], 10)
-                if not readable:
+                try:
+                    writer_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    writer_process.terminate()
                     try:
-                        os.kill(child_pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
-                    raise AssertionError("Git's background hook writer did not finish")
-                self.assertEqual(os.read(done_fd, 4), b"done")
+                        writer_process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        writer_process.kill()
+                        writer_process.wait()
+                    raise AssertionError("Git's background hook writer did not terminate")
+                finally:
+                    if writer_process.poll() is None:
+                        writer_process.terminate()
+                        try:
+                            writer_process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            writer_process.kill()
+                            writer_process.wait()
 
             class CleanupScandir:
                 def __init__(self, iterator):
@@ -454,6 +498,7 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
                         if not self.triggered:
                             self.triggered = True
                             release_child()
+                            close_process_owner()
                         raise
 
             def cleanup_scandir(path):
@@ -463,12 +508,13 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
                 return iterator
 
             cleanup_error = None
-            original_cleanup = temporary_directory.cleanup
 
             def controlled_cleanup():
                 nonlocal cleanup_error
                 if child_started:
                     shutil.os.scandir = cleanup_scandir
+                if not child_started:
+                    close_process_owner()
                 try:
                     original_cleanup()
                 except OSError as error:
@@ -477,36 +523,39 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
                     shutil.os.scandir = original_scandir
                     if child_started and not child_released:
                         release_child()
-                    for fd in (ready_fd, trigger_fd, done_fd):
+                    close_process_owner()
+                    for fd in (ready_fd, trigger_fd):
                         os.close(fd)
                 if Path(temporary).exists():
                     shutil.rmtree(temporary)
 
-            temporary_directory.cleanup = controlled_cleanup
+            cleanup_body = controlled_cleanup
             try:
-                with _fixture_git_config(disable_automatic_maintenance):
-                    effective_auto = subprocess.run(["git", "config", "--get", "gc.auto"],
-                                                    cwd=root, capture_output=True, text=True)
-                    effective_maintenance = subprocess.run(["git", "config", "--get", "maintenance.auto"],
-                                                           cwd=root, capture_output=True, text=True)
-                    if disable_automatic_maintenance:
-                        self.assertEqual(effective_auto.stdout.strip(), "0")
-                        self.assertEqual(effective_maintenance.stdout.strip(), "false")
-                    else:
-                        self.assertEqual(effective_auto.returncode, 1)
-                    subprocess.run(["git", "--git-dir", str(remote), "gc", "--auto"], cwd=root,
-                                   check=True, capture_output=True)
-                    if disable_automatic_maintenance:
-                        readable, _, _ = select.select([ready_fd], [], [], 0.1)
-                        self.assertFalse(readable, "automatic GC unexpectedly ran its writer hook")
-                    else:
-                        readable, _, _ = select.select([ready_fd], [], [], 10)
-                        child_started = pid_file.exists()
-                        if child_started:
-                            child_pid = int(pid_file.read_text())
-                        self.assertTrue(readable, "eligible Git auto-GC did not launch its hook writer")
-                        self.assertEqual(os.read(ready_fd, 5), b"ready")
-                        self.assertTrue(child_started)
+                effective_auto = subprocess.run(["git", "config", "--get", "gc.auto"],
+                                                cwd=root, capture_output=True, text=True)
+                effective_maintenance = subprocess.run(["git", "config", "--get", "maintenance.auto"],
+                                                       cwd=root, capture_output=True, text=True)
+                if disable_automatic_maintenance:
+                    self.assertEqual(effective_auto.stdout.strip(), "0")
+                    self.assertEqual(effective_maintenance.stdout.strip(), "false")
+                else:
+                    self.assertEqual(effective_auto.returncode, 1)
+                    self.assertEqual(effective_maintenance.returncode, 1)
+                if not disable_automatic_maintenance:
+                    writer_process = subprocess.Popen(
+                        [sys.executable, str(writer), str(remote), str(trigger)],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True)
+                    child_started = True
+                subprocess.run(["git", "-c", "gc.autoDetach=false", "--git-dir", str(remote),
+                                "gc", "--auto"], cwd=root, check=True, capture_output=True)
+                if disable_automatic_maintenance:
+                    readable, _, _ = select.select([ready_fd], [], [], 0.1)
+                    self.assertFalse(readable, "automatic GC unexpectedly ran its writer hook")
+                else:
+                    readable, _, _ = select.select([ready_fd], [], [], 10)
+                    self.assertTrue(readable, "eligible Git auto-GC did not run its hook")
+                    self.assertEqual(os.read(ready_fd, 4), b"hook")
             except OSError as error:
                 cleanup_error = error
         return cleanup_error
@@ -521,14 +570,14 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
 
 class LandFixture(unittest.TestCase):
     def setUp(self):
-        git_config = _fixture_git_config(disable_automatic_maintenance=True)
-        git_config.__enter__()
-        self.addCleanup(git_config.__exit__, None, None, None)
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
         self.addCleanup(quiet.__exit__, None, None, None)
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
+        process_owner = _owned_test_processes()
+        process_owner.__enter__()
+        self.addCleanup(process_owner.__exit__, None, None, None)
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
         git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
