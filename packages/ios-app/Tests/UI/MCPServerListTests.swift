@@ -5,6 +5,18 @@ import TronMobileCore
 
 @Suite("MCP server list projection")
 struct MCPServerListTests {
+    @Test("Codemode alias shares the visible choice while preserving stored values until an explicit change")
+    func codemodeAliasPresentationAndUpdates() {
+        let codemodeChoices = MCPServerPresentationPolicy.exposures.filter { $0.title == "Codemode" }
+        #expect(codemodeChoices.map(\.value) == ["codemode"])
+        #expect(MCPServerPresentationPolicy.exposureTitle("codemode-deferred") == "Codemode")
+
+        let unrelatedFieldUpdate = MCPServerPresentationPolicy.updateFields(server: "example", enabled: false)
+        #expect(unrelatedFieldUpdate == ["server": .string("example"), "enabled": .bool(false)])
+        let explicitChoice = MCPServerPresentationPolicy.updateFields(server: "example", exposure: codemodeChoices[0].value)
+        #expect(explicitChoice == ["server": .string("example"), "exposure": .string("codemode")])
+    }
+
     @Test("decodes the bounded Gateway projection for unhealthy and disabled Pi servers")
     func decodesPinnedCLIReport() throws {
         let fixture = URL(fileURLWithPath: #filePath)

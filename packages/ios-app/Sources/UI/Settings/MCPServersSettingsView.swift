@@ -34,13 +34,21 @@ enum MCPServerPresentationPolicy {
 
     static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
 
-    /// Plain names for Pi's exposure values, in the order the menu offers them.
+    /// Pi's exposure choices in the order the settings menu offers them.
     static let exposures: [(value: String, title: String)] = [
-        ("codemode", "Codemode"), ("codemode-deferred", "Codemode, on demand"),
+        ("codemode", "Codemode"),
         ("deferred", "Tool search"), ("direct", "Direct"), ("hidden", "Hidden"),
     ]
     static func exposureTitle(_ value: String) -> String {
-        exposures.first { $0.value == value }?.title ?? value
+        if value == "codemode-deferred" { return "Codemode" }
+        return exposures.first { $0.value == value }?.title ?? value
+    }
+
+    static func updateFields(server: String, enabled: Bool? = nil, exposure: String? = nil) -> [String: JSONValue] {
+        var fields: [String: JSONValue] = ["server": .string(server)]
+        if let enabled { fields["enabled"] = .bool(enabled) }
+        if let exposure { fields["exposure"] = .string(exposure) }
+        return fields
     }
 }
 
@@ -294,8 +302,7 @@ struct MCPServersSettingsView: View {
         }
     }
     private func update(_ server: String, enabled: Bool? = nil, exposure: String? = nil, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
-        var fields: [String: JSONValue] = ["server": .string(server)]
-        if let enabled { fields["enabled"] = .bool(enabled) }; if let exposure { fields["exposure"] = .string(exposure) }
+        let fields = MCPServerPresentationPolicy.updateFields(server: server, enabled: enabled, exposure: exposure)
         await mutate("mcp.update", fields, destination: destination, scope: scope, cwd: cwd)
     }
     private func addServer(_ submitted: MCPAddServerDraft, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
