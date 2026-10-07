@@ -36,6 +36,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import { assertChapterWritable, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
@@ -486,6 +487,9 @@ export interface RuntimeSlotDependencies {
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
   homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
+  /** Physical chapter state is consulted only by mutation owners. Current Home
+   * records report unsealed until the chapter ledger is introduced. */
+  homeChapterState?: (sessionId: string) => HomeChapterState;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -1786,14 +1790,17 @@ export class RuntimeSlot {
     return {
       waitForIdle: () => this.runtime.session.waitForIdle(),
       newSession: (options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         return this.replaceFromCommand("reset", () => this.runtime.newSession(options));
       },
       fork: (entryId, options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         return this.replaceFromCommand("reset", () => this.runtime.fork(entryId, options));
       },
       navigateTree: async (targetId, options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         const result = await this.runtime.session.navigateTree(targetId, options);
         if (!result.cancelled) {
@@ -1803,10 +1810,12 @@ export class RuntimeSlot {
         return result;
       },
       switchSession: (sessionPath, options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         return this.replaceFromCommand("preserve", () => this.runtime.switchSession(sessionPath, options));
       },
       reload: async () => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         await this.reloadBoundSession();
         if (this.projectTrustReloadOverride === undefined) this.commitReload();
@@ -3176,6 +3185,7 @@ export class RuntimeSlot {
       throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
     }
     if (state === "matching") return;
+    this.assertChapterWritable();
     try {
       options.append();
     } catch (error) {
@@ -6821,6 +6831,7 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
+    this.assertChapterWritable();
     if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
@@ -6971,6 +6982,7 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
+      this.assertChapterWritable();
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -7994,6 +8006,7 @@ export class RuntimeSlot {
   async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
@@ -8018,6 +8031,7 @@ export class RuntimeSlot {
   async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<number> {
     return this.lane.run(() => {
       this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertChapterWritable();
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
         throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
       }
@@ -8039,6 +8053,7 @@ export class RuntimeSlot {
   async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
     return this.lane.run(() => {
       this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
       this.revision += 1;
@@ -9135,8 +9150,15 @@ export class RuntimeSlot {
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
+  private assertChapterWritable(): void {
+    if (this.liveProfile() !== "home") return;
+    const state = this.dependencies.homeChapterState?.(this.id);
+    if (state) assertChapterWritable(state);
+  }
+
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
+    this.assertChapterWritable();
     if (this.isRunningWork(exceptWorkToken)) throw new GatewayError("busy", "Session must be idle for this operation");
   }
 

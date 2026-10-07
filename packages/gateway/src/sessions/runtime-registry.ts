@@ -1658,6 +1658,7 @@ export class RuntimeRegistry {
       homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
+      homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {

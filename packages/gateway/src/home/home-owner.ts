@@ -15,6 +15,7 @@ import {
   type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
+import { unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 1;
@@ -208,6 +209,12 @@ export class HomeOwner {
   modelFor(sessionId: string): ModelRef | undefined {
     const record = this.record;
     return record?.enabled && record.sessionId === sessionId ? { ...record.model } : undefined;
+  }
+
+  /** Chapter ledger support is deliberately inactive in the current record
+   * format: every physical Home session remains writable until the ledger step. */
+  chapterStateFor(sessionId: string): HomeChapterState {
+    return unsealedHomeChapterState(sessionId);
   }
 
   /** What the record says about one session id. Runtime creation reads this for

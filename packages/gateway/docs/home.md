@@ -7,6 +7,18 @@ request seam that sends each activation the memory's view instead of the
 canonical transcript. Tasks, the wake inbox and Home's own client surface are
 later slices. Ordinary sessions are unaffected by every rule here.
 
+## Physical chapter mutation boundary
+
+RuntimeSlot owns mutations to the physical session. Its serialized mutation
+owners consult a chapter-state provider before prompt admission, configuration,
+branch edits, and extension-driven session replacement. A sealed result is a
+typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
+The current version-1 Home record has no chapter ledger, so HomeOwner's provider
+always reports unsealed. This seam does not change persisted data or activate
+rollover; read/open/acquire remain available. If a future SDK operation fails
+after staging canonical entries, RuntimeSlot retains the existing uncertain-
+outcome fence rather than treating the staged mutation as a clean refusal.
+
 ## The record
 
 `<tronHome>/gateway/home/home.json`, written 0600 and published atomically and
