@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { resolveBindHost } from "../config.js";
 import { resolveTronHome } from "../tron-home.js";
-import type { ContentPart, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
+import type { ContentPart, HomeContextProjection, HomeMemoryStatus, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 
@@ -23,14 +23,21 @@ function text(parts: ContentPart[]): string {
   return parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
 }
 
-function assistantText(snapshot: SessionSnapshot): string {
-  if (snapshot.streaming?.kind === "message" && snapshot.streaming.role === "assistant") {
-    return text(snapshot.streaming.content);
-  }
-  const assistant = [...snapshot.transcript].reverse().find(
-    (item): item is Extract<TranscriptItem, { kind: "message" }> => item.kind === "message" && item.role === "assistant",
-  );
-  return assistant ? text(assistant.content) : "";
+function assistantMessage(snapshot: SessionSnapshot): Extract<TranscriptItem, { kind: "message" }> | undefined {
+  return snapshot.streaming?.kind === "message" && snapshot.streaming.role === "assistant"
+    ? snapshot.streaming
+    : [...snapshot.transcript].reverse().find(
+      (item): item is Extract<TranscriptItem, { kind: "message" }> => item.kind === "message" && item.role === "assistant",
+    );
+}
+
+export function assistantText(snapshot: SessionSnapshot): string {
+  const assistant = assistantMessage(snapshot);
+  if (!assistant) return "";
+  const content = text(assistant.content);
+  return assistant.errorMessage
+    ? [content, assistant.errorMessage].filter(Boolean).join("\n")
+    : content;
 }
 
 interface SessionEventEnvelope {
@@ -40,7 +47,13 @@ interface SessionEventEnvelope {
   data: JsonValue;
 }
 
-function renderDelta(previous: string, current: string): string {
+function assistantMessageId(snapshot: SessionSnapshot): string | undefined {
+  const message = assistantMessage(snapshot);
+  return message?.presentationId ?? message?.id;
+}
+
+function renderDelta(previous: string, current: string, isNewMessage: boolean): string {
+  if (isNewMessage) return current;
   if (current.startsWith(previous)) return current.slice(previous.length);
   return `\n${current}`;
 }
@@ -168,45 +181,18 @@ function usage(): never {
   process.exit(64);
 }
 
-/** `home.status`: the same bounded projection the RPC returns. */
-export interface HomeStatusEnvelope {
-  available: boolean;
-  reason?: string;
-  enabled: boolean;
-  homeId?: string;
-  sessionId?: string;
-  generation?: number;
-  model?: { provider: string; id: string };
-  live: boolean;
-  sessionPresent: boolean;
-}
+/** `home.status`: the protocol's bounded projection, rendered without a terminal-only shape. */
+type HomeStatusEnvelope = HomeStatus;
 
 interface HomeDesignationEnvelope { homeId: string; sessionId: string; generation: number }
 
 /** `home.configureMemory`/`home.resumeMemory` and `home.status`'s `memory`: the
  * same bounded memory projection the RPCs return. */
-export interface HomeMemoryEnvelope {
-  configured: boolean;
-  open: boolean;
-  model?: { provider: string; id: string };
-  spentTokens?: number;
-  blocked?: string;
-  reason?: string;
-}
+export type HomeMemoryEnvelope = HomeMemoryStatus;
 
 /** `home.context`: the bounded request context of Home's current or last
  * activation. The sizes are absent when that activation prepared no request. */
-export interface HomeContextEnvelope {
-  available: boolean;
-  activationStartEntryId?: string | null;
-  activationOpen?: boolean;
-  viewLines?: number;
-  viewBytes?: number;
-  effectiveTokens?: number;
-  contextWindow?: number;
-  lastRefusalReason?: string;
-  lastRefusalDetail?: string;
-}
+export type HomeContextEnvelope = HomeContextProjection;
 
 /** One `/home` line, resolved without touching the Gateway. */
 export type HomeCommand =
@@ -242,11 +228,13 @@ export function parseHomeCommand(input: string): HomeCommand | undefined {
 }
 
 export function describeHomeStatus(status: HomeStatusEnvelope): string {
-  if (!status.available) return `Home unavailable: ${status.reason ?? "the stored record could not be used"}`;
-  if (!status.enabled) return "Home is not designated.";
-  const model = status.model ? `, model ${status.model.provider}/${status.model.id}` : "";
-  const session = status.sessionPresent ? "" : ", its session is missing (designate creates a new one)";
-  return `Home is designated: session ${status.sessionId}, generation ${status.generation}${model}, ${status.live ? "runtime live" : "runtime not loaded"}${session}.`;
+  const designation = !status.available
+    ? `Home unavailable: ${status.reason ?? "the stored record could not be used"}`
+    : !status.enabled ? "Home is not designated."
+      : `Home is designated: session ${status.sessionId}, generation ${status.generation}${status.model ? `, model ${status.model.provider}/${status.model.id}` : ""}, ${status.live ? "runtime live" : "runtime not loaded"}${status.sessionPresent ? "" : ", session missing"}.`;
+  const gaps = status.readiness.gaps.length ? status.readiness.gaps.join(", ") : "none";
+  const recovery = status.recovery.reason ? `${status.recovery.action} (${status.recovery.reason})` : status.recovery.action;
+  return `${designation} Phase: ${status.phase}. Readiness: ${status.readiness.ready ? "ready" : `not ready; ${gaps}`}. ${describeHomeMemory(status.memory)} ${describeHomeContext(status.activation)} Recovery: ${recovery}.`;
 }
 
 const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context\n";
@@ -267,12 +255,19 @@ export function parseHomeModelArgument(argument: string): { provider: string; id
 /** What the memory projection says, in one line: its model, the spend so far,
  * whether its store is open yet and the reason it is blocked. */
 export function describeHomeMemory(memory: HomeMemoryEnvelope): string {
-  if (!memory.configured) return "Home memory is not configured. /home memory <provider/id> configures it.";
+  if (!memory.configured) {
+    return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id> configures it.`;
+  }
   const model = memory.model ? `model ${memory.model.provider}/${memory.model.id}` : "an unrecorded model";
   const spend = memory.spentTokens === undefined ? "" : `, ${memory.spentTokens} tokens spent`;
   const open = memory.open ? "open" : "not open yet (it opens at the first activation)";
   const blocked = memory.blocked ? `, blocked: ${memory.blocked}` : "";
-  return `Home memory: ${model}${spend}, ${open}${blocked}.`;
+  const episodic = memory.episodic;
+  const progress = episodic
+    ? `, ${episodic.coverage.admitted} admitted, ${episodic.coverage.summarized} summarized, ${episodic.view.unbuilt} unbuilt view parts, pump busy: ${episodic.pump.busy}`
+    : "";
+  const reason = memory.reason ? `, degraded: ${memory.reason}` : "";
+  return `Home memory: ${model}${spend}, ${open}${blocked}${progress}${reason}.`;
 }
 
 /** What the request-context projection says: the activation's start, whether it
@@ -282,7 +277,7 @@ export function describeHomeContext(context: HomeContextEnvelope): string {
   const start = context.activationStartEntryId ?? "the start of the conversation";
   const state = context.activationOpen ? "open" : "settled";
   const sizes = context.viewLines === undefined
-    ? "it was refused before it prepared a request"
+    ? context.lastRefusalReason ? "it was refused before it prepared a request" : "it is awaiting request preparation"
     : `${context.viewLines} view lines (${context.viewBytes} bytes), about ${context.effectiveTokens} tokens of a ${context.contextWindow}-token window`;
   const refusal = context.lastRefusalReason
     ? `, last refusal ${context.lastRefusalReason}${context.lastRefusalDetail ? `: ${context.lastRefusalDetail}` : ""}`
@@ -323,8 +318,21 @@ export async function disableHome(client: Pick<GatewayProtocolClient, "request">
   return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
 }
 
-/** Run one `/home` command, reporting its outcome on stdout and any failure on
- * stderr so the chat continues. */
+/** Resolve and run one `/home` line without letting malformed arguments escape the prompt loop. */
+export async function runHomeInput(client: Pick<GatewayProtocolClient, "request">, input: string): Promise<boolean> {
+  let command: HomeCommand | undefined;
+  try {
+    command = parseHomeCommand(input);
+  } catch (error) {
+    process.stderr.write(`${HOME_USAGE}${error instanceof Error ? `home: ${error.message}\n` : `home: ${String(error)}\n`}`);
+    return true;
+  }
+  if (!command) return false;
+  await runHomeCommand(client, command);
+  return true;
+}
+
+/** Run one parsed `/home` command, reporting its outcome on stdout and failures on stderr. */
 export async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
   if (command.kind === "usage") {
     process.stderr.write(HOME_USAGE);
@@ -377,6 +385,7 @@ async function runTerminalChat(): Promise<void> {
   let snapshot!: SessionSnapshot;
   let subscriptionToken!: string;
   let rendered = "";
+  let renderedMessageId: string | undefined;
   let cursor!: { runtimeGeneration: string; eventSequence: number };
   let awaitingOperation: string | undefined;
   let reconciledSettledOperation: string | undefined;
@@ -386,6 +395,7 @@ async function runTerminalChat(): Promise<void> {
     snapshot = installed.session;
     subscriptionToken = installed.subscriptionToken;
     rendered = assistantText(snapshot);
+    renderedMessageId = assistantMessageId(snapshot);
     cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
     process.stdout.write(`Attached to Tron session ${snapshot.sessionId} (${snapshot.cwd})\n`);
     if (rendered) process.stdout.write(rendered);
@@ -424,9 +434,11 @@ async function runTerminalChat(): Promise<void> {
           }
         }
         const current = assistantText(snapshot);
-        const delta = renderDelta(rendered, current);
+        const messageId = assistantMessageId(snapshot);
+        const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
         if (delta) process.stdout.write(delta);
         rendered = current;
+        renderedMessageId = messageId;
         if (snapshot.phase === "idle" && !snapshot.operation && settledResolve) {
           process.stdout.write("\n");
           awaitingOperation = undefined;
@@ -450,9 +462,11 @@ async function runTerminalChat(): Promise<void> {
             subscriptionToken = installed.subscriptionToken;
             cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
             const current = assistantText(snapshot);
-            const delta = renderDelta(rendered, current);
+            const messageId = assistantMessageId(snapshot);
+            const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
             if (awaitingOperation && delta) process.stdout.write(delta);
             rendered = current;
+            renderedMessageId = messageId;
           });
           attachListeners();
           process.stderr.write("[Tron synchronized]\n");
@@ -525,11 +539,7 @@ async function runTerminalChat(): Promise<void> {
       }
       // Home commands are Gateway-wide, not session-scoped, so they work before
       // or without an attached session's runtime being the Home one.
-      const homeCommand = parseHomeCommand(prompt);
-      if (homeCommand) {
-        await runHomeCommand(client, homeCommand);
-        continue;
-      }
+      if (await runHomeInput(client, prompt)) continue;
       const commandId = randomUUID();
       reconciledSettledOperation = undefined;
       pendingCommand = { method: "session.prompt", commandId };

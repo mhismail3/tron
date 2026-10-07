@@ -146,23 +146,47 @@ export class HomeOwner {
 
   async status(): Promise<HomeStatus> {
     const memory = await this.memoryStatus();
+    const activation = this.contextStatus();
     if (this.unavailable) {
       return {
-        available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false,
-        memory,
+        phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
+        recovery: { action: "inspect-record", reason: this.unavailable },
+        available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false, memory,
       };
     }
     const record = this.record;
-    if (!record) return { available: true, enabled: false, live: false, sessionPresent: false, memory };
+    if (!record) return {
+      phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
+      recovery: { action: "designate" },
+      available: true, enabled: false, live: false, sessionPresent: false, memory,
+    };
+    const live = this.options.sessions.hasLiveRuntime(record.sessionId);
+    const sessionPresent = await this.options.sessions.sessionPresent(record.sessionId);
+    const gaps: string[] = [];
+    if (!record.enabled) gaps.push("disabled");
+    if (!sessionPresent) gaps.push("session-missing");
+    if (!memory.configured) gaps.push("memory-not-configured");
+    if (memory.blocked) gaps.push(`memory-${memory.blocked}`);
+    const recovery: HomeStatus["recovery"] = !record.enabled || !sessionPresent
+      ? { action: "designate", ...(!sessionPresent ? { reason: "Home session is missing" } : {}) }
+      : !memory.configured ? { action: "configure-memory" }
+        : memory.blocked ? { action: "resume-memory", reason: memory.blocked }
+          : { action: "none" };
+    const ready = gaps.length === 0;
+    const phase: HomeStatus["phase"] = !record.enabled ? "disabled"
+      : !sessionPresent ? "missing-session"
+        : memory.blocked || !memory.configured ? "blocked"
+          : activation.available && activation.activationOpen ? "active" : "ready";
     return {
+      phase, activation, readiness: { ready, gaps }, recovery,
       available: true,
       enabled: record.enabled,
       homeId: record.homeId,
       sessionId: record.sessionId,
       generation: record.generation,
       model: { ...record.model },
-      live: this.options.sessions.hasLiveRuntime(record.sessionId),
-      sessionPresent: await this.options.sessions.sessionPresent(record.sessionId),
+      live,
+      sessionPresent,
       memory,
     };
   }
