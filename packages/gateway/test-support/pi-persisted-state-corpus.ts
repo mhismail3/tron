@@ -51,6 +51,7 @@ export const CORPUS_TOKENS = {
 
 /** `mcp.json` server names in the corpus. Both are hyphenated (0.99.2 renames `-` to `_`). */
 export const CORPUS_MCP_SERVERS = ["corpus-mcp", "corpus-oauth"] as const;
+const mcpToolServer = (name: string): string => name.replaceAll("-", "_");
 
 /**
  * The stdio fixture server's synthetic tool list. The recorder writes it as the
@@ -66,11 +67,11 @@ export const CORPUS_STDIO_TOOLS = [{
 export const CORPUS_MCP_STATE_FILE = "mcp-state.json";
 
 /**
- * Synthetic provider credential stored in `auth.json` (1.0.3 renames this
- * provider to `azure`). The model is a reasoning model, so a session that
- * restored it keeps its persisted thinking level instead of clamping to `off`.
+ * Synthetic provider credential stored in `auth.json` under Pi 1.0.4's
+ * `azure` key (renamed from `azure-openai-responses` in 1.0.3). The model is a
+ * reasoning model, so a restored session keeps its persisted thinking level.
  */
-export const CORPUS_AZURE_PROVIDER = "azure-openai-responses";
+export const CORPUS_AZURE_PROVIDER = "azure";
 export const CORPUS_AZURE_MODEL = "gpt-5";
 export const CORPUS_AZURE_API_KEY = "corpus-synthetic-azure-key";
 /** The faux provider that owns every other corpus session. */
@@ -367,7 +368,7 @@ export function scenarioShapes(entries: ReadonlyArray<Entry>): Record<CorpusScen
     .filter(({ entry }) => message(entry)?.role === "system");
   const deltaMessage = systemMessages.slice(1).find(({ entry }) =>
     ((message(entry)?.toolsAdded as Array<{ name?: string }> | undefined) ?? [])
-      .some((tool) => typeof tool.name === "string" && tool.name.includes(CORPUS_MCP_SERVERS[1])));
+      .some((tool) => typeof tool.name === "string" && tool.name.includes(mcpToolServer(CORPUS_MCP_SERVERS[1]))));
   const searchLoaded = entries.findIndex((entry) => message(entry)?.toolName === "tool_search"
     && loadedTools(entry).length > 0);
   const childrenPerParent = new Map<string, number>();
@@ -386,11 +387,11 @@ export function scenarioShapes(entries: ReadonlyArray<Entry>): Record<CorpusScen
     "system-loadout": line((entry) => message(entry)?.role === "system"),
     "user-image": line((entry) => message(entry)?.role === "user" && hasImage(entry)),
     "assistant-tool-call": line((entry) => message(entry)?.role === "assistant" && hasToolCall(entry)),
-    "tool-result-direct-mcp": line((entry) => message(entry)?.toolName === `mcp__${CORPUS_MCP_SERVERS[0]}__echo`),
+    "tool-result-direct-mcp": line((entry) => message(entry)?.toolName === `mcp__${mcpToolServer(CORPUS_MCP_SERVERS[0])}__echo`),
     "tool-result-codemode-nested": line((entry) => message(entry)?.toolName === "codemode" && successfulNestedCalls(entry) > 0),
     "tool-search-loaded-tool": searchLoaded < 0 ? null : searchLoaded + 1,
     "system-loadout-delta": deltaMessage ? deltaMessage.index + 1 : null,
-    "tool-result-searched-mcp": line((entry) => message(entry)?.toolName === `mcp__${CORPUS_MCP_SERVERS[1]}__echo`),
+    "tool-result-searched-mcp": line((entry) => message(entry)?.toolName === `mcp__${mcpToolServer(CORPUS_MCP_SERVERS[1])}__echo`),
     "context-edit": line((entry) => entry.type === "context_edit"),
     compaction: line((entry) => entry.type === "compaction"),
     "branch-sibling": branchSibling,
@@ -446,7 +447,7 @@ export async function observeSessions(input: {
     .filter((name) => name.startsWith("mcp__"));
   const servers: CorpusServerObservation[] = input.servers.map((server) => ({
     name: server.name,
-    tools: mcpTools.filter((tool) => tool.startsWith(`mcp__${server.name}__`)).sort(),
+    tools: mcpTools.filter((tool) => tool.startsWith(`mcp__${mcpToolServer(server.name)}__`)).sort(),
   }));
   return { sessions, servers };
 }

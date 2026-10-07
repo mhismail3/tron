@@ -1,5 +1,5 @@
 {
-  "«corpus-mcp-url»": {
+  "mcp__corpus_oauth|«corpus-mcp-url»": {
     "serverUrl": "«corpus-mcp-url»",
     "discovery": {
       "authorizationServerUrl": "«corpus-mcp-origin»",
@@ -34,14 +34,14 @@
       "client_id": "corpus-mcp-fixture-client",
       "redirect_uris": []
     },
-    "oauthState": "2e3bcffb5be4d60320dcbef37c48dde13c1924553367fb70d36ba5fa72e78bc8",
-    "codeVerifier": "OxEBSZ0bDhvbx-fEXRTbEmkEwxcSveLnnSIg8Hh0Mb4",
+    "oauthState": "187e0d332f9a68e33b962d7ca7fb04f30505fc7f2541ddeed85c95d3f731c5c9",
+    "codeVerifier": "oHiEk-BRcDFJG52K7RGa87QfrxyVrMpLYPZL2TAMixQ",
     "tokens": {
       "access_token": "corpus-mcp-access-token",
       "token_type": "Bearer",
       "expires_in": 315360000,
       "refresh_token": "corpus-fixture-refresh-token"
     },
-    "tokensExpireAt": 2106681433208
+    "tokensExpireAt": 2106692032760
   }
 }

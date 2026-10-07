@@ -26,6 +26,17 @@ existing sessions may need reload or a new session to pick it up.
 
 ## Accepted boundary changes
 
+Pi 0.99.2 normalizes generated MCP tool identifiers by replacing hyphens in
+server names with underscores (`mcp__my-server__tool` becomes
+`mcp__my_server__tool`). Tron adopts Pi's spelling as a one-time cutover; there
+is no translation shim because the maintainer verified this host has no
+persisted hyphenated tool selection or MCP configuration to migrate.
+
+Pi 1.0.0 stores OAuth credentials by server name and URL rather than URL alone.
+On rollback from 1.0.4 to 0.99.1, a migrated sign-in is not found and that MCP
+server needs authorization again. This is the accepted one-way rollback delta,
+recorded as the exact MCP-auth entry in `pi-sdk-baseline.json`.
+
 Pi MCP replaces Tron's retired adapter. The following differences are
 intentional: stdio servers inherit the Gateway environment; HTTP follows normal
 fetch redirect behavior and may contact OAuth authorization servers; Pi applies

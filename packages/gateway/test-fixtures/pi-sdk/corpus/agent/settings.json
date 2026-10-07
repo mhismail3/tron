@@ -1,5 +1,5 @@
 {
-  "defaultProvider": "azure-openai-responses",
+  "defaultProvider": "azure",
   "defaultModel": "gpt-5",
   "defaultThinkingLevel": "medium",
   "defaultTools": [
@@ -20,7 +20,7 @@
     "keepRecentTokens": 100
   },
   "enabledModels": [
-    "azure-openai-responses/gpt-5",
+    "azure/gpt-5",
     "tron-corpus/corpus-model"
   ],
   "sessionDir": "«corpus-sessions»",

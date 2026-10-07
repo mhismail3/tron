@@ -5,6 +5,7 @@ package enum ModelDisplayFormatting {
         "amazon-bedrock": "Amazon Bedrock",
         "anthropic": "Anthropic",
         "anthropic-(cortexkit)": "Anthropic (CortexKit)",
+        "azure": "Azure OpenAI",
         "azure-openai": "Azure OpenAI",
         "deepseek": "DeepSeek",
         "github-copilot": "GitHub Copilot",
