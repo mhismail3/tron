@@ -430,6 +430,9 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 - `packages/gateway/test-results/episodic-memory/scale.json` — the refold
   timings and worst synchronous slice, the context-encoding sizes, and the
   1,000-message invalidation (`npm run test:scale`).
+- `packages/gateway/test-results/episodic-reasoning-model/report.json` — the
+  reasoning-model end-to-end cases (`npx vitest run
+  src/episodic/episodic-reasoning-model.e2e.test.ts`).
 
 ## Home's use of this module
 
