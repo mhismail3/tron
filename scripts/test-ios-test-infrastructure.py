@@ -3208,7 +3208,8 @@ if "build-for-testing" in arguments:
     products.mkdir(parents=True, exist_ok=True)
     scheme = arguments[arguments.index("-scheme") + 1]
     test_plan = arguments[arguments.index("-testPlan") + 1]
-    targets = [{"BlueprintName": "TronMobileTests", "IsUITestBundle": False}]
+    # Xcode's real shape: the unit target omits IsUITestBundle (#497).
+    targets = [{"BlueprintName": "TronMobileTests"}]
     if scheme == "Tron UI Validation":
         targets.append({"BlueprintName": "TronMobileUITests", "IsUITestBundle": True})
     record({"action": "build", "scheme": scheme, "test_plan": test_plan})
@@ -3681,7 +3682,8 @@ exec "{real_node}" "$@"
             plistlib.dump({
                 "TestConfigurations": [{
                     "IsEnabled": True,
-                    "TestTargets": [{"BlueprintName": "TronMobileTests", "IsUITestBundle": False}],
+                    # Xcode's real shape: the unit target omits IsUITestBundle (#497).
+                    "TestTargets": [{"BlueprintName": "TronMobileTests"}],
                 }],
             }, handle)
         return derived

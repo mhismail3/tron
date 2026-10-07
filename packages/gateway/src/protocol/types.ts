@@ -968,7 +968,9 @@ export interface SessionTreeNode {
   bookmarkTargetId?: string;
   parentId: string | null;
   timestamp: string;
-  kind: TranscriptItem["kind"] | "sessionInfo" | "contextEdit" | "systemMessage";
+  /** `usage` is Pi's model-attributed usage record (cache warming): canonical
+   * evidence with no chat row, published under its own declared kind. */
+  kind: TranscriptItem["kind"] | "sessionInfo" | "contextEdit" | "systemMessage" | "usage";
   label?: string;
   preview: string;
   role?: "user" | "assistant" | "toolResult";

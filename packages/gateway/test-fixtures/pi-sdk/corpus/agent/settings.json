@@ -1,0 +1,30 @@
+{
+  "defaultProvider": "azure",
+  "defaultModel": "gpt-5",
+  "defaultThinkingLevel": "medium",
+  "defaultTools": [
+    "read",
+    "edit",
+    "write",
+    "bash",
+    "+codemode",
+    "+tool_search"
+  ],
+  "thinkingBudgets": {
+    "minimal": 512,
+    "high": 8192
+  },
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 4096,
+    "keepRecentTokens": 100
+  },
+  "enabledModels": [
+    "azure/gpt-5",
+    "tron-corpus/corpus-model"
+  ],
+  "sessionDir": "«corpus-sessions»",
+  "extensions": [
+    "-builtin:llama.cpp"
+  ]
+}

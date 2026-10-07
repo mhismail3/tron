@@ -30,7 +30,7 @@ export const HOOK_HANG_BOUND_MS = 5_000;
  * of the test, and a poll must never move a clock the test owns: that would fire
  * the timers under test (epic #400).
  *
- * The escape is a snapshot, not an exemption. Vitest 4.1.10 does patch
+ * The escape is a snapshot, not an exemption. Vitest 4.1.x does patch
  * `node:timers` (fake-timers writes `_global[name]` onto the module) and proxies
  * a builtin's namespace by reading `mod[prop]`, but a *named* ESM import of a
  * builtin binds at link time and only `syncBuiltinESMExports()` moves it, which

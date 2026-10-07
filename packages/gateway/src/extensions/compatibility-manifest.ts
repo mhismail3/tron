@@ -93,6 +93,7 @@ export const extensionAPICompatibility = {
   on: entry("pi-runtime", "registration.events"), registerTool: entry("pi-runtime", "registration.tools"), registerCommand: entry("pi-runtime", "registration.commands"),
   registerShortcut: entry("pi-runtime", "registration.shortcuts"), registerFlag: entry("pi-runtime", "registration.flags"), getFlag: entry("pi-runtime", "control.flags"),
   registerMessageRenderer: entry("renderer", "renderer.message"), registerMarkdownTransformer: entry("renderer", "renderer.markdown"), registerEntryRenderer: entry("renderer", "renderer.entry"),
+  registerToolRenderer: entry("renderer", "renderer.tool", "Tron's iOS and Mac clients render tool calls/results through native semantic transcript rows; Pi TUI tool renderer callbacks are not transported or hosted."),
   sendMessage: entry("pi-runtime", "control.send-message"), sendUserMessage: entry("pi-runtime", "control.send-user-message"), appendEntry: entry("pi-runtime", "control.append-entry"),
   setSessionName: entry("pi-runtime", "control.session-name"), getSessionName: entry("pi-runtime", "control.session-name"), setLabel: entry("pi-runtime", "control.label"),
   exec: entry("pi-runtime", "control.exec"), getActiveTools: entry("pi-runtime", "control.tools"), getAllTools: entry("pi-runtime", "control.tools"), setActiveTools: entry("pi-runtime", "control.tools"),

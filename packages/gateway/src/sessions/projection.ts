@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 
@@ -22,7 +23,6 @@ export function canonicalToolResultCallIDsFromBranch(branch: readonly SessionEnt
 export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): ReadonlySet<string> {
   return canonicalToolResultCallIDsFromBranch(manager.getBranch());
 }
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import { admitToolDisplayProjection } from "../display/display-contract.js";
@@ -247,7 +247,7 @@ function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; 
  * detail objects remain structured JSON and are never guessed into user-facing
  * output. The newest tail is retained because command tools stream cumulative
  * output and the current lines are the most useful audit evidence. */
-export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES): {
+export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES, toolName?: string): {
   output?: string;
   outputTruncated?: true;
 } {
@@ -284,11 +284,19 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
     retainedBytes += textBytes + 1;
     return false;
   };
-  const visitReverse = (candidate: unknown, depth = 0): boolean => {
+  const visitReverse = (candidate: unknown, depth = 0, filterCodemodeImageLabels = false): boolean => {
     if (depth > 4 || candidate === null || candidate === undefined) return false;
     if (typeof candidate === "string") return addNewest(candidate);
     if (Array.isArray(candidate)) {
       for (let index = candidate.length - 1; index >= 0; index -= 1) {
+        if (filterCodemodeImageLabels && index > 0) {
+          const visiblePair = visibleToolResultContent("codemode", [candidate[index - 1], candidate[index]]);
+          if (visiblePair.length === 1) {
+            if (visitReverse(visiblePair[0], depth + 1)) return true;
+            index -= 1;
+            continue;
+          }
+        }
         if (visitReverse(candidate[index], depth + 1)) return true;
       }
       return false;
@@ -301,7 +309,16 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
     if (typeof record.text === "string") return addNewest(record.text);
     return false;
   };
-  visitReverse(value);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.content)) {
+      visitReverse(record.content, 1, toolName === "codemode");
+    } else {
+      visitReverse(value);
+    }
+  } else {
+    visitReverse(value);
+  }
   if (retainedNewestFirst.length === 0) return {};
   // Reverse traversal prepends each older block, so the collector is already
   // in display order. Reversing it here would make newest output appear first.
@@ -345,7 +362,7 @@ export function mergeLiveToolOutput(
 /** The JSON frame stays bounded independently from the readable live-output
  * channel. If Pi streams a huge text result, retain only a recent tail here too
  * rather than serializing the whole value before projectJson can compact it. */
-export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonValue {
+export function projectToolResult(value: unknown, maximumBytes = 24_000, toolName?: string): JsonValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return projectJson(value, maximumBytes);
   const record = value as Record<string, unknown>;
   if (!Array.isArray(record.content)) {
@@ -363,7 +380,7 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonVa
   // Retain at most the newest content rows before cloning any row. Each row is
   // projected independently so a giant detail object cannot be spread into an
   // unbounded intermediate result.
-  const content = record.content.slice(-128).map((part) => {
+  const content = visibleToolResultContent(toolName ?? "", record.content.slice(-128)).map((part) => {
     if (!part || typeof part !== "object" || Array.isArray(part)) return part;
     const source = part as Record<string, unknown>;
     // Tail the source scalar before generic JSON projection. Otherwise
@@ -1019,12 +1036,22 @@ export function fitSessionSnapshot(
   };
 }
 
-type ProjectableContent = string | Array<
-  | TextContent
-  | ImageContent
-  | { type: "thinking"; thinking: string; redacted?: boolean }
-  | { type: "toolCall"; id: string; name: string; arguments: unknown }
->;
+/** Every content block a Pi message can carry. Derived from the SDK's message
+ * union, so a block type added upstream fails `projectContent` at compile time
+ * instead of being dropped from every row (#470). */
+type MessageContentBlock<M> = M extends { content: infer C } ? C extends readonly unknown[] ? C[number] : never : never;
+export type PiMessageContentBlock = MessageContentBlock<AgentMessage>;
+
+type ProjectableContent = string | readonly PiMessageContentBlock[];
+
+const PI_CODEMODE_IMAGE_SAVED_TEXT = /^\[Image saved to ([^\r\n]+) \((image\/(?:png|jpeg|gif|webp)), (?:\d+B|\d+\.\d(?:KB|MB))\)\]$/;
+const PI_CODEMODE_IMAGE_PATH = /(?:^|[\\/])pi-codemode-[a-f0-9]{16}\.(png|jpg|gif|webp)$/;
+const PI_CODEMODE_IMAGE_MIME_BY_EXTENSION = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+} as const;
 
 const ATTACHMENT_TAG = /<attachment\b([^<>]*?)\s*\/>/g;
 const ATTACHMENT_ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
@@ -1205,6 +1232,13 @@ function projectContent(
         }];
         break;
       }
+      default: {
+        // Unreachable for the pinned SDK: every block type is a projected row
+        // above. A new SDK block type fails this assignment, so it cannot be
+        // silently dropped from the transcript.
+        const unclassified: never = part;
+        break;
+      }
     }
     for (const candidate of candidates) {
       if (projected.length >= MAX_CONTENT_PARTS - 1) {
@@ -1223,6 +1257,48 @@ function projectContent(
     }
   }
   return decorateToolGroups(projected, ownerId, finalizedToolGroups, segmentId);
+}
+
+function isPiCodemodeImageSavedText(text: string, followingImageMimeType: string): boolean {
+  const saved = PI_CODEMODE_IMAGE_SAVED_TEXT.exec(text);
+  if (!saved || saved[2] !== followingImageMimeType || !isAbsolute(saved[1]!)) return false;
+  const file = PI_CODEMODE_IMAGE_PATH.exec(saved[1]!);
+  return file !== null && PI_CODEMODE_IMAGE_MIME_BY_EXTENSION[file[1] as keyof typeof PI_CODEMODE_IMAGE_MIME_BY_EXTENSION] === saved[2];
+}
+
+/**
+ * Pi's `image()` adds this label before the image block (pi-coding-agent's
+ * `extensions/codemode/execute.js:243`). Hide only that exact pair in client
+ * projections; the source result remains authoritative and unchanged.
+ */
+export function visibleToolResultContent<T>(toolName: string, content: readonly T[]): readonly T[] {
+  if (toolName !== "codemode") return content;
+  let visible: T[] | undefined;
+  for (let index = 0; index < content.length; index += 1) {
+    const part = content[index] as unknown;
+    const following = content[index + 1] as unknown;
+    const isText = part !== null && typeof part === "object"
+      && (part as Record<string, unknown>).type === "text"
+      && typeof (part as Record<string, unknown>).text === "string";
+    const isImage = following !== null && typeof following === "object"
+      && (following as Record<string, unknown>).type === "image"
+      && typeof (following as Record<string, unknown>).mimeType === "string";
+    if (isText && isImage && isPiCodemodeImageSavedText(
+      (part as { text: string }).text,
+      (following as { mimeType: string }).mimeType,
+    )) {
+      visible ??= content.slice(0, index);
+      continue;
+    }
+    visible?.push(content[index]!);
+  }
+  return visible ?? content;
+}
+
+function projectToolResultContent(content: ProjectableContent, toolName: string, blobs: BlobStore, ownerId: string): ContentPart[] {
+  return projectContent(visibleToolResultContent(toolName, typeof content === "string" ? [
+    { type: "text", text: content } as PiMessageContentBlock,
+  ] : content), blobs, ownerId);
 }
 
 export interface ToolProjectionMetadata {
@@ -1296,7 +1372,7 @@ export function projectMessage(
         kind: "message",
         role: "toolResult",
         presentationId,
-        content: projectContent(message.content, blobs, presentationId),
+        content: projectToolResultContent(message.content, message.toolName, blobs, presentationId),
         toolCallId: message.toolCallId,
         toolName: message.toolName,
         ...(toolLabels?.get(message.toolName) ? { toolLabel: toolLabels.get(message.toolName)! } : {}),
@@ -1383,8 +1459,15 @@ export function projectMessage(
         tokensBefore: message.tokensBefore,
         semantic: semanticForStatus(),
       };
-    default:
+    case "system":
+      // System messages are model context and prompt state, never a chat row.
       return undefined;
+    default: {
+      // Unreachable for the pinned SDK: every message role is classified above.
+      // A new SDK role fails this assignment instead of silently dropping a row.
+      const unclassified: never = message;
+      return undefined;
+    }
   }
 }
 
@@ -1512,7 +1595,23 @@ function projectEntry(
         semantic: semanticForStatus(),
       };
     case "session_info":
+      // Session metadata is read from its own owner, not a transcript row.
       return undefined;
+    case "usage":
+      // Pi attributes model usage (for example cache warming) to a canonical
+      // entry that never participates in the conversation.
+      return undefined;
+    case "context_edit":
+      // A context-only edit rewrites model input; canonical JSONL and the tree
+      // projection's `contextEdit` kind own it, not the transcript.
+      return undefined;
+    default: {
+      // Unreachable for the pinned SDK: every entry type is classified above.
+      // A new SDK entry type fails this assignment instead of silently
+      // disappearing from the transcript.
+      const unclassified: never = entry;
+      return undefined;
+    }
   }
 }
 
@@ -1619,16 +1718,24 @@ function validCanonicalSummary(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/** Shape-check one content block from canonical JSONL. */
 function validContentPart(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const part = value as Record<string, unknown>;
-  switch (part.type) {
+  // The tag is asserted, not trusted: a value outside the SDK's block union still
+  // reaches `default` and fails closed, while a new SDK block type fails the
+  // build here instead of being silently rejected as a malformed block.
+  const type = part.type as PiMessageContentBlock["type"];
+  switch (type) {
     case "text": return typeof part.text === "string";
     case "thinking": return typeof part.thinking === "string";
     case "image": return typeof part.mimeType === "string" && typeof part.data === "string";
     case "toolCall": return typeof part.id === "string" && typeof part.name === "string"
       && Object.prototype.hasOwnProperty.call(part, "arguments");
-    default: return false;
+    default: {
+      const unclassified: never = type;
+      return false;
+    }
   }
 }
 
@@ -1640,7 +1747,11 @@ function validMessage(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const message = value as Record<string, unknown>;
   if (typeof message.role !== "string" || !Number.isFinite(message.timestamp as number)) return false;
-  switch (message.role) {
+  // The role is asserted, not trusted: a value outside the SDK's message union
+  // still reaches `default` and fails closed, while a new SDK role fails the
+  // build here instead of being silently rejected as a malformed message.
+  const role = message.role as AgentMessage["role"];
+  switch (role) {
     case "system": {
       const sections = message.sections;
       return (typeof message.content === "string" || Array.isArray(message.content) && message.content.every(validContentPart))
@@ -1672,8 +1783,12 @@ function validMessage(value: unknown): boolean {
       return typeof message.fromId === "string" && typeof message.summary === "string";
     case "compactionSummary":
       return typeof message.summary === "string" && Number.isSafeInteger(message.tokensBefore);
-    default:
+    default: {
+      // Unreachable for the pinned SDK: every role is validated above. A new SDK
+      // role fails this assignment; a foreign runtime role still fails closed.
+      const unclassified: never = role;
       return false;
+    }
   }
 }
 
@@ -1696,7 +1811,11 @@ function validateCanonicalEntry(value: unknown): void {
   if (typeof entry.customType === "string" && Buffer.byteLength(entry.customType) > TREE_PROJECTION_STRING_BYTES) {
     throw new GatewayError("conflict", "Session tree contains an invalid or oversized string");
   }
-  switch (entry.type) {
+  // The type is asserted, not trusted: a foreign value still reaches `default`
+  // and fails closed, while a new SDK entry type fails the build here instead of
+  // being rejected as malformed.
+  const type = entry.type as SessionEntry["type"];
+  switch (type) {
     case "message": valid = validMessage(entry.message); break;
     case "thinking_level_change": valid = validTreeString(entry.thinkingLevel); break;
     case "model_change": valid = validTreeString(entry.provider) && validTreeString(entry.modelId); break;
@@ -1713,6 +1832,13 @@ function validateCanonicalEntry(value: unknown): void {
         && typeof entry.display === "boolean"; break;
     case "label": valid = validTreeString(entry.targetId) && (entry.label === undefined || validTreeString(entry.label)); break;
     case "session_info": valid = entry.name === undefined || validTreeString(entry.name); break;
+    case "usage":
+      // Pi's cache warmer records model-attributed usage as a canonical entry
+      // with no authored content. Tron validates its shape and hides it from the
+      // transcript, the outline and the history feed (#470).
+      valid = validTreeString(entry.kind) && validTreeString(entry.provider) && validTreeString(entry.model)
+        && !!entry.usage && typeof entry.usage === "object" && !Array.isArray(entry.usage)
+        && (entry.note === undefined || validTreeString(entry.note)); break;
     case "context_edit": {
       const replacement = entry.replacement;
       valid = validTreeString(entry.targetId) && (replacement === null
@@ -1720,7 +1846,13 @@ function validateCanonicalEntry(value: unknown): void {
           && validContextEditableContent((replacement as Record<string, unknown>).content));
       break;
     }
-    default: valid = false;
+    default: {
+      // Unreachable for the pinned SDK: every entry type is validated above. A
+      // new SDK entry type fails this assignment; a foreign runtime type still
+      // fails closed.
+      const unclassified: never = type;
+      valid = false;
+    }
   }
   if (!valid) throw new GatewayError("conflict", "Session tree contains an invalid canonical entry payload");
 }
@@ -1739,6 +1871,40 @@ function validateProjectedTreeNode(node: SessionTreeNode): void {
   }
 }
 
+/** Outline node kind for one canonical entry. The outline publishes
+ * `contextEdit`, `sessionInfo` and `usage` evidence without a chat row, a system
+ * message as `systemMessage`, and every other entry under its projected row's
+ * kind; an entry whose producer asked to stay hidden (a non-displayed custom
+ * message) keeps the session-metadata kind it already had. Every SDK entry type
+ * is classified, so a new type fails this switch instead of silently becoming
+ * `sessionInfo` (#470). */
+function outlineNodeKind(entry: SessionEntry, item: TranscriptItem | undefined): SessionTreeNode["kind"] {
+  switch (entry.type) {
+    case "context_edit": return "contextEdit";
+    case "session_info": return "sessionInfo";
+    // Omitted from the outline; classified so the union stays exhaustive.
+    case "usage": return "usage";
+    case "message":
+      if (entry.message.role === "system") return "systemMessage";
+      return entry.message.role === "custom" && !entry.message.display ? "sessionInfo" : rowKind(item);
+    case "custom_message":
+      return entry.display ? rowKind(item) : "sessionInfo";
+    case "custom": case "compaction": case "branch_summary": case "model_change":
+    case "thinking_level_change": case "label":
+      return rowKind(item);
+    default: {
+      const unclassified: never = entry;
+      return "sessionInfo";
+    }
+  }
+}
+
+/** A visible outline entry of these types projects a row; the fallback is the
+ * pre-existing session-metadata label for the producer-hidden ones. */
+function rowKind(item: TranscriptItem | undefined): SessionTreeNode["kind"] {
+  return item?.kind ?? "sessionInfo";
+}
+
 function projectedTreeNode(
   node: PiSessionTreeNode,
   blobs: BlobStore,
@@ -1751,9 +1917,7 @@ function projectedTreeNode(
     id: node.entry.id,
     parentId: node.entry.parentId,
     timestamp: node.entry.timestamp,
-    kind: node.entry.type === "context_edit" ? "contextEdit"
-      : node.entry.type === "message" && node.entry.message.role === "system" ? "systemMessage"
-      : item?.kind ?? "sessionInfo",
+    kind: outlineNodeKind(node.entry, item),
     ...(node.label ? { label: node.label } : {}),
     preview: preview(item, node.entry),
     ...(item?.kind === "message" ? { role: item.role } : {}),
@@ -1788,6 +1952,28 @@ function validateSourceTreeNode(source: PiSessionTreeNode, expectedParentId: str
   }
 }
 
+/** Whether a canonical entry is omitted from the tree outline: a `custom` entry
+ * that is not a Gateway-authored start receipt, and Pi's model-attributed usage
+ * record (cache warming), which carries no authored content. Every SDK entry
+ * type is classified, so a new type cannot silently gain or lose an outline node
+ * (#470). */
+function omittedFromTreeOutline(
+  entry: SessionEntry,
+  invocation: ReturnType<typeof parseInvocationReceipt>,
+): boolean {
+  switch (entry.type) {
+    case "usage": return true;
+    case "custom": return invocation?.receiptKind !== "start" || invocation.source !== "extension";
+    case "message": case "custom_message": case "thinking_level_change": case "model_change":
+    case "compaction": case "branch_summary": case "context_edit": case "label": case "session_info":
+      return false;
+    default: {
+      const unclassified: never = entry;
+      return false;
+    }
+  }
+}
+
 export function projectTree(manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
   const canonicalRoots = manager.getTree();
   const currentPath = new Set(manager.getBranch().map((entry) => entry.id));
@@ -1812,9 +1998,7 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
       && source.entry.customType === INVOCATION_RECEIPT_TYPE
       ? parseInvocationReceipt(source.entry.data)
       : undefined;
-    const isHiddenCanonical = source.entry.type === "custom" && (
-      treeInvocation?.receiptKind !== "start" || treeInvocation.source !== "extension"
-    );
+    const isHiddenCanonical = omittedFromTreeOutline(source.entry, treeInvocation);
     if (!isHiddenCanonical) byId.set(id, { source, depth });
     const childDepth = isHiddenCanonical ? depth : depth + 1;
     // Preserve descendants while omitting reserved audit nodes themselves.
@@ -1832,10 +2016,8 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
     const entryInvocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
       ? parseInvocationReceipt(entry.data)
       : undefined;
-    const omittedReceipt = entry.type === "custom" && (
-      entryInvocation?.receiptKind !== "start" || entryInvocation.source !== "extension"
-    );
-    if (!omittedReceipt && !byId.has(entry.id)) {
+    const omitted = omittedFromTreeOutline(entry, entryInvocation);
+    if (!omitted && !byId.has(entry.id)) {
       throw new GatewayError("conflict", "Session tree omits a canonical entry");
     }
   }
@@ -1862,6 +2044,56 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
     selected.push(admitted);
   }
   return selected.reverse();
+}
+
+/** Roles whose message never becomes a chat row: Pi's system context and a
+ * producer-hidden custom message. A new SDK role fails this switch instead of
+ * reaching a default. */
+function projectableMessageRole(message: AgentMessage): boolean {
+  switch (message.role) {
+    case "custom": return message.display;
+    case "user": case "assistant": case "toolResult": case "bashExecution":
+    case "branchSummary": case "compactionSummary":
+      return true;
+    case "system":
+      return false;
+    default: {
+      const unclassified: never = message;
+      return false;
+    }
+  }
+}
+
+/** Whether one canonical entry produces a chat row. Every SDK entry type is
+ * classified: Pi records model-context edits, session metadata and
+ * model-attributed usage (cache warming) as canonical entries that never become
+ * rows, and a `custom`/`custom_message` entry is a row only when its producer
+ * asked for display. A new SDK entry type fails this switch instead of being
+ * treated as projectable and then throwing `projectable transcript entry
+ * produced no item` in `projectTranscript` (#470). */
+function transcriptRowFor(
+  entry: SessionEntry,
+  invocation: ReturnType<typeof parseInvocationReceipt>,
+  notification: ReturnType<typeof parseExtensionNotificationReceipt>,
+): boolean {
+  switch (entry.type) {
+    case "message": return projectableMessageRole(entry.message);
+    case "custom_message": return entry.display;
+    case "custom": return invocation?.receiptKind === "start" && invocation.source === "extension"
+      || notification !== undefined;
+    case "thinking_level_change": case "model_change": case "compaction":
+    case "branch_summary": case "label":
+      return true;
+    // Context edits alter only Pi's model-context projection, session metadata
+    // has its own owner, and usage is model-attributed metadata: all three stay
+    // canonical without a fabricated user-facing chat row.
+    case "session_info": case "context_edit": case "usage":
+      return false;
+    default: {
+      const unclassified: never = entry;
+      return false;
+    }
+  }
 }
 
 /** Filter the canonical branch and derive tool segments in the same pass. The
@@ -1901,17 +2133,7 @@ function projectableTranscriptEntries(
     const notification = entry.type === "custom" && entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE
       ? parseExtensionNotificationReceipt(entry.data)
       : undefined;
-    const projectableCustom = entry.type !== "custom"
-      || invocation?.receiptKind === "start" && invocation.source === "extension"
-      || notification !== undefined;
-    // Context edits alter only Pi's model-context projection. Keep their full
-    // records in canonical/history views without fabricating a user-facing chat row.
-    const projectable = entry.type !== "session_info" && entry.type !== "context_edit"
-      && projectableCustom
-      && !(entry.type === "custom_message" && !entry.display)
-      && !(entry.type === "message" && (entry.message.role === "system"
-        || entry.message.role === "custom" && !entry.message.display));
-    if (!projectable) continue;
+    if (!transcriptRowFor(entry, invocation, notification)) continue;
     entries.push(entry);
 
     const presentationId = presentationIDs?.get(entry.id) ?? entry.id;

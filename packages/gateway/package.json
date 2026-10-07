@@ -15,6 +15,9 @@
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
     "test:pi-sdk-scripts": "node --test scripts/check-pi-sdk.test.mjs scripts/update-pi-sdk.test.mjs scripts/compare-pi-sdk-graph.test.mjs",
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",
+    "test:sdk-behavior-trace": "vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
+    "update:sdk-behavior-trace": "TRON_UPDATE_SDK_BEHAVIOR_TRACE=1 vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
+    "record:pi-corpus": "vitest run --config vitest.corpus.config.ts",
     "build": "tsc -p tsconfig.json && npm run check:test-support",
     "check": "tsc -p tsconfig.json --noEmit && npm run check:test-support",
     "check:test-support": "tsc -p tsconfig.test-support.json",
@@ -26,10 +29,10 @@
     "chat": "node dist/client/terminal-chat.js"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.99.1",
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-coding-agent": "0.99.1",
-    "@earendil-works/pi-tui": "0.99.1",
+    "@earendil-works/pi-agent-core": "1.0.4",
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-tui": "1.0.4",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",
     "ws": "8.21.3"
@@ -39,6 +42,6 @@
     "@types/proper-lockfile": "4.1.4",
     "@types/ws": "8.18.1",
     "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }

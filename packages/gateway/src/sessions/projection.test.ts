@@ -94,6 +94,41 @@ describe("aggregate transcript structure", () => {
       .map(entry => entry.id));
   });
 
+  it("hides Pi model-attributed usage entries from the transcript instead of throwing", () => {
+    // Pi's cache warmer appends a `usage` entry through appendUsage, which makes
+    // it the leaf of the active branch. It is canonical metadata with no authored
+    // content, so transcript projection must hide it instead of throwing.
+    const manager = SessionManager.inMemory("/tmp/usage-entry-transcript-fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Warm the cache", timestamp: 1 });
+    const usage = manager.appendUsage("cache_warm", "anthropic", "claude", {
+      input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    }).id;
+    expect(manager.getBranch().map(entry => entry.id)).toEqual([prompt, usage]);
+    const canonical = JSON.stringify(manager.getBranch());
+
+    expect(projectTranscript(manager, new BlobStore()).map(item => item.id)).toEqual([prompt]);
+    expect(projectTranscriptPage(manager, new BlobStore(), 1).items.map(item => item.id)).toEqual([prompt]);
+    expect(projectTranscriptPageAfter(manager, new BlobStore(), 1, 8_192, prompt).items).toEqual([]);
+    expect(projectedTranscriptOrdinal(manager, prompt)).toBe(0);
+
+    // Hiding is projection only: the canonical entry stays in Pi's JSONL.
+    expect(JSON.stringify(manager.getBranch())).toBe(canonical);
+  });
+
+  it("hides Pi model-attributed usage entries from the tree outline instead of throwing", () => {
+    const manager = SessionManager.inMemory("/tmp/usage-entry-tree-fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Warm the cache", timestamp: 1 });
+    manager.appendUsage("cache_warm", "anthropic", "claude", {
+      input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    });
+    // The warmer's entry is the leaf, so the outline must not publish it as a
+    // node with a kind outside `SessionTreeNode["kind"]`.
+    expect(projectTree(manager, new BlobStore()).map(node => ({ id: node.id, kind: node.kind })))
+      .toEqual([{ id: prompt, kind: "message" }]);
+  });
+
   it("keeps canonical context edits out of fabricated transcript rows while Pi applies them", () => {
     const manager = SessionManager.inMemory("/tmp/context-edit-projection-fixture");
     const prompt = manager.appendMessage({ role: "user", content: "Original prompt", timestamp: 1 });
@@ -226,6 +261,84 @@ describe("catalog projection admission", () => {
 });
 
 describe("transcript projection", () => {
+  // The SDK output may be removed only when it is the exact codemode image
+  // marker paired with its immediately following image; similar text can be user/tool content.
+  it("hides Pi's image-save label from live codemode output and result projections", () => {
+    const label = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const result = { content: [
+      { type: "text", text: label },
+      { type: "image", data: "AA==", mimeType: "image/png" },
+      { type: "text", text: "image complete" },
+    ] };
+
+    const liveOutput = projectToolOutput(result, 64_000, "codemode");
+    const liveResult = projectToolResult(result, 24_000, "codemode");
+
+    expect(liveOutput.output).toBe("image complete");
+    expect(liveResult).toMatchObject({ content: [
+      { type: "image", mimeType: "image/png" },
+      { type: "text", text: "image complete" },
+    ] });
+    expect(JSON.stringify(liveResult)).not.toContain(label);
+    expect(result.content[0]).toMatchObject({ text: label });
+  });
+
+  it("hides Pi's generated codemode image-save label while retaining the canonical message", () => {
+    const content: Extract<AgentMessage, { role: "toolResult" }>["content"] = [
+      { type: "text", text: "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]" },
+      { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" },
+    ];
+    const message: AgentMessage = {
+      role: "toolResult", toolCallId: "image", toolName: "codemode", content, isError: false, timestamp: 1,
+    };
+
+    const projected = projectMessage("image-result", null, "2026-01-01T00:00:00Z", message, new BlobStore());
+
+    expect(message.content).toEqual(content);
+    expect(projected).toMatchObject({ role: "toolResult", content: [{ type: "image", mimeType: "image/png" }] });
+  });
+
+  it("keeps a matching-looking codemode label without its adjacent image", () => {
+    const text = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const projected = projectMessage("text-only", null, "2026-01-01T00:00:00Z", {
+      role: "toolResult", toolCallId: "text-only", toolName: "codemode",
+      content: [{ type: "text", text }, { type: "text", text: "follow-up output" }],
+      isError: false, timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "text", text: "follow-up output" }] });
+  });
+
+  it("keeps adjacent-image text without Pi's generated output path", () => {
+    const text = "[Image saved to /tmp/generated.png (image/png, 70B)]";
+    const projected = projectMessage("custom-output", null, "2026-01-01T00:00:00Z", {
+      role: "toolResult", toolCallId: "custom-output", toolName: "codemode",
+      content: [{ type: "text", text }, { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" }],
+      isError: false, timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "image", mimeType: "image/png" }] });
+  });
+
+  it("keeps matching-looking image-save text in user content", () => {
+    const text = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const projected = projectMessage("user-content", null, "2026-01-01T00:00:00Z", {
+      role: "user", content: [{ type: "text", text }, { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" }], timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "image", mimeType: "image/png" }] });
+  });
+
+  it("keeps the same image-save text from other tools", () => {
+    const text = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const projected = projectMessage("other-tool", null, "2026-01-01T00:00:00Z", {
+      role: "toolResult", toolCallId: "other-tool", toolName: "read",
+      content: [{ type: "text", text }, { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" }],
+      isError: false, timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "image", mimeType: "image/png" }] });
+  });
 
   it("promotes only an exact reserved display result into the typed transcript field", () => {
     const details = {

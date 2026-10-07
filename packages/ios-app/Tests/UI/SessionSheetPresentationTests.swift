@@ -563,6 +563,22 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testAgentInstructionsMCPServersSectionIsNotPresentedAsAnExtensionTurnSection() throws {
+        // Pi 1.0 writes `mcp_servers` itself; it must not fall into the copy for
+        // an unknown extension-added per-turn section.
+        func section(_ id: String) -> AgentInstructionsProjection.Section {
+            AgentInstructionsProjection.Section(
+                id: id, perTurn: false, text: "MCP servers whose tools are not declared to you.",
+                source: AgentInstructionsProjection.Source(.object(["kind": .string("pi")])),
+                entries: []
+            )
+        }
+        let mcp = AgentInstructionsPresentation.copy(for: section("mcp_servers"))
+        let unknown = AgentInstructionsPresentation.copy(for: section("unrecognized_extension_section"))
+        XCTAssertNotEqual(mcp.purpose, unknown.purpose)
+        XCTAssertNotEqual(mcp.title, unknown.title)
+    }
+
     func testInstructionsReaderRetainsThePreparedDocumentAcrossCoverAndUncover() async throws {
         let instructions = "# Project Rules\n\n" + String(repeating: "Preserve **user data** and read the owning docs.\n\n", count: 400)
         try await withModel { model in

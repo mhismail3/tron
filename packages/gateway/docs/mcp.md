@@ -26,6 +26,19 @@ existing sessions may need reload or a new session to pick it up.
 
 ## Accepted boundary changes
 
+Pi 0.99.2 normalizes generated MCP tool identifiers by replacing hyphens in
+server names with underscores (`mcp__my-server__tool` becomes
+`mcp__my_server__tool`). Tron adopts Pi's spelling as a one-time cutover; there
+is no translation shim because the maintainer verified this host has no
+persisted hyphenated tool selection or MCP configuration to migrate. A chat
+whose saved selection contains an old hyphenated tool name no longer resolves
+that selection; re-enable the server's tools for that chat in Available Tools.
+
+Pi 1.0.0 stores OAuth credentials by server name and URL rather than URL alone.
+On rollback from 1.0.4 to 0.99.1, a migrated sign-in is not found and that MCP
+server needs authorization again. This is the accepted one-way rollback delta,
+recorded as the exact MCP-auth entry in `pi-sdk-baseline.json`.
+
 Pi MCP replaces Tron's retired adapter. The following differences are
 intentional: stdio servers inherit the Gateway environment; HTTP follows normal
 fetch redirect behavior and may contact OAuth authorization servers; Pi applies
@@ -37,7 +50,10 @@ tool owns its existing limits and nested-call behavior.
 
 Pi supports stdio and streamable HTTP, OAuth/PKCE, dynamic client registration,
 refresh, server instructions, resources, progress, logging, structured results,
-and per-tool exposure. MCP uses Pi's `mcp.json` and `mcp-auth.json` for server and OAuth configuration;
+and per-tool exposure. Pi 1.0.4 accepts `codemode-deferred` as an alias for
+`codemode`; iOS offers only one Codemode exposure choice and presents stored
+alias values as Codemode without rewriting them. MCP uses Pi's `mcp.json` and
+`mcp-auth.json` for server and OAuth configuration;
 Tron does not maintain a second server schema. Runtime fixture coverage for
 stdio/HTTP exposure, resource reads, `list_changed`, lazy reconnect, and process
 group cleanup lives in `src/sessions/runtime-registry.integration.test.ts`.
@@ -49,9 +65,24 @@ Each string is capped at 256 characters (except `state`, capped at 64); `error`
 is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
 paths are not exposed. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
-covered by `src/admin/mcp-admin-service.test.ts`; sign-in relay outcomes and
-callback safety are covered by `src/admin/auth-broker.test.ts` and the local
-OAuth fixture in `src/admin/mcp-auth.integration.test.ts`.
+covered by `src/admin/mcp-admin-service.test.ts`, which proves the `!command`
+header reference through Pi's own CLI against a loopback server that records the
+`Authorization` it receives; sign-in relay outcomes and callback safety are
+covered by `src/admin/auth-broker.test.ts`, and the local OAuth fixture in
+`src/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
+challenge, dynamic client registration, loopback callback relay, token
+persistence and refresh through the Gateway's `mcp.auth.start` operation. That
+fixture serves the resource-metadata URL named by `WWW-Authenticate` and not the
+well-known root, and asserts the challenge path was fetched while the root was
+not: the request log is the proof, because Pi's discovery falls back to the
+server origin and would otherwise still sign in. The MCP CLI is located through
+the `bin.pi` the package declares rather than a guessed layout. Those tests reach
+Pi only through its public exports, so they describe the supported boundary
+instead of one installed layout. The sequential rollback matrix
+(`packages/gateway/scripts/check-pi-sdk-rollback.mjs`) seeds and rereads
+`mcp.json` and `mcp-auth.json` through each runtime's own `pi mcp list`
+resolution, so an SDK change that rewrites either store in a way the previous
+runtime cannot read is reported before an upgrade lands.
 
 ## Sign-in relay
 

@@ -4139,7 +4139,7 @@ export class RuntimeSlot {
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
-        const output = mergeLiveToolOutput(existing, projectToolOutput(event.partialResult));
+        const output = mergeLiveToolOutput(existing, projectToolOutput(event.partialResult, undefined, event.toolName));
         const startedAt = existing?.startedAt ?? now;
         const durationMs = this.measureToolDuration(
           event.toolCallId,
@@ -4160,7 +4160,7 @@ export class RuntimeSlot {
           order: existing?.order ?? this.nextToolOrder++,
           status: "running",
           arguments: projectJson(event.args),
-          partialResult: projectToolResult(event.partialResult),
+          partialResult: projectToolResult(event.partialResult, undefined, event.toolName),
           ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
@@ -4229,7 +4229,7 @@ export class RuntimeSlot {
           existing?.durationMs ?? 0,
           retained?.durationMs ?? 0
         );
-        const output = projectToolOutput(event.result);
+        const output = projectToolOutput(event.result, undefined, event.toolName);
         const extensionOrigin = this.extensionToolOrigin(event.toolName)
           ?? existing?.extensionOrigin
           ?? retained?.extensionOrigin;
@@ -4246,7 +4246,7 @@ export class RuntimeSlot {
           status: event.isError ? "failed" : "completed",
           arguments: existing?.arguments ?? null,
           ...(existing?.partialResult === undefined ? {} : { partialResult: existing.partialResult }),
-          result: projectToolResult(event.result),
+          result: projectToolResult(event.result, undefined, event.toolName),
           ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
@@ -4447,8 +4447,20 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         this.hooks.changed(this.id);
         break;
-      default:
+      // Turn boundaries and incremental bash output carry no Gateway runtime
+      // state: canonical entries and the message/tool cases above own every
+      // projection, and attention settlement keys off agent_start/agent_settled.
+      case "turn_start":
+      case "turn_end":
+      case "bash_execution_update":
         break;
+      default: {
+        // Unreachable for the pinned SDK: every AgentSessionEvent type is
+        // classified above. A new SDK event fails this assignment instead of
+        // being ignored without a runtime projection.
+        const unclassified: never = event;
+        break;
+      }
     }
   }
 

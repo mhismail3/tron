@@ -171,6 +171,49 @@ function validateInstalled(root, lockPackages, version, issues) {
   }
 }
 
+const KNOWN_DELTA_KEYS = ["store", "from", "to", "reason", "rollbackState", "credentialKey"];
+const CREDENTIAL_KEY_KEYS = ["from", "to"];
+const KNOWN_DELTA_PLACEHOLDERS = ["{namespace}", "{url}"];
+/**
+ * The stores and rollback states the sequential rollback matrix can act on. An
+ * entry naming anything else would validate but never match, so it is rejected
+ * instead of sitting in the file looking authoritative.
+ */
+export const KNOWN_DELTA_STORES = Object.freeze(["mcp-auth"]);
+export const KNOWN_DELTA_ROLLBACK_STATES = Object.freeze(["needs-auth"]);
+
+function isCredentialKeyTemplate(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const withoutPlaceholders = KNOWN_DELTA_PLACEHOLDERS.reduce((text, placeholder) => text.split(placeholder).join(""), value);
+  return !withoutPlaceholders.includes("{") && !withoutPlaceholders.includes("}");
+}
+
+/**
+ * A `knownOneWayDeltas` entry accepts exactly one store's documented re-keying
+ * for exactly one version range. It names the store, the range, the credential
+ * key transform (`{namespace}` and `{url}` placeholders) and the rollback
+ * state that transform is allowed to leave behind, so the matrix can keep
+ * asserting every other runtime, step and state.
+ */
+function validateKnownOneWayDeltas(entries, issues) {
+  for (const entry of entries) {
+    const keys = entry && typeof entry === "object" && !Array.isArray(entry) ? Object.keys(entry) : [];
+    const credentialKeyKeys = entry?.credentialKey && typeof entry.credentialKey === "object" && !Array.isArray(entry.credentialKey)
+      ? Object.keys(entry.credentialKey) : [];
+    const coherent = keys.length === KNOWN_DELTA_KEYS.length && KNOWN_DELTA_KEYS.every((key) => keys.includes(key))
+      && typeof entry.store === "string" && KNOWN_DELTA_STORES.includes(entry.store)
+      && typeof entry.from === "string" && EXACT_VERSION.test(entry.from)
+      && typeof entry.to === "string" && EXACT_VERSION.test(entry.to)
+      && typeof entry.reason === "string" && entry.reason.trim().length > 0
+      && typeof entry.rollbackState === "string" && KNOWN_DELTA_ROLLBACK_STATES.includes(entry.rollbackState)
+      && credentialKeyKeys.length === CREDENTIAL_KEY_KEYS.length && CREDENTIAL_KEY_KEYS.every((key) => credentialKeyKeys.includes(key))
+      && isCredentialKeyTemplate(entry.credentialKey?.from) && isCredentialKeyTemplate(entry.credentialKey?.to);
+    if (!coherent) {
+      addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas entries must be exactly {store, from, to, reason, rollbackState, credentialKey: {from, to}} with a known store (${KNOWN_DELTA_STORES.join(", ")}), exact versions, a reason, a known rollback state (${KNOWN_DELTA_ROLLBACK_STATES.join(", ")}) and key templates using only ${KNOWN_DELTA_PLACEHOLDERS.join("/")}`);
+    }
+  }
+}
+
 /**
  * Validate the Pi family in a Gateway package directory.
  * Returns a stable report and never performs network or filesystem mutation.
@@ -179,12 +222,21 @@ export function readPiSdkBaseline(gatewayDir) {
   const issues = [];
   const path = join(resolve(gatewayDir), BASELINE_FILE);
   const value = readJson(path, BASELINE_FILE, issues, BASELINE_MAX_BYTES);
-  if (!value || Object.keys(value).length !== 2 || value.schema !== 1
+  const keys = value && typeof value === "object" ? Object.keys(value) : [];
+  const shaped = keys.length === 2 || (keys.length === 3 && keys.includes("knownOneWayDeltas"));
+  if (!value || !shaped || value.schema !== 1
     || typeof value.rollbackVersion !== "string" || !EXACT_VERSION.test(value.rollbackVersion)) {
-    addIssue(issues, `${BASELINE_FILE} must contain exactly schema 1 and an exact rollbackVersion`);
+    addIssue(issues, `${BASELINE_FILE} must contain exactly schema 1, an exact rollbackVersion, and at most the knownOneWayDeltas list`);
     return { value: undefined, issues };
   }
-  return { value, issues };
+  if (value.knownOneWayDeltas !== undefined) {
+    if (!Array.isArray(value.knownOneWayDeltas)) {
+      addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas must be a list`);
+    } else {
+      validateKnownOneWayDeltas(value.knownOneWayDeltas, issues);
+    }
+  }
+  return { value: issues.length > 0 ? undefined : value, issues };
 }
 
 export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."), checkInstalled = true, requireBaseline = true } = {}) {
