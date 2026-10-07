@@ -46,8 +46,13 @@ it the commits the runtime reports, and sends each activation the view it render
   the projection and persists a digest of the bytes it read; it does not reject
   the refresh merely because the old digest differs. A transient cut lookup
   hashes the complete ingested prefix before and after reconstruction and refuses
-  a mismatch. The session file remains append-only under its owner; the reader
-  neither repairs nor migrates it, and whole-file reads are bounded per line.
+  a mismatch. When a source parse fails, the reader compares file identity, size,
+  modification time and change time across the read. If these differ, or the
+  final snapshot cannot be inspected, ingestion leaves the cursor unchanged and
+  unblocked; the next commit/open retries from the source. A stable malformed
+  file still blocks as `source-unavailable`. The session file remains append-only
+  under its owner; the reader neither repairs nor migrates it, and whole-file
+  reads are bounded per line.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory

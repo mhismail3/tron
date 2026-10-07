@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -149,6 +150,14 @@ describe("episodic canonical source reader", () => {
     const header = raw.split("\n")[0]!;
     await appendFile(broken, `${header}\nnot json\n`);
     await expect(readCanonicalSession({ path: broken, sessionId: fx.sessionId, maxLineBytes: 1_024 })).rejects.toThrowError(/not JSON/u);
+    const stableInvalidMemory = await EpisodicMemory.open({
+      workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: broken,
+      summarizer: stubSummarizer,
+      limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+    });
+    await stableInvalidMemory.entriesCommitted(fx.sessionId);
+    expect(stableInvalidMemory.status().blocked?.reason).toBe("source-unavailable");
+    await stableInvalidMemory.dispose();
 
     const oversized = join(fx.root, "oversized.jsonl");
     await appendFile(oversized, `${header}\n${JSON.stringify({ type: "message", id: "big", parentId: null, timestamp: new Date().toISOString(), message: { role: "user", content: "x".repeat(4_000), timestamp: Date.now() } })}\n`);
@@ -222,6 +231,42 @@ describe("episodic canonical source reader", () => {
     // Both messages are level-0 nodes, and the omitted one is free: no
     // compactor call was needed for it.
     expect(memory.status().nodes.byLevel.find(entry => entry.level === 0)?.count).toBe(3);
+    await memory.dispose();
+  });
+
+  it("leaves memory unblocked when an invalid read overlaps an in-place rewrite, then ingests the stable file", async () => {
+    const fx = await fixture("rewrite-during-read");
+    fx.manager.appendMessage(userMessage("stable replacement prompt"));
+    const stable = await readFile(fx.sessionFile);
+    const invalid = Buffer.from(`${stable.toString("utf8").split("\n")[0]}\nnot json\n`);
+    await writeFile(fx.sessionFile, invalid);
+    const memory = await memoryFor(fx);
+    const probe = await fsPromises.open(fx.sessionFile, "r");
+    const prototype = Object.getPrototypeOf(probe) as { read: (...args: unknown[]) => Promise<{ bytesRead: number }> };
+    await probe.close();
+    const read = prototype.read;
+    let rewritten = false;
+    const readSpy = vi.spyOn(prototype, "read").mockImplementation(async function (this: { read: typeof read }, ...args: unknown[]) {
+      const result = await read.apply(this, args);
+      if (!rewritten) {
+        rewritten = true;
+        await writeFile(fx.sessionFile, stable);
+      }
+      return result;
+    });
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+    } finally {
+      readSpy.mockRestore();
+    }
+    expect(rewritten).toBe(true);
+    expect(memory.status().blocked).toBeNull();
+    expect(memory.status().messages).toBe(0);
+    await memory.entriesCommitted(fx.sessionId);
+    expect(memory.status().blocked).toBeNull();
+    expect(memory.status().messages).toBe(2);
+    const catalog = catalogRecords(await readFile(fx.catalogPath, "utf8"));
+    expect(catalog.some(record => record.text === "stable replacement prompt")).toBe(true);
     await memory.dispose();
   });
 
