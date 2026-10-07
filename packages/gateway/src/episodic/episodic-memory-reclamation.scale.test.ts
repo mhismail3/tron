@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { runInNewContext } from "node:vm";
 import { getHeapSnapshot, setFlagsFromString } from "node:v8";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,8 +37,7 @@ async function namespaceBytes(path: string): Promise<number> {
   return total;
 }
 
-async function retainedEditPayloads(): Promise<{ count: number; bytes: number }> {
-  const stream = getHeapSnapshot();
+async function retainedEditPayloads(stream: AsyncIterable<Uint8Array> = getHeapSnapshot()): Promise<{ count: number; bytes: number }> {
   const decoder = new TextDecoder();
   const stringNodeBytes = new Map<number, number>();
   const candidateIndexes = new Set<number>();
@@ -48,6 +48,8 @@ async function retainedEditPayloads(): Promise<{ count: number; bytes: number }>
   let nodeFieldCount = 0;
   let stringType = -1;
   let nodeOffset = 0;
+  let nodeCount = 0;
+  let stringCount = 0;
   let currentType = -1;
   let currentName = -1;
   let totalBytes = 0;
@@ -85,9 +87,14 @@ async function retainedEditPayloads(): Promise<{ count: number; bytes: number }>
         stringNodeBytes.set(currentName, (stringNodeBytes.get(currentName) ?? 0) + Number(raw));
       }
       nodeOffset += 1;
-    } else if (frame.context === "strings" && kind === "string" && candidateIndexes.has(frame.index)) {
+    } else if (frame.context === "strings" && kind === "string") {
+      stringCount = frame.index + 1;
+      if (!candidateIndexes.has(frame.index)) {
+        complete(frame);
+        return;
+      }
       const value = JSON.parse(raw) as string;
-      if (/^edit-\d{2} /u.test(value)) {
+      if (/^edit-\d{2} r{64,}$/u.test(value)) {
         const id = value.slice(0, 7);
         retainedEditIds.add(id);
         totalBytes += stringNodeBytes.get(frame.index) ?? 0;
@@ -113,7 +120,10 @@ async function retainedEditPayloads(): Promise<{ count: number; bytes: number }>
     else {
       const frame = stack.at(-1);
       if (frame && frame.kind === "object" && frame.expectingKey) consumeScalar("string", '""');
-      else if (frame) complete(frame);
+      else if (frame) {
+        if (frame.context === "strings") stringCount = frame.index + 1;
+        complete(frame);
+      }
     }
     token = "";
     inString = false;
@@ -139,6 +149,13 @@ async function retainedEditPayloads(): Promise<{ count: number; bytes: number }>
           token = keepString ? '"' : "";
           continue;
         }
+        const frame = stack.at(-1);
+        const relevantNumber = frame?.kind === "array" && frame.context === "nodes";
+        if (relevantNumber && (punctuation.has(char!) || /\s/u.test(char!)) && token.length > 0) {
+          consumeScalar("number", token);
+          nodeCount += 1;
+          token = "";
+        }
         if (punctuation.has(char!)) {
           if (char === "{" || char === "[") {
             const parent = stack.at(-1);
@@ -151,22 +168,34 @@ async function retainedEditPayloads(): Promise<{ count: number; bytes: number }>
           continue;
         }
         if (/\s/u.test(char!)) continue;
-        const frame = stack.at(-1);
-        const relevantNumber = frame?.kind === "array" && frame.context === "nodes";
         if (relevantNumber) token += char;
-        if (index + 1 < text.length && /[\s,\]}]/u.test(text[index + 1]!)) {
-          if (relevantNumber) consumeScalar("number", token);
-          token = "";
-        }
       }
     }
   } finally {
-    stream.destroy();
+    if ("destroy" in stream && typeof stream.destroy === "function") stream.destroy();
+  }
+  if (typeField < 0 || nameField < 0 || selfSizeField < 0 || nodeFieldCount === 0 || stringType < 0
+    || nodeCount === 0 || nodeOffset % nodeFieldCount !== 0 || stringCount === 0
+    || [...candidateIndexes].some(index => index >= stringCount)) {
+    throw new Error("Heap snapshot edit-payload measurement was incomplete or misaligned");
   }
   return { count: retainedEditIds.size, bytes: totalBytes };
 }
 
 describe("episodic memory reclamation scale", () => {
+  it("parses numeric node fields when a chunk ends immediately before a delimiter", async () => {
+    const snapshot = JSON.stringify({
+      snapshot: { meta: { node_fields: ["type", "name", "self_size"], node_types: [["string"]] } },
+      nodes: [0, 2, 131_104],
+      strings: ["node", "unused", "edit-00 " + "r".repeat(64)],
+    });
+    const bytes = Buffer.from(snapshot);
+    const nodesStart = bytes.indexOf(Buffer.from('"nodes"'));
+    const delimiter = bytes.indexOf(Buffer.from(","), nodesStart);
+    const result = await retainedEditPayloads(Readable.from([bytes.subarray(0, delimiter), bytes.subarray(delimiter)]));
+    expect(result).toEqual({ count: 1, bytes: 131_104 });
+  });
+
   it("keeps store bytes bounded by live state over repeated early edits", async () => {
     const measurements: number[] = [];
     const liveNodeCounts: number[] = [];
