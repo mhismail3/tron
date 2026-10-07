@@ -249,24 +249,51 @@ different session id, hence an ordinary session with no seam and no activation.
 
 ### Prompt caching
 
-Requests follow the recipe's caching layout (gist §8), so each one re-reads from
-the provider's cache everything a recent request sent:
+Each request can re-read from the provider's cache everything the previous one
+sent (#491). The exceptions are the request right after a view rebalance, an
+invalidation or a restart, and any request after the provider's cache expired:
 
-- The system prompt and tool list are constant, with no dates or per-turn state.
-- The memory message is the view cut into pieces at the last line end before
-  50,000, 80,000 and 100,000 characters (`episodic/cache-layout.ts`), followed by
-  the activation's nonce as its own last block. Anything that changes every
-  activation follows the view, so consecutive activations send the same bytes up
-  to the first cut their views differ at.
-- OpenAI and DeepSeek reuse that shared prefix on their own. For the
-  `anthropic-messages` API, tron-home's `before_provider_request` handler marks the
-  end of every view piece but the last. It keeps pi-ai's request-end mark, and
-  stays within Anthropic's four marks by dropping the tool mark first, then the
-  system mark.
-- The handler runs after the seam validated the request, and changes only
-  `cache_control`. If it fails, pi-ai's own payload is sent unmarked.
+- **Constant system prompt and tools.** The system prompt and tool list carry no
+  dates or per-turn state.
+- **The view only grows between rebalances.** It rebalances only once it passes
+  its budget, and then leaves an eighth of the budget for later turns
+  ([episodic-memory.md](episodic-memory.md)), so a rebalance rewrites its start
+  once in about every twenty turns at production sizes.
+- **The memory message's blocks** (`viewPieces` in `home/home-memory.ts`):
+  - the header plus every line the previous activation's request sent;
+  - one block per line after those;
+  - the footer;
+  - the activation's nonce, last.
 
-Ordinary sessions are not affected: the handler belongs to the Home profile.
+  The blocks rejoin to exactly the view text the model reads. Anything that
+  changes every activation follows the view. Between rebalances the first block
+  ends exactly where the previous request's view ended. After a rebalance the
+  start changed, so the whole view is one block, written once.
+- **What the previous request sent.** It is held per opened memory as a line
+  count and digest. It is recorded only once the seam has passed every refusal
+  check, because a refused activation sends nothing. The first request after a
+  restart therefore writes the view once.
+- **Where the cache marks go.** OpenAI and DeepSeek reuse the shared prefix on
+  their own. For the `anthropic-messages` API, tron-home's
+  `before_provider_request` handler marks the first block and the last line:
+  - the next request re-reads the first mark exactly, or finds the last-line mark
+    within Anthropic's 20-block lookback;
+  - it keeps pi-ai's request-end mark;
+  - it stays within Anthropic's four marks by dropping the tool mark first, then
+    the system mark.
+
+  The handler runs after the seam validated the request, and changes only
+  `cache_control`. If it fails, pi-ai's own payload is sent unmarked. A provider
+  that composes its own request must call pi-ai's `onPayload` for these marks to
+  apply (pi's custom-provider contract).
+- **Long retention.** Home's chat requests and its summarizer's calls ask pi-ai
+  for `long` cache retention: Anthropic's one-hour TTL, OpenAI's longest. Home is
+  used on and off through a day, so a five-minute cache would expire between most
+  turns. The chat's request goes through the Home session's own view of the
+  shared model runtime (`applyHomeCacheRetention`).
+
+Ordinary sessions are not affected: the handler, the layout and the retention
+belong to the Home profile.
 
 ## Memory and readiness
 

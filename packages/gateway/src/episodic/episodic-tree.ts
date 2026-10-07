@@ -190,8 +190,32 @@ export function fitView(
   return total;
 }
 
+/** Where a rebalance fits the view down to: an eighth of the budget below it. */
+export function viewLowWater(viewBudget: number): number {
+  return viewBudget - Math.floor(viewBudget / 8);
+}
+
+/**
+ * The view's rebalance (#491): nothing while the view is within its budget, then
+ * one `fitView` down to the low-water mark. A fit merges the oldest eligible
+ * parts, near the view's head, so fitting after every message rewrote the head of
+ * nearly every request and voided every provider's prompt cache. Between two
+ * rebalances the view only grows at its end, so a request re-reads everything an
+ * earlier one sent, and a rebalance leaves an eighth of the budget before the next.
+ */
+export function rebalanceView(
+  parts: EpisodicViewPart[],
+  count: number,
+  viewBudget: number,
+  bytesOf: EpisodicViewBytes,
+  isBuilt: (address: string) => boolean,
+  total = viewBytes(parts, bytesOf),
+): number {
+  return total <= viewBudget ? total : fitView(parts, count, viewLowWater(viewBudget), bytesOf, isBuilt, total);
+}
+
 /** Fold the view again from message 0 (gist §5.2 "At load"): append each
- * message's part, then fit. */
+ * message's part, then rebalance, exactly as the live view does. */
 export function foldView(count: number, viewBudget: number, bytesOf: EpisodicViewBytes, isBuilt: (address: string) => boolean): EpisodicViewPart[] {
   const parts: EpisodicViewPart[] = [];
   let total = 0;
@@ -199,7 +223,7 @@ export function foldView(count: number, viewBudget: number, bytesOf: EpisodicVie
     const part: EpisodicViewPart = { level: 0, index, start: index, span: 1 };
     parts.push(part);
     total += bytesOf(part).bytes;
-    total = fitView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
+    total = rebalanceView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
   }
   return parts;
 }
@@ -226,7 +250,7 @@ export async function foldViewSliced(
     const part: EpisodicViewPart = { level: 0, index, start: index, span: 1 };
     parts.push(part);
     total += bytesOf(part).bytes;
-    total = fitView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
+    total = rebalanceView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
     if (sliceMessages > 0 && (index + 1) % sliceMessages === 0) await yieldToEventLoop();
   }
   return parts;

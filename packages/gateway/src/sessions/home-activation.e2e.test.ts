@@ -106,20 +106,29 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs 
 interface CapturedRequest {
   roles: string[];
   blob: string;
+  /** The memory message's text blocks before the nonce, joined: the view as the model reads it. */
+  view: string;
+  /** Every message but the memory message. */
+  outside: string;
 }
 
-function record(context: { messages: Array<{ role: string }> }): CapturedRequest {
+function record(context: { messages: Array<{ role: string; content?: unknown }> }): CapturedRequest {
+  const json = (messages: unknown) => JSON.stringify(messages, (key, value) => key === "timestamp" ? 0 : value);
+  const texts = (message: { content?: unknown }) => Array.isArray(message.content)
+    ? (message.content as Array<{ type?: string; text?: string }>).filter((part) => part.type === "text").map((part) => part.text ?? "") : [];
+  const memory = context.messages.find((message) => texts(message)[0]?.startsWith(HOME_MEMORY_VIEW_MARKER));
   return {
     roles: context.messages.map((message) => message.role),
-    blob: JSON.stringify(context.messages, (key, value) => key === "timestamp" ? 0 : value),
+    blob: json(context.messages),
+    // The view spans several text blocks (#491); they rejoin to the view text.
+    view: memory ? texts(memory).slice(0, -1).join("") : "",
+    outside: json(context.messages.filter((message) => message !== memory)),
   };
 }
 
 /** The frozen view one request carried, without its per-activation nonce. */
 function viewOf(request: CapturedRequest): string {
-  const start = request.blob.indexOf(HOME_MEMORY_VIEW_MARKER);
-  const end = request.blob.indexOf("</chat>", start);
-  return start < 0 || end < 0 ? "" : request.blob.slice(start, end);
+  return request.view;
 }
 
 const roots: string[] = [];
@@ -309,12 +318,12 @@ describe.sequential("Tron Home activations end to end", () => {
       const view = viewOf(requests[0]!);
       // Short inputs are verbatim view lines (gist §3); only text outside the
       // view would be a resent native message, and replies are never verbatim.
-      const outside = requests[0]!.blob.replace(view, "");
+      const outside = requests[0]!.outside;
       let carriesEarlier = false;
       for (let earlier = 0; earlier < turn; earlier += 1) {
         if (outside.includes(`INPUT-${earlier}-MARK`) || requests[0]!.blob.includes(`REPLY-${earlier}-MARK`)) carriesEarlier = true;
       }
-      const lines = view.split("\\n").filter((line) => /^\d+\+\d+\|/u.test(line));
+      const lines = view.split("\n").filter((line) => /^\d+\+\d+\|/u.test(line));
       turns.push({ chars: requests[0]!.blob.length, carriesEarlier, coversZero: turn === 0 || lines.some((line) => line.startsWith("0+")) });
     }
     const history = (await canonicalMessages(slot)).reduce((sum, message) => sum + JSON.stringify(message.content ?? "").length, 0);

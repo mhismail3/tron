@@ -3,7 +3,7 @@ import { clampThinkingLevel, isRetryableAssistantError } from "@earendil-works/p
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 import { cutBytes } from "./episodic-tree.js";
-import { cachePieces, markAnthropicPieces } from "./cache-layout.js";
+import { cachePieces, markAnthropicBlocks } from "./cache-layout.js";
 
 /*
  * The compactor (gist §4): one call per node, no tools, a cheap model. Its
@@ -183,8 +183,11 @@ export function createModelRuntimeSummarizer(runtime: ModelRuntime, model: Model
       maxTokens: COMPACTOR_MAX_TOKENS,
       ...(reasoning === "off" ? {} : { reasoning }),
       sessionId: request.cacheKey,
+      // Home's memory is read and extended on and off through a day; long
+      // retention keeps its view cached between bursts (#491).
+      cacheRetention: "long",
       onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
-        ? markAnthropicPieces(payload, 0, pieces.length - 1) : undefined,
+        ? markAnthropicBlocks(payload, 0, pieces.slice(0, -1).map((_piece, index) => index)) : undefined,
     });
   };
 }

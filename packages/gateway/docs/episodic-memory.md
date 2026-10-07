@@ -162,11 +162,18 @@ The tree, the view, and the pump are the recipe's:
   trimmed; while it is over `NODE` bytes the size loop sends the line cut at the
   limit back in the same conversation, up to `TRIES` times, and the shortest try
   wins. Cutting never splits a UTF-8 character.
-- **The view** (gist §5): `append(part(0, i))` then `fit()`. While the view is
-  over `VIEW` bytes, `fit` merges the adjacent built-parent pair with the largest
-  `due = (T - start) / 2^(l+2)`. Parents that are not built are passed over, so
-  the budget is soft; parts are never split. An unbuilt part renders the recipe's
-  placeholder for status only.
+- **The view** (gist §5): `append(part(0, i))` then a rebalance. Departure (#491):
+  the recipe fits after every message; this view does nothing while it is within
+  `VIEW` bytes, and once it passes them fits down to seven eighths of `VIEW`.
+  `fit` merges the adjacent built-parent pair with the largest
+  `due = (T - start) / 2^(l+2)`. The oldest eligible pairs come first, near the
+  view's head, so fitting after every message rewrote the start of nearly every
+  request and voided its prompt cache (measured on #467). Batched, the view only
+  grows at its end between two rebalances, and each rebalance leaves an eighth of
+  `VIEW` for later messages. What gets merged, and in what order, is unchanged.
+  Parents that are not built are passed over, so the budget is soft; parts are
+  never split. The fold at load applies the same rule. An unbuilt part renders
+  the recipe's placeholder for status only.
 - **The pump** (gist §4.1): a node builds only when it is not built, its
   children are built, and its whole context is summarized (`end <= first(view)`).
   Up to `JOBS` build at once, and the pump refills **after each completion**, as
@@ -379,8 +386,11 @@ fields (gist §8). It is not persisted.
 Each compactor call puts its context block first, as the recipe says (gist §4.2,
 §8): consecutive calls share that prefix.
 
-- **Pieces:** the default summarizer sends the context cut at the same marks as
-  Home's view (`cache-layout.ts`), then the step as the last block.
+- **Pieces:** the default summarizer sends the context cut at the recipe's marks
+  (50,000, 80,000 and 100,000 characters; `cache-layout.ts`), then the step as the
+  last block. Between two view rebalances, consecutive contexts only grow at
+  their end, so each call re-reads every piece before its last.
+- **Retention:** calls ask pi-ai for `long` cache retention (#491).
 - **Anthropic:** it marks the cut pieces within the four-mark limit. Other
   providers reuse the prefix on their own.
 - **Cache key:** every call carries the memory's cache key,

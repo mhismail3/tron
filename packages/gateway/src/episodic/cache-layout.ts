@@ -1,13 +1,13 @@
 /**
- * The recipe's prompt-caching layout (OptChat gist §8), for every request that
- * carries a memory view: Home's activations and the episodic summarizer's calls.
+ * Prompt-caching layout for requests that carry a memory view.
  *
- * The view is cut into pieces at the last line end before each mark. Two
- * requests whose views share their start share the pieces before the first cut
- * that differs, so a provider that caches by prefix re-reads them. Anthropic
- * caches only where a request places `cache_control`, at most four times per
- * request; OpenAI and DeepSeek cache shared prefixes on their own, so for them
- * the order of the request is the whole layout.
+ * The episodic summarizer's context uses the recipe's cuts (OptChat gist §8): the
+ * context is cut into pieces at the last line end before each mark, so two calls
+ * whose contexts share their start share the pieces before the first cut that
+ * differs. Home's activations use the view's own blocks instead (`viewPieces`,
+ * #491). Anthropic caches only where a request places `cache_control`, at most
+ * four times per request; OpenAI and DeepSeek cache shared prefixes on their
+ * own, so for them the order of the request is the whole layout.
  */
 
 /** Where the view is cut, in characters (gist §8; picked there by replaying real sessions). */
@@ -42,9 +42,9 @@ function isObject(value: unknown): value is Json {
 }
 
 /**
- * Mark the first `count` content blocks of `messages[messageIndex]` in an
- * Anthropic Messages payload, as pi-ai builds it, and keep the request within
- * Anthropic's breakpoint limit.
+ * Mark the content blocks `blocks` of `messages[messageIndex]` in an Anthropic
+ * Messages payload, as pi-ai builds it, and keep the request within Anthropic's
+ * breakpoint limit.
  *
  * Only `cache_control` fields change. The request's own end mark and the new
  * piece marks are kept; when the limit is exceeded, marks are dropped from the
@@ -52,18 +52,19 @@ function isObject(value: unknown): value is Json {
  * covers both. A payload with no mark at all has caching turned off, and one
  * of any other shape is returned as it is.
  */
-export function markAnthropicPieces(payload: unknown, messageIndex: number, count: number): unknown {
-  if (!isObject(payload) || !Array.isArray(payload.messages) || count <= 0) return payload;
+export function markAnthropicBlocks(payload: unknown, messageIndex: number, blocks: readonly number[]): unknown {
+  if (!isObject(payload) || !Array.isArray(payload.messages) || blocks.length === 0) return payload;
   const target = payload.messages[messageIndex];
-  if (!isObject(target) || !Array.isArray(target.content) || target.content.length < count) return payload;
+  if (!isObject(target) || !Array.isArray(target.content)) return payload;
+  if (blocks.some((block) => !Number.isInteger(block) || block < 0 || block >= (target.content as unknown[]).length)) return payload;
   const control = existingControl(payload);
   if (control === undefined) return payload;
 
   const next = structuredClone(payload) as Json & { messages: Json[] };
-  const blocks = next.messages[messageIndex]!.content as Json[];
-  for (let index = 0; index < count; index += 1) {
-    if (!isObject(blocks[index])) return payload;
-    blocks[index]!.cache_control = structuredClone(control);
+  const content = next.messages[messageIndex]!.content as Json[];
+  for (const index of blocks) {
+    if (!isObject(content[index])) return payload;
+    content[index]!.cache_control = structuredClone(control);
   }
   const optional: Json[] = [
     ...(Array.isArray(next.tools) ? (next.tools as unknown[]).filter(isObject).reverse() : []),
