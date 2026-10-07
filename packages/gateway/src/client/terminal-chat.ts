@@ -23,12 +23,16 @@ function text(parts: ContentPart[]): string {
   return parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
 }
 
-export function assistantText(snapshot: SessionSnapshot): string {
-  const assistant = snapshot.streaming?.kind === "message" && snapshot.streaming.role === "assistant"
+function assistantMessage(snapshot: SessionSnapshot): Extract<TranscriptItem, { kind: "message" }> | undefined {
+  return snapshot.streaming?.kind === "message" && snapshot.streaming.role === "assistant"
     ? snapshot.streaming
     : [...snapshot.transcript].reverse().find(
       (item): item is Extract<TranscriptItem, { kind: "message" }> => item.kind === "message" && item.role === "assistant",
     );
+}
+
+export function assistantText(snapshot: SessionSnapshot): string {
+  const assistant = assistantMessage(snapshot);
   if (!assistant) return "";
   const content = text(assistant.content);
   return assistant.errorMessage
@@ -43,7 +47,12 @@ interface SessionEventEnvelope {
   data: JsonValue;
 }
 
-function renderDelta(previous: string, current: string): string {
+function assistantMessageId(snapshot: SessionSnapshot): string | undefined {
+  return assistantMessage(snapshot)?.id;
+}
+
+function renderDelta(previous: string, current: string, isNewMessage: boolean): string {
+  if (isNewMessage) return current;
   if (current.startsWith(previous)) return current.slice(previous.length);
   return `\n${current}`;
 }
@@ -301,8 +310,7 @@ export async function disableHome(client: Pick<GatewayProtocolClient, "request">
   return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
 }
 
-/** Run one `/home` command, reporting its outcome on stdout and any failure on
- * stderr so the chat continues. */
+/** Resolve and run one `/home` line without letting malformed arguments escape the prompt loop. */
 export async function runHomeInput(client: Pick<GatewayProtocolClient, "request">, input: string): Promise<boolean> {
   let command: HomeCommand | undefined;
   try {
@@ -316,6 +324,7 @@ export async function runHomeInput(client: Pick<GatewayProtocolClient, "request"
   return true;
 }
 
+/** Run one parsed `/home` command, reporting its outcome on stdout and failures on stderr. */
 export async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
   if (command.kind === "usage") {
     process.stderr.write(HOME_USAGE);
@@ -368,6 +377,7 @@ async function runTerminalChat(): Promise<void> {
   let snapshot!: SessionSnapshot;
   let subscriptionToken!: string;
   let rendered = "";
+  let renderedMessageId: string | undefined;
   let cursor!: { runtimeGeneration: string; eventSequence: number };
   let awaitingOperation: string | undefined;
   let reconciledSettledOperation: string | undefined;
@@ -377,6 +387,7 @@ async function runTerminalChat(): Promise<void> {
     snapshot = installed.session;
     subscriptionToken = installed.subscriptionToken;
     rendered = assistantText(snapshot);
+    renderedMessageId = assistantMessageId(snapshot);
     cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
     process.stdout.write(`Attached to Tron session ${snapshot.sessionId} (${snapshot.cwd})\n`);
     if (rendered) process.stdout.write(rendered);
@@ -415,9 +426,11 @@ async function runTerminalChat(): Promise<void> {
           }
         }
         const current = assistantText(snapshot);
-        const delta = renderDelta(rendered, current);
+        const messageId = assistantMessageId(snapshot);
+        const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
         if (delta) process.stdout.write(delta);
         rendered = current;
+        renderedMessageId = messageId;
         if (snapshot.phase === "idle" && !snapshot.operation && settledResolve) {
           process.stdout.write("\n");
           awaitingOperation = undefined;
@@ -441,9 +454,11 @@ async function runTerminalChat(): Promise<void> {
             subscriptionToken = installed.subscriptionToken;
             cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
             const current = assistantText(snapshot);
-            const delta = renderDelta(rendered, current);
+            const messageId = assistantMessageId(snapshot);
+            const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
             if (awaitingOperation && delta) process.stdout.write(delta);
             rendered = current;
+            renderedMessageId = messageId;
           });
           attachListeners();
           process.stderr.write("[Tron synchronized]\n");

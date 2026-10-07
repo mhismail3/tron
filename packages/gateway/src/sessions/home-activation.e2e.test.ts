@@ -9,9 +9,14 @@
  * stream. That keeps the counts meaningful — "zero provider requests" is about
  * the activation, not about a compactor the test happens to script.
  *
- * The retained artifact is `test-results/home-activation/report.json`.
+ * Retained artifacts are `test-results/home-activation/report.json` and
+ * `test-results/terminal-chat-home/transcript.json`.
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -25,6 +30,8 @@ import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { DeviceStore } from "../security/device-store.js";
+import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 
@@ -159,6 +166,7 @@ interface Fixture {
   runtime: ModelRuntime;
   registry: RuntimeRegistry;
   service: GatewayService;
+  server?: GatewayServer;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
   /** Every record the seam reported (activation sizes and refusals). */
@@ -175,7 +183,7 @@ function openRegistry(f: Fixture): void {
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,
     trust: new TrustService(f.agentDir),
-    broadcast: () => {},
+    broadcast: (sessionId, topic, payload) => f.server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
     homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
@@ -192,7 +200,11 @@ function openRegistry(f: Fixture): void {
     settings: new SettingsService(f.agentDir, f.runtime),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
-    uploads: { removeSession: async () => {} },
+    uploads: {
+      acquire: async () => ({ release: () => {} }),
+      materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }),
+      removeSession: async () => {},
+    },
   } as unknown as GatewayServiceDependencies);
   f.registry = registry;
   f.service = service;
@@ -431,6 +443,10 @@ describe.sequential("Tron Home activations end to end", () => {
     const second = slot.prompt(longInput("wait activation two"));
     await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
     const waiting = requests.length;
+    expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
+      phase: "active", readiness: { ready: true, gaps: [] }, recovery: { action: "none" },
+      activation: { available: true, activationOpen: true },
+    });
     const unbuiltWhileWaiting = (await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt ?? 0;
     f.compactor.release?.();
     await second;
@@ -505,6 +521,10 @@ describe.sequential("Tron Home activations end to end", () => {
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-configure", { configure: false });
     const unconfigured = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(unconfigured).toMatchObject({
+      phase: "blocked", readiness: { ready: false, gaps: ["memory-not-configured"] },
+      recovery: { action: "configure-memory" }, activation: { available: false },
+    });
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("unconfigured activation input"));
     await waitUntil(() => !slot.isBusy);
@@ -520,6 +540,7 @@ describe.sequential("Tron Home activations end to end", () => {
     await slot.prompt(longInput("configured activation input"));
     await waitUntil(() => !slot.isBusy);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(status).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" }, activation: { available: true, activationOpen: false } });
     const row = {
       unconfiguredMemory: unconfigured.memory,
       providerRequestsWhileUnconfigured: requests.filter((request) => request.blob.includes("unconfigured activation input")).length,
@@ -541,6 +562,119 @@ describe.sequential("Tron Home activations end to end", () => {
     expect(row.configured.configured).toBe(true);
     expect(row.configured.open).toBe(true);
   }, 60_000);
+
+  it("shows Gateway refusals in the terminal and keeps its prompt after invalid input", async () => {
+    const f = await fixture("terminal-subprocess");
+    const slot = await designateHome(f, "e2e-terminal-subprocess", { configure: false });
+    const devices = new DeviceStore(f.tronHome, "fixture-terminal-machine");
+    await devices.initialize();
+    const uploads = {
+      acquire: async () => ({ release: () => {} }),
+      materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }),
+      removeSession: async () => {},
+    };
+    const methods: string[] = [];
+    const invoke = f.service.invoke.bind(f.service);
+    (f.service as unknown as { invoke: typeof f.service.invoke }).invoke = async (context, method, params) => {
+      methods.push(method);
+      const result = await invoke(context, method, params);
+      if (method === "session.close") methods.push("session.close:completed");
+      return result;
+    };
+    const server = new GatewayServer({
+      host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
+      devices, sessions: f.registry, service: f.service, uploads: uploads as never,
+      auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
+      logger: { log: () => {} } as never,
+    });
+    f.server = server;
+    await server.listen();
+    const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+    const testRoot = join(f.root, "terminal-client");
+    await mkdir(testRoot, { recursive: true });
+    const typescript = createRequire(import.meta.url).resolve("typescript");
+    const loaderPath = join(testRoot, "typescript-loader.mjs");
+    await writeFile(loaderPath, `import ts from ${JSON.stringify(pathToFileURL(typescript).href)};\nimport { readFile } from "node:fs/promises";\nexport async function resolve(specifier, context, nextResolve) {\n  try { return await nextResolve(specifier, context); } catch (error) {\n    if (specifier.endsWith(".js") && (error?.code === "ERR_MODULE_NOT_FOUND" || error?.code === "ERR_UNSUPPORTED_DIR_IMPORT")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n    throw error;\n  }\n}\nexport async function load(url, context, nextLoad) {\n  if (url.endsWith(".ts")) { const source = await readFile(new URL(url), "utf8"); return { format: "module", shortCircuit: true, source: ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText }; }\n  return nextLoad(url, context);\n}\n`);
+
+    const terminal = spawn(process.execPath, [
+      "--experimental-loader", loaderPath, join(process.cwd(), "src/client/terminal-chat.ts"),
+      "--session", slot.id,
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        TRON_DATA_DIR: f.tronHome,
+        TRON_GATEWAY_HOST: "127.0.0.1",
+        TRON_GATEWAY_PORT: String(port),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const scrub = (value: string) => value.replaceAll(`/private${f.root}`, "<fixture>").replaceAll(f.root, "<fixture>");
+    let exitTimer: NodeJS.Timeout | undefined;
+    let serverClosed = false;
+    terminal.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    terminal.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    try {
+      await waitUntil(() => stdout.includes(`Attached to Tron session ${slot.id}`), 20_000);
+      terminal.stdin.write("refusal one\n");
+      await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 1, 10_000).catch(() => { throw new Error(`missing first refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      terminal.stdin.write("refusal two\n");
+      await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 2, 10_000).catch(() => { throw new Error(`missing second refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      const repeatedRefusalCount = stdout.match(/Home memory is not configured/gu)?.length ?? 0;
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 3, 10_000);
+      terminal.stdin.write("/home memory anthropic\n");
+      await waitUntil(() => stderr.includes("Usage: /home"), 10_000).catch(() => { throw new Error(`missing usage; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 4, 10_000);
+      terminal.stdin.write("/home designate anthropic\n");
+      await waitUntil(() => (stderr.match(/Usage: \/home/gu)?.length ?? 0) >= 2, 10_000);
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 5, 10_000);
+      terminal.stdin.write("/home status\n");
+      await waitUntil(() => stdout.includes("configure-memory"), 10_000).catch(() => { throw new Error(`missing status; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 6, 10_000);
+      terminal.stdin.write("/quit\n");
+      await waitUntil(() => methods.includes("session.close:completed"), 5_000);
+      await server.close();
+      serverClosed = true;
+      f.server = undefined;
+      terminal.stdin.destroy();
+      const closed = once(terminal, "close") as Promise<[number | null, NodeJS.Signals | null]>;
+      const [code, signal] = await Promise.race([
+        closed,
+        new Promise<never>((_, reject) => { exitTimer = setTimeout(() => reject(new Error(`terminal client did not exit; methods=${methods.join(",")} stdout=${scrub(stdout)} stderr=${scrub(stderr)}`)), 10_000); }),
+      ]);
+      if (exitTimer) clearTimeout(exitTimer);
+      const refusalCount = stdout.match(/Home memory is not configured/gu)?.length ?? 0;
+      const artifact = {
+        exitCode: code,
+        signal,
+        stdout: scrub(stdout),
+        stderr: scrub(stderr),
+        assertions: { refusalCount, repeatedRefusalCount, malformedUsage: (stderr.match(/Usage: \/home/gu)?.length ?? 0) >= 2 && stderr.includes("provider/id"), statusReturned: stdout.includes("configure-memory") },
+      };
+      await mkdir(join(process.cwd(), "test-results", "terminal-chat-home"), { recursive: true });
+      await writeFile(join(process.cwd(), "test-results", "terminal-chat-home", "transcript.json"), `${JSON.stringify(artifact, null, 2)}\n`);
+      expect(scrub(stderr)).not.toContain("tron-chat:");
+      expect(code).toBe(0);
+      expect(signal).toBeNull();
+      expect(artifact.assertions.repeatedRefusalCount).toBeGreaterThanOrEqual(2);
+      expect(artifact.assertions.malformedUsage).toBe(true);
+      expect(artifact.assertions.statusReturned).toBe(true);
+      report.cases.push({ case: "terminal-subprocess", exitCode: code, repeatedRefusalCount: artifact.assertions.repeatedRefusalCount, malformedUsage: artifact.assertions.malformedUsage, statusReturned: artifact.assertions.statusReturned });
+    } finally {
+      if (exitTimer) clearTimeout(exitTimer);
+      if (terminal.exitCode === null && terminal.signalCode === null) {
+        const stopped = once(terminal, "close");
+        terminal.kill("SIGTERM");
+        await stopped;
+      }
+      if (!serverClosed) await server.close();
+      f.server = undefined;
+      await f.registry.dispose();
+      await rm(f.root, { recursive: true, force: true });
+    }
+  }, 90_000);
 
   it("resumes a retries-exhausted block once on the next activation", async () => {
     // A transient outage leaves a `retries-exhausted` block behind. The cause is
@@ -594,6 +728,10 @@ describe.sequential("Tron Home activations end to end", () => {
     await waitUntil(() => !slot.isBusy);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure");
     const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
+    expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
+      phase: "blocked", readiness: { ready: false, gaps: ["memory-permanent-failure"] },
+      recovery: { action: "resume-memory", reason: "permanent-failure" },
+    });
 
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("resume activation two"));
@@ -605,6 +743,7 @@ describe.sequential("Tron Home activations end to end", () => {
     const resumed = await f.service.invoke(client, "home.resumeMemory", { commandId: "e2e-resume-memory" })
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     const afterResume = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(afterResume).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)(longInput("resume response three"))]);
     await slot.prompt(longInput("resume activation three"));
@@ -640,17 +779,23 @@ describe.sequential("Tron Home activations end to end", () => {
 
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "e2e-lifecycle-disable" });
     const afterDisable = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(afterDisable).toMatchObject({ phase: "disabled", readiness: { ready: false, gaps: ["disabled"] }, recovery: { action: "designate" } });
     const reEnabled = await f.service.invoke(client, "home.designate", { commandId: "e2e-lifecycle-enable", model: MODEL });
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply two"))]);
     const sameSession = await f.registry.acquire((reEnabled as unknown as { sessionId: string }).sessionId);
     await sameSession.prompt(longInput("lifecycle activation two"));
     await waitUntil(() => !sameSession.isBusy);
     const afterEnable = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(afterEnable).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
 
     // A replacement session: the recorded one is deleted, so the next
     // designation creates a fresh one.
     await f.service.invoke(client, "session.delete", { commandId: "e2e-lifecycle-delete", sessionId: sameSession.id });
     await waitUntil(async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).sessionPresent === false);
+    expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
+      phase: "missing-session", readiness: { ready: false, gaps: ["session-missing"] },
+      recovery: { action: "designate", reason: "Home session is missing" },
+    });
     const reDesignated = await f.service.invoke(client, "home.designate", { commandId: "e2e-lifecycle-fresh", model: MODEL }) as unknown as { sessionId: string };
     const fresh = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const row = {

@@ -172,11 +172,13 @@ rebuild: the next runtime creation reads the record.
 `tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the session-based
 terminal client, and today it is the only surface that can designate Home,
 configure its memory and recover it. Its `/home` line is resolved without
-touching the Gateway, so a bad argument is answered before any RPC:
+touching the Gateway, so a bad argument is answered before any RPC. Malformed
+arguments are caught within the command loop, and assistant refusals are rendered
+from the canonical message's `errorMessage`, even when it has no content text:
 
 | command | what it does |
 | --- | --- |
-| `/home`, `/home status` | `home.status`, printed as the bounded projection |
+| `/home`, `/home status` | `home.status`, printed with phase, activation, readiness gaps, memory and recovery action |
 | `/home designate [provider/id]` | `home.designate`; without a model the Gateway's default is used |
 | `/home disable` | `home.disable` |
 | `/home memory <provider/id>` | `home.configureMemory`, then the memory projection it returns |
