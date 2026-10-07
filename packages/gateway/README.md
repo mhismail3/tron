@@ -3264,9 +3264,10 @@ shell commands and their process trees do not receive that live-home root, Gatew
 supervision/payload identity, or the `TRON_DATA_DIR` and `TRON_HOME_NAME` selectors. PATH
 entries under the resolved live home are removed. Gateway Vitest configurations (regular,
 scale and corpus), Node test scripts, and `scripts/tron work verify` share one environment
-policy and fail before tests or checks are selected when an inherited value resolves into a
-live Tron home. The policy expands SDK-style `~` paths and normalizes dot segments, including
-path-list entries.
+policy. Vitest rejects during setup, before test modules execute; `scripts/tron work verify`
+rejects before checks are selected or carried. The policy expands SDK-style `~` paths and
+normalizes dot segments, including path-list entries, and interprets `TRON_HOME_NAME` using
+the same home-relative resolution as `resolveTronHome()`.
 
 `SessionProcessActivity` gives subagent rows a stable namespaced `processId`, typed
 source/mode/lifecycle, bounded current-tool/output facts,

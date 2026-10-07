@@ -2,7 +2,7 @@ import { delimiter, isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
-function selectedHome(environment) {
+export function resolveTronHomePath(environment = process.env) {
   if (environment.TRON_DATA_DIR) {
     if (!isAbsolute(environment.TRON_DATA_DIR)) throw new Error("TRON_DATA_DIR must be absolute");
     return resolve(environment.TRON_DATA_DIR);
@@ -34,13 +34,20 @@ export function isTronHomePath(value, homes) {
 export function tronHomeEnvironmentLeaks(environment, homes) {
   return Object.entries(environment).flatMap(([name, value]) => {
     if (typeof value !== "string") return [];
+    if (name === "TRON_HOME_NAME") {
+      if (environment.TRON_DATA_DIR) return [];
+      const selected = resolveTronHomePath(environment);
+      return homes.some(home => selected === resolve(home) || selected.startsWith(`${resolve(home)}${sep}`))
+        ? [`${name}=${selected}`]
+        : [];
+    }
     const home = homes.find(candidate => isTronHomePath(value, [candidate]));
     return home ? [`${name}=${resolve(home)}`] : [];
   });
 }
 
 export function environmentTronHomes(environment = process.env) {
-  return [...new Set([resolve(homedir(), ".tron"), resolve(homedir(), ".tron-dev"), selectedHome(environment)].filter(Boolean))];
+  return [...new Set([resolve(homedir(), ".tron"), resolve(homedir(), ".tron-dev"), resolveTronHomePath(environment)])];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
