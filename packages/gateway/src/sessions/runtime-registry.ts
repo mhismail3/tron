@@ -74,6 +74,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
@@ -569,6 +570,7 @@ export class RuntimeRegistry {
   private knowledgeService: KnowledgeService | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
+  private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
@@ -853,6 +855,102 @@ export class RuntimeRegistry {
 
   /** The Home designation owner for this installation. */
   homeOwner(): HomeOwner { return this.home; }
+
+  /**
+   * One reservation-scoped materialization promise. Callers await this before
+   * dispatching their own input, so joining never consumes or replays a command.
+   */
+  async materializeReservedHome(sessionId: string): Promise<RuntimeSlot> {
+    let selected!: Promise<RuntimeSlot>;
+    await this.mutex.run(() => {
+      const existing = this.homeMaterializations.get(sessionId);
+      if (existing) {
+        selected = existing;
+      } else {
+        selected = Promise.resolve().then(() => this.createReservedHomeRuntime(sessionId));
+        this.homeMaterializations.set(sessionId, selected);
+      }
+    });
+    try {
+      return await selected;
+    } finally {
+      await this.mutex.run(() => {
+        if (this.homeMaterializations.get(sessionId) === selected) this.homeMaterializations.delete(sessionId);
+      });
+    }
+  }
+
+  private async createReservedHomeRuntime(sessionId: string): Promise<RuntimeSlot> {
+    const attemptId = randomUUID();
+    const chapter = await this.home.claimReservedChapter(sessionId, attemptId);
+    const cwd = await this.options.trust.requireResolved(this.home.homeWorkspacePath());
+    const sessionDirectory = this.sessionDirectoryFor(cwd.cwd);
+    const expectedPath = chapter.expectedPath ?? join(sessionDirectory, `.home-reservation-${sessionId}.jsonl`);
+    const scan = await scanReservedHomeSession({ directory: sessionDirectory, expectedPath, sessionId });
+    if (scan.action === "blocked") {
+      throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
+    }
+
+    const finishAdmission = this.beginSlotAdmission();
+    let reserved = false;
+    let slot: RuntimeSlot | undefined;
+    try {
+      await this.evictIdle(true);
+      await this.mutex.run(() => {
+        this.assertSlotAdmissionOpen();
+        this.requireLiveSlotCapacity();
+        this.reservedSlotStarts += 1;
+        reserved = true;
+      });
+      let manager: SessionManager;
+      if (scan.action === "adopt") {
+        manager = SessionManager.open(scan.path, sessionDirectory, cwd.cwd);
+        if (manager.getSessionId() !== sessionId || manager.getSessionFile() !== scan.path) {
+          throw new GatewayError("conflict", "Home chapter recovery did not reopen the exact reserved session");
+        }
+      } else {
+        manager = SessionManager.create(cwd.cwd, sessionDirectory);
+        const createdPath = manager.newSession({ id: sessionId });
+        if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
+        await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
+      }
+      if (scan.action === "adopt" && chapter.expectedPath !== scan.path) {
+        throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
+      }
+      if (scan.action === "adopt" && !chapter.expectedPath) {
+        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
+      }
+      if (scan.action === "adopt" && chapter.expectedPath) {
+        // The durable path was recorded by the earlier process; this attempt
+        // rebinds it before any runtime can submit canonical input.
+        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
+      }
+      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, "home");
+      if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
+        throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
+      }
+      const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
+      await this.mutex.run(() => {
+        if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
+        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        reserved = false;
+        this.publishRuntime(sessionId, slot!, transcriptBytes, "create");
+        this.invalidateCatalogAdmission();
+        void this.sessionCatalog.refresh(slot!.persistedSessionFile);
+        this.revision += 1;
+        this.options.sessionListChanged();
+      });
+      return slot;
+    } catch (error) {
+      if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
+      throw error;
+    } finally {
+      if (reserved) {
+        await this.mutex.run(() => { this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1); });
+      }
+      finishAdmission();
+    }
+  }
 
   /** Shared model recency for the model picker; newest first and bounded. */
   recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }

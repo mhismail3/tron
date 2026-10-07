@@ -235,6 +235,52 @@ export class HomeOwner {
       : unsealedHomeChapterState(sessionId);
   }
 
+  /** Claim a durable reserved successor for the Registry's single-flight owner.
+   * Replacing an older attempt is recovery after the prior Gateway process exited. */
+  async claimReservedChapter(sessionId: string, attemptId: string): Promise<HomeChapter> {
+    return this.recordMutex.run(async () => {
+      const current = this.record;
+      const chapter = current?.chapters.find(candidate => candidate.sessionId === sessionId);
+      if (!current || !chapter || (chapter.state !== "reserved" && chapter.state !== "materializing")) {
+        throw new GatewayError("conflict", "Home chapter is not reserved for materialization");
+      }
+      const claimed: HomeChapter = { ...chapter, state: "materializing", attemptId };
+      await this.writeLocked({
+        ...current,
+        chapters: current.chapters.map(candidate => candidate.sessionId === sessionId ? claimed : candidate),
+        updatedAt: new Date().toISOString(),
+      });
+      return { ...claimed };
+    });
+  }
+
+  /** Persist the exact SDK path before the caller can admit canonical input. */
+  async recordReservedChapterPath(sessionId: string, attemptId: string, expectedPath: string): Promise<void> {
+    await this.recordMutex.run(async () => {
+      const current = this.record;
+      const chapter = current?.chapters.find(candidate => candidate.sessionId === sessionId);
+      if (!current || !chapter || chapter.state !== "materializing" || chapter.attemptId !== attemptId) {
+        throw new GatewayError("conflict", "Home materialization attempt no longer owns its reservation");
+      }
+      await this.writeLocked({
+        ...current,
+        chapters: current.chapters.map(candidate => candidate.sessionId === sessionId
+          ? { ...candidate, expectedPath }
+          : candidate),
+        updatedAt: new Date().toISOString(),
+      });
+    });
+  }
+
+  /** Bounded chapter metadata consumed by Registry recovery; never exposes mutable record state. */
+  reservedChapter(sessionId: string): HomeChapter | undefined {
+    const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
+    return chapter && (chapter.state === "reserved" || chapter.state === "materializing") ? { ...chapter } : undefined;
+  }
+
+  /** The canonical cwd used to locate Home's physical session directory. */
+  homeWorkspacePath(): string { return this.workspacePath; }
+
   /** What the record says about one session id. Runtime creation reads this for
    * every runtime it builds, so a replacement is never built from a stale
    * profile decision. */

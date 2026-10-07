@@ -65,7 +65,7 @@ export async function scanReservedHomeSession(input: {
         const record = parsed as Record<string, unknown>;
         if (index === 0) header = record;
       }
-      if (header?.type !== "session" || !Number.isSafeInteger(header.version) || typeof header.id !== "string") {
+      if (header?.type !== "session" || header.version !== 3 || typeof header.id !== "string") {
         return { action: "blocked" };
       }
       if (header.id === input.sessionId) matches.push(path);

@@ -40,9 +40,10 @@
  * seam on its first runtime, F18 an ordinary session's requests change when a
  * Home is designated.
  */
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   convertToLlm, ModelRuntime, type AgentSession, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
@@ -274,6 +275,98 @@ async function open(label: string, options: FixtureOptions = {}) {
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe.sequential("Home request seam inside the Gateway runtime", () => {
+  it("single-flights a reserved Home materialization and records its path before returning", async () => {
+    const item = await open("reserved-materialization-single-flight", { home: true });
+    const owner = item.registry.homeOwner() as unknown as {
+      writeLocked(record: HomeRecord): Promise<void>;
+      claimReservedChapter(sessionId: string, attemptId: string): Promise<unknown>;
+    };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-successor";
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+
+    let releaseClaim!: () => void;
+    let enteredClaim!: () => void;
+    const claimEntered = new Promise<void>(resolve => { enteredClaim = resolve; });
+    const claimGate = new Promise<void>(resolve => { releaseClaim = resolve; });
+    const originalClaim = owner.claimReservedChapter.bind(owner);
+    let claims = 0;
+    owner.claimReservedChapter = async (sessionId, attemptId) => {
+      claims += 1;
+      enteredClaim();
+      await claimGate;
+      return originalClaim(sessionId, attemptId);
+    };
+
+    const first = item.registry.materializeReservedHome(reservedId);
+    await claimEntered;
+    const second = item.registry.materializeReservedHome(reservedId);
+    releaseClaim();
+    const [firstSlot, secondSlot] = await Promise.all([first, second]);
+    expect(claims).toBe(1);
+    expect(secondSlot).toBe(firstSlot);
+    const stored = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters[1]).toMatchObject({
+      sessionId: reservedId, state: "materializing", attemptId: expect.any(String),
+      expectedPath: firstSlot.sessionFile,
+    });
+    expect(firstSlot.sessionFile).toBeTruthy();
+    expect(existsSync(firstSlot.sessionFile!)).toBe(false);
+    expect(item.faux.state.callCount).toBe(0);
+  });
+
+  it("blocks Registry materialization on uncertain scan evidence without creating a runtime", async () => {
+    const item = await open("reserved-materialization-scan-block", { home: true });
+    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-scan-block";
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+    const unknownPath = join(dirname(item.slot.sessionFile!), "unreadable-candidate.jsonl");
+    const unknownBytes = "{partial";
+    await writeFile(unknownPath, unknownBytes);
+
+    await expect(item.registry.materializeReservedHome(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(unknownPath, "utf8")).toBe(unknownBytes);
+    expect(item.faux.state.callCount).toBe(0);
+    expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
+  });
+
+  it("does not publish or dispatch when the durable expected-path barrier fails", async () => {
+    const item = await open("reserved-materialization-path-failure", { home: true });
+    const owner = item.registry.homeOwner() as unknown as {
+      writeLocked(record: HomeRecord): Promise<void>;
+      recordReservedChapterPath(sessionId: string, attemptId: string, path: string): Promise<void>;
+    };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-path-failure";
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+    const refused = owner.recordReservedChapterPath.bind(owner);
+    owner.recordReservedChapterPath = async () => { throw new Error("injected path persistence failure"); };
+
+    await expect(item.registry.materializeReservedHome(reservedId)).rejects.toThrow("injected path persistence failure");
+    owner.recordReservedChapterPath = refused;
+    expect(item.faux.state.callCount).toBe(0);
+    expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
+  });
+
   it("continues refusing sealed physical mutations after Home is disabled", async () => {
     const item = await open("disabled-sealed-chapter", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);

@@ -186,6 +186,26 @@ describe("Tron Home record", () => {
     await f.owner.dispose();
   });
 
+  it("durably claims a reserved successor and fences path writes by attempt id", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes({ chapters: [
+      { sessionId: "session-reserved", ordinal: 1, state: "reserved", createdAt: new Date().toISOString() },
+    ] }), { mode: 0o600 });
+    await f.owner.initialize();
+
+    const claim = await f.owner.claimReservedChapter("session-reserved", "attempt-1");
+    expect(claim).toMatchObject({ state: "materializing", attemptId: "attempt-1" });
+    await f.owner.recordReservedChapterPath("session-reserved", "attempt-1", "/sessions/exact.jsonl");
+    const recorded = await readFile(f.recordPath, "utf8");
+    expect(JSON.parse(recorded).chapters[0]).toMatchObject({
+      state: "materializing", attemptId: "attempt-1", expectedPath: "/sessions/exact.jsonl",
+    });
+    await expect(f.owner.recordReservedChapterPath("session-reserved", "stale-attempt", "/sessions/other.jsonl"))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(recorded);
+  });
+
   it("preserves malformed chapter topology rather than choosing an active target", async () => {
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
