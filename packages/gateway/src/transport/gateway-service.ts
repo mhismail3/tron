@@ -469,7 +469,10 @@ export class GatewayService {
       }
       case "home.open": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
-        return safeJson(this.requireHome().open());
+        const home = this.requireHome();
+        const binding = home.open();
+        home.noteRouteBound();
+        return safeJson(binding);
       }
       case "home.designate":
         return this.mutation(client, method, params, async () => {
@@ -1467,11 +1470,13 @@ export class GatewayService {
           const slot = reserved
             ? await this.dependencies.sessions.materializeReservedHome(binding.physicalSessionId)
             : await this.dependencies.sessions.acquire(binding.physicalSessionId);
+          if (reserved) await this.dependencies.sessions.assertReservedHomeAttempt(binding.physicalSessionId);
           this.requireHome().assertRouteBinding({
             homeId: binding.homeId,
             bindingRevision: binding.bindingRevision,
             physicalSessionId: binding.physicalSessionId,
           });
+          this.requireHome().noteRouteBound();
           let resolveAdmission!: (result: { operationId: string }) => void;
           let rejectAdmission!: (error: unknown) => void;
           const admission = new Promise<{ operationId: string }>((resolve, reject) => {

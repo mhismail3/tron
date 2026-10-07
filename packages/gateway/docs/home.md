@@ -41,13 +41,23 @@ after a chapter is active. Ordinary session routes are unchanged.
 
 Home memory remains one bounded projection keyed by stable `homeId`, not by a
 physical chapter. Its canonical source reads active, sealed, and materializing
-chapters in ledger order, retains each physical session ID as provenance, and
-continues its cursor across chapter boundaries. A reserved chapter contributes
-nothing until canonical evidence exists. If an SDK operation fails after staging
-canonical entries, RuntimeSlot retains the existing uncertain-outcome fence
-rather than treating the staged mutation as a clean refusal. A sealed check
-before a custom-entry append is a clean typed refusal: it exits the bounded
-ownership-write retry path without draining or fencing the runtime.
+chapters in ledger order and retains each physical session ID as provenance.
+Per-chapter cursors continue simple active appends and skip unchanged sealed
+files; an active-branch rewrite falls back to that chapter only, while immutable
+sealed entries remain outside the active chapter's navigation cut. Missing or
+changed sealed evidence blocks ingestion without rewriting the projection. A
+reserved chapter contributes nothing until canonical evidence exists. If an SDK
+operation fails after staging canonical entries, RuntimeSlot retains the existing
+uncertain-outcome fence rather than treating the staged mutation as a clean
+refusal. A sealed check before a custom-entry append is a clean typed refusal: it
+exits the bounded ownership-write retry path without draining or fencing the
+runtime.
+
+The Home hard limits guard every canonical SDK entry before it is staged. Prompt
+admission also reserves bounded headroom for serialized receipts and the first
+user entry; later SDK-generated messages and tool entries are checked at their
+own append boundary. Exceeding the limit after an accepted provider response
+leaves an uncertain operation rather than staging an over-limit canonical entry.
 
 ## The record
 
@@ -175,7 +185,8 @@ owner.
 - `home.status` is one bounded read that composes the record, memory status and
   `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
   enabled, homeId?, sessionId?, generation?, model?, live, sessionPresent,
-  memory }`. `phase` and the recovery action are derived on each read; they are
+  chapter?, memory }`. `chapter` contains a bounded ledger count, current canonical
+  byte/entry measurements when available, and the current recovery decision. `phase` and the recovery action are derived on each read; they are
   not additional lifecycle state. Readiness gaps identify an unavailable record,
   missing/disabled designation, unconfigured memory or blocked memory. `activation`
   is the same body-free projection returned by `home.context`. The memory
@@ -201,9 +212,12 @@ owner.
   model matches the recorded model. A different explicit model is refused with
   a typed conflict directing callers to `session.setModel`; designation enables
   Home but does not own changes to its enabled session's model. A disabled record
-  re-enables the same session with `generation + 1`. A record whose session is
-  **gone** (a session that was never written, or was deleted) is kept and given
-  a fresh session with `generation + 1`, whether it was enabled or disabled: the record is the only
+  re-enables the same session with `generation + 1`. If rollover left a durable
+  `reserved` or `materializing` successor, re-enable preserves that exact
+  reservation; the next `home.prompt` recovers/materializes it rather than
+  replacing it with a new chapter. A record whose session is **gone** (a session
+  that was never written, or was deleted) is kept and given a fresh session with
+  `generation + 1`, whether it was enabled or disabled: the record is the only
   evidence of the designation, and the dangling id must not be re-enabled.
 - `home.disable` is a mutation. It sets `enabled: false` with `generation + 1`;
   the session stays an ordinary session afterwards. A record whose session is

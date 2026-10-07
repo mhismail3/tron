@@ -319,6 +319,18 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(firstSlot.sessionFile).toBeTruthy();
     expect(existsSync(firstSlot.sessionFile!)).toBe(false);
     expect(item.faux.state.callCount).toBe(0);
+
+    // A contender arriving after the shared construction promise resolves, but
+    // before the first canonical flush, must still join the live owner.
+    const afterReturn = await item.registry.materializeReservedHome(reservedId);
+    const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(afterReturn).toBe(firstSlot);
+    expect(afterReturn.sessionFile).toBe(firstSlot.sessionFile);
+    expect(afterReturnRecord.chapters[1]).toMatchObject({
+      state: "materializing", attemptId: stored.chapters[1]!.attemptId,
+      expectedPath: stored.chapters[1]!.expectedPath,
+    });
+    cases.push({ case: "reservation-owner-through-first-flush", firstPathPreserved: true, contenderJoined: true, providerDispatchesBeforePrompt: item.faux.state.callCount });
   });
 
   it("blocks Registry materialization on uncertain scan evidence without creating a runtime", async () => {

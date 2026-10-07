@@ -1059,6 +1059,12 @@ export interface HomeStatus {
   bindingRevision?: number;
   generation?: number;
   model?: ModelRef;
+  chapter?: {
+    count: number;
+    currentBytes?: number;
+    currentEntries?: number;
+    recoveryDecision: "none" | "reserved" | "materializing";
+  };
   live: boolean;
   sessionPresent: boolean;
   /** Home's memory, once a record names one. There are no memory defaults

@@ -213,6 +213,8 @@ type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
 
 const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
 const HOME_HARD_ENTRIES = 100_000;
+const HOME_ADMISSION_RESERVE_BYTES = 64 * 1_024;
+const HOME_ADMISSION_RESERVE_ENTRIES = 4;
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
   resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
@@ -389,6 +391,7 @@ interface RuntimeSlotHooks {
   settled: (sessionId: string) => void;
   /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
   homeQuiescent?: (sessionId: string) => Promise<void>;
+  homeChapterRefused?: (reason: "sealed-write" | "hard-bytes" | "hard-entries") => void;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
   turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
@@ -860,6 +863,31 @@ export class RuntimeSlot {
     this.unregisterProcessExpiry = dependencies.processActivityRecency.registerExpiryCallback((frame) => this.onProcessActivityExpiry(frame));
   }
 
+  private installCanonicalWriteGuard(): void {
+    const manager = this.sessionManager as unknown as {
+      _appendEntry: (entry: FileEntry) => void;
+      getEntries: () => FileEntry[];
+    };
+    const appendEntry = manager._appendEntry.bind(manager);
+    manager._appendEntry = (entry) => {
+      if (this.isHomeProfile(this.sessionManager)) {
+        const path = this.sessionManager.getSessionFile();
+        const fileExists = path ? existsSync(path) : false;
+        if (this.activeOperationId !== undefined || fileExists) {
+          const stagedBytes = fileExists ? 0 : manager.getEntries().reduce(
+            (total, staged) => total + Buffer.byteLength(JSON.stringify(staged)) + 1,
+            0,
+          );
+          const projectedBytes = stagedBytes + Buffer.byteLength(JSON.stringify(entry)) + 1;
+          const permit = this.activeOperationId !== undefined
+            && this.homeMaterializationPermitOperations.has(this.activeOperationId);
+          this.assertChapterWritable(permit, projectedBytes, 1);
+        }
+      }
+      appendEntry(entry);
+    };
+  }
+
   private createSemanticBroker(): SemanticUIBroker {
     const presentation = new ExtensionPresentationStore((topic, payload) => {
       this.revision += 1;
@@ -1028,6 +1056,7 @@ export class RuntimeSlot {
   ): Promise<RuntimeSlot> {
     const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile);
     await slot.initialize();
+    slot.installCanonicalWriteGuard();
     return slot;
   }
 
@@ -1603,7 +1632,7 @@ export class RuntimeSlot {
    * names it, and never a fork or a reset (which produce a new session id). */
   private isHomeProfile(sessionManager: SessionManager): boolean {
     const sessionId = sessionManager.getSessionId();
-    const decision = this.dependencies.homeProfile?.(sessionId, this.cwd) ?? "unnamed";
+    const decision = this.dependencies.homeProfile?.(sessionId, sessionManager.getCwd()) ?? "unnamed";
     if (decision === "home") return true;
     if (decision === "ordinary") return false;
     return this.explicitHomeSessionId === sessionId;
@@ -1968,6 +1997,7 @@ export class RuntimeSlot {
           this.rebindAttentionDisposition,
           () => {
             this.sessionManager = nextManager;
+            this.installCanonicalWriteGuard();
             this.clearExtensionActivityWatchers();
             this.extensionActivities.clear();
             this.extensionActivitySequences.clear();
@@ -1977,6 +2007,7 @@ export class RuntimeSlot {
         );
       } else {
         this.sessionManager = nextManager;
+        this.installCanonicalWriteGuard();
       }
     } catch (error) {
       nextUnsubscribe();
@@ -6857,7 +6888,11 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
-    this.assertChapterWritable(queueDisplay?.homeMaterializationPermit === true, Buffer.byteLength(text), 1);
+    this.assertChapterWritable(
+      queueDisplay?.homeMaterializationPermit === true,
+      Buffer.byteLength(text) + HOME_ADMISSION_RESERVE_BYTES,
+      HOME_ADMISSION_RESERVE_ENTRIES,
+    );
     if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
@@ -7008,7 +7043,11 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
-      this.assertChapterWritable(queueDisplay?.homeMaterializationPermit === true, Buffer.byteLength(queueDisplay?.text ?? ""), 1);
+      this.assertChapterWritable(
+        queueDisplay?.homeMaterializationPermit === true,
+        Buffer.byteLength(queueDisplay?.text ?? "") + HOME_ADMISSION_RESERVE_BYTES,
+        HOME_ADMISSION_RESERVE_ENTRIES,
+      );
       if (queueDisplay?.homeMaterializationPermit) {
         this.homeMaterializationPermitOperations.add(operationId);
         while (this.homeMaterializationPermitOperations.size > 32) this.homeMaterializationPermitOperations.delete(this.homeMaterializationPermitOperations.values().next().value!);
@@ -9183,15 +9222,22 @@ export class RuntimeSlot {
    * still makes this busy. */
   private assertChapterWritable(homeMaterializationPermit = false, addedBytes = 0, addedEntries = 1): void {
     const state = this.dependencies.homeChapterState?.(this.id);
-    if (state) assertChapterWritable(state, homeMaterializationPermit);
-    if (this.liveProfile() !== "home" || state?.sealed) return;
+    if (state) {
+      try { assertChapterWritable(state, homeMaterializationPermit); }
+      catch (error) {
+        if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
+        throw error;
+      }
+    }
+    if (!this.isHomeProfile(this.sessionManager)) return;
     const entries = this.canonicalEntryCount;
     if (entries + addedEntries > HOME_HARD_ENTRIES) {
+      this.hooks.homeChapterRefused?.("hard-entries");
       throw new GatewayError("conflict", "This Home chapter reached its canonical entry limit", false, {
         reason: "hard-entries", chapterOrdinal: state?.ordinal ?? 0, entries,
       });
     }
-    const path = this.sessionFile;
+    const path = this.sessionManager.getSessionFile();
     let bytes = 0;
     if (path) {
       try { bytes = statSync(path).size; } catch (error) {
@@ -9199,6 +9245,7 @@ export class RuntimeSlot {
       }
     }
     if (bytes + addedBytes > HOME_HARD_BYTES) {
+      this.hooks.homeChapterRefused?.("hard-bytes");
       throw new GatewayError("conflict", "This Home chapter reached its canonical byte limit", false, {
         reason: "hard-bytes", chapterOrdinal: state?.ordinal ?? 0, bytes, entries,
       });

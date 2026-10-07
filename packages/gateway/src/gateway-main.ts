@@ -335,9 +335,15 @@ const sessions = new RuntimeRegistry({
   // `refused` are the two outcomes that need attention: the preserved record
   // could not be used, or a running session blocked the profile change.
   homeDiagnostic: (diagnostic) => logger.log(
-    diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused" ? "warning" : "info",
-    `Tron Home designation ${diagnostic.outcome}`,
-    { event: `home.${diagnostic.outcome}`, source: "home", ...(diagnostic.reason ? { reason: diagnostic.reason } : {}) },
+    diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused" || diagnostic.outcome === "chapter-refused" ? "warning" : "info",
+    `Tron Home ${diagnostic.outcome}`,
+    {
+      event: diagnostic.outcome === "chapter-rollover" ? "home.chapter-rollover"
+        : diagnostic.outcome === "chapter-recovery" ? "home.chapter-recovery"
+          : diagnostic.outcome === "chapter-refused" ? "home.chapter-refused"
+            : diagnostic.outcome === "route-bound" ? "home.route-bound" : `home.${diagnostic.outcome}`,
+      source: "home", ...(diagnostic.reason ? { reason: diagnostic.reason } : {}),
+    },
   ),
   machineId: config.machineId,
   notifications,

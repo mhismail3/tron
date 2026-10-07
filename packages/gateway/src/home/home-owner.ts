@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
+import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { EPISODIC_DEFAULTS, type EpisodicDiagnostic, type EpisodicSourceCursor } from "../episodic/episodic-contract.js";
 import { readCanonicalHomeSessions, type EpisodicCanonicalCut, type EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -84,8 +85,8 @@ export interface HomeSessionPort {
   hasLiveRuntime(sessionId: string): boolean;
   /** Quiescent canonical size used to seal a chapter at its soft boundary. */
   chapterMetrics?(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }>;
-  /** Whether the current SDK owner has observed a persisted conversation message. */
-  hasConversation?(sessionId: string): boolean;
+  /** Whether the exact current SDK file has a complete durable conversation message. */
+  hasConversation?(sessionId: string, expectedPath: string): Promise<boolean>;
   /** Replace the session's live runtime in place after `commit` changes the
    * profile decision for it, so the next prompt uses the new profile. A busy
    * session refuses retryably before `commit` runs. */
@@ -102,7 +103,8 @@ export interface HomeMemoryPort {
 }
 
 export type HomeDiagnostic = (diagnostic: {
-  outcome: "designated" | "enabled" | "disabled" | "refused" | "unavailable";
+  outcome: "designated" | "enabled" | "disabled" | "refused" | "unavailable"
+    | "chapter-rollover" | "chapter-recovery" | "chapter-refused" | "route-bound";
   reason?: string;
 }) => void;
 
@@ -195,6 +197,10 @@ export class HomeOwner {
       available: true, enabled: false, live: false, sessionPresent: false, memory,
     };
     const sessionId = homeSessionId(record);
+    const currentChapter = record.chapters.at(-1)!;
+    const activeMetrics = currentChapter.state === "active" && this.options.sessions.chapterMetrics
+      ? await this.options.sessions.chapterMetrics(currentChapter.sessionId)
+      : undefined;
     const live = this.options.sessions.hasLiveRuntime(sessionId);
     const sessionPresent = await this.options.sessions.sessionPresent(sessionId);
     const gaps: string[] = [];
@@ -225,6 +231,13 @@ export class HomeOwner {
       live,
       sessionPresent,
       memory,
+      chapter: {
+        count: record.chapters.length,
+        ...((activeMetrics?.bytes ?? currentChapter.sizeAtSeal) === undefined ? {} : { currentBytes: activeMetrics?.bytes ?? currentChapter.sizeAtSeal }),
+        ...((activeMetrics?.entries ?? currentChapter.entriesAtSeal) === undefined ? {} : { currentEntries: activeMetrics?.entries ?? currentChapter.entriesAtSeal }),
+        recoveryDecision: currentChapter.state === "reserved" ? "reserved"
+          : currentChapter.state === "materializing" ? "materializing" : "none",
+      },
     };
   }
 
@@ -248,6 +261,10 @@ export class HomeOwner {
    * Replacing an older attempt is recovery after the prior Gateway process exited. */
   /** Stable logical route target. A reserved successor's next binding revision
    * is fixed before it can receive a command. */
+  noteRouteBound(): void {
+    this.options.diagnostic?.({ outcome: "route-bound", reason: "logical-home" });
+  }
+
   open(): HomeOpen {
     const binding = this.routeBinding();
     const record = this.record!;
@@ -280,6 +297,22 @@ export class HomeOwner {
         reason: "binding-stale", bindingRevision: binding.bindingRevision,
       });
     }
+  }
+
+  async assertReservedChapterAttempt(sessionId: string, attemptId: string, expectedPath: string): Promise<void> {
+    await this.recordMutex.run(async () => {
+      const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
+      if (!chapter
+        || (chapter.state !== "materializing" && chapter.state !== "active")
+        || (chapter.state === "materializing" && (chapter.attemptId !== attemptId || chapter.expectedPath !== expectedPath))) {
+        this.options.diagnostic?.({ outcome: "chapter-refused", reason: "ownership-changed" });
+        throw new GatewayError("conflict", "Home materialization attempt no longer owns its reservation", true);
+      }
+      if (chapter.state === "active" && !(await this.options.sessions.hasConversation?.(sessionId, expectedPath))) {
+        this.options.diagnostic?.({ outcome: "chapter-refused", reason: "missing-conversation-evidence" });
+        throw new GatewayError("conflict", "Published Home chapter lacks durable conversation evidence", true);
+      }
+    });
   }
 
   async claimReservedChapter(sessionId: string, attemptId: string): Promise<HomeChapter> {
@@ -377,8 +410,10 @@ export class HomeOwner {
     const chapter = record?.chapters.find(candidate => candidate.sessionId === sessionId);
     if (!record || !record.enabled || !chapter || (chapter.state !== "active" && chapter.state !== "materializing")) return;
     if (this.memory?.sessionId === record.homeId) this.memory.owner.noteEntriesCommitted();
-    if (chapter.state === "materializing" && this.options.sessions.hasConversation?.(sessionId)) {
-      void this.publishObservedMaterialization(sessionId);
+    if (chapter.state === "materializing" && chapter.attemptId && chapter.expectedPath) {
+      void this.publishObservedMaterialization(sessionId, chapter.attemptId, chapter.expectedPath).catch(() => {
+        this.options.diagnostic?.({ outcome: "chapter-refused", reason: "publication-failed" });
+      });
     }
   }
 
@@ -386,13 +421,19 @@ export class HomeOwner {
   async chapterQuiescent(sessionId: string): Promise<void> {
     const record = this.record;
     const chapter = record?.chapters.find(candidate => candidate.sessionId === sessionId);
-    if (!record || !record.enabled || chapter?.state !== "active" || !this.options.sessions.chapterMetrics) return;
+    if (!record || !record.enabled || !chapter) return;
+    if (chapter.state === "materializing" && chapter.attemptId && chapter.expectedPath) {
+      const published = await this.publishObservedMaterialization(sessionId, chapter.attemptId, chapter.expectedPath);
+      if (!published) this.options.diagnostic?.({ outcome: "chapter-refused", reason: "conversation-not-durable" });
+      return;
+    }
+    if (chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
     const metrics = await this.options.sessions.chapterMetrics(sessionId);
     if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES)) return;
-    await this.recordMutex.run(async () => {
+    const rolled = await this.recordMutex.run(async () => {
       const current = this.record;
       const active = current?.chapters.find(candidate => candidate.sessionId === sessionId);
-      if (!current || !active || active.state !== "active") return;
+      if (!current || !active || active.state !== "active") return false;
       const now = new Date().toISOString();
       const successor: HomeChapter = {
         sessionId: randomUUID(), ordinal: active.ordinal + 1, state: "reserved", createdAt: now,
@@ -404,15 +445,22 @@ export class HomeOwner {
           : candidate).concat(successor),
         updatedAt: now,
       });
+      return true;
+    });
+    if (rolled) this.options.diagnostic?.({
+      outcome: "chapter-rollover", reason: metrics.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
     });
   }
 
-  private async publishObservedMaterialization(sessionId: string): Promise<void> {
-    await this.recordMutex.run(async () => {
+  async publishObservedMaterialization(sessionId: string, attemptId: string, expectedPath: string): Promise<boolean> {
+    return this.recordMutex.run(async () => {
       const current = this.record;
       const chapter = current?.chapters.find(candidate => candidate.sessionId === sessionId);
       if (!current || !current.enabled || chapter?.state !== "materializing"
-        || !this.options.sessions.hasConversation?.(sessionId)) return;
+        || chapter.attemptId !== attemptId || chapter.expectedPath !== expectedPath) return false;
+      const currentPath = await this.options.sessions.sessionFile(sessionId);
+      const observed = currentPath === expectedPath && await this.options.sessions.hasConversation?.(sessionId, expectedPath);
+      if (!currentPath || currentPath !== expectedPath || !observed) return false;
       const now = new Date().toISOString();
       await this.writeLocked({
         ...current,
@@ -422,6 +470,8 @@ export class HomeOwner {
         bindingRevision: current.bindingRevision + 1,
         updatedAt: now,
       });
+      this.options.diagnostic?.({ outcome: "chapter-recovery", reason: "conversation-published" });
+      return true;
     });
   }
 
@@ -609,13 +659,25 @@ export class HomeOwner {
     const chapters: Array<{ sessionId: string; path: string }> = [];
     for (const chapter of record.chapters) {
       if (chapter.state !== "sealed" && chapter.state !== "active" && chapter.state !== "materializing") continue;
-      const path = await this.options.sessions.sessionFile(chapter.sessionId);
-      if (!path) continue;
+      let path: string | undefined;
+      try { path = await this.options.sessions.sessionFile(chapter.sessionId); }
+      catch (error) {
+        if (chapter.state === "sealed") throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} cannot be resolved: ${String(error)}`);
+        throw error;
+      }
+      if (!path) {
+        if (chapter.state === "sealed") throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} has no catalog path`);
+        continue;
+      }
       const info = await stat(path).catch(error => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;
       });
-      if (info?.isFile()) chapters.push({ sessionId: chapter.sessionId, path });
+      if (!info?.isFile()) {
+        if (chapter.state === "sealed") throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} is unavailable`);
+        continue;
+      }
+      chapters.push({ sessionId: chapter.sessionId, path });
     }
     if (chapters.length === 0) throw new GatewayError("conflict", "Home has no canonical chapter file to read");
     return readCanonicalHomeSessions({
@@ -664,8 +726,28 @@ export class HomeOwner {
     return this.mutex.run(async () => {
       this.assertAvailable();
       const existing = this.record;
-      if (existing?.chapters.some(chapter => chapter.state === "reserved" || chapter.state === "materializing")) {
+      const pendingChapter = existing?.chapters.find(chapter => chapter.state === "reserved" || chapter.state === "materializing");
+      if (pendingChapter && existing?.enabled) {
         throw new GatewayError("conflict", "Tron Home has an unresolved chapter reservation; recover that chapter before designation");
+      }
+      if (pendingChapter && existing && !existing.enabled) {
+        const model = input.model ?? existing.model;
+        let next: HomeRecord | undefined;
+        await this.recordMutex.run(async () => {
+          const current = this.record;
+          if (!current || current.enabled || !current.chapters.some(chapter => chapter.sessionId === pendingChapter.sessionId
+            && (chapter.state === "reserved" || chapter.state === "materializing"))) {
+            throw new GatewayError("conflict", "Tron Home changed while re-enabling its reserved chapter");
+          }
+          next = {
+            ...current, enabled: true, generation: current.generation + 1,
+            policyRevision: HOME_POLICY_REVISION, model: { ...model }, updatedAt: new Date().toISOString(),
+          };
+          await this.writeLocked(next);
+        });
+        if (!next) throw new Error("Home reservation re-enable did not commit its record");
+        this.options.diagnostic?.({ outcome: "enabled" });
+        return designation(next);
       }
       const existingSessionId = existing ? homeSessionId(existing) : undefined;
       if (existing && existingSessionId && await this.options.sessions.sessionPresent(existingSessionId)) {

@@ -75,6 +75,8 @@ import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
+import { readCanonicalSession } from "../episodic/episodic-source.js";
+import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
@@ -571,6 +573,7 @@ export class RuntimeRegistry {
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
+  private readonly reservedHomeOwners = new Map<string, { slot: RuntimeSlot; attemptId: string; expectedPath: string }>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
@@ -813,7 +816,27 @@ export class RuntimeRegistry {
           }) : 0;
           return { bytes, entries: slot.canonicalEntryCount, quiescent: !slot.isBusy };
         },
-        hasConversation: (sessionId) => this.slots.get(sessionId)?.hasConversationMessage ?? false,
+        hasConversation: async (sessionId, expectedPath) => {
+          const slot = this.slots.get(sessionId);
+          if (!slot || slot.sessionFile !== expectedPath || slot.isDisposed) return false;
+          let fileInfo;
+          try { fileInfo = await lstat(expectedPath); }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+          }
+          if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) return false;
+          const cut = await readCanonicalSession({
+            path: expectedPath, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+          });
+          const hasConversation = cut.branch.some(entry => {
+            if (entry.type !== "message") return false;
+            const message = entry.raw.message as { role?: unknown } | undefined;
+            return message?.role === "user" || message?.role === "assistant";
+          });
+          return cut.tornBytes === 0 && hasConversation;
+        },
+
         replaceRuntimeForProfile: async (sessionId, commit) => {
           const slot = this.slots.get(sessionId);
           if (!slot || slot.isDisposed) {
@@ -874,6 +897,11 @@ export class RuntimeRegistry {
   async materializeReservedHome(sessionId: string): Promise<RuntimeSlot> {
     let selected!: Promise<RuntimeSlot>;
     await this.mutex.run(() => {
+      const owner = this.reservedHomeOwners.get(sessionId);
+      if (owner) {
+        selected = Promise.resolve(owner.slot);
+        return;
+      }
       const existing = this.homeMaterializations.get(sessionId);
       if (existing) {
         selected = existing;
@@ -891,16 +919,27 @@ export class RuntimeRegistry {
     }
   }
 
+  async assertReservedHomeAttempt(sessionId: string): Promise<void> {
+    const owner = await this.mutex.run(() => this.reservedHomeOwners.get(sessionId));
+    if (!owner) throw new GatewayError("conflict", "No live Home reservation owner exists", true);
+    await this.home.assertReservedChapterAttempt(sessionId, owner.attemptId, owner.expectedPath);
+    if (owner.slot.isDisposed || owner.slot.sessionFile !== owner.expectedPath) {
+      throw new GatewayError("conflict", "The live Home reservation runtime no longer owns its recorded path", true);
+    }
+  }
+
   private async createReservedHomeRuntime(sessionId: string): Promise<RuntimeSlot> {
     const attemptId = randomUUID();
     const chapter = await this.home.claimReservedChapter(sessionId, attemptId);
     const cwd = await this.options.trust.requireResolved(this.home.homeWorkspacePath());
     const sessionDirectory = this.sessionDirectoryFor(cwd.cwd);
-    const expectedPath = chapter.expectedPath ?? join(sessionDirectory, `.home-reservation-${sessionId}.jsonl`);
+    let expectedPath = chapter.expectedPath ?? join(sessionDirectory, `.home-reservation-${sessionId}.jsonl`);
     const scan = await scanReservedHomeSession({ directory: sessionDirectory, expectedPath, sessionId });
     if (scan.action === "blocked") {
+      this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason: "uncertain-session-evidence" });
       throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
     }
+    this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
 
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
@@ -924,6 +963,7 @@ export class RuntimeRegistry {
         const createdPath = manager.newSession({ id: sessionId });
         if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
         await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
+        expectedPath = createdPath;
       }
       if (scan.action === "adopt" && chapter.expectedPath !== scan.path) {
         throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
@@ -945,14 +985,17 @@ export class RuntimeRegistry {
         if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
+        this.reservedHomeOwners.set(sessionId, { slot: slot!, attemptId, expectedPath });
         this.publishRuntime(sessionId, slot!, transcriptBytes, "create");
         this.invalidateCatalogAdmission();
         void this.sessionCatalog.refresh(slot!.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
       });
+      await this.home.publishObservedMaterialization(sessionId, attemptId, expectedPath);
       return slot;
     } catch (error) {
+      this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason: "materialization-failed" });
       if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
       throw error;
     } finally {
@@ -1228,6 +1271,9 @@ export class RuntimeRegistry {
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
       homeQuiescent: (sessionId: string) => this.home.chapterQuiescent(sessionId),
+      homeChapterRefused: (reason: "sealed-write" | "hard-bytes" | "hard-entries") => {
+        this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason });
+      },
       turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
         // Admission is detached from inference, but RuntimeSlot invokes this
         // only after the terminal receipt and canonical attention barrier settle.

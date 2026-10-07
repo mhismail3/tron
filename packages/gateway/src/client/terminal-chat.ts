@@ -578,9 +578,29 @@ async function runTerminalChat(): Promise<void> {
       pendingCommand = undefined;
       if (logicalHome && result.sessionId !== sessionId) {
         if (!result.sessionId) throw new Error("Home prompt returned no physical chapter identity");
-        sessionId = result.sessionId;
-        await synchronizeTerminalSession(client, sessionId, installSnapshot);
+        const previousSessionId = sessionId;
+        const previousSubscriptionToken = subscriptionToken;
+        const nextSessionId = result.sessionId;
+        let nextSubscriptionToken: string | undefined;
+        try {
+          await synchronizeTerminalSession(client, nextSessionId, installed => {
+            nextSubscriptionToken = installed.subscriptionToken;
+            installSnapshot(installed);
+          });
+        } catch (error) {
+          if (nextSubscriptionToken) {
+            await client.request("session.close", { sessionId: nextSessionId, subscriptionToken: nextSubscriptionToken }).catch(() => null);
+          }
+          throw error;
+        }
+        sessionId = nextSessionId;
         attachListeners();
+        if (previousSessionId && previousSubscriptionToken) {
+          await client.request("session.close", {
+            sessionId: previousSessionId, subscriptionToken: previousSubscriptionToken,
+          }).catch(() => null);
+        }
+        if (snapshot?.phase === "idle" && !snapshot.operation) reconciledSettledOperation = result.operationId;
       }
       if (!operationNeedsSettlement(result.operationId, reconciledSettledOperation)) {
         reconciledSettledOperation = undefined;

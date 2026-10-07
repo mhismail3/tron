@@ -343,6 +343,7 @@ describe("Tron Home activations end to end", () => {
     expect(stored.bindingRevision).toBe(1);
     // Lazy rollover: threshold crossing seals and reserves metadata only.
     expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(stored.chapters[1]!.sessionId);
+    report.cases.push({ case: "soft-rollover", trigger: _label, oldState: stored.chapters[0]!.state, successorState: stored.chapters[1]!.state, successorMaterialized: false });
   });
 
   it.each(["hard bytes", "hard entries"] as const)("refuses a Home activation before staged state at the %s boundary", async boundary => {
@@ -371,6 +372,29 @@ describe("Tron Home activations end to end", () => {
     expect(slot.sessionManager.getBranch()).toEqual(branchBefore);
     expect((await stat(file)).size).toBe(sizeBefore);
     expect(providerCalls).toBe(0);
+  });
+
+  it("rejects a serialized SDK entry that would cross the hard byte limit before staging", async () => {
+    const f = await fixture("hard-byte-projection");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-hard-byte-projection");
+    let providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("seed"); }]);
+    await slot.prompt("seed");
+    await waitUntil(() => providerCalls === 1);
+    await waitUntil(() => !slot.isBusy);
+    const file = slot.sessionFile!;
+    const nearLimit = 200 * 1_024 * 1_024 - 64;
+    await truncate(file, nearLimit);
+    const before = slot.sessionManager.getBranch();
+    const bytesBefore = (await stat(file)).size;
+    providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("must not reach provider"); }]);
+    await expect(slot.prompt("x")).rejects.toMatchObject({ code: "conflict", details: { reason: "hard-bytes" } });
+    expect(slot.sessionManager.getBranch()).toEqual(before);
+    expect((await stat(file)).size).toBe(bytesBefore);
+    expect(providerCalls).toBe(0);
+    report.cases.push({ case: "hard-byte-preflight", canonicalBytesBefore: bytesBefore, canonicalEntriesStable: true, providerDispatches: providerCalls });
   });
 
   it("recovers a durable reservation after restart and routes the next activation to one successor", async () => {
@@ -407,14 +431,42 @@ describe("Tron Home activations end to end", () => {
     const accepted = await f.service.invoke(client, "home.prompt", {
       commandId: "e2e-home-prompt-after-reservation", text: "AFTER-ROLLOVER-FACT: the bell rings twice",
     }) as unknown as { sessionId: string; operationId: string };
+    let latestStatus: HomeStatus | undefined;
     await waitUntil(async () => {
-      const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-      return status.sessionId !== oldSlot.id && status.phase === "active";
-    }, 30_000);
+      latestStatus = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+      return latestStatus.sessionId === reservedId && (latestStatus.phase === "active" || latestStatus.phase === "ready");
+    }, 30_000).catch(error => { throw new Error(`${String(error)}; status=${JSON.stringify(latestStatus)}`); });
     expect(accepted.sessionId).toBe(reservedId);
     expect(accepted.operationId).toBeTypeOf("string");
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     expect(status).toMatchObject({ sessionId: reservedId, bindingRevision: current.bindingRevision + 1 });
+  });
+
+  it.each(["reserved", "materializing"] as const)("re-enables Home without replacing a pending %s chapter", async state => {
+    const f = await fixture(`reenable-pending-${state}`);
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const active = await designateHome(f, `e2e-reenable-${state}`);
+    const owner = f.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const pendingId = `pending-${state}`;
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        {
+          sessionId: pendingId, ordinal: 2, state, createdAt: new Date().toISOString(),
+          ...(state === "materializing" ? { attemptId: "attempt-reenable", expectedPath: join(f.tronHome, "gateway", "sessions", `${pendingId}.jsonl`) } : {}),
+        },
+      ],
+    });
+    await f.registry.homeOwner().disable();
+    const designation = await f.registry.homeOwner().designate({}, () => ({ provider: "faux", id: "test" }));
+    expect(designation).toMatchObject({ sessionId: pendingId });
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters.map(chapter => [chapter.sessionId, chapter.state])).toEqual([
+      [active.id, "sealed"], [pendingId, state],
+    ]);
+    report.cases.push({ case: "re-enable-pending-reservation", state, preservedSessionId: pendingId, chapterCount: stored.chapters.length });
   });
 
   it("keeps one homeId memory stream continuous across a crash and physical chapter boundary", async () => {
@@ -987,8 +1039,12 @@ describe("Tron Home activations end to end", () => {
     await freshSlot.prompt(longInput("lifecycle activation three"));
     await waitUntil(() => !freshSlot.isBusy);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as { lastRefusalReason?: string; lastRefusalDetail?: string };
-    expect(context.lastRefusalReason, context.lastRefusalDetail).toBeUndefined();
-    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0) > 0);
+    expect(context.lastRefusalReason, context.lastRefusalDetail).toBe("memory-blocked");
+    expect(context.lastRefusalDetail).toContain("Sealed Home chapter");
+    const blockedMemory = await f.registry.homeOwner().memoryStatus();
+    expect(blockedMemory.blocked).toBe("source-unavailable");
+    expect(blockedMemory.spentTokens).toBeGreaterThanOrEqual(row.spentOnFirstSession);
+    report.cases.push({ case: "missing-sealed-source-blocked", priorProjectionRetained: true, blocked: blockedMemory.blocked });
   }, 120_000);
 
   // #493: there is no budget to manage, and the memory is never stopped by what
