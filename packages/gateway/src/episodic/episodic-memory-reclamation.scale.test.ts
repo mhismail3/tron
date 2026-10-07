@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, open as openFile, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -9,6 +11,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import type { EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
+import { EpisodicStore } from "./episodic-store.js";
+import { EPISODIC_DEFAULTS, EPISODIC_STORE_VERSION, type EpisodicMessageRecord } from "./episodic-contract.js";
 
 const roots: string[] = [];
 const owners: TronWorkspace[] = [];
@@ -135,4 +139,129 @@ describe("episodic memory reclamation scale", () => {
     expect(Math.max(...retained) - Math.min(...retained)).toBeLessThan(2 * 1024 * 1024);
     console.log(`episodic open heap N=100 K=1,10,50: ${JSON.stringify(measurements)}`);
   }, 180_000);
+
+  it("bounds legacy replay peak and retained source heap as history grows", async () => {
+    setFlagsFromString("--expose_gc");
+    const collect = runInNewContext("gc") as () => void;
+    const replayMeasurements: Array<{ revisions: number; logBytes: number; peakDelta: number; retainedDelta: number }> = [];
+    for (const revisions of [100, 5_000, 75_000]) {
+      const root = await mkdtemp(join(tmpdir(), "tron-episodic-legacy-heap-"));
+      roots.push(root);
+      const workspace = new TronWorkspace(join(root, "home"));
+      owners.push(workspace);
+      const sessionId = `legacy-heap-${revisions}`;
+      const store = new EpisodicStore(workspace, sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+      const base: EpisodicMessageRecord = {
+        revision: 1, index: 0, entryId: "one-live-message", kind: "user", text: "x".repeat(900), omitted: false, omissions: [],
+        sourceDigest: "source", projectedDigest: "projection", sessionId,
+      };
+      await store.appendCatalog(base);
+      await store.saveState({ version: EPISODIC_STORE_VERSION, generation: 0, cursor: null, blocked: null, spend: 0 });
+      const catalogPath = join(root, "home", "workspace", "state", "episodic", sessionId, "catalog.jsonl");
+      const writer = await openFile(catalogPath, "w", 0o600);
+      let position = 0;
+      let lines: string[] = [];
+      const flush = async (): Promise<void> => {
+        if (lines.length === 0) return;
+        const chunk = Buffer.from(lines.join(""));
+        let written = 0;
+        while (written < chunk.length) {
+          const result = await writer.write(chunk, written, chunk.length - written, position + written);
+          written += result.bytesWritten;
+        }
+        position += chunk.length;
+        lines = [];
+      };
+      for (let revision = 1; revision <= revisions; revision += 1) {
+        lines.push(`${JSON.stringify({ ...base, revision: revision + 1 })}\n`);
+        if (lines.length === 100) await flush();
+      }
+      await flush();
+      await writer.sync();
+      await writer.close();
+      for (let pass = 0; pass < 3; pass += 1) { collect(); await new Promise<void>(resolve => setImmediate(resolve)); }
+      const baseline = process.memoryUsage().heapUsed;
+      let peak = baseline;
+      const sampler = setInterval(() => { peak = Math.max(peak, process.memoryUsage().heapUsed); }, 1);
+      try {
+        const snapshot = await store.read();
+        peak = Math.max(peak, process.memoryUsage().heapUsed);
+        expect(snapshot.messages.size).toBe(1);
+        expect(snapshot.messages.get(0)?.revision).toBe(revisions + 1);
+      } finally { clearInterval(sampler); }
+      for (let pass = 0; pass < 3; pass += 1) { collect(); await new Promise<void>(resolve => setImmediate(resolve)); }
+      const logBytes = (await stat(catalogPath)).size;
+      replayMeasurements.push({ revisions, logBytes, peakDelta: peak - baseline, retainedDelta: process.memoryUsage().heapUsed - baseline });
+    }
+    expect(replayMeasurements.at(-1)!.logBytes).toBeGreaterThan(64 * 1024 * 1024);
+    expect(Math.max(...replayMeasurements.map(item => item.peakDelta)) - Math.min(...replayMeasurements.map(item => item.peakDelta))).toBeLessThan(32 * 1024 * 1024);
+    expect(Math.max(...replayMeasurements.map(item => item.retainedDelta)) - Math.min(...replayMeasurements.map(item => item.retainedDelta))).toBeLessThan(8 * 1024 * 1024);
+    console.log(`episodic legacy replay heap N=1 K=100,5000,75000: ${JSON.stringify(replayMeasurements)}`);
+
+    const sourceMeasurements: Array<{ edits: number; peakDelta: number; retainedDelta: number }> = [];
+    const liveNodeCounts: number[] = [];
+    for (const edits of [1, 10, 30]) {
+      const root = await mkdtemp(join(tmpdir(), "tron-episodic-source-heap-"));
+      roots.push(root);
+      const cwd = join(root, "project");
+      const sessions = join(root, "sessions");
+      await Promise.all([mkdir(cwd, { recursive: true }), mkdir(sessions, { recursive: true })]);
+      let manager: SessionManager | null = SessionManager.create(cwd, sessions);
+      manager.appendMessage({ role: "user", content: "resident baseline target", timestamp: Date.now() });
+      for (let index = 1; index < 10; index += 1) {
+        manager.appendMessage({ role: "user", content: `resident prompt ${index}`, timestamp: Date.now() } satisfies Message);
+        manager.appendMessage(fauxAssistantMessage(`resident reply ${index}`));
+      }
+      manager.appendMessage({ role: "user", content: "resident final message", timestamp: Date.now() });
+      const workspace = new TronWorkspace(join(root, "home"));
+      owners.push(workspace);
+      const sessionId = manager.getSessionId();
+      const sessionFile = manager.getSessionFile()!;
+      const memory = await EpisodicMemory.open({ workspace, sessionId, sessionFile, summarizer, limits: { nodeBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {} });
+      await memory.entriesCommitted(sessionId);
+      await memory.whenReady(memory.status().messages);
+      const targetId = manager.getBranch().find(entry => entry.type === "message")!.id;
+      let original: Buffer | null = await readFile(sessionFile);
+      for (let edit = 0; edit < edits; edit += 1) {
+        const text = `edit-${String(edit).padStart(2, "0")} ${"r".repeat(64 * 1024 - 9)}`;
+        manager.appendContextEdit(targetId, { content: text });
+      }
+      let full: Buffer | null = await readFile(sessionFile);
+      let suffix: Buffer | null = full.subarray(original!.length);
+      const editFile = join(root, "context-edit-history.jsonl");
+      await writeFile(editFile, suffix);
+      const restored = join(root, "session-before-edits.jsonl");
+      await writeFile(restored, original!);
+      await rename(restored, sessionFile);
+      original = null;
+      full = null;
+      suffix = null;
+      manager = null;
+      for (let pass = 0; pass < 3; pass += 1) { collect(); await new Promise<void>(resolve => setImmediate(resolve)); }
+      const baseline = process.memoryUsage().heapUsed;
+      let peak = baseline;
+      const sampler = setInterval(() => { peak = Math.max(peak, process.memoryUsage().heapUsed); }, 1);
+      const lineStream = createInterface({ input: createReadStream(editFile), crlfDelay: Infinity });
+      let consumed = 0;
+      try {
+        for await (const line of lineStream) {
+          if (line.trim() === "") continue;
+          await appendFile(sessionFile, `${line}\n`);
+          await memory.entriesCommitted(sessionId);
+          consumed += 1;
+          expect(memory.status().messages).toBe(20);
+          expect(memory.searchMessages(`edit-${String(consumed - 1).padStart(2, "0")}`, 0, 1).matches).toBe(1);
+        }
+      } finally { clearInterval(sampler); }
+      expect(consumed).toBe(edits);
+      liveNodeCounts.push(memory.status().nodes.total);
+      peak = Math.max(peak, process.memoryUsage().heapUsed);
+      for (let pass = 0; pass < 3; pass += 1) { collect(); await new Promise<void>(resolve => setImmediate(resolve)); }
+      sourceMeasurements.push({ edits, peakDelta: peak - baseline, retainedDelta: process.memoryUsage().heapUsed - baseline });
+      await memory.dispose();
+    }
+    expect(new Set(liveNodeCounts).size).toBe(1);
+    expect(Math.max(...sourceMeasurements.map(item => item.retainedDelta)) - Math.min(...sourceMeasurements.map(item => item.retainedDelta))).toBeLessThan(1_500_000);
+    console.log(`episodic owner source heap N=20 K=1,10,30: ${JSON.stringify(sourceMeasurements)}`);
+  }, 300_000);
 });

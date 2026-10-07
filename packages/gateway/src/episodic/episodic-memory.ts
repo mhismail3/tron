@@ -550,7 +550,8 @@ export class EpisodicMemory {
       }
       throw error;
     }
-    if (this.sourceCursor && cut.completeBytes === this.sourceCursor.completeBytes && cut.leafEntryId === this.sourceCursor.leafEntryId) {
+    if (this.sourceCursor && cut.incremental
+      && cut.completeBytes === this.sourceCursor.completeBytes && cut.leafEntryId === this.sourceCursor.leafEntryId) {
       const addPrefixFence = !this.sourceCursor.completePrefixDigest && Boolean(cut.cursor.completePrefixDigest);
       this.sourceCursor = cut.cursor;
       if (addPrefixFence) await this.saveState();

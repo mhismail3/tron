@@ -36,8 +36,11 @@ it the commits the runtime reports, and sends each activation the view it render
   When the file only grew, it reads from the offset and extends the branch it
   already knows; it falls back to a whole-file read when the identity changed,
   the file shrank, the line before the offset no longer matches, or the new
-  entries do not chain onto that branch. A whole-file read is bounded per line
-  and never repairs or migrates the file.
+  entries do not chain onto that branch. An unchanged-source shortcut is allowed
+  only for a proven incremental no-change read; a whole-file rebuild first
+  reconciles projected messages and only then persists its cursor and
+  complete-prefix digest, even when size and branch leaf happen to match. A
+  whole-file read is bounded per line and never repairs or migrates the file.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
