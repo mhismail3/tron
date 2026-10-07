@@ -594,7 +594,12 @@ choices while `providerUsageLentTo` identifies `openai`; a sole Codex sign-in is
 unchanged. This describes account-list behavior, not the current account's exact
 membership; a live account check remains a maintainer post-install validation. An
 extension can still call `ctx.setModel` directly; extension-authored selections are
-outside this Tron policy because the SDK has no pre-selection admission hook.
+outside this Tron policy because the SDK has no pre-selection admission hook. Likewise, an
+extension provider contribution that re-registers `openai` or `openai-codex`
+replaces the SDK filter decoration (the SDK keeps native and extension providers
+mutually exclusive). Gateway catalog, selection, default and Knowledge admission
+still consult the eligibility owner directly, but SDK snapshot consumers (model
+cycling and Pi's own no-default initial pick) are unfiltered for that composition.
 
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot

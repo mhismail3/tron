@@ -11,6 +11,7 @@ import { SettingsService } from "../admin/settings-service.js";
 import { GatewayError } from "../errors.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";
+import { fauxProvider } from "@earendil-works/pi-ai";
 
 const client = { id: "openai-catalog", identity: "device:openai-catalog", isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 const models = [
@@ -306,6 +307,27 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     expect(policy.isEligible({ provider: "openai", id: "gpt-5.5" })).toBe(false);
     expect(policy.isEligible({ provider: "openai", id: "gpt-5.6-sol" })).toBe(true);
     expect((await catalog(service)).filter(model => model.provider === "openai" && model.available).map(model => model.id)).toEqual(["gpt-5.6-sol"]);
+  });
+
+  it("keeps other providers' credential filters and owner admission across SDK recomposition", async () => {
+    server = await fakeModelsServer((_request, response) => json(response, { models, has_more: false }));
+    const { runtime, service } = await harness({ type: "oauth", access: "safe-test-token", refresh: "refresh", expires: Date.now() + 3_600_000 });
+    // An unrelated provider with its own credential filter (GitHub Copilot's shape):
+    // eligibility refreshes must not republish its unfiltered configured catalog.
+    const faux = fauxProvider({ provider: "restricted-test", models: [{ id: "kept" }, { id: "withheld" }] });
+    runtime.registerNativeProvider({ ...faux.provider, filterModels: (candidates) => candidates.filter(model => model.id !== "withheld") });
+    await catalog(service);
+    await openAIModelEligibility(runtime)!.refresh();
+    const snapshot = runtime.getAvailableSnapshot().map(model => `${model.provider}/${model.id}`);
+    expect(snapshot).not.toContain("restricted-test/withheld");
+    expect(snapshot.filter(id => id.startsWith("openai/"))).toEqual(expect.arrayContaining(["openai/gpt-5.5", "openai/gpt-5.6-sol"]));
+    expect(snapshot).not.toContain("openai/gpt-5.2-chat-latest");
+
+    // A first-party metadata-only extension contribution replaces the SDK filter
+    // decoration; Gateway catalog admission must still come from the owner.
+    runtime.registerProvider("openai", { name: "OpenAI (contributed)" });
+    const offered = (await catalog(service)).filter(model => model.provider === "openai" && model.available).map(model => model.id);
+    expect(offered).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
   });
 
   it("leaves API-key OpenAI availability unchanged without discovery", async () => {

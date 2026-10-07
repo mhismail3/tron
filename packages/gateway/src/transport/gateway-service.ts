@@ -2369,7 +2369,10 @@ export class GatewayService {
           contextWindow: model.contextWindow,
           contextWindowLimits: contextWindowLimits(model),
           maxTokens: model.maxTokens,
-          available: available.has(`${model.provider}\0${model.id}`),
+          // The owner is checked directly as well: an extension contribution that
+          // re-registers openai/openai-codex replaces the SDK filter decoration.
+          available: available.has(`${model.provider}\0${model.id}`)
+            && (openAIModelEligibility(modelRuntime)?.isEligibleInRuntime(modelRuntime, model.provider, model.id) ?? true),
           ...(releaseDate === undefined ? {} : { releaseDate }),
           ...(priced ? { cost: { input: model.cost.input, output: model.cost.output } } : {}),
         };

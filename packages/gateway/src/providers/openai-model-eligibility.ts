@@ -13,7 +13,7 @@ const installed = new WeakMap<ModelRuntime, OpenAIModelEligibility>();
 type OpenAIModel = Model<Api>;
 interface DiscoveryEntry { slug: string; visibility: string; displayName?: string; }
 interface AccountModels { fingerprint: string; entries: readonly string[]; displayNames: ReadonlyMap<string, string>; expiresAt: number; }
-interface DiscoveryFlight { fingerprint: string; runtime: ModelRuntime; controller: AbortController; promise: Promise<AccountModels | undefined>; }
+interface DiscoveryFlight { fingerprint: string; controller: AbortController; promise: Promise<AccountModels | undefined>; }
 interface EligibilityState {
   generation: number;
   fingerprint: string | undefined;
@@ -194,7 +194,6 @@ export class OpenAIModelEligibility {
     timeout.unref?.();
     const flight: DiscoveryFlight = {
       fingerprint,
-      runtime,
       controller,
       promise: this.discover(runtime, token, fingerprint, controller.signal).catch(() => undefined).finally(() => {
         clearTimeout(timeout);
@@ -241,7 +240,10 @@ export class OpenAIModelEligibility {
   }
 
   private async refreshSnapshots(): Promise<void> {
-    await Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false, providers: ["openai", "openai-codex"] }).then(() => undefined, () => undefined)));
+    // A provider-scoped SDK refresh first republishes every provider's unfiltered
+    // configured catalog and then reapplies filters only to the named subset, which
+    // would drop other providers' credential filters. Refresh full availability.
+    await Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false }).then(() => undefined, () => undefined)));
   }
 
   private primaryRuntime(): ModelRuntime | undefined { return this.runtimes.values().next().value; }
