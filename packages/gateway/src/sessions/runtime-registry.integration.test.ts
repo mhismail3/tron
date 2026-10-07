@@ -7476,6 +7476,84 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
+  it("retires completion observations after queued successful operations settle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseFollowUp!: () => void;
+    let releaseAttention!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
+    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(() => {
+      releaseInitial();
+      releaseFollowUp();
+      releaseAttention();
+    });
+    const faux = fauxProvider({ provider: "tron-completion-observation-retirement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        followUpStarted();
+        await followUpBarrier;
+        return fauxAssistantMessage("follow-up complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const attention = (registry as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+    }).attention;
+    const originalComplete = attention.complete.bind(attention);
+    vi.spyOn(attention, "complete").mockImplementation(async (...args) => {
+      await attentionBarrier;
+      return originalComplete(...args);
+    });
+    // This lifecycle-only map has no public projection. Inspect the existing
+    // private state rather than adding a production accessor for the regression.
+    const slotInternals = slot as unknown as { observedCompletionsByOperation: Map<string, string> };
+
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const queued = await slot.prompt("queued follow-up", [], "followUp");
+    releaseInitial();
+    await followUpStart;
+    releaseFollowUp();
+    await waitFor(() => faux.state.callCount === 2, "both successful model responses");
+    await initial;
+    releaseAttention();
+    await waitFor(() => !slot.isBusy, "both operations to settle");
+
+    expect(slotInternals.observedCompletionsByOperation.has(initialOperationId!)).toBe(false);
+    expect(slotInternals.observedCompletionsByOperation.has(queued.operationId)).toBe(false);
+    expect(slotInternals.observedCompletionsByOperation.size).toBe(0);
+  });
+
   it("settles a reply before the queued follow-up runs so steering remains admissible", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-follow-up-steering-settlement-"));
     const agentDir = join(root, "agent");

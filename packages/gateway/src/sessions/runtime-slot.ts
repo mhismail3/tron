@@ -3284,7 +3284,10 @@ export class RuntimeSlot {
       return;
     }
     item.observationSettled = true;
-    if (!this.hasActiveAgentRun || this.activeOperationId === operationId) {
+    // The deduplication record belongs only to the operation whose eventual
+    // agent_settled callback can consume it. A completion from an earlier
+    // operation in a queued run may settle after its callback ownership ended.
+    if (this.activeOperationId === operationId) {
       this.observedCompletionsByOperation.set(operationId, item.completion.id);
     }
     if (this.hasActiveAgentRun && this.activeOperationId === operationId) {

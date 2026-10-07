@@ -14,10 +14,12 @@ RuntimeSlot immediately starts that exact completion's durable attention
 settlement; it does not wait for `agent_settled`, because Pi can begin a queued
 follow-up inside the same run. Settlement retires only the prior completion's
 receipt and marker while the follow-up remains active, and admits that exact
-completed observation cut once from the same completion owner. When that owner
-continues in the same run, its observation cursor advances just past the
-completion, so a later cut includes steering input and its answer without replaying
-the earlier cut. A later follow-up failure cannot swallow the earlier success cut. If a durable commit truly blocks
+completed observation cut once from the same completion owner. Per-operation
+completion deduplication remains only while that exact operation's terminal
+callback can consume it; queued predecessors whose terminal ownership has ended
+are not retained. When an owner continues in the same run, its observation cursor
+advances just past the completion, so a later cut includes steering input and its
+answer without replaying the earlier cut. A later follow-up failure cannot swallow the earlier success cut. If a durable commit truly blocks
 admission, the `attention-pending` diagnostic names the owning operation and its
 age. The faux-provider regression in
 `src/sessions/runtime-registry.integration.test.ts` retains its canonical
