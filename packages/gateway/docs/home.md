@@ -251,14 +251,17 @@ owner.
   Home's current or last activation (see [Activations](#activations)), never a
   message body.
 
-A profile change must take effect before the session's next prompt, so the live
+Enable, disable and profile/model changes use the same serialized profile owner.
+A profile change must take effect before the session's next prompt, so a live
 runtime is **replaced in place** inside the slot's own serialized lane: the idle
 check, the durable record write and the rebuild are one critical section, and
-prompt admission uses the same lane. The session identity, its subscribers, its
-presentation and its (possibly never-persisted) in-memory session manager all
-survive. If the session is not idle the mutation is refused with a retryable
-`busy` error and nothing changes. A session with no live runtime needs no
-rebuild: the next runtime creation reads the record, including its model.
+prompt admission uses the same lane. This includes a live runtime for a `reserved`
+or `materializing` chapter; re-enabling preserves its chapter, attempt and exact
+path while rebuilding the runtime before routing is exposed. The session identity,
+its subscribers, its presentation and its (possibly never-persisted) in-memory
+session manager all survive. If the session is not idle the mutation is refused
+with a retryable `busy` error and nothing changes. A session with no live runtime
+needs no rebuild: the next runtime creation reads the record, including its model.
 Lifecycle updates merge against the current record at the serialized profile
 commit boundary. Durable record commits use one serialization authority for
 memory and model updates; it is separate from the lifecycle mutex so a model

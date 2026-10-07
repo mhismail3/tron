@@ -772,27 +772,11 @@ export class HomeOwner {
       if (pendingChapter && existing?.enabled) {
         throw new GatewayError("conflict", "Tron Home has an unresolved chapter reservation; recover that chapter before designation");
       }
-      if (pendingChapter && existing && !existing.enabled) {
-        const model = input.model ?? existing.model;
-        let next: HomeRecord | undefined;
-        await this.recordMutex.run(async () => {
-          const current = this.record;
-          if (!current || current.enabled || !current.chapters.some(chapter => chapter.sessionId === pendingChapter.sessionId
-            && (chapter.state === "reserved" || chapter.state === "materializing"))) {
-            throw new GatewayError("conflict", "Tron Home changed while re-enabling its reserved chapter");
-          }
-          next = {
-            ...current, enabled: true, generation: current.generation + 1,
-            policyRevision: HOME_POLICY_REVISION, model: { ...model }, updatedAt: new Date().toISOString(),
-          };
-          await this.writeLocked(next);
-        });
-        if (!next) throw new Error("Home reservation re-enable did not commit its record");
-        this.options.diagnostic?.({ outcome: "enabled" });
-        return designation(next);
-      }
       const existingSessionId = existing ? homeSessionId(existing) : undefined;
-      if (existing && existingSessionId && await this.options.sessions.sessionPresent(existingSessionId)) {
+      if (existing && existingSessionId && (
+        (pendingChapter !== undefined && !existing.enabled)
+        || await this.options.sessions.sessionPresent(existingSessionId)
+      )) {
         if (existing.enabled) {
           if (input.model && (input.model.provider !== existing.model.provider || input.model.id !== existing.model.id)) {
             this.options.diagnostic?.({ outcome: "refused", reason: "model-change-requires-session-set-model" });

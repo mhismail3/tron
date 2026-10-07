@@ -40,6 +40,7 @@ import { invocationReceipts } from "../sessions/invocation-receipts.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
+const OTHER_MODEL_ID = "chat-2";
 const MEMORY_PROVIDER = "tron-home-e2e-memory";
 const MEMORY_MODEL_ID = "compactor";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
@@ -47,6 +48,7 @@ const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
 const OTHER_MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor-2" };
 const VIRTUAL_MODEL_ID = "router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
+const OTHER_MODEL = { provider: PROVIDER, id: OTHER_MODEL_ID };
 const SUMMARY_MARKER = "HOME-SUMMARY";
 const FILLER = "these are earlier home words ".repeat(40);
 const REPORT_PATH = "test-results/home-activation/report.json";
@@ -220,7 +222,10 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
   const faux = fauxProvider({
     provider: PROVIDER,
-    models: [{ id: MODEL_ID, reasoning: true, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) }],
+    models: [
+      { id: MODEL_ID, reasoning: true, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) },
+      { id: OTHER_MODEL_ID, reasoning: true },
+    ],
     tokensPerSecond: 1_000_000,
     tokenSize: { min: 10, max: 10 },
   });
@@ -540,31 +545,40 @@ describe("Tron Home activations end to end", () => {
     expect(status).toMatchObject({ sessionId: reservedId, bindingRevision: current.bindingRevision + 1 });
   });
 
-  it.each(["reserved", "materializing"] as const)("re-enables Home without replacing a pending %s chapter", async state => {
+  it.each(["reserved", "materializing"] as const)("rebuilds a live runtime when re-enabling a pending %s chapter", async state => {
     const f = await fixture(`reenable-pending-${state}`);
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const active = await designateHome(f, `e2e-reenable-${state}`);
+    const pending = await f.registry.create(f.agentDir);
     const owner = f.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
-    const pendingId = `pending-${state}`;
+    const attemptId = "attempt-reenable";
+    const expectedPath = pending.sessionFile!;
     await owner.writeLocked({
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
         {
-          sessionId: pendingId, ordinal: 2, state, createdAt: new Date().toISOString(),
-          ...(state === "materializing" ? { attemptId: "attempt-reenable", expectedPath: join(f.tronHome, "gateway", "sessions", `${pendingId}.jsonl`) } : {}),
+          sessionId: pending.id, ordinal: 2, state, createdAt: new Date().toISOString(),
+          ...(state === "materializing" ? { attemptId, expectedPath } : {}),
         },
       ],
     });
     await f.registry.homeOwner().disable();
-    const designation = await f.registry.homeOwner().designate({}, () => ({ provider: "faux", id: "test" }));
-    expect(designation).toMatchObject({ sessionId: pendingId });
+    const afterDisable = pending.snapshot().revision;
+    const designation = await f.registry.homeOwner().designate({ model: OTHER_MODEL }, () => ({ provider: "faux", id: "test" }));
+    expect(designation).toMatchObject({ sessionId: pending.id });
+    expect(pending.snapshot().revision).toBeGreaterThan(afterDisable);
+    expect(pending.snapshot().model).toMatchObject(OTHER_MODEL);
     const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.model).toEqual(OTHER_MODEL);
     expect(stored.chapters.map(chapter => [chapter.sessionId, chapter.state])).toEqual([
-      [active.id, "sealed"], [pendingId, state],
+      [active.id, "sealed"], [pending.id, state],
     ]);
-    report.cases.push({ case: "re-enable-pending-reservation", state, preservedSessionId: pendingId, chapterCount: stored.chapters.length });
+    if (state === "materializing") {
+      expect(stored.chapters.at(-1)).toMatchObject({ attemptId, expectedPath });
+    }
+    report.cases.push({ case: "re-enable-pending-reservation", state, preservedSessionId: pending.id, runtimeRevisionAdvanced: pending.snapshot().revision > afterDisable });
   });
 
   it("keeps one homeId memory stream continuous across a crash and physical chapter boundary", async () => {
