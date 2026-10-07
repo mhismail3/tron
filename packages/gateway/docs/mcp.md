@@ -50,7 +50,10 @@ tool owns its existing limits and nested-call behavior.
 
 Pi supports stdio and streamable HTTP, OAuth/PKCE, dynamic client registration,
 refresh, server instructions, resources, progress, logging, structured results,
-and per-tool exposure. MCP uses Pi's `mcp.json` and `mcp-auth.json` for server and OAuth configuration;
+and per-tool exposure. Pi 1.0.4 accepts `codemode-deferred` as an alias for
+`codemode`; iOS offers only one Codemode exposure choice and presents stored
+alias values as Codemode without rewriting them. MCP uses Pi's `mcp.json` and
+`mcp-auth.json` for server and OAuth configuration;
 Tron does not maintain a second server schema. Runtime fixture coverage for
 stdio/HTTP exposure, resource reads, `list_changed`, lazy reconnect, and process
 group cleanup lives in `src/sessions/runtime-registry.integration.test.ts`.

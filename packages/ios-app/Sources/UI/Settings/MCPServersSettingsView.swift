@@ -34,13 +34,27 @@ enum MCPServerPresentationPolicy {
 
     static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
 
-    /// Plain names for Pi's exposure values, in the order the menu offers them.
+    /// Pi's exposure choices in the order the settings menu offers them.
     static let exposures: [(value: String, title: String)] = [
-        ("codemode", "Codemode"), ("codemode-deferred", "Codemode, on demand"),
+        ("codemode", "Codemode"),
         ("deferred", "Tool search"), ("direct", "Direct"), ("hidden", "Hidden"),
     ]
+    /// The menu choice a stored exposure selects. Pi 0.99.2+ treats
+    /// `codemode-deferred` as an alias of `codemode` (#490), so it selects the one
+    /// Codemode choice; the stored value is rewritten only by an explicit change.
+    static func exposureChoice(_ value: String) -> String {
+        value == "codemode-deferred" ? "codemode" : value
+    }
     static func exposureTitle(_ value: String) -> String {
-        exposures.first { $0.value == value }?.title ?? value
+        let choice = exposureChoice(value)
+        return exposures.first { $0.value == choice }?.title ?? value
+    }
+
+    static func updateFields(server: String, enabled: Bool? = nil, exposure: String? = nil) -> [String: JSONValue] {
+        var fields: [String: JSONValue] = ["server": .string(server)]
+        if let enabled { fields["enabled"] = .bool(enabled) }
+        if let exposure { fields["exposure"] = .string(exposure) }
+        return fields
     }
 }
 
@@ -222,7 +236,7 @@ struct MCPServersSettingsView: View {
                     Task { await update(server.name, enabled: !server.enabled, destination: destination, scope: submittedScope, cwd: submittedCWD) }
                 }
                 Picker("Exposure", selection: Binding(
-                    get: { server.exposure },
+                    get: { MCPServerPresentationPolicy.exposureChoice(server.exposure) },
                     set: { value in Task { await update(server.name, exposure: value, destination: destination, scope: submittedScope, cwd: submittedCWD) } }
                 )) {
                     ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
@@ -294,8 +308,7 @@ struct MCPServersSettingsView: View {
         }
     }
     private func update(_ server: String, enabled: Bool? = nil, exposure: String? = nil, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
-        var fields: [String: JSONValue] = ["server": .string(server)]
-        if let enabled { fields["enabled"] = .bool(enabled) }; if let exposure { fields["exposure"] = .string(exposure) }
+        let fields = MCPServerPresentationPolicy.updateFields(server: server, enabled: enabled, exposure: exposure)
         await mutate("mcp.update", fields, destination: destination, scope: scope, cwd: cwd)
     }
     private func addServer(_ submitted: MCPAddServerDraft, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
