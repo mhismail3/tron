@@ -462,8 +462,9 @@ export class HomeOwner {
   }
 
   /**
-   * `home.designate`. Idempotent for an enabled record whose session still
-   * exists. A disabled record is re-enabled on the same session. A record whose
+   * `home.designate`. An enabled record whose session still exists is idempotent,
+   * but cannot change the session-owned model; callers use `session.setModel` for
+   * that. A disabled record is re-enabled on the same session. A record whose
    * session is gone is kept and given a fresh session, because the record is the
    * only evidence of the designation.
    */
@@ -472,7 +473,12 @@ export class HomeOwner {
       this.assertAvailable();
       const existing = this.record;
       if (existing && await this.options.sessions.sessionPresent(existing.sessionId)) {
-        if (existing.enabled) return designation(existing);
+        if (existing.enabled) {
+          if (input.model && (input.model.provider !== existing.model.provider || input.model.id !== existing.model.id)) {
+            throw new GatewayError("conflict", "Tron Home is already enabled with a different model; use session.setModel to change its model");
+          }
+          return designation(existing);
+        }
         // The model is the request's, else the one the record was last
         // designated with; both were admitted before they were recorded.
         const model = input.model ?? existing.model;

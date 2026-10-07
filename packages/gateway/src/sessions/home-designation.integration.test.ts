@@ -248,6 +248,34 @@ const HOME_EXTENSIONS = [
 const HOME_TOOLS = ["ask_user", "date", "display", "memory_search", "notify", "zoom"];
 
 describe("Tron Home designation", () => {
+  homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {
+    const f = await fixture("enabled-model-designate");
+    const original = await designate(f, "home-designate-enabled-model");
+    const home = await f.registry.acquire(original.sessionId);
+    const before = await homeStatus(f);
+    const runtimeModel = home.snapshot().model;
+
+    await expect(f.service.invoke(client, "home.designate", {
+      commandId: "home-designate-enabled-different-model",
+      model: { provider: PROVIDER, id: OTHER_MODEL_ID },
+    })).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("session.setModel"),
+    });
+    expect(await homeStatus(f)).toEqual(before);
+    expect(home.snapshot().model).toEqual(runtimeModel);
+
+    const sameModel = await designate(f, "home-designate-enabled-same-model", MODEL);
+    expect(sameModel).toEqual(original);
+    expect(await designate(f, "home-designate-enabled-same-model", MODEL)).toEqual(original);
+
+    const noModel = await designate(f, "home-designate-enabled-no-model", null);
+    expect(noModel).toEqual(original);
+    expect(await designate(f, "home-designate-enabled-no-model", null)).toEqual(original);
+    expect(await homeStatus(f)).toEqual(before);
+    expect(home.snapshot().model).toEqual(runtimeModel);
+  });
+
   homeCase("refuses a former Home after record corruption without blocking ordinary provider requests", async () => {
     const f = await fixture("corrupt-record", { symlinkHome: true });
     const designation = await designate(f, "home-designate-corrupt-record");

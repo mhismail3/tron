@@ -148,10 +148,13 @@ owner.
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
   and returns `{ homeId, sessionId, generation }`. An enabled record whose
-  session still exists is idempotent. A disabled record re-enables the same
-  session with `generation + 1`. A record whose session is **gone** (a session
-  that was never written, or was deleted) is kept and given a fresh session with
-  `generation + 1`, whether it was enabled or disabled: the record is the only
+  session still exists is idempotent when no model is supplied or the explicit
+  model matches the recorded model. A different explicit model is refused with
+  a typed conflict directing callers to `session.setModel`; designation enables
+  Home but does not own changes to its enabled session's model. A disabled record
+  re-enables the same session with `generation + 1`. A record whose session is
+  **gone** (a session that was never written, or was deleted) is kept and given
+  a fresh session with `generation + 1`, whether it was enabled or disabled: the record is the only
   evidence of the designation, and the dangling id must not be re-enabled.
 - `home.disable` is a mutation. It sets `enabled: false` with `generation + 1`;
   the session stays an ordinary session afterwards. A record whose session is
