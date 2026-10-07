@@ -6,6 +6,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, type Credential, type CredentialInfo, type CredentialStore } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 class SessionCredentials implements CredentialStore {
@@ -62,9 +63,10 @@ describe("new-session OpenAI default admission", () => {
     });
   }
 
-  async function createRegistry(agentDir: string, credentials: CredentialStore): Promise<void> {
+  async function createRegistry(agentDir: string, credentials: CredentialStore, eligibility?: OpenAIModelEligibility): Promise<void> {
     registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      ...(eligibility ? { openAIModelEligibility: eligibility } : {}),
       modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, credentials }),
       trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
@@ -163,12 +165,14 @@ describe("new-session OpenAI default admission", () => {
     const agentDir = join(root, "agent"); const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     const credentials = new SessionCredentials({ type: "api_key", key: "api-key-fixture" }, null, { type: "api_key", key: "anthropic-fixture" });
-    await createRegistry(agentDir, credentials);
+    const discoveryFetch = vi.fn(async () => { throw new Error("API-key account must not be discovered"); });
+    await createRegistry(agentDir, credentials, new OpenAIModelEligibility({ fetch: discoveryFetch as typeof fetch }));
     const slot = await registry!.create(cwd);
     const available = slot.modelRuntime.getAvailableSnapshot();
     expect(available.some(model => model.provider === "openai")).toBe(true);
     expect(available.some(model => model.provider === "anthropic")).toBe(true);
     expect(slot.snapshot().model).not.toEqual({ provider: "unknown", id: "unknown" });
+    expect(discoveryFetch).not.toHaveBeenCalled();
     expect(server).toBeUndefined();
   });
 

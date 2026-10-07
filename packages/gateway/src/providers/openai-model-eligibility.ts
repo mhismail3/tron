@@ -115,18 +115,9 @@ export class OpenAIModelEligibility {
     }
     if (generation !== this.state.generation) return;
     const stored = credentials.find(item => item.providerId === "openai");
-    let authType = stored?.type;
-    if (!authType) {
-      try { authType = (await runtime.checkAuth("openai"))?.type; }
-      catch {
-        this.publish(generation, { fingerprint: undefined, oauth: undefined, entries: [], displayNames: new Map() });
-        this.abortFlight();
-        await this.refreshSnapshots();
-        return;
-      }
-    }
-    if (generation !== this.state.generation) return;
-    if (authType !== "oauth") {
+    // Discovery is an account-specific OAuth capability, not a generic auth probe:
+    // API keys, absent credentials, and environment auth must never reach this endpoint.
+    if (stored?.type !== "oauth") {
       this.lastSuccessful = undefined;
       this.lastFailure = undefined;
       this.abortFlight();

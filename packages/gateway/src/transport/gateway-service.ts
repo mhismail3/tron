@@ -2347,8 +2347,9 @@ export class GatewayService {
   private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown, signal?: AbortSignal): Promise<JsonValue> {
     await openAIModelEligibility(modelRuntime)?.refresh(signal);
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
-      const available = new Set((await Promise.all(modelRuntime.getProviders().map(async provider => {
-        try { return await modelRuntime.getAvailable(provider.id, signal ? { signal } : undefined); }
+      const providerIds = new Set(modelRuntime.getModels().map(model => model.provider));
+      const available = new Set((await Promise.all([...providerIds].map(async providerId => {
+        try { return await modelRuntime.getAvailable(providerId, signal ? { signal } : undefined); }
         catch (error) { if (signal?.aborted) throw error; return []; }
       }))).flat().map((model) => `${model.provider}\0${model.id}`));
       const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
