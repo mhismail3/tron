@@ -10,6 +10,12 @@ struct MCPServerListTests {
         let codemodeChoices = MCPServerPresentationPolicy.exposures.filter { $0.title == "Codemode" }
         #expect(codemodeChoices.map(\.value) == ["codemode"])
         #expect(MCPServerPresentationPolicy.exposureTitle("codemode-deferred") == "Codemode")
+        // The menu's selection must be one of its own tags, or the picker shows no
+        // choice for a server stored with the alias.
+        let offered = MCPServerPresentationPolicy.exposures.map(\.value)
+        for stored in ["codemode-deferred"] + offered {
+            #expect(offered.contains(MCPServerPresentationPolicy.exposureChoice(stored)))
+        }
 
         let unrelatedFieldUpdate = MCPServerPresentationPolicy.updateFields(server: "example", enabled: false)
         #expect(unrelatedFieldUpdate == ["server": .string("example"), "enabled": .bool(false)])

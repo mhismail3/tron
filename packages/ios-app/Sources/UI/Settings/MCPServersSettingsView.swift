@@ -39,9 +39,15 @@ enum MCPServerPresentationPolicy {
         ("codemode", "Codemode"),
         ("deferred", "Tool search"), ("direct", "Direct"), ("hidden", "Hidden"),
     ]
+    /// The menu choice a stored exposure selects. Pi 0.99.2+ treats
+    /// `codemode-deferred` as an alias of `codemode` (#490), so it selects the one
+    /// Codemode choice; the stored value is rewritten only by an explicit change.
+    static func exposureChoice(_ value: String) -> String {
+        value == "codemode-deferred" ? "codemode" : value
+    }
     static func exposureTitle(_ value: String) -> String {
-        if value == "codemode-deferred" { return "Codemode" }
-        return exposures.first { $0.value == value }?.title ?? value
+        let choice = exposureChoice(value)
+        return exposures.first { $0.value == choice }?.title ?? value
     }
 
     static func updateFields(server: String, enabled: Bool? = nil, exposure: String? = nil) -> [String: JSONValue] {
@@ -230,7 +236,7 @@ struct MCPServersSettingsView: View {
                     Task { await update(server.name, enabled: !server.enabled, destination: destination, scope: submittedScope, cwd: submittedCWD) }
                 }
                 Picker("Exposure", selection: Binding(
-                    get: { server.exposure },
+                    get: { MCPServerPresentationPolicy.exposureChoice(server.exposure) },
                     set: { value in Task { await update(server.name, exposure: value, destination: destination, scope: submittedScope, cwd: submittedCWD) } }
                 )) {
                     ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
