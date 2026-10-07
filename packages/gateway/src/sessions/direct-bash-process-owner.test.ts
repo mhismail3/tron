@@ -13,6 +13,7 @@ const roots: string[] = [];
  * marker, independently of the code under test, so a failing implementation or
  * a partial fixture start cannot leak a busy loop past the test. */
 const markers: string[] = [];
+const testSessionId = process.env.PI_SESSION_ID ?? "test-session";
 function markedPids(marker: string): number[] {
   const listing = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout ?? "";
   return listing.split("\n").flatMap((line) => {
@@ -40,7 +41,7 @@ describe("DirectBashProcessOwner", () => {
       roots.push(root);
       const agentDir = join(root, "agent");
       const settings = SettingsManager.create(root, agentDir);
-      const owner = new DirectBashProcessOwner(settings);
+      const owner = new DirectBashProcessOwner(settings, testSessionId);
       const pidFile = join(root, "detached.pid");
       await writeFile(join(root, "placeholder"), "ready");
 
@@ -95,7 +96,7 @@ describe("DirectBashProcessOwner", () => {
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
-      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")));
+      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
       // A busy loop in its own process group, and a grandchild that inherits and
@@ -130,7 +131,7 @@ describe("DirectBashProcessOwner", () => {
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
-      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")));
+      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
       const writer = `/*${marker}*/ const t = setInterval(() => process.stdout.write('tick\\n'), 20); setTimeout(() => { clearInterval(t); process.stdout.write('final-output\\n'); }, 3000)`;
@@ -152,7 +153,7 @@ describe("DirectBashProcessOwner", () => {
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
-      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")));
+      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const tool = owner.toolDefinition(root);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
@@ -182,7 +183,7 @@ describe("DirectBashProcessOwner", () => {
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
-      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")));
+      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const tool = owner.toolDefinition(root);
       const text = (result: { content: Array<{ type: string; text?: string }> }) =>
         result.content.flatMap(part => part.type === "text" && part.text ? [part.text] : []).join("");
@@ -200,4 +201,36 @@ describe("DirectBashProcessOwner", () => {
     },
     20_000,
   );
+
+  it("does not pass Gateway-private paths or supervision identity to shell commands, but preserves the work session id", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-env-"));
+    roots.push(root);
+    const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), "opaque-session-561");
+    const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SESSION_ID", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT"] as const;
+    const previous = new Map(names.map(name => [name, process.env[name]]));
+    process.env.PI_SUBAGENTS_TEMP_ROOT = join(root, "tron", "internal", "subagents");
+    process.env.PI_CODING_AGENT_DIR = join(root, "tron", "agent");
+    process.env.PI_SESSION_FILE = join(root, "tron", "sessions", "session.jsonl");
+    process.env.PI_SESSION_ID = "opaque-session-561";
+    process.env.PI_SUBAGENT_PARENT_SESSION = "supervision-parent";
+    process.env.TRON_GATEWAY_SUPERVISED = "1";
+    process.env.TRON_GATEWAY_PAYLOAD_ROOT = join(root, "tron", "payload");
+    try {
+      const result = await owner.toolDefinition(root).execute(
+        "environment", { command: "env | sort" }, undefined, undefined, undefined,
+      );
+      const output = result.content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
+      expect(output).toContain("PI_SESSION_ID=opaque-session-561");
+      for (const name of names.filter(name => name !== "PI_SESSION_ID")) {
+        expect(output).not.toContain(`${name}=`);
+      }
+      expect(output).not.toContain(`${process.env.HOME}/.tron/`);
+      expect(output).not.toContain(`${process.env.HOME}/.tron-dev/`);
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
 });

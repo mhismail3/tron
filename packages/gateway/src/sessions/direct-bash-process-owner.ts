@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { join } from "node:path";
+import { delimiter, join, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import {
   createBashToolDefinition,
   getShellConfig,
@@ -17,6 +18,11 @@ const TERMINATED_OUTPUT_MAX_MS = 2_000;
 const ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 /** Pi's own bound on a bash timeout (the largest `setTimeout` delay). */
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const TRON_HOME_PATHS = [resolve(homedir(), ".tron"), resolve(homedir(), ".tron-dev")];
+
+function isTronHomePath(value: string): boolean {
+  return TRON_HOME_PATHS.some((home) => value === home || value.startsWith(`${home}${sep}`));
+}
 
 /**
  * The tool's `timeout` (seconds) as milliseconds, validated exactly as Pi's own
@@ -47,7 +53,7 @@ interface ActiveProcess {
 export class DirectBashProcessOwner {
   private readonly active = new Map<number, ActiveProcess>();
 
-  constructor(private readonly settings: SettingsManager) {}
+  constructor(private readonly settings: SettingsManager, private readonly sessionId: string) {}
 
   toolDefinition(cwd: string): ReturnType<typeof createBashToolDefinition> {
     const presentation = createBashToolDefinition(cwd);
@@ -58,7 +64,7 @@ export class DirectBashProcessOwner {
         // the same behavior as Pi's built-in bash definition.
         const commandPrefix = this.settings.getShellCommandPrefix();
         const current = createBashToolDefinition(cwd, {
-          operations: this.operations(),
+          operations: this.shellOperations(),
           ...(commandPrefix === undefined ? {} : { commandPrefix }),
         });
         return current.execute(toolCallId, params, signal, onUpdate, context);
@@ -90,7 +96,21 @@ export class DirectBashProcessOwner {
     }
   }
 
-  private operations(): BashOperations {
+  /** Keep the work CLI's opaque session identity, but never expose Gateway-owned
+   * paths or supervision controls to arbitrary shell commands. */
+  private commandEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const commandEnvironment = Object.fromEntries(
+      Object.entries(environment ?? process.env).filter(([name]) => !name.startsWith("PI_") && !name.startsWith("TRON_GATEWAY_")),
+    );
+    commandEnvironment.PI_SESSION_ID = this.sessionId;
+    if (commandEnvironment.PATH) {
+      commandEnvironment.PATH = commandEnvironment.PATH.split(delimiter).filter((entry) => !isTronHomePath(entry)).join(delimiter);
+    }
+    return commandEnvironment;
+  }
+
+  /** Shared by assistant bash tools and Pi's direct user `!` bash execution. */
+  shellOperations(): BashOperations {
     return {
       exec: async (command, cwd, options) => {
         // Validated before the abort check, in Pi's order.
@@ -104,7 +124,7 @@ export class DirectBashProcessOwner {
           {
             cwd,
             detached: process.platform !== "win32",
-            env: options.env,
+            env: this.commandEnvironment(options.env),
             stdio: [fromStdin ? "pipe" : "ignore", "pipe", "pipe"],
             windowsHide: true,
           },
