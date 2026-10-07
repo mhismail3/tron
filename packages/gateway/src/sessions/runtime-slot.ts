@@ -4298,10 +4298,13 @@ export class RuntimeSlot {
             // Pi can admit a same-agent queued follow-up without emitting a
             // second agent_start. The canonical user binding is the exact
             // prospective cut boundary; never fall back to session history.
-            if (!this.operationObservations.get(operationID)?.cursor) {
+            // Steering is nested input in the foreground run, not an observation owner.
+            const isConsumedSteering = this.consumedSteeringOperationIDs.has(operationID);
+            const observationOwnerId = isConsumedSteering ? this.activeOperationId ?? operationID : operationID;
+            if (isConsumedSteering || !this.operationObservations.get(observationOwnerId)?.cursor) {
               const canonical = this.canonicalSessionEntries();
               const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
-              if (entryIndex >= 0) this.observationFor(operationID).cursor = { entryIndex, branchId: this.observationBranchId(canonical) };
+              if (entryIndex >= 0) this.observationFor(observationOwnerId).cursor = { entryIndex, branchId: this.observationBranchId(canonical) };
             }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
