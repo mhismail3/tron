@@ -7476,6 +7476,134 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
+  it("settles a reply before the queued follow-up runs so steering remains admissible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-follow-up-steering-settlement-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseFollowUp!: () => void;
+    let followUpStarted!: () => void;
+    let releaseAttention!: () => void;
+    let attentionStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
+    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
+    const attentionStart = new Promise<void>((resolve) => { attentionStarted = resolve; });
+    onTestFinished(() => { releaseAttention(); releaseFollowUp(); });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    const faux = fauxProvider({ provider: "tron-follow-up-steering-settlement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        followUpStarted();
+        await followUpBarrier;
+        return fauxAssistantMessage("follow-up complete");
+      },
+      fauxAssistantMessage("steering complete"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
+    slot.hooks.assistantResponseCompleted = async (...args: any[]) => {
+      attentionStarted();
+      await attentionBarrier;
+      return originalAttention(...args);
+    };
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const queuedFollowUp = await slot.prompt("queued follow-up", [], "followUp");
+    releaseInitial();
+    await followUpStart;
+    await attentionStart;
+
+    let steer: { operationId: string };
+    try {
+      let steerSettled = false;
+      const steering = slot.prompt("steer during follow-up", [], "steer").then(result => {
+        steerSettled = true;
+        return result;
+      });
+      await Promise.resolve();
+      expect(steerSettled, "admission remains ordered behind the real attention commit").toBe(false);
+      releaseAttention();
+      steer = await steering;
+      expect(steer.operationId).toBeTruthy();
+      expect(slot.snapshot().queuedItems).toEqual([
+        expect.objectContaining({ id: steer.operationId, behavior: "steer" }),
+      ]);
+      await waitFor(() => invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt =>
+        receipt.operationId === initialOperationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed"),
+      "the initial terminal receipt while the follow-up is active");
+    } finally {
+      releaseAttention();
+      releaseFollowUp();
+    }
+    await initial;
+    await waitFor(() => !slot.isBusy, "the follow-up and accepted steer to settle");
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const queuedReceipt = entries
+      .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === queuedFollowUp.operationId)
+      .map(entry => entry.data);
+    expect(queuedReceipt.at(-1)).toMatchObject({ receiptKind: "terminal", lifecycle: "completed" });
+    const steerReceipt = entries
+      .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === steer.operationId)
+      .map(entry => entry.data);
+    expect(steerReceipt.at(-1)).toMatchObject({ receiptKind: "terminal", lifecycle: "completed" });
+  });
+
+  it("names the exact pending completion and age when attention blocks prompt admission", async () => {
+    const fixture = await coldFixture("attention-pending-diagnostic");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const completion = {
+      id: "canonical-completion-id",
+      completedAt: new Date(Date.now() - 2_000).toISOString(),
+      operationId: "pending-operation-id",
+    };
+    const rejectedBarrier = Promise.reject(new Error("injected blocked completion"));
+    void rejectedBarrier.catch(() => {});
+    const internal = slot as unknown as {
+      attentionBarrier: Promise<void>;
+      pendingAssistantCompletion: typeof completion;
+    };
+    internal.pendingAssistantCompletion = completion;
+    internal.attentionBarrier = rejectedBarrier;
+
+    const error = await slot.prompt("new prompt").then(() => undefined, value => value);
+    expect(error).toMatchObject({
+      code: "busy",
+      diagnosticReason: "attention-pending",
+      details: { reason: "attention-pending", operationId: "pending-operation-id", ageMs: expect.any(Number) },
+    });
+    expect(fixture.events.find(event => event.topic === "session.diagnostic")?.payload.data).toMatchObject({
+      code: "attention-pending",
+      operationId: "pending-operation-id",
+      ageMs: expect.any(Number),
+    });
+  });
+
   it("binds duplicate consumed steering to each exact queue operation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-steering-ownership-"));
     const agentDir = join(root, "agent");

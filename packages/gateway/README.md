@@ -9,7 +9,13 @@ the same session branch and never enter model context. Plain prompt bodies remai
 only in their canonical user entries rather than being duplicated into receipts;
 resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
-automatically replayed.
+automatically replayed. When Pi appends a canonical successful assistant reply,
+RuntimeSlot immediately starts that exact completion's durable attention
+settlement; it does not wait for `agent_settled`, because Pi can begin a queued
+follow-up inside the same run. Settlement retires only the prior completion's
+receipt and marker while the follow-up remains active. If a durable commit truly
+blocks admission, the `attention-pending` diagnostic names the owning operation
+and its age.
 
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,

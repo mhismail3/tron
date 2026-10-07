@@ -2702,8 +2702,11 @@ export class RuntimeSlot {
             ...(binding.operationId ? { operationId: binding.operationId } : {}),
           });
           this.pendingAssistantCompletion = item.completion;
-          // Pi has synchronously appended the canonical entry. Its exact durable
-          // stamp has started; truthful agent settlement still gates projection.
+          // Pi has synchronously appended the canonical entry. Settle this exact
+          // completion immediately: a queued follow-up can start inside the same
+          // agent loop without a continuation/agent-settled boundary in between.
+          void this.beginAttentionSettlement(item.completion).catch((error) =>
+            this.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork));
         }
         if (presentationID && this.streamPresentationId === presentationID) {
           this.latestStreamingMessage = undefined;
@@ -6756,6 +6759,26 @@ export class RuntimeSlot {
     return true;
   }
 
+  private attentionPendingError(): GatewayError {
+    const completion = this.pendingAssistantCompletion ?? this.completionOwnershipQueue[0]?.completion;
+    const ageMs = completion ? Math.max(0, Date.now() - Date.parse(completion.completedAt)) : undefined;
+    const completionId = completion?.operationId ?? completion?.id;
+    this.emit("session.diagnostic", {
+      code: "attention-pending",
+      ...(completionId ? { operationId: completionId } : {}),
+      ...(ageMs !== undefined ? { ageMs } : {}),
+    });
+    return new GatewayError(
+      "busy",
+      completion
+        ? `The prior response is still committing durable attention state (completion ${completionId} pending for ${Math.floor((ageMs ?? 0) / 1000)} s)`
+        : "The prior response is still committing durable attention state",
+      true,
+      { reason: "attention-pending", ...(completionId ? { operationId: completionId } : {}), ...(ageMs !== undefined ? { ageMs } : {}) },
+      "attention-pending",
+    );
+  }
+
   private async admitPrompt(
     text: string,
     images: ImageContent[],
@@ -6773,10 +6796,10 @@ export class RuntimeSlot {
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
-        throw new GatewayError("busy", "The prior response is still committing durable attention state", true);
+        throw this.attentionPendingError();
       }
       if (this.completionOwnershipQueue.length > 0 || this.pendingAssistantCompletion) {
-        throw new GatewayError("busy", "The prior response is still committing durable attention state", true);
+        throw this.attentionPendingError();
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
