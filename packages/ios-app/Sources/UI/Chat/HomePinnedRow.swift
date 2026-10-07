@@ -4,13 +4,18 @@ import TronMobileCore
 // Home does not appear in the ordinary session catalog. Its explicit states
 // keep unavailable and stale session identities from becoming route targets.
 enum HomePinnedRowAction: Equatable {
+    case checkReceipt
     case designate
     case open(sessionID: String)
     case unavailable
 }
 
 enum HomePinnedRowPolicy {
-    static func action(for status: HomeStatusDTO?) -> HomePinnedRowAction {
+    static func action(
+        for status: HomeStatusDTO?,
+        hasUnresolvedCommand: Bool = false
+    ) -> HomePinnedRowAction {
+        if hasUnresolvedCommand { return .checkReceipt }
         guard let status else { return .unavailable }
         switch status.phase {
         case .undesignated, .disabled, .missingSession:
@@ -30,7 +35,9 @@ struct HomePinnedRow: View {
     let isDesignating: Bool
     var hasUnresolvedCommand = false
 
-    private var action: HomePinnedRowAction { HomePinnedRowPolicy.action(for: status) }
+    private var action: HomePinnedRowAction {
+        HomePinnedRowPolicy.action(for: status, hasUnresolvedCommand: hasUnresolvedCommand)
+    }
     private var detail: String {
         if isDesignating { return hasUnresolvedCommand ? "Checking Home change…" : "Setting up Home…" }
         if hasUnresolvedCommand { return "Home change pending · Tap to check" }
@@ -53,6 +60,7 @@ struct HomePinnedRow: View {
         if isDesignating { return hasUnresolvedCommand ? "Checking" : "Setting up" }
         if hasUnresolvedCommand { return "Check status" }
         switch action {
+        case .checkReceipt: return "Check status"
         case .designate: return "Set up"
         case .open:
             switch status?.phase {

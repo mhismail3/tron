@@ -101,7 +101,8 @@ struct HostedHomeDashboardFixture: View {
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let capabilityEnabled = !arguments.contains("-home-capability-absent")
-        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled)
+        let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
+        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState)
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -215,6 +216,7 @@ struct HostedHomeRowAppearanceFixture: View {
 
     private func activateHome() {
         switch HomePinnedRowPolicy.action(for: status) {
+        case .checkReceipt: break
         case .open(let sessionID): route = "home-fixture:\(sessionID)"
         case .designate:
             isDesignating = true
@@ -252,9 +254,14 @@ struct HostedHomeRowAppearanceFixture: View {
 
 private actor HostedHomeShellGateway {
     private let capabilityEnabled: Bool
-    private var designated = false
+    private let initialState: String
+    private var designated: Bool
     private var homeStatusCount = 0
-    init(capabilityEnabled: Bool) { self.capabilityEnabled = capabilityEnabled }
+    init(capabilityEnabled: Bool, initialState: String) {
+        self.capabilityEnabled = capabilityEnabled
+        self.initialState = initialState
+        designated = initialState == "ready"
+    }
     func statusCount() -> Int { homeStatusCount }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] : ["sessions.v1"] }
 
@@ -295,14 +302,18 @@ private actor HostedHomeShellGateway {
     }
 
     private func homeStatus() -> JSONValue {
-        .object(["phase": .string(designated ? "ready" : "undesignated"),
+        let phase = designated ? "ready" : initialState == "disabled" ? "disabled"
+            : initialState == "missing-session" ? "missing-session" : "undesignated"
+        let sessionPresent = designated || initialState == "disabled"
+        let enabled = designated || initialState == "missing-session"
+        return .object(["phase": .string(phase),
             "activation": .object(["available": .bool(false)]),
             "readiness": .object(["ready": .bool(designated), "gaps": .array([])]),
             "recovery": .object(["action": .string(designated ? "none" : "designate")]),
-            "available": .bool(true), "enabled": .bool(designated),
-            "homeId": designated ? .string("home-fixture") : .null,
-            "sessionId": designated ? .string("home-session") : .null,
-            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(designated),
+            "available": .bool(true), "enabled": .bool(enabled),
+            "homeId": designated || initialState == "disabled" || initialState == "missing-session" ? .string("home-fixture") : .null,
+            "sessionId": sessionPresent ? .string("home-session") : .null,
+            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
             "memory": .object(["configured": .bool(false), "open": .bool(false)])])
     }
 }

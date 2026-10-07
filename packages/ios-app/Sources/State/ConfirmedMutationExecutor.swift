@@ -68,18 +68,26 @@ final class ConfirmedMutationExecutor {
             until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
             admission: admission
         ) else {
-            throw GatewayFailure(
+            throw GatewayDefinitelyNotSentError(failure: GatewayFailure(
                 code: "disconnected",
                 message: "The Mac gateway is still reconnecting. Your change was not sent.",
                 retryable: true,
                 details: nil
-            )
+            ))
         }
 
         var retriedBeforeTransmission = false
         while true {
             do {
                 return try await send()
+            } catch is CancellationError {
+                // Once send is invoked the request may have left the client even
+                // if cancellation wins before its response is observed.
+                throw Self.uncertainMutationOutcome(
+                    method: method,
+                    commandID: commandID,
+                    lastFailure: GatewayFailure(code: "cancelled_after_send", message: "The mutation response was cancelled after transmission may have started.", retryable: true, details: nil)
+                )
             } catch let definitelyNotSent as GatewayDefinitelyNotSentError where
                 !retriedBeforeTransmission {
                 // Local non-Codable provenance proves that no request byte left

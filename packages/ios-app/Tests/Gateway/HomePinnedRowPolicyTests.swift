@@ -20,6 +20,17 @@ struct HomePinnedRowPolicyTests {
         #expect(HomePinnedRowPolicy.action(for: nil) == .unavailable)
     }
 
+    @Test("an owned unresolved receipt takes priority over routeable and unavailable status")
+    func unresolvedReceiptTakesPriorityOverStatus() throws {
+        let ready = try status(phase: .ready, enabled: true, sessionPresent: true, sessionID: "home-current")
+        #expect(HomePinnedRowPolicy.action(for: ready) == .open(sessionID: "home-current"))
+        #expect(HomePinnedRowPolicy.action(for: ready, hasUnresolvedCommand: true) == .checkReceipt)
+
+        let unavailable = try status(phase: .unavailable, enabled: false, sessionPresent: false, sessionID: nil)
+        #expect(HomePinnedRowPolicy.action(for: unavailable) == .unavailable)
+        #expect(HomePinnedRowPolicy.action(for: unavailable, hasUnresolvedCommand: true) == .checkReceipt)
+    }
+
     private func status(
         phase: HomeStatusDTO.Phase,
         enabled: Bool,

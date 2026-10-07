@@ -1072,7 +1072,11 @@ struct SessionShellView: View {
             openingSessionID = "home:\(profileID)"
             let navigationIntent = navigationOwner.begin()
             let presentationToken = homeStatusSurfaceToken
-            let action = HomePinnedRowPolicy.action(for: model.homeStatus.status)
+            let ownsUnresolvedCommand = model.homeDesignation.ownsUnresolvedCommand(profileID: profileID)
+            let action = HomePinnedRowPolicy.action(
+                for: model.homeStatus.status,
+                hasUnresolvedCommand: ownsUnresolvedCommand
+            )
             Task {
                 defer { openingSessionID = nil }
                 do {
@@ -1081,7 +1085,7 @@ struct SessionShellView: View {
                     case .open:
                         guard let currentStatus = model.homeStatus.status else { return }
                         status = currentStatus
-                    case .designate:
+                    case .checkReceipt, .designate:
                         status = try await model.designateHomeAndRefreshStatus()
                     case .unavailable:
                         return
@@ -1105,11 +1109,20 @@ struct SessionShellView: View {
             HomePinnedRow(
                 status: model.homeStatus.status,
                 isDesignating: model.homeDesignation.isDesignating,
-                hasUnresolvedCommand: model.homeDesignation.hasUnresolvedCommand
+                hasUnresolvedCommand: model.homeDesignation.ownsUnresolvedCommand(
+                    profileID: model.profiles.selected?.id ?? ""
+                )
             )
         }
         .buttonStyle(.plain)
-        .disabled(HomePinnedRowPolicy.action(for: model.homeStatus.status) == .unavailable || model.homeDesignation.isDesignating)
+        .disabled(
+            HomePinnedRowPolicy.action(
+                for: model.homeStatus.status,
+                hasUnresolvedCommand: model.profiles.selected.map {
+                    model.homeDesignation.ownsUnresolvedCommand(profileID: $0.id)
+                } ?? false
+            ) == .unavailable || model.homeDesignation.isDesignating
+        )
         .accessibilityIdentifier("home-pinned-row")
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

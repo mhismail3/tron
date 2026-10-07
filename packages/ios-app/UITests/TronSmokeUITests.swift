@@ -17,24 +17,27 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(unsupported.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
         unsupported.terminate()
 
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture"]
-        app.launch()
-        let home = app.buttons["home-pinned-row"]
+        let ready = XCUIApplication()
+        ready.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        ready.launch()
+        let home = ready.buttons["home-pinned-row"]
         XCTAssertTrue(home.waitForExistence(timeout: 10))
         home.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
-        app.terminate()
+        XCTAssertTrue(ready.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(ready.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+        ready.terminate()
 
-        let setup = XCUIApplication()
-        setup.launchArguments = ["-tron-home-dashboard-fixture"]
-        setup.launch()
-        let designate = setup.buttons["home-pinned-row"]
-        XCTAssertTrue(designate.waitForExistence(timeout: 10))
-        designate.tap()
-        XCTAssertTrue(setup.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
-        XCTAssertTrue(setup.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
-        setup.terminate()
+        for state in ["undesignated", "disabled", "missing-session"] {
+            let setup = XCUIApplication()
+            setup.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-\(state)"]
+            setup.launch()
+            let designate = setup.buttons["home-pinned-row"]
+            XCTAssertTrue(designate.waitForExistence(timeout: 10), state)
+            designate.tap()
+            XCTAssertTrue(setup.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), state)
+            XCTAssertTrue(setup.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+            setup.terminate()
+        }
     }
 
     @MainActor
@@ -50,13 +53,18 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
         let count = app.staticTexts["fixture.home-status-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
-        let initialCount = Int(count.label.split(separator: ":").last ?? "0") ?? 0
+        let statusCount = { Int(count.label.split(separator: ":").last ?? "0") ?? 0 }
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        // Let a read admitted before cover settle, then require a quiet interval
+        // longer than the five-second fallback while the managed sheet is open.
+        Thread.sleep(forTimeInterval: 1)
+        let coveredBaseline = statusCount()
         Thread.sleep(forTimeInterval: 5.5)
+        XCTAssertEqual(statusCount(), coveredBaseline, "Home status reads continued while Settings covered the chat")
         app.buttons["Done"].tap()
         let increased = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            Int(count.label.split(separator: ":").last ?? "0").map { $0 > initialCount } ?? false
+            statusCount() > coveredBaseline
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [increased], timeout: 7), .completed)
         app.terminate()

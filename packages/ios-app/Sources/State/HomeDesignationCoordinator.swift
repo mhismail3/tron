@@ -35,6 +35,16 @@ final class HomeDesignationCoordinator {
         self.uuidSource = uuidSource
     }
 
+    func ownsUnresolvedCommand(profileID: String) -> Bool {
+        unresolvedCommand?.profileID == profileID
+    }
+
+    static func retainsUnresolvedCommand(for error: Error) -> Bool {
+        guard !(error is GatewayDefinitelyNotSentError),
+              let failure = error as? GatewayFailure else { return false }
+        return failure.code == "outcome_unknown"
+    }
+
     func designate(profileID: String) async throws -> HomeDesignationReceipt {
         guard !isDesignating else {
             throw GatewayFailure(
@@ -88,30 +98,17 @@ final class HomeDesignationCoordinator {
             ) {
                 try await client.request("home.designate", Params(commandId: commandID))
             }
-        } catch let failure as GatewayFailure where failure.code == "outcome_unknown" {
-            unresolvedCommand = (profileID, commandID)
-            hasUnresolvedCommand = true
-            throw failure
-        } catch is CancellationError {
-            // Transport retirement can cancel the response after the mutation
-            // crossed the wire. Keep its exact receipt owner; never mint a retry.
-            unresolvedCommand = (profileID, commandID)
-            hasUnresolvedCommand = true
-            throw GatewayFailure(
-                code: "outcome_unknown",
-                message: "Tron may have accepted this Home change. Reconnect to check the original command before trying again.",
-                retryable: false,
-                details: .object(["commandId": .string(commandID), "method": .string("home.designate")])
-            )
-        } catch let failure as GatewayFailure where failure.retryable {
-            unresolvedCommand = (profileID, commandID)
-            hasUnresolvedCommand = true
-            throw GatewayFailure(
-                code: "outcome_unknown",
-                message: "Tron may have accepted this Home change. Check the original command before trying again.",
-                retryable: false,
-                details: .object(["commandId": .string(commandID), "method": .string("home.designate")])
-            )
+        } catch {
+            if Self.retainsUnresolvedCommand(for: error) {
+                unresolvedCommand = (profileID, commandID)
+                hasUnresolvedCommand = true
+            }
+            if let definitelyNotSent = error as? GatewayDefinitelyNotSentError {
+                // The executor retains local transmission provenance; a new explicit
+                // attempt is safe because this command never reached the Gateway.
+                throw definitelyNotSent.failure
+            }
+            throw error
         }
         guard lifecycle.selectedProfileID == profileID,
               lifecycle.currentLifecycleGeneration == admission.generation else {
