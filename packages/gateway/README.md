@@ -193,12 +193,9 @@ otherwise it marks the cut unavailable with an explicit reason.
 
 ## Pi SDK maintenance
 
-Tron pins the Pi SDK family at **1.0.4** (upgraded from 0.99.1). Pi 1.0.3's
-Azure provider rename is accepted: provider keys, auth and settings now use
-`azure`, `model-release-date-aliases.json` maps `azure` to the release-date
-vendor, and iOS displays that key as Azure OpenAI. Existing persisted
-`azure-openai-responses` model selections do not resolve under Pi 1.0.4; Tron
-adds no legacy alias or migration.
+Provider IDs and credentials follow the Pi catalog. Tron does not migrate or
+alias a retired provider ID (including `azure-openai-responses` to `azure`), so
+persisted selections that name a removed ID may no longer resolve.
 
 `packages/gateway/package.json` is the sole Pi SDK version authority. The four
 runtime dependencies (`pi-agent-core`, `pi-ai`, `pi-coding-agent`, and `pi-tui`)
@@ -208,9 +205,10 @@ cohort and the canonical registry; it does not require optional historical
 packages that a newer coding-agent no longer depends on. The published package
 preflight covers the known family (`pi-client`, `pi-protocol`, `pi-telemetry`,
 and `chord` included); 0.87.1 adds `chord` and removes coding-agent's direct
-`pi-client`/`pi-protocol` dependencies. npm's native nested `pi-coding-agent`
-shrinkwrap entries may omit integrity while retaining their canonical registry
-URL. The executable authority is npm's `node_modules/.bin/pi` projection: it must
+`pi-client`/`pi-protocol` dependencies. The checker also recognizes legacy
+coding-agent shrinkwrap entries when they occur in a rollback dependency graph;
+those entries may omit integrity while retaining a canonical registry URL. The
+executable authority is npm's `node_modules/.bin/pi` projection: it must
 be a symlink to the declared `bin.pi` executable inside `pi-coding-agent`, and
 payload runtime aliases must target `../../app/node_modules/.bin/pi` exactly.
 Check the source state offline with `npm run check:pi-sdk`. Staged production
@@ -283,11 +281,12 @@ input path, which can be removed with the upload; it is not a guaranteed
 navigable parent. Imported entries remain self-contained for reopen and context. Pi 0.87 also applies the active model's initial image-resize
 profile before attachments, `read` results and tool-result images enter history;
 Gateway must preserve the source upload and avoid pre-resizing prompt images a
-second time. Pi 0.99 does not normalize images on its queued steer/follow-up path
-and cannot decode HEIC on either path, so `UploadStore` inlines only png, jpeg,
-gif and webp uploads. Any other `image/*` is claimed as a path-envelope file
-attachment. An inline image a provider rejects would be replayed by every later
-request in its session (#407). Update focused owner tests and this boundary map when ownership
+second time. `UploadStore` inlines only png, jpeg, gif and webp uploads; any other
+`image/*` is claimed as a path-envelope file attachment. Pi's 1.0.4 queue APIs
+accept supplied `AgentMessage` values directly, so images queued as steer or
+follow-up must already be valid for the provider rather than relying on Pi to
+normalize them. An inline image a provider rejects would be replayed by every
+later request in its session (#407). Update focused owner tests and this boundary map when ownership
 changes. Keep a candidate's detailed version matrix in its GitHub epic until
 closeout; do not turn this paragraph into a second change tracker.
 
@@ -354,24 +353,21 @@ and its description and rule lines reach the prompt. The Gateway check that runs
 this file is macOS. Tron-owned prompt text (Tron's tool snippets, rule lines and
 operating context) is part of what the model is sent, so it is part of the
 golden: a Tron change to those surfaces updates this golden in the same pull
-request, and the diff names exactly which text moved. Masking it was rejected
-because the SDK's own tool-declaration wording sits in the same field: four of
-the 1.0.4 upgrade's hunks rewrite the codemode declaration of Tron's own
-`display`, `computer`, `ask_user` and `jev` tools, and masking those descriptions
-would hide them.
+request, and the diff names exactly which text moved. Keep the full field: it
+contains Tron-owned prompt text alongside the SDK's own tool declarations, so
+masking one would hide changes to the other.
 
 After each candidate update, run the focused SDK checks, Gateway build and
-owning runtime tests, then the full required Gateway/Mac/iOS validation. For the 0.99.1 → 1.0.4 upgrade, the reviewed and accepted deltas are: MCP tool
-names replace `-` with `_` (Pi 0.99.2), with no compatibility shim because no
-persisted use exists on the host; Azure's provider key changes from
-`azure-openai-responses` to `azure` (Pi 1.0.3), reflected in model-date and iOS
-display aliases; and MCP OAuth credentials are keyed by server name plus URL
-(Pi 1.0.0), so rollback to 0.99.1 requires sign-in again. The latter is recorded
-as the sole `knownOneWayDeltas` entry. The regenerated corpus and trace review
-also attributes `mcp_servers` prompt sections, codemode image temp-file naming,
-updated tool/codemode descriptions, leaner `tokensBefore`, and stricter bool
-question criteria to the corresponding upstream changelog entries. Unexplained
-hunks remain a stop, not a reason to normalize the trace further.
+owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
+any event, persistence, projection, packaging, UI, or UX difference as a
+behavior-delta stop: do not normalize it silently; compare current and candidate
+behavior and obtain an explicit product decision before continuing. For this
+seam, the comparison is the trace above: review its diff hunk by hunk, classify
+each hunk as inherited, adapted with evidence, or not applicable, and only then
+update the golden. A hunk the reviewer cannot explain is the stop, not a reason
+to normalize the trace further. Keep candidate-specific evidence and accepted
+exceptions in the issue and the owning focused documentation rather than
+repeating the ledger here.
 
 ## Ownership
 

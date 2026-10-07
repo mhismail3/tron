@@ -563,6 +563,20 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testAgentInstructionsMCPServersSectionHasPurposefulCopy() throws {
+        let section = AgentInstructionsProjection.Section(
+            id: "mcp_servers", perTurn: false,
+            text: "MCP servers whose tools are not declared to you.\n- mcp__example (codemode): Example server",
+            source: AgentInstructionsProjection.Source(.object(["kind": .string("pi")])),
+            entries: []
+        )
+
+        let copy = AgentInstructionsPresentation.copy(for: section)
+        XCTAssertEqual(copy.title, "MCP Servers")
+        XCTAssertEqual(copy.icon, "server.rack")
+        XCTAssertTrue(copy.purpose.contains("codemode or search"))
+    }
+
     func testInstructionsReaderRetainsThePreparedDocumentAcrossCoverAndUncover() async throws {
         let instructions = "# Project Rules\n\n" + String(repeating: "Preserve **user data** and read the owning docs.\n\n", count: 400)
         try await withModel { model in

@@ -41,7 +41,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import {
-  CORPUS_MANIFEST_PATH,
+  CORPUS_DIR,
   CORPUS_MCP_SERVERS,
   corpusFauxProvider,
   corpusModelRuntime,
@@ -63,6 +63,7 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MCP_STDIO_FIXTURE = resolve(PACKAGE_ROOT, "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
 const MCP_OAUTH_FIXTURE = resolve(PACKAGE_ROOT, "test-support/mcp-oauth-fixture.mjs");
 
+const CORPUS_SOURCE_DIR = resolve(process.env.TRON_PI_PERSISTED_STATE_CORPUS_DIR ?? CORPUS_DIR);
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 const servers: Array<ReturnType<typeof spawn>> = [];
@@ -82,17 +83,17 @@ afterEach(async () => {
 });
 
 /** Content hash per staged session file, so reopening can be proven read-only. */
-async function sessionFileHashes(sessionDir: string): Promise<Record<string, string>> {
+async function sessionFileHashes(sessionDir: string, corpusDir: string): Promise<Record<string, string>> {
   const hashes: Record<string, string> = {};
-  for (const path of await corpusSessionFiles()) {
+  for (const path of await corpusSessionFiles(corpusDir)) {
     const name = path.slice(path.lastIndexOf("/") + 1);
     hashes[name] = createHash("sha256").update(await readFile(join(sessionDir, name))).digest("hex");
   }
   return hashes;
 }
 
-async function readManifest(): Promise<CorpusObservation> {
-  return JSON.parse(await readFile(CORPUS_MANIFEST_PATH, "utf8")) as CorpusObservation;
+async function readManifest(corpusDir: string): Promise<CorpusObservation> {
+  return JSON.parse(await readFile(join(corpusDir, "manifest.json"), "utf8")) as CorpusObservation;
 }
 
 /**
@@ -100,7 +101,7 @@ async function readManifest(): Promise<CorpusObservation> {
  * the one the corpus's `corpus-oauth` server authenticates against, so its
  * persisted credential has to be exercised against a live server.
  */
-async function stageWithServers(): Promise<StagedCorpusPaths> {
+async function stageWithServers(corpusDir: string = CORPUS_SOURCE_DIR): Promise<StagedCorpusPaths> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-corpus-reopen-")));
   roots.push(root);
   const oauthPortFile = join(root, "oauth.port");
@@ -108,7 +109,7 @@ async function stageWithServers(): Promise<StagedCorpusPaths> {
   servers.push(oauthServer);
   await waitFor(() => existsSync(oauthPortFile), "the MCP OAuth fixture to bind a port");
   const mcpUrl = `http://127.0.0.1:${Number(await readFile(oauthPortFile, "utf8"))}/mcp`;
-  const staged = await stageCorpus({ root, mcpUrl, mcpFixture: MCP_STDIO_FIXTURE, nodeExecutable: process.execPath });
+  const staged = await stageCorpus({ root, corpusDir, mcpUrl, mcpFixture: MCP_STDIO_FIXTURE, nodeExecutable: process.execPath });
   if (priorAgentDir === undefined) priorAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = staged.agentDir;
   return staged;
@@ -116,7 +117,7 @@ async function stageWithServers(): Promise<StagedCorpusPaths> {
 
 describe("persisted-state upgrade corpus", () => {
   it("resolves every saved provider key and model the corpus recorded", async () => {
-    const manifest = await readManifest();
+    const manifest = await readManifest(CORPUS_SOURCE_DIR);
     const staged = await stageWithServers();
     const observed = await observeProviders(await corpusModelRuntime(staged.agentDir, corpusFauxProvider()), manifest.providers);
     // `azure-openai-responses` is the provider key 1.0.3 renames to `azure`. The
@@ -127,9 +128,9 @@ describe("persisted-state upgrade corpus", () => {
   }, 30_000);
 
   it("reopens every recorded session with the same projection, tools and model", async () => {
-    const manifest = await readManifest();
+    const manifest = await readManifest(CORPUS_SOURCE_DIR);
     const staged = await stageWithServers();
-    const before = await sessionFileHashes(staged.sessionDir);
+    const before = await sessionFileHashes(staged.sessionDir, CORPUS_SOURCE_DIR);
     const trust = new TrustService(staged.agentDir);
     await trust.set(staged.cwd, true);
     const registry = new RuntimeRegistry({
@@ -174,8 +175,8 @@ describe("persisted-state upgrade corpus", () => {
     // not against prose: a regeneration that silently loses a shape (a codemode
     // call that parses as a subtraction, a tool search that loads nothing) fails
     // here even though every reopen invariant would still hold.
-    const shapes = scenarioShapes(await corpusSessionEntries(sessionIds[0]!));
-    expect(missingScenarioShapes(shapes), "the committed corpus must cover every shape this layer claims")
+    const shapes = scenarioShapes(await corpusSessionEntries(sessionIds[0]!, CORPUS_SOURCE_DIR));
+    expect.soft(missingScenarioShapes(shapes), "the committed corpus must cover every shape this layer claims")
       .toEqual([]);
     expect.soft(observed.servers, "every configured MCP server must reconnect and expose its persisted tools")
       .toEqual(CORPUS_MCP_SERVERS.map((name) => ({
@@ -183,7 +184,7 @@ describe("persisted-state upgrade corpus", () => {
       })));
     // Reopening is a read: a migration that rewrites the canonical file would
     // silently change user state instead of reading it.
-    expect.soft(await sessionFileHashes(staged.sessionDir), "reopening must not rewrite the canonical sessions")
+    expect.soft(await sessionFileHashes(staged.sessionDir, CORPUS_SOURCE_DIR), "reopening must not rewrite the canonical sessions")
       .toEqual(before);
   }, 60_000);
 });

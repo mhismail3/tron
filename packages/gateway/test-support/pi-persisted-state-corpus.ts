@@ -178,8 +178,8 @@ export async function stageCorpus(options: StageCorpusOptions): Promise<StagedCo
 }
 
 /** The corpus's canonical session files, in sorted order. */
-export async function corpusSessionFiles(): Promise<string[]> {
-  const directory = join(CORPUS_DIR, "agent", CORPUS_SESSIONS_DIR_NAME);
+export async function corpusSessionFiles(corpusDir: string = CORPUS_DIR): Promise<string[]> {
+  const directory = join(corpusDir, "agent", CORPUS_SESSIONS_DIR_NAME);
   const entries = await readdir(directory);
   return entries.filter((entry) => entry.endsWith(".jsonl")).sort().map((entry) => join(directory, entry));
 }
@@ -404,8 +404,8 @@ export function missingScenarioShapes(shapes: Record<CorpusScenarioShape, number
 }
 
 /** One canonical corpus session's entries, found by the session id its header declares. */
-export async function corpusSessionEntries(sessionId: string): Promise<Array<Record<string, unknown>>> {
-  for (const path of await corpusSessionFiles()) {
+export async function corpusSessionEntries(sessionId: string, corpusDir: string = CORPUS_DIR): Promise<Array<Record<string, unknown>>> {
+  for (const path of await corpusSessionFiles(corpusDir)) {
     const entries = await readSessionEntries(path);
     if (entries.some((entry) => entry.type === "session" && entry.id === sessionId)) return entries;
   }

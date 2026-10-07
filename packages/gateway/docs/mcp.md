@@ -30,7 +30,9 @@ Pi 0.99.2 normalizes generated MCP tool identifiers by replacing hyphens in
 server names with underscores (`mcp__my-server__tool` becomes
 `mcp__my_server__tool`). Tron adopts Pi's spelling as a one-time cutover; there
 is no translation shim because the maintainer verified this host has no
-persisted hyphenated tool selection or MCP configuration to migrate.
+persisted hyphenated tool selection or MCP configuration to migrate. A chat
+whose saved selection contains an old hyphenated tool name no longer resolves
+that selection; re-enable the server's tools for that chat in Available Tools.
 
 Pi 1.0.0 stores OAuth credentials by server name and URL rather than URL alone.
 On rollback from 1.0.4 to 0.99.1, a migrated sign-in is not found and that MCP
