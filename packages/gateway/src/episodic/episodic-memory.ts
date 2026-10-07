@@ -16,7 +16,7 @@ import {
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import {
-  projectBranch, readCanonicalBranchAtCursor, readCanonicalEntryInstants, readCanonicalSession, readCanonicalSimpleAppend, episodicDigest,
+  EpisodicSourceChangedError, projectBranch, readCanonicalBranchAtCursor, readCanonicalEntryInstants, readCanonicalSession, readCanonicalSimpleAppend, episodicDigest,
   type EpisodicCanonicalCut,
 } from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
@@ -544,6 +544,15 @@ export class EpisodicMemory {
         cut = await readCanonicalSession({ path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId, maxLineBytes: this.limits.maxSourceLineBytes });
       }
     } catch (error) {
+      // A concurrent in-place rewrite can make a syntactically invalid read a
+      // transient cut. Leave the cursor untouched so the next ingestion retries.
+      if (error instanceof EpisodicSourceChangedError) {
+        this.diagnostic({
+          event: "episodic.source-read-retried", level: "warning",
+          message: "Canonical session changed during a failed read; ingestion will retry on the next source update",
+        });
+        return;
+      }
       if (error instanceof EpisodicMemoryError && error.kind === "source") {
         await this.block("source-unavailable", error.message);
         return;

@@ -28,6 +28,19 @@ const SUPPORTED_SESSION_VERSION = 3;
 const PREFIX_WINDOW_BYTES = 8 * 1_024;
 const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
 
+/** A failed parse of a source whose snapshot could not be proven stable. */
+export class EpisodicSourceChangedError extends Error {
+  constructor() {
+    super("Canonical session changed while it was being read");
+    this.name = "EpisodicSourceChangedError";
+  }
+}
+
+function sameSnapshot(start: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>, end: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>): boolean {
+  return start.dev === end.dev && start.ino === end.ino && start.size === end.size
+    && start.mtimeMs === end.mtimeMs && start.ctimeMs === end.ctimeMs;
+}
+
 export interface EpisodicCanonicalEntry {
   id: string;
   parentId: string | null;
@@ -174,8 +187,9 @@ export async function readCanonicalSession(options: {
   const handle = await open(options.path, constants.O_RDONLY).catch((error: NodeJS.ErrnoException) => {
     throw new EpisodicMemoryError("source", `Canonical session ${options.path} cannot be read: ${error.code ?? error.message}`);
   });
+  let start: Awaited<ReturnType<typeof handle.stat>> | undefined;
   try {
-    const info = await handle.stat();
+    const info = start = await handle.stat();
     if (!info.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
 
     const previous = options.previous;
@@ -240,6 +254,12 @@ export async function readCanonicalSession(options: {
         leafLineDigest: tail ? digestOf(tail.line) : null,
       },
     };
+  } catch (error) {
+    if (start && error instanceof EpisodicMemoryError && error.kind === "source") {
+      const end = await handle.stat().catch(() => undefined);
+      if (!end || !sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
+    }
+    throw error;
   } finally {
     await handle.close();
   }
@@ -317,8 +337,9 @@ export async function readCanonicalSimpleAppend(options: {
 }): Promise<EpisodicCanonicalCut | undefined> {
   const handle = await open(options.path, constants.O_RDONLY).catch(() => undefined);
   if (!handle) return undefined;
+  let start: Awaited<ReturnType<typeof handle.stat>> | undefined;
   try {
-    const start = await handle.stat();
+    start = await handle.stat();
     const cursor = options.cursor;
     if (!start.isFile() || start.dev !== cursor.dev || start.ino !== cursor.ino || start.size < cursor.completeBytes
       || !cursor.completePrefixDigest || await prefixLineDigest(handle, cursor.completeBytes) !== cursor.leafLineDigest) return undefined;
@@ -354,6 +375,12 @@ export async function readCanonicalSimpleAppend(options: {
       incremental: true,
       cursor: nextCursor,
     };
+  } catch (error) {
+    if (start && error instanceof EpisodicMemoryError && error.kind === "source") {
+      const end = await handle.stat().catch(() => undefined);
+      if (!end || !sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
+    }
+    throw error;
   } finally { await handle.close(); }
 }
 

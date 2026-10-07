@@ -285,7 +285,7 @@ export interface EpisodicCompactorRequest {
 export type EpisodicSummarizer = (request: EpisodicCompactorRequest) => Promise<AssistantMessage>;
 
 export interface EpisodicDiagnostic {
-  event: "episodic.source-invalidated" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered";
+  event: "episodic.source-invalidated" | "episodic.source-read-retried" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered";
   level: "info" | "warning" | "error";
   message: string;
   counts?: Record<string, number>;
