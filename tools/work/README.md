@@ -165,7 +165,18 @@ merges and silently drop the work.
 ### Base failure modes
 
 `test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
-repositories, local bare remotes and the fake `gh`.
+repositories, local bare remotes and the fake `gh`. The land fixtures disable
+Git auto-GC and automatic maintenance for every child Git process, so repository
+temporary-directory cleanup does not race detached maintenance.
+The fixture-level test process owner tracks every child process and applies the
+Git auto-GC/maintenance configuration. It terminates and joins any remaining
+children before fixture-directory cleanup, including on test failures.
+`GitMaintenanceCleanupTests` makes auto-GC eligible with auto-detachment disabled,
+then uses an owner-tracked writer to reproduce a late write during
+`TemporaryDirectory` cleanup without the fixture configuration. It verifies
+cleanup succeeds with the fixture configuration. Its failure-injection case
+also verifies that a child-release exception still restores the process owner
+and closes both FIFO descriptors.
 
 75. **A stacked claim uses the wrong base.** `verify`, `land` (update, pull
     request, merge, resume and the closing comment), `steward` and `cleanup`
