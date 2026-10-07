@@ -329,8 +329,8 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     policy.settle("c22");
   }, 30_000);
 
-  // F4: the default SDK image path must behave identically for Home and an
-  // ordinary session. Exercise Pi's resize routine directly on this fixture too.
+  // F4: the default SDK image path must preserve Pi's result for both Home and
+  // an ordinary session.
   it("C23 default image handling matches an ordinary session for both block states", async () => {
     const item = await open("c23", { home: true, memory: true });
     const ordinary = await item.extra("ordinary");
@@ -363,22 +363,16 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       const ordinaryContent = userContent(ordinaryRequest);
       expect(homeContent).toBeDefined();
       expect(ordinaryContent).toBeDefined();
+      const serializedHomeContent = JSON.stringify(homeContent);
+      if (blocked) {
+        expect(serializedHomeContent).toContain("Image reading is disabled.");
+      } else {
+        expect(serializedHomeContent).toContain('"type":"image"');
+        expect(serializedHomeContent).toContain(image.data);
+      }
       cases.push({ blocked, homeContent, ordinaryContent, equal: JSON.stringify(homeContent) === JSON.stringify(ordinaryContent) });
     }
-    const resizeCoreUrl = new URL("../../node_modules/@earendil-works/pi-coding-agent/dist/utils/image-resize-core.js", import.meta.url);
-    const { resizeImageInProcess } = await import(resizeCoreUrl.href);
-    const resizeResult = await resizeImageInProcess(Buffer.from(image.data, "base64"), image.mimeType);
-    let photonImportError: string | undefined;
-    let photonDecodeError: string | undefined;
-    try {
-      const photon = await import(new URL("../../node_modules/@earendil-works/pi-coding-agent/node_modules/@silvia-odwyer/photon-node/photon_rs.js", import.meta.url).href);
-      let decoded: { free(): void } | undefined;
-      try {
-        decoded = photon.PhotonImage.new_from_byteslice(Buffer.from(image.data, "base64"));
-      } catch (error) { photonDecodeError = error instanceof Error ? error.message : String(error); }
-      finally { decoded?.free(); }
-    } catch (error) { photonImportError = error instanceof Error ? error.message : String(error); }
-    const row = { cases, resizeSucceeded: resizeResult !== null, photonImportError: photonImportError ?? null, photonDecodeError: photonDecodeError ?? null };
+    const row = { cases };
     item.record("C23", row);
     expect(cases).toHaveLength(2);
     expect(cases.every((entry) => entry.equal === true)).toBe(true);

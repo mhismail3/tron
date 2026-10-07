@@ -112,7 +112,7 @@ export interface HomeRequestStep {
   /** The model's context window this activation was measured against, 0 when the
    * model declares none. */
   contextWindow: number;
-  /** sha256 of `convertToLlm(rewritten messages)`, recorded for evidence. */
+  /** sha256 of the bare `convertToLlm` projection before Pi's settings-aware conversion. */
   digest: string;
   /** True when the SDK's projection messages were the identical objects compared against. */
   identityEqual: boolean;
@@ -421,7 +421,6 @@ export class HomeRequestPolicy {
         );
       }
       const digest = digestLlmMessages(convertToLlm(rewritten.messages));
-      this.expectedDigest = digest;
       this.expectedNonSystemMessages = rewritten.nonSystem;
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
