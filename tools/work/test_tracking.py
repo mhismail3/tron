@@ -9,16 +9,20 @@ overlapping independent label additions overwrite each other; (7) a missing
 live Project option is discovered only after another requested field commits;
 (8) valid multi-area issues are refused or lose areas during unrelated flag
 updates; (9) typed issue filing cannot represent multiple valid areas, zero
-areas or undeclared areas.
+areas or undeclared areas; (10) a fake GitHub reader parses truncated shared
+state instead of waiting for the existing remote-state owner lock.
 """
 from __future__ import annotations
 
 import json
 import os
+import select
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -28,7 +32,7 @@ sys.path.insert(0, str(HERE))
 
 
 _FAKE_GH = r'''#!/usr/bin/env python3
-import fcntl, json, os, sys, time
+import fcntl, json, os, socket, sys, time
 args=sys.argv[1:]
 state_path=os.environ['TRACKING_STATE']
 trace_path=os.environ['TRACKING_TRACE']
@@ -37,7 +41,14 @@ def default_state():
 # Each fake-gh invocation is a process; protect both the initial snapshot and
 # truncate/write window. Callers release this lock before any test barrier.
 def locked_state(mode, change=None):
- lock=os.open(state_path+'.lock',os.O_CREAT|os.O_RDWR,0o600); fcntl.flock(lock,mode)
+ lock=os.open(state_path+'.lock',os.O_CREAT|os.O_RDWR,0o600)
+ contention_socket=os.environ.get('TRACKING_STATE_CONTENTION_SOCKET')
+ if contention_socket:
+  try: fcntl.flock(lock,mode|fcntl.LOCK_NB)
+  except BlockingIOError:
+   with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as marker: marker.sendto(b'blocked',contention_socket)
+   fcntl.flock(lock,mode)
+ else: fcntl.flock(lock,mode)
  try:
   try: current=json.load(open(state_path))
   except FileNotFoundError: current=default_state()
@@ -148,12 +159,19 @@ class TypedTrackingCommandTests(unittest.TestCase):
             "import sys\nsys.exit(1 if 'BLOCKED_TEXT' in sys.stdin.read() else 0)\n"
         )
         self.fake = self.root / 'fake-gh'
-        self.fake.write_text(_FAKE_GH)
+        self.fake_errors = self.root / 'fake-gh-errors.log'
+        fake_script = ("#!/usr/bin/env python3\nimport os, traceback\ntry:\n" +
+                       textwrap.indent(_FAKE_GH, '    ') +
+                       "except SystemExit:\n    raise\nexcept BaseException:\n"
+                       "    with open(os.environ['TRACKING_FAKE_ERROR_LOG'], 'a') as stream:\n"
+                       "        traceback.print_exc(file=stream)\n    raise\n")
+        self.fake.write_text(fake_script)
         self.fake.chmod(0o755)
         self.state = self.root / 'remote-state.json'
         self.trace = self.root / 'calls.jsonl'
         self.env = dict(os.environ, WORK_GH=str(self.fake), TRACKING_STATE=str(self.state),
-                        TRACKING_TRACE=str(self.trace), PI_SESSION_ID='fixture-session')
+                        TRACKING_TRACE=str(self.trace), TRACKING_FAKE_ERROR_LOG=str(self.fake_errors),
+                        PI_SESSION_ID='fixture-session')
         self.env.pop('WORK_SESSION_ID', None)
         self.body = self.root / 'issue.md'
         self.body.write_text('A bounded task body.')
@@ -230,6 +248,94 @@ class TypedTrackingCommandTests(unittest.TestCase):
                            '--area', 'area:ios', '--area', 'area:mac')
         self.assertEqual(created.returncode, 0, created.stderr)
         self.assertTrue({'area:ios', 'area:mac'} <= set(self.state_json()['labels']))
+
+    def test_fake_gh_reader_waits_for_truncated_state_writer(self):
+        writer_source = r'''import fcntl, json, os, sys
+state, ready_fd, release_fd = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+lock = os.open(state + '.lock', os.O_CREAT | os.O_RDWR, 0o600)
+fcntl.flock(lock, fcntl.LOCK_EX)
+try:
+    with open(state, 'w') as stream:
+        os.write(ready_fd, b'T')
+        if os.read(release_fd, 1) != b'R': raise SystemExit('writer release missing')
+        json.dump({'number':101,'item':False,'fields':{},'labels':['task','needs-triage','kind:maintenance','visibility:internal','area:tooling'],'writes':[],'updates':0,'subs':[],'blockers':[]}, stream)
+        stream.flush()
+finally:
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    os.close(lock)
+'''
+        ready_read, ready_write = os.pipe()
+        release_read, release_write = os.pipe()
+        contention_path = self.root / 'state-lock-contention.sock'
+        contention = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        contention.bind(str(contention_path))
+        writer = None
+        reader = None
+
+        def release_writer():
+            nonlocal release_write
+            if release_write is not None:
+                try:
+                    os.write(release_write, b'R')
+                except OSError:
+                    pass
+                os.close(release_write)
+                release_write = None
+
+        try:
+            writer = subprocess.Popen(
+                [sys.executable, '-c', writer_source, str(self.state), str(ready_write), str(release_read)],
+                pass_fds=(ready_write, release_read), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            os.close(ready_write)
+            ready_write = None
+            os.close(release_read)
+            release_read = None
+            self.assertEqual(os.read(ready_read, 1), b'T', 'writer did not open and truncate the state file')
+            truncated_state = self.state.read_text(encoding='utf-8')
+            self.assertEqual(truncated_state, '')
+
+            env = dict(self.env, TRACKING_STATE_CONTENTION_SOCKET=str(contention_path))
+            reader = subprocess.Popen(
+                [sys.executable, str(HERE / 'cli.py'), 'issue', 'labels', '101', '--add', 'needs-decision'],
+                cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            readable, _, _ = select.select([contention, reader.stderr], [], [])
+            observed_contention = contention.recv(16) if contention in readable else b''
+            if observed_contention != b'blocked':
+                stdout, stderr = reader.communicate()
+                trace = self.trace.read_text(encoding='utf-8') if self.trace.exists() else ''
+                fake_errors = self.fake_errors.read_text(encoding='utf-8') if self.fake_errors.exists() else ''
+                self.fail(f"fake-gh did not block on the held state lock; marker={observed_contention!r}; "
+                          f"state while writer held EX={truncated_state!r}; rc={reader.returncode}; "
+                          f"stdout={stdout!r}; stderr={stderr!r}; fake-gh errors={fake_errors!r}; "
+                          f"fake-gh trace={trace!r}")
+
+            release_writer()
+            self.assertEqual(writer.wait(), 0, writer.stderr.read())
+            stdout, stderr = reader.communicate()
+            self.assertEqual(reader.returncode, 0, f"stdout={stdout!r}; stderr={stderr!r}")
+            self.assertIn('updated labels on issue #101', stdout)
+            self.assertEqual(self.state_json()['labels'],
+                             ['task', 'needs-triage', 'kind:maintenance', 'visibility:internal',
+                              'area:tooling', 'needs-decision'])
+        finally:
+            release_writer()
+            try:
+                if reader is not None:
+                    reader.communicate()
+            finally:
+                try:
+                    if writer is not None:
+                        writer.wait()
+                        if writer.stderr is not None:
+                            writer.stderr.close()
+                finally:
+                    for fd in (ready_read, ready_write, release_read):
+                        if fd is not None:
+                            try:
+                                os.close(fd)
+                            except OSError:
+                                pass
+                    contention.close()
 
     def test_overlapping_independent_label_additions_preserve_both_remote_flags(self):
         created = self.cli('issue', 'create', '--title', 'Concurrent labels', '--body-file', str(self.body),
