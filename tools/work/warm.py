@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -40,7 +41,8 @@ def _seed_directory(source: Path, destination: Path) -> bool:
 
 
 def _npm_ci(package: Path) -> None:
-    subprocess.run(["npm", "ci"], cwd=package, check=True)
+    subprocess.run(["npm", "ci"], cwd=package, check=True,
+                   env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
 
 
 def _installed_from_lock(package: Path, lockfile: Path) -> bool:
