@@ -105,16 +105,86 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
 const MODEL = { provider: "anthropic", id: "claude-sonnet-4-5" };
 const defaultModel = () => MODEL;
 
-function recordBytes(overrides: Partial<HomeRecord> = {}): string {
+function chapterRecordBytes(overrides: Record<string, unknown> = {}): string {
   return `${JSON.stringify({
-    version: 1, homeId: "home-1", sessionId: "session-1", generation: 2,
-    policyRevision: 1, enabled: true, model: MODEL,
+    version: 2, homeId: "home-1", generation: 2, policyRevision: 1, bindingRevision: 1,
+    enabled: true, model: MODEL,
+    chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     ...overrides,
   })}\n`;
 }
 
+function recordBytes(overrides: Record<string, unknown> = {}): string {
+  const { sessionId = "session-1", ...fields } = overrides;
+  return `${JSON.stringify({
+    version: 2, homeId: "home-1", chapters: [{ sessionId, ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
+    bindingRevision: 1, generation: 2, policyRevision: 1, enabled: true, model: MODEL,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    ...fields,
+  })}\n`;
+}
+
+function legacyRecordBytes(): string {
+  return `${JSON.stringify({
+    version: 1, homeId: "home-1", sessionId: "session-1", generation: 2,
+    policyRevision: 1, enabled: true, model: MODEL,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  })}\n`;
+}
+
 describe("Tron Home record", () => {
+  it("admits a strict one-active-chapter record and resolves the physical session", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes(), { mode: 0o600 });
+    f.present.add("session-1");
+    await f.owner.initialize();
+
+    expect(await f.owner.status()).toMatchObject({
+      available: true, enabled: true, homeId: "home-1", sessionId: "session-1", generation: 2,
+    });
+    expect(f.owner.chapterStateFor("session-1")).toEqual({ sessionId: "session-1", sealed: false });
+  });
+
+  it("preserves and refuses the pre-chapter v1 record without rewriting it", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const previous = legacyRecordBytes();
+    await writeFile(f.recordPath, previous, { mode: 0o600 });
+    await f.owner.initialize();
+
+    expect(await f.owner.status()).toMatchObject({ available: false, phase: "unavailable" });
+    await expect(f.owner.designate({}, defaultModel)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(previous);
+    expect(f.created).toEqual([]);
+  });
+
+  it("preserves unknown chapter-record fields instead of partially admitting them", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const persisted = chapterRecordBytes({ futureBinding: { attempt: "unknown" } });
+    await writeFile(f.recordPath, persisted, { mode: 0o600 });
+    await f.owner.initialize();
+    expect(await f.owner.status()).toMatchObject({ available: false, enabled: false });
+    await expect(readFile(f.recordPath, "utf8")).resolves.toBe(persisted);
+  });
+
+  it("preserves malformed chapter topology rather than choosing an active target", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const malformed = chapterRecordBytes({ chapters: [
+      { sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() },
+      { sessionId: "session-1", ordinal: 2, state: "active", createdAt: new Date().toISOString() },
+    ] });
+    await writeFile(f.recordPath, malformed, { mode: 0o600 });
+    await f.owner.initialize();
+
+    expect(await f.owner.status()).toMatchObject({ available: false, phase: "unavailable" });
+    await expect(f.owner.disable()).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(malformed);
+  });
+
   it("preserves a corrupt record and refuses to designate over it", async () => {
     // Failure modes 1 and 3: a corrupt record must not be silently replaced,
     // and a refused designate must not touch the file.
@@ -177,7 +247,7 @@ describe("Tron Home record", () => {
     // Failure mode 2: a future record shape is not this build's to rewrite.
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
-    const future = recordBytes({ version: 2 as unknown as 1 });
+    const future = recordBytes({ version: 3 });
     await writeFile(f.recordPath, future, { mode: 0o600 });
     await f.owner.initialize();
 
@@ -243,8 +313,8 @@ describe("Tron Home record", () => {
     expect((await stat(f.workspacePath)).mode & 0o777).toBe(0o700);
     const stored = JSON.parse(await readFile(f.recordPath, "utf8")) as HomeRecord;
     expect(stored).toMatchObject({
-      version: 1, policyRevision: 1, enabled: true, generation: 1, model: MODEL,
-      sessionId: designation.sessionId,
+      version: 2, bindingRevision: 1, policyRevision: 1, enabled: true, generation: 1, model: MODEL,
+      chapters: [{ sessionId: designation.sessionId, ordinal: 1, state: "active" }],
     });
     expect(stored.createdAt).toBe(stored.updatedAt);
     expect(stored.homeId).toBe(designation.homeId);

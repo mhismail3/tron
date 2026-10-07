@@ -73,7 +73,7 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
 };
 
 /** Version of every persisted episodic document. */
-export const EPISODIC_STORE_VERSION = 1 as const;
+export const EPISODIC_STORE_VERSION = 2 as const;
 
 /** How many revoked nodes one invalidation record carries. The record is
  * written once per chunk in ancestor-first order, so any prefix of a batch

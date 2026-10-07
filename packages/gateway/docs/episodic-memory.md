@@ -114,10 +114,11 @@ state/episodic/<sourceSessionId>/
   `gateway/workspace-state/episodic-initialized.json` records that the shared
   `state/episodic` container was initialized, so a **deleted container is lost
   state**: it refuses instead of restarting and re-spending every compactor call.
-  This strict version-1 record is separate from the frozen shared workspace
-  record. It describes the container, never one session. Each session's namespace
-  is created lazily inside it, so a session without one, such as a new Home
-  session after another
+  This strict version-2 record is separate from the frozen shared workspace
+  record. Version-1 per-session markers and state are preserved and refused; no
+  implicit migration resets memory history or compactor spend. The marker describes
+  the container, never one session. Each session's namespace is created lazily
+  inside it, so a session without one, such as a new Home session after another
   session's memory set the marker, starts fresh (#483). Spend is recorded inside
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
@@ -133,8 +134,9 @@ state/episodic/<sourceSessionId>/
   superseded checkpoint directories and recognized interrupted temp files are
   removed. Legacy JSONL logs seed this same checkpoint representation; no schema
   migration or canonical history mutation is performed.
-- The version is `EPISODIC_STORE_VERSION` (1). There is no migration path: a
-  store this owner cannot read is refused rather than guessed at.
+- The version is `EPISODIC_STORE_VERSION` (2). Markers and state documents use
+  strict field sets; there is no migration path. A store this owner cannot read
+  is refused rather than guessed at.
 
 ## Projection (departure 1: source projection before compression)
 
