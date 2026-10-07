@@ -28,6 +28,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+_FIXTURE_PHASE_TIMEOUT = 5
+_CLEANUP_PHASE_TIMEOUT = 1
 sys.path.insert(0, str(HERE))
 
 
@@ -250,13 +252,15 @@ class TypedTrackingCommandTests(unittest.TestCase):
         self.assertTrue({'area:ios', 'area:mac'} <= set(self.state_json()['labels']))
 
     def test_fake_gh_reader_waits_for_truncated_state_writer(self):
-        writer_source = r'''import fcntl, json, os, sys
+        writer_source = r'''import fcntl, json, os, select, sys
 state, ready_fd, release_fd = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 lock = os.open(state + '.lock', os.O_CREAT | os.O_RDWR, 0o600)
 fcntl.flock(lock, fcntl.LOCK_EX)
 try:
     with open(state, 'w') as stream:
         os.write(ready_fd, b'T')
+        ready, _, _ = select.select([release_fd], [], [], 5)
+        if not ready: raise SystemExit('bounded writer-release phase exceeded 5s')
         if os.read(release_fd, 1) != b'R': raise SystemExit('writer release missing')
         json.dump({'number':101,'item':False,'fields':{},'labels':['task','needs-triage','kind:maintenance','visibility:internal','area:tooling'],'writes':[],'updates':0,'subs':[],'blockers':[]}, stream)
         stream.flush()
@@ -282,14 +286,52 @@ finally:
                 os.close(release_write)
                 release_write = None
 
+        def communicate_bounded(process, name):
+            try:
+                return process.communicate(timeout=_FIXTURE_PHASE_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                self.fail(f"bounded {name} phase exceeded {_FIXTURE_PHASE_TIMEOUT}s")
+
+        def stop_owned_tree(process, name):
+            def complete_and_check_group():
+                try:
+                    process.communicate(timeout=_CLEANUP_PHASE_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    return False
+                try:
+                    os.killpg(process.pid, 0)
+                except ProcessLookupError:
+                    return True
+                return False
+
+            if complete_and_check_group():
+                return None
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            if complete_and_check_group():
+                return None
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            if complete_and_check_group():
+                return None
+            return f"{name} process tree remained after bounded SIGTERM/SIGKILL cleanup"
+
+        cleanup_errors = []
         try:
             writer = subprocess.Popen(
                 [sys.executable, '-c', writer_source, str(self.state), str(ready_write), str(release_read)],
-                pass_fds=(ready_write, release_read), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                pass_fds=(ready_write, release_read), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                start_new_session=True)
             os.close(ready_write)
             ready_write = None
             os.close(release_read)
             release_read = None
+            ready, _, _ = select.select([ready_read], [], [], _FIXTURE_PHASE_TIMEOUT)
+            self.assertTrue(ready, f"bounded writer-readiness phase exceeded {_FIXTURE_PHASE_TIMEOUT}s")
             self.assertEqual(os.read(ready_read, 1), b'T', 'writer did not open and truncate the state file')
             truncated_state = self.state.read_text(encoding='utf-8')
             self.assertEqual(truncated_state, '')
@@ -297,11 +339,14 @@ finally:
             env = dict(self.env, TRACKING_STATE_CONTENTION_SOCKET=str(contention_path))
             reader = subprocess.Popen(
                 [sys.executable, str(HERE / 'cli.py'), 'issue', 'labels', '101', '--add', 'needs-decision'],
-                cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            readable, _, _ = select.select([contention, reader.stderr], [], [])
+                cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                start_new_session=True)
+            readable, _, _ = select.select([contention, reader.stderr], [], [], _FIXTURE_PHASE_TIMEOUT)
+            self.assertTrue(readable, f"bounded fake-reader lock-observation phase exceeded {_FIXTURE_PHASE_TIMEOUT}s")
             observed_contention = contention.recv(16) if contention in readable else b''
             if observed_contention != b'blocked':
-                stdout, stderr = reader.communicate()
+                release_writer()
+                stdout, stderr = communicate_bounded(reader, 'reader failure observation')
                 trace = self.trace.read_text(encoding='utf-8') if self.trace.exists() else ''
                 fake_errors = self.fake_errors.read_text(encoding='utf-8') if self.fake_errors.exists() else ''
                 self.fail(f"fake-gh did not block on the held state lock; marker={observed_contention!r}; "
@@ -310,8 +355,9 @@ finally:
                           f"fake-gh trace={trace!r}")
 
             release_writer()
-            self.assertEqual(writer.wait(), 0, writer.stderr.read())
-            stdout, stderr = reader.communicate()
+            writer_stdout, writer_stderr = communicate_bounded(writer, 'writer publication')
+            self.assertEqual(writer.returncode, 0, writer_stderr)
+            stdout, stderr = communicate_bounded(reader, 'real CLI completion')
             self.assertEqual(reader.returncode, 0, f"stdout={stdout!r}; stderr={stderr!r}")
             self.assertIn('updated labels on issue #101', stdout)
             self.assertEqual(self.state_json()['labels'],
@@ -319,23 +365,28 @@ finally:
                               'area:tooling', 'needs-decision'])
         finally:
             release_writer()
-            try:
-                if reader is not None:
-                    reader.communicate()
-            finally:
-                try:
-                    if writer is not None:
-                        writer.wait()
-                        if writer.stderr is not None:
-                            writer.stderr.close()
-                finally:
-                    for fd in (ready_read, ready_write, release_read):
-                        if fd is not None:
-                            try:
-                                os.close(fd)
-                            except OSError:
-                                pass
-                    contention.close()
+            if writer is not None:
+                error = stop_owned_tree(writer, 'fixture writer')
+                if error:
+                    cleanup_errors.append(error)
+            if reader is not None:
+                error = stop_owned_tree(reader, 'real CLI reader tree')
+                if error:
+                    cleanup_errors.append(error)
+            for process in (writer, reader):
+                if process is not None:
+                    for stream in (process.stdout, process.stderr):
+                        if stream is not None:
+                            stream.close()
+            for fd in (ready_read, ready_write, release_read):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            contention.close()
+            if cleanup_errors:
+                self.fail('; '.join(cleanup_errors))
 
     def test_overlapping_independent_label_additions_preserve_both_remote_flags(self):
         created = self.cli('issue', 'create', '--title', 'Concurrent labels', '--body-file', str(self.body),
@@ -359,6 +410,7 @@ finally:
                         os.killpg(process.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
+            cleanup_errors = []
             for process in processes:
                 try:
                     process.communicate(timeout=5)
@@ -367,7 +419,12 @@ finally:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-                    process.communicate()
+                    try:
+                        process.communicate(timeout=_CLEANUP_PHASE_TIMEOUT)
+                    except subprocess.TimeoutExpired:
+                        cleanup_errors.append(f"label worker process tree {process.pid} remained after SIGKILL")
+            if cleanup_errors:
+                raise AssertionError('; '.join(cleanup_errors))
             raise
         self.assertEqual([process.returncode for process in processes], [0, 0], outputs)
         remote = self.state_json()
