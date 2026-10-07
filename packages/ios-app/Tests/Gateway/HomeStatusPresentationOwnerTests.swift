@@ -96,15 +96,38 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     func testCoordinatorRetirementWhileFetchSuspendedCannotPublish() async throws {
         let (owner, coordinator, token) = mountedOwner()
         let started = expectation(description: "status read started")
+        let fetchReturned = expectation(description: "resumed fetch returned to owner")
         var continuation: CheckedContinuation<HomeStatusDTO, Error>?
         owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true) { _ in
-            try await withCheckedThrowingContinuation { continuation = $0; started.fulfill() }
+            let value = try await withCheckedThrowingContinuation { continuation = $0; started.fulfill() }
+            fetchReturned.fulfill()
+            return value
         }
         await fulfillment(of: [started], timeout: 1)
         coordinator.retire(token)
         owner.presentationActivityChanged(for: token)
         continuation?.resume(returning: try decodeStatus())
-        for _ in 0..<20 where owner.status != nil { await Task.yield() }
+        // Fetch completion and publication run on MainActor without another await;
+        // once this waiter resumes, the owner has processed the returned value.
+        await fulfillment(of: [fetchReturned], timeout: 1)
+        XCTAssertNil(owner.status)
+        owner.retireSurface(token)
+    }
+
+    func testCoordinatorRetirementWithoutActivityCallbackFencesCompletedFetch() async throws {
+        let (owner, coordinator, token) = mountedOwner()
+        let started = expectation(description: "status read started")
+        let fetchReturned = expectation(description: "resumed fetch returned to owner")
+        var continuation: CheckedContinuation<HomeStatusDTO, Error>?
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true) { _ in
+            let value = try await withCheckedThrowingContinuation { continuation = $0; started.fulfill() }
+            fetchReturned.fulfill()
+            return value
+        }
+        await fulfillment(of: [started], timeout: 1)
+        coordinator.retire(token)
+        continuation?.resume(returning: try decodeStatus())
+        await fulfillment(of: [fetchReturned], timeout: 1)
         XCTAssertNil(owner.status)
         owner.retireSurface(token)
     }
