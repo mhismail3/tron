@@ -62,7 +62,7 @@ def main(argv: list) -> int:
     create_issue.add_argument("--type", choices=("task", "epic"), default="task")
     create_issue.add_argument("--kind")
     create_issue.add_argument("--visibility")
-    create_issue.add_argument("--area")
+    create_issue.add_argument("--area", action="append", help="declared area label; repeat for each affected area")
     labels_issue = issue_commands.add_parser("labels", help="add/remove only labels declared by the repository")
     labels_issue.add_argument("issue", type=int)
     labels_issue.add_argument("--add", action="append", default=[])

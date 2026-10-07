@@ -741,8 +741,8 @@ lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
 
 Use these typed commands instead of direct `gh` writes:
 
-- `issue create --title <title> --body-file <md> --kind kind:* --visibility visibility:* --area area:* [--type task|epic]` files a task with its declared taxonomy labels and `needs-triage`. An epic receives only the `epic` and `needs-triage` labels. Titles and bodies are bounded and scrubbed before creation. A newly filed issue is not implicitly approved or added to the Project.
-- `issue labels <issue> [--add <declared-label>] [--remove <label>]` changes classifications and triage labels. New labels must be declared. Issue-type labels are fixed at creation; non-epics must retain exactly one declared kind, visibility and area label. A stale undeclared label may be removed. Writes use GitHub's targeted add/remove endpoints rather than replacing a stale whole label set, so unrelated concurrent label changes are preserved. Taxonomy changes re-read under a private process lock shared by linked worktrees; ordinary flag changes can overlap safely.
+- `issue create --title <title> --body-file <md> --kind kind:* --visibility visibility:* --area area:* [--area area:* ...] [--type task|epic]` files a task with exactly one declared kind and visibility label and one or more declared area labels, plus `needs-triage`. Repeat `--area` for each affected area. An epic receives only the `epic` and `needs-triage` labels and no task taxonomy. Titles and bodies are bounded and scrubbed before creation. A newly filed issue is not implicitly approved or added to the Project.
+- `issue labels <issue> [--add <declared-label>] [--remove <label>]` changes classifications and triage labels. New labels must be declared. Issue-type labels are fixed at creation; non-epics must retain exactly one declared kind and visibility label plus one or more declared area labels. A stale undeclared label may be removed. Writes use GitHub's targeted add/remove endpoints rather than replacing a stale whole label set, so unrelated concurrent label changes are preserved. Taxonomy changes re-read under a private process lock shared by linked worktrees; ordinary flag changes can overlap safely.
 - `project add <issue>` adds the issue idempotently to the configured repository-linked work Project.
 - `project set <issue> [--status Proposed|Ready|Needs you|Blocked] [--priority P0|P1|P2|P3]` assigns only unclaimed statuses. `start` owns In progress, `land` owns In review and Done. Ready is only for maintainer-approved work inside approved scope after blockers close. Every requested live field and option is resolved before the first mutation; partial two-field updates report exactly which field succeeded if a request later fails, and rerunning is safe.
 - `issue parent <task> --epic <epic>` creates the native parent/sub-issue relationship after validating the labels. `issue block <issue> --blocked-by <blocker>` creates GitHub's native blocked-by relation. Both are idempotent.
@@ -760,7 +760,8 @@ later request fails, the command identifies completed label deltas or fields.
 No generic argument passthrough is provided.
 
 `test_tracking.py` uses the real CLI boundary with an executable GitHub stand-in
-to exercise issue filing, taxonomy authorization, overlapping independent label
+to exercise issue filing with multiple areas, taxonomy authorization, area
+preservation during unrelated flag changes, overlapping independent label
 additions, Project add and field selection, parent/blocker links, audit
 completeness, live-option preflight and partially completed Project updates.
 Controlled reads prove concurrent flags survive on the remote fixture, and

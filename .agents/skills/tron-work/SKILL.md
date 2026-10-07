@@ -176,8 +176,8 @@ For work that spans sessions or several tasks:
 1. Write the epic body with its goal, constraints, decisions and rules, then
    file it with `scripts/tron work issue create --type epic --title <title>
    --body-file <file>`.
-2. Add each task using `issue create` with its declared kind, visibility and
-   area; add it to the Project with `project add`, and assign Proposed plus a
+2. Add each task using `issue create` with its declared kind and visibility
+   plus one or more declared area labels; add it to the Project with `project add`, and assign Proposed plus a
    priority using `project set`.
 3. Link tasks with `issue parent <task> --epic <epic>` and explicit ordering
    with `issue block <task> --blocked-by <blocker>`. All GitHub writes use
@@ -197,7 +197,8 @@ When asked to triage, take the open issues labeled `needs-triage`. For each:
    with `scripts/tron work comment`, state the other issue number, and leave the
    decision to the maintainer; never close it yourself.
 2. Use `scripts/tron work issue labels <n>` to set exactly one declared
-   `kind:*`, `visibility:*` and `area:*` label while removing `needs-triage`.
+   `kind:*` and `visibility:*` label plus one or more declared `area:*` labels,
+   while removing `needs-triage`.
 3. Ensure Project membership with `scripts/tron work project add <n>`, then set
    Status Proposed and Priority P0–P3 with `scripts/tron work project set`.
    Use Ready only when the maintainer approved scope and blockers are closed;

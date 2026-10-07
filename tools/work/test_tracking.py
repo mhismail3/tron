@@ -6,7 +6,10 @@ ownership; (3) a compound Project update hides a committed first field when a
 later write fails; (4) retrying issue/Project links duplicates canonical work;
 (5) a failed request leaks public text or bypasses the shared audit; (6)
 overlapping independent label additions overwrite each other; (7) a missing
-live Project option is discovered only after another requested field commits.
+live Project option is discovered only after another requested field commits;
+(8) valid multi-area issues are refused or lose areas during unrelated flag
+updates; (9) typed issue filing cannot represent multiple valid areas, zero
+areas or undeclared areas.
 """
 from __future__ import annotations
 
@@ -195,6 +198,26 @@ class TypedTrackingCommandTests(unittest.TestCase):
         self.assertNotIn('Bounded task', json.dumps(audit))
         self.assertNotIn('A bounded task body.', json.dumps(audit))
 
+    def test_issue_label_flags_preserve_multiple_declared_areas(self):
+        created = self.cli('issue', 'create', '--title', 'Multi-area task', '--body-file', str(self.body),
+                           '--kind', 'kind:maintenance', '--visibility', 'visibility:internal', '--area', 'area:ios')
+        self.assertEqual(created.returncode, 0, created.stderr)
+        state = self.state_json()
+        state['labels'] = ['task', 'kind:maintenance', 'visibility:internal', 'area:ios', 'area:mac', 'needs-triage']
+        self.state.write_text(json.dumps(state))
+        changed = self.cli('issue', 'labels', '101', '--remove', 'needs-triage', '--add', 'needs-decision')
+        self.assertEqual(changed.returncode, 0, changed.stderr)
+        labels = set(self.state_json()['labels'])
+        self.assertTrue({'area:ios', 'area:mac', 'needs-decision'} <= labels)
+        self.assertNotIn('needs-triage', labels)
+
+    def test_issue_creation_accepts_multiple_declared_areas(self):
+        created = self.cli('issue', 'create', '--title', 'Cross-surface task', '--body-file', str(self.body),
+                           '--kind', 'kind:maintenance', '--visibility', 'visibility:internal',
+                           '--area', 'area:ios', '--area', 'area:mac')
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.assertTrue({'area:ios', 'area:mac'} <= set(self.state_json()['labels']))
+
     def test_overlapping_independent_label_additions_preserve_both_remote_flags(self):
         created = self.cli('issue', 'create', '--title', 'Concurrent labels', '--body-file', str(self.body),
                            '--kind', 'kind:maintenance', '--visibility', 'visibility:internal', '--area', 'area:tooling')
@@ -256,6 +279,13 @@ class TypedTrackingCommandTests(unittest.TestCase):
                            '--kind', 'kind:bogus', '--visibility', 'visibility:internal',
                            '--area', 'area:tooling')
         self.assertNotEqual(invalid.returncode, 0)
+        missing_area = self.cli('issue', 'create', '--title', 'Missing area', '--body-file', str(self.body),
+                                '--kind', 'kind:maintenance', '--visibility', 'visibility:internal')
+        self.assertNotEqual(missing_area.returncode, 0)
+        invalid_area = self.cli('issue', 'create', '--title', 'Unknown area', '--body-file', str(self.body),
+                                '--kind', 'kind:maintenance', '--visibility', 'visibility:internal',
+                                '--area', 'area:unregistered')
+        self.assertNotEqual(invalid_area.returncode, 0)
         invalid_label = self.cli('issue', 'labels', '101', '--add', 'arbitrary-label')
         self.assertNotEqual(invalid_label.returncode, 0)
         invalid_status = self.cli('project', 'set', '101', '--status', 'In progress')

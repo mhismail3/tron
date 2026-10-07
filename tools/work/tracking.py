@@ -82,7 +82,7 @@ def _repository(gh: Gh) -> Tuple[str, str]:
 
 
 def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path,
-                 issue_type: str, kind: Optional[str], visibility: Optional[str], area: Optional[str]) -> int:
+                 issue_type: str, kind: Optional[str], visibility: Optional[str], areas: Optional[List[str]]) -> int:
     title = title.strip()
     if not title or len(title) > 200:
         raise TrackingError("issue title must contain 1 to 200 characters")
@@ -100,12 +100,17 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path,
     declared = {label["name"] for label in config["labels"]}
     labels: List[str] = [issue_type, "needs-triage"]
     if issue_type == "task":
-        prefixes = ((kind, "kind:"), (visibility, "visibility:"), (area, "area:"))
+        prefixes = ((kind, "kind:"), (visibility, "visibility:"))
         for value, prefix in prefixes:
             if value is None or not value.startswith(prefix) or value not in declared:
                 raise TrackingError(f"task creation requires a declared {prefix[:-1]} label")
             labels.append(value)
-    elif any(value is not None for value in (kind, visibility, area)):
+        if not areas or any(not area.startswith("area:") or area not in declared for area in areas):
+            raise TrackingError("task creation requires one or more declared area labels")
+        if len(set(areas)) != len(areas):
+            raise TrackingError("task area labels must be unique")
+        labels.extend(areas)
+    elif any(value is not None for value in (kind, visibility, areas)):
         raise TrackingError("epics do not take task kind, visibility or area labels")
     _scrub(repo, config, title + "\n\n" + body, "issue title and body")
     owner, name = _repository(gh)
@@ -142,8 +147,10 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
         if "epic" not in updated:
             for prefix in taxonomy_prefixes:
                 classified = [label for label in updated if label.startswith(prefix)]
-                if len(classified) != 1 or classified[0] not in declared:
-                    raise TrackingError(f"issue labels must retain exactly one declared {prefix[:-1]} classification")
+                valid_count = len(classified) == 1 if prefix != "area:" else bool(classified)
+                if not valid_count or any(label not in declared for label in classified):
+                    count = "one or more" if prefix == "area:" else "exactly one"
+                    raise TrackingError(f"issue labels must retain {count} declared {prefix[:-1]} classification")
         additions_needed = [label for label in additions if label not in current]
         removals_needed = [label for label in removals if label in current]
         if not additions_needed and not removals_needed:
