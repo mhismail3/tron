@@ -645,6 +645,9 @@ describe.sequential("Tron Home activations end to end", () => {
         new Promise<never>((_, reject) => { exitTimer = setTimeout(() => reject(new Error(`terminal client did not exit; methods=${methods.join(",")} stdout=${scrub(stdout)} stderr=${scrub(stderr)}`)), 10_000); }),
       ]);
       if (exitTimer) clearTimeout(exitTimer);
+      await server.close();
+      serverClosed = true;
+      f.server = undefined;
       const refusalCount = stdout.match(/Home memory is not configured/gu)?.length ?? 0;
       const artifact = {
         exitCode: code,
