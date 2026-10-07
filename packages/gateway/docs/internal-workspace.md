@@ -40,7 +40,14 @@ Secrets belong in existing credential stores, not workspace documents.
 
 `TronWorkspace`, owned by `RuntimeRegistry`, creates only an owner-only root and
 minimal lifecycle evidence at `gateway/workspace-state/initialized.json` (version
-1). It reuses bounded secure reads and durable atomic JSON publication. It holds
+1). This shared record's schema is frozen at `version` plus the optional
+`knowledgeInitialized` boolean: shipped builds reject unknown keys, so adding a
+feature key would make the whole workspace unavailable after rollback to one of
+them. Knowledge keeps its existing flag there. Every other feature stores setup
+in its own strict version-1 record at
+`gateway/workspace-state/<feature>-initialized.json`; malformed or unsafe records
+are preserved and refuse only their owning feature. It reuses bounded secure
+reads and durable atomic JSON publication. It holds
 a cooperative, refreshed `proper-lockfile` lock on `gateway/workspace-state` for
 its lifetime; another owner cannot initialize/use this workspace through this
 service. It releases that lock on disposal; crashed-owner locks expire under the

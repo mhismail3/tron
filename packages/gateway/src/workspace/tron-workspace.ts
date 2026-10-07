@@ -16,14 +16,17 @@ export interface TronWorkspaceDescriptor {
  * as lost state instead of a fresh installation. */
 export type TronWorkspaceFeature = "knowledge" | "episodic";
 
-const FEATURE_MARKER_KEYS = ["knowledgeInitialized", "episodicInitialized"] as const;
+export type TronWorkspaceUnavailableCause =
+  | "invalid-record" | "unsafe-directory" | "missing-root"
+  | "owned-elsewhere" | "record-write-failed" | "root-changed";
 
-function featureMarkerKey(feature: TronWorkspaceFeature): string {
-  return `${feature}Initialized`;
-}
-
-function isFeatureMarkerKey(key: string): boolean {
-  return (FEATURE_MARKER_KEYS as readonly string[]).includes(key);
+// Frozen at the shipped schema: a rolled-back build must accept our writes.
+function validSharedRecord(value: unknown): value is { version: 1; knowledgeInitialized?: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).every(key => key === "version" || key === "knowledgeInitialized")
+    && record.version === 1
+    && (record.knowledgeInitialized === undefined || typeof record.knowledgeInitialized === "boolean");
 }
 
 /** Only owns internal-workspace initialization and availability. It neither
@@ -37,9 +40,19 @@ export class TronWorkspace {
   private failure: NonNullable<TronWorkspaceDescriptor["reason"]> = "unavailable";
   private closed = false;
 
-  constructor(tronHome: string) {
+  private unavailableCause?: TronWorkspaceUnavailableCause;
+  private markerWrites: Promise<void> = Promise.resolve();
+
+  constructor(tronHome: string, private readonly options: { unavailable?: (cause: TronWorkspaceUnavailableCause) => void } = {}) {
     this.home = resolve(tronHome);
     this.root = join(this.home, "workspace");
+  }
+
+  private unavailable(cause: TronWorkspaceUnavailableCause): void {
+    this.identity = undefined;
+    if (this.unavailableCause) return;
+    this.unavailableCause = cause;
+    this.options.unavailable?.(cause);
   }
 
   /** Inspection must not acquire the live owner's lock or create a missing
@@ -71,6 +84,7 @@ export class TronWorkspace {
   }
 
   private async initializeOwned(): Promise<void> {
+    let cause: TronWorkspaceUnavailableCause = "unsafe-directory";
     try {
       await this.directory(this.home, true);
       this.home = await realpath(this.home);
@@ -83,28 +97,27 @@ export class TronWorkspace {
         this.release = await lockfile.lock(state, {
           realpath: true, retries: 0, stale: 60_000, update: 10_000,
           onCompromised: () => {
-            this.identity = undefined;
             this.failure = "owned_elsewhere";
+            this.unavailable("owned-elsewhere");
             // proper-lockfile has already retired this ownership. Do not try
             // to release an unowned lock or fail unrelated runtime shutdown.
             this.release = undefined;
           },
         });
-      } catch { this.failure = "owned_elsewhere"; return; }
+      } catch { this.failure = "owned_elsewhere"; this.unavailable("owned-elsewhere"); return; }
       const marker = join(state, "initialized.json");
+      cause = "invalid-record";
       const read = await readSecureJson<unknown>(marker, 128);
-      if (read.present) {
-        const value = read.value as Record<string, unknown> | null;
-        if (!value || typeof value !== "object" || Array.isArray(value)
-          || Object.keys(value).some(key => key !== "version" && !isFeatureMarkerKey(key))
-          || value.version !== 1
-          || FEATURE_MARKER_KEYS.some(key => value[key] !== undefined && typeof value[key] !== "boolean")) {
-          throw new Error("Invalid workspace initialization record");
-        }
-      }
+      if (read.present && !validSharedRecord(read.value)) throw new Error("Invalid workspace initialization record");
       // A missing established root is loss of data, not a new installation.
-      this.identity = await this.directory(this.root, !read.present);
+      cause = "unsafe-directory";
+      try { this.identity = await this.directory(this.root, !read.present); }
+      catch (error) {
+        if (read.present && (error as NodeJS.ErrnoException).code === "ENOENT") cause = "missing-root";
+        throw error;
+      }
       if (!read.present) {
+        cause = "record-write-failed";
         const parent = await open(this.home, "r");
         try { await syncDurably(parent); } finally { await parent.close(); }
         await durableAtomicWriteJson(marker, { version: 1 });
@@ -112,8 +125,8 @@ export class TronWorkspace {
       if (this.failure === "owned_elsewhere") this.identity = undefined;
       if (this.closed) { this.identity = undefined; await this.release?.(); this.release = undefined; }
     } catch {
-      this.identity = undefined;
-      // Preserve invalid data and make the failure local to this feature.
+      this.unavailable(cause);
+      // Preserve invalid data; unrelated project sessions remain available.
       const release = this.release;
       this.release = undefined;
       await release?.().catch(() => {});
@@ -131,7 +144,7 @@ export class TronWorkspace {
           return { root: this.root, available: true };
         }
       } catch { /* Unavailable is a fact, never permission to recreate. */ }
-      this.identity = undefined;
+      this.unavailable("root-changed");
     }
     return { root: this.root, available: false, reason: this.failure };
   }
@@ -139,20 +152,38 @@ export class TronWorkspace {
   /** Feature initialization evidence lives beside the workspace root so loss of
    * a feature namespace cannot be mistaken for a fresh installation. */
   async featureInitialized(feature: TronWorkspaceFeature): Promise<boolean> {
-    await this.initialize();
-    const marker = join(this.home, "gateway", "workspace-state", "initialized.json");
-    const read = await readSecureJson<unknown>(marker, 256);
-    if (!read.present) return false;
-    if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)) return false;
-    return (read.value as Record<string, unknown>)[featureMarkerKey(feature)] === true;
+    if (!(await this.describe()).available) throw new Error(`${feature}: Tron workspace is unavailable`);
+    const marker = this.featureMarker(feature);
+    try {
+      const read = await readSecureJson<unknown>(marker, 128);
+      if (!read.present) return false;
+      if (feature === "knowledge") {
+        if (!validSharedRecord(read.value)) throw new Error("Invalid shared initialization record");
+        return read.value.knowledgeInitialized === true;
+      }
+      if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)
+        || Object.keys(read.value).length !== 1 || (read.value as { version?: unknown }).version !== 1) {
+        throw new Error("Invalid initialization record");
+      }
+      return true;
+    } catch (error) { throw new Error(`${feature}: invalid initialization record`, { cause: error }); }
+  }
+
+  private featureMarker(feature: TronWorkspaceFeature): string {
+    return join(this.home, "gateway", "workspace-state", feature === "knowledge" ? "initialized.json" : `${feature}-initialized.json`);
   }
 
   async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {
-    await this.initialize();
-    const marker = join(this.home, "gateway", "workspace-state", "initialized.json");
-    const read = await readSecureJson<unknown>(marker, 256);
-    const value = read.present && read.value && typeof read.value === "object" && !Array.isArray(read.value) ? read.value as Record<string, unknown> : { version: 1 };
-    await durableAtomicWriteJson(marker, { ...value, version: 1, [featureMarkerKey(feature)]: true });
+    // Separate feature files remove cross-feature lost updates. This queue
+    // serializes same-feature check/publication so concurrent initialization
+    // does not republish valid evidence. Knowledge alone writes the frozen record.
+    const write = this.markerWrites.then(async () => {
+      if (await this.featureInitialized(feature)) return;
+      await durableAtomicWriteJson(this.featureMarker(feature), feature === "knowledge"
+        ? { version: 1, knowledgeInitialized: true } : { version: 1 });
+    });
+    this.markerWrites = write.catch(() => {});
+    await write;
   }
 
   /** Read-only resolution for display. The document producer creates files/;
@@ -173,6 +204,7 @@ export class TronWorkspace {
   async dispose(): Promise<void> {
     this.closed = true;
     await this.initialization;
+    await this.markerWrites;
     const release = this.release;
     this.identity = undefined;
     await release?.();
