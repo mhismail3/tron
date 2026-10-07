@@ -20,7 +20,11 @@ operates on one active physical session; no rollover path creates a successor.
 An active chapter is writable; a sealed chapter remains readable but refuses
 mutation regardless of Home's enabled state or the runtime's ordinary/Home
 profile. The chapter-state check is physical-session-owned and is not bypassed
-when Home is disabled. If a future SDK operation fails
+when Home is disabled. The reserved-session recovery scanner proves absence only
+after every candidate file is read and validated; an unreadable, malformed,
+torn, duplicate, symlinked, or path-mismatched candidate blocks recovery without
+changing canonical bytes. This scanner is not yet connected to a Home activation.
+If a future SDK operation fails
 after staging canonical entries, RuntimeSlot retains the existing uncertain-
 outcome fence rather than treating the staged mutation as a clean refusal. A
 sealed check before a custom-entry append is a clean typed refusal: it exits the
