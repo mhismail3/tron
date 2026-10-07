@@ -254,6 +254,8 @@ NPM_BIN="$(dirname "$NODE_BIN")/npm"
 # npm's launcher commonly uses /usr/bin/env node; make only the resolved Node
 # directory first on PATH so all subprocesses use this exact toolchain.
 export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
+# npm's bundled node-gyp runs Python during native dependency installation.
+export PYTHONDONTWRITEBYTECODE=1
 
 if ((!skip_install)); then
     echo "==> installing locked gateway dependencies"
