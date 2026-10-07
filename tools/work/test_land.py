@@ -672,6 +672,25 @@ class TypeSpecificPullBodyTests(LandFixture):
     def test_fence_trailer_text_is_not_a_closing_delimiter(self):
         self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n```md\n```not-a-closing-fence\n")
 
+    def test_nonbreaking_space_is_not_a_fence_closer(self):
+        summary = ("## Repro\n\n```text\nfailure\n```\u00a0\n\n"
+                   "## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        self.assert_rejected_without_publication(summary)
+
+    def test_ascii_space_fence_trailer_is_valid(self):
+        summary = ("## Repro\n\n```text\nfailure\n``` \n\n"
+                   "## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("## Verification", self.state()["pulls"][0]["body"])
+
+    def test_ascii_tab_fence_trailer_is_valid(self):
+        summary = ("## Repro\n\n```text\nfailure\n```" + "\t" + "\n\n"
+                   "## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("## Verification", self.state()["pulls"][0]["body"])
+
     def test_four_space_and_tab_fence_markers_are_code_not_closers(self):
         self.assert_rejected_without_publication(
             "## Repro\n\n```text\nfailure\n    ```\n\n## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")

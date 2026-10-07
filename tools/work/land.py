@@ -275,7 +275,7 @@ def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool, bool]:
                 code_lines.append(False)
                 continue
             remainder = line[fence_match.end():]
-            if marker[0] == fence[0] and len(marker) >= fence[1] and not remainder.strip():
+            if marker[0] == fence[0] and len(marker) >= fence[1] and not remainder.strip(" \t"):
                 fence = None
                 visible.append("")
                 code_lines.append(False)

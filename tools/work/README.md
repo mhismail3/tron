@@ -1062,8 +1062,10 @@ Project state and records every call. The live E2E covers GitHub itself.
     user-supplied Verification heading before publication. It checks adopted
     open and merged PR bodies as well. ATX headings and fence delimiters accept
     valid zero-to-three-space indentation only; four-space and tab-indented code
-    is never structural. Non-empty fenced evidence—including heading-shaped
-    literal output—and balanced harmless comments remain valid.
+    is never structural. A closing fence may trail only ASCII spaces or tabs;
+    other Unicode whitespace is payload, not a delimiter. Non-empty fenced
+    evidence—including heading-shaped literal output—and balanced harmless
+    comments remain valid.
     Valid non-bug summaries remain unchanged;
     stewarding and merged-resume paths preserve the generated Verification and
     Maintainer validation sections.
