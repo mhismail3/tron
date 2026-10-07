@@ -312,7 +312,7 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
     if (Array.isArray(record.content)) {
-      visitReverse(record.content, 0, toolName === "codemode");
+      visitReverse(record.content, 1, toolName === "codemode");
     } else {
       visitReverse(value);
     }

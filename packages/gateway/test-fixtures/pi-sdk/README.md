@@ -71,10 +71,10 @@ would notice an SDK that stopped reading an old user's session.
 
 The rollback probe (`packages/gateway/scripts/pi-session-compatibility-probe.mjs`,
 driven by `packages/gateway/scripts/check-pi-sdk-rollback.mjs`) writes and rereads
-0.99-only payloads through Pi's public `SessionManager` APIs: `codemode-store`,
+current-SDK payloads through Pi's public `SessionManager` APIs: `codemode-store`,
 virtual-model state and `model_change`, tool-search loadout deltas, canonical
-`nestedCalls`, and parent `details.tronNested`. It checks that both 0.99.1 and the
-0.87.1 reader preserve the JSONL entries, parent result content and structured
+`nestedCalls`, and parent `details.tronNested`. It checks that both the current
+reader and the rollback reader (`pi-sdk-baseline.json` `rollbackVersion`) preserve the JSONL entries, parent result content and structured
 content through read/append/reopen cycles. Files are isolated in disposable
 directories; they are not a Tron session format.
 

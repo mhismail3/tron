@@ -563,18 +563,20 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    func testAgentInstructionsMCPServersSectionHasPurposefulCopy() throws {
-        let section = AgentInstructionsProjection.Section(
-            id: "mcp_servers", perTurn: false,
-            text: "MCP servers whose tools are not declared to you.\n- mcp__example (codemode): Example server",
-            source: AgentInstructionsProjection.Source(.object(["kind": .string("pi")])),
-            entries: []
-        )
-
-        let copy = AgentInstructionsPresentation.copy(for: section)
-        XCTAssertEqual(copy.title, "MCP Servers")
-        XCTAssertEqual(copy.icon, "server.rack")
-        XCTAssertTrue(copy.purpose.contains("codemode or search"))
+    func testAgentInstructionsMCPServersSectionIsNotPresentedAsAnExtensionTurnSection() throws {
+        // Pi 1.0 writes `mcp_servers` itself; it must not fall into the copy for
+        // an unknown extension-added per-turn section.
+        func section(_ id: String) -> AgentInstructionsProjection.Section {
+            AgentInstructionsProjection.Section(
+                id: id, perTurn: false, text: "MCP servers whose tools are not declared to you.",
+                source: AgentInstructionsProjection.Source(.object(["kind": .string("pi")])),
+                entries: []
+            )
+        }
+        let mcp = AgentInstructionsPresentation.copy(for: section("mcp_servers"))
+        let unknown = AgentInstructionsPresentation.copy(for: section("unrecognized_extension_section"))
+        XCTAssertNotEqual(mcp.purpose, unknown.purpose)
+        XCTAssertNotEqual(mcp.title, unknown.title)
     }
 
     func testInstructionsReaderRetainsThePreparedDocumentAcrossCoverAndUncover() async throws {

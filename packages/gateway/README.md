@@ -71,6 +71,11 @@ activate codemode or tool-search for its exposure needs even when neither is a
 
 Pi owns nested execution and canonical session JSONL. Nested tool calls remain
 children of their parent result, not independent transcript rows or receipts.
+Pi's codemode `image()` label (`[Image saved to <temp path> …]`, written ahead
+of each image) stays in canonical JSONL and the model-facing result, but every
+client projection hides it (`visibleToolResultContent` in
+`src/sessions/projection.ts`): transcript rows and live tool output, result and
+partial result. The raw-entry history inspector shows canonical text unchanged.
 New sessions materialize at the first user or assistant message; earlier
 setup-only state remains in memory, while accepted receipts appended before
 that message are flushed with the first persisted message. The
