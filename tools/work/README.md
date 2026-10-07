@@ -365,6 +365,10 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   build. Any other changed input, or a deleted or renamed Gateway file, runs the
   full suite instead, because `vitest related` cannot select a test that still
   imports a deleted module and the build excludes tests.
+- **Gateway scale** runs the dedicated scale suite when one of its own
+  `*.scale.test.ts` files or an explicitly exercised Knowledge source/helper
+  changes. It stays separate from the ordinary source selector so unrelated
+  Gateway changes do not pay for the large corpus tests.
 - **iOS** runs the source, build-matrix and archive-privacy policy scripts,
   then `scripts/tron-ios-test build`. For changed test files, verify derives
   their declared suites only when every non-private top-level declaration is a
@@ -438,7 +442,9 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 
 `test_verify.py` checks these against real temporary repositories, local bare
 remotes and a fake `gh` (`WORK_GH`) that records every call. The live E2E
-covers the GitHub side.
+covers the GitHub side. `test_scale_suite_selector_is_narrow` also protects the
+Tron-specific selector: a scale test path selects `gateway-scale`, while an
+unrelated Gateway source does not.
 
 12. **A stale receipt is accepted for another head.** A receipt is named by and
     records its head. `--post` publishes only the receipt it just made for the

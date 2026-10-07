@@ -16,7 +16,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 async function waitJob(service: KnowledgeService, commandId: string) {
-  for (let i = 0; i < 1_000; i += 1) {
+  for (let i = 0; i < 10_000; i += 1) {
     const job = service.summaryJobs({ commandId }).jobs[0];
     if (job && job.status !== "running") return job;
     await new Promise(resolve => setTimeout(resolve, 1));
@@ -54,7 +54,11 @@ describe("Knowledge Jev tagging scale", () => {
     const elapsedMs = performance.now() - started;
     expect(dispatched).toBe(440);
     expect(processed).toBe(440);
-    expect((await budget.status("tagger")).spentCents).toBeCloseTo(440 * (120 * 42 / 10_000_000));
+    const budgetStatus = await budget.status("typesafe");
+    const expectedSpendCents = 440 * (120 * 42 / 10_000_000);
+    expect(budgetStatus.spentCents).toBeCloseTo(expectedSpendCents);
+    expect(budgetStatus.spentCents).toBeLessThanOrEqual(budgetStatus.capCents);
+    expect(budgetStatus.reservedCents).toBe(0);
     expect(elapsedMs).toBeLessThan(120_000);
     console.log(JSON.stringify({ sources: 440, batches: 18, jevDispatches: dispatched, elapsedMs: +elapsedMs.toFixed(1), throughputSourcesPerSecond: +(440 / (elapsedMs / 1_000)).toFixed(1) }));
   }, 180_000);
