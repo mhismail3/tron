@@ -1740,6 +1740,102 @@ test("Debug handoff copies exact bytes only after post-proof and leaves Stable i
   }
 });
 
+// #515: stage Debug on the installed signed runtime only when its validated
+// Node contract matches; the handoff continues to compare runtime bytes exactly.
+async function refreshFixtureManifest(root, changes = {}) {
+  const path = join(root, "manifest.json");
+  const manifest = { ...JSON.parse(await readFile(path, "utf8")), ...changes };
+  manifest.payloadFingerprint = await payloadFingerprint(root);
+  await writeFile(path, JSON.stringify(manifest));
+  return manifest;
+}
+
+test("Debug stage adopts matching validated installed runtime and handoff succeeds byte-exactly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-dev-signed-runtime-match-"));
+  try {
+    const runtimeSource = await makePreflightFixture(join(root, "installed"));
+    const official = await makePreflightFixture(join(root, "official"));
+    await writeFile(join(official, "runtime", "node-arm64"), Buffer.alloc(1_048_576, 0x4f));
+    await refreshFixtureManifest(official);
+    const home = join(root, "dev-home");
+    const staged = await stagePayload({
+      home, channel: "dev", source: official, version: "matching-runtime",
+      sourceRevision: "a".repeat(40), runtimeSource,
+    });
+    assert.equal(await payloadFingerprint(staged.root), await payloadFingerprint(runtimeSource));
+    assert.deepEqual(
+      await readFile(join(staged.root, "runtime", "node-arm64")),
+      await readFile(join(runtimeSource, "runtime", "node-arm64")),
+    );
+    const devChannel = join(home, "gateway/payloads/dev");
+    await writeFile(join(devChannel, "current.json"), JSON.stringify({
+      schema: 1, kind: "tron-gateway-selection", channel: "dev", version: staged.manifest.version,
+      payloadFingerprint: staged.manifest.payloadFingerprint,
+    }));
+    const result = await handoffDebugCandidate({
+      devHome: home, stableHome: join(root, "stable-home"), stableBundledRoot: runtimeSource,
+      version: staged.manifest.version, expectedFingerprint: staged.manifest.payloadFingerprint,
+      preflight: async () => {},
+      requestInfo: async () => ({ gatewayChannel: "dev", buildFingerprint: staged.manifest.payloadFingerprint,
+        sourceRevision: staged.manifest.sourceRevision, runtimeEpoch: staged.manifest.runtimeEpoch }),
+    });
+    assert.equal(result.debugOriginIdentity.testedPayloadFingerprint, staged.manifest.payloadFingerprint);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Debug stage keeps the official runtime when installed Node version differs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-dev-signed-runtime-version-"));
+  try {
+    const runtimeSource = await makePreflightFixture(join(root, "installed"));
+    await refreshFixtureManifest(runtimeSource, { nodeVersion: "23" });
+    const official = await makePreflightFixture(join(root, "official"));
+    await writeFile(join(official, "runtime", "node-arm64"), Buffer.alloc(1_048_576, 0x4f));
+    await refreshFixtureManifest(official);
+    const home = join(root, "dev-home");
+    const staged = await stagePayload({
+      home, channel: "dev", source: official, version: "different-runtime",
+      sourceRevision: "a".repeat(40), runtimeSource,
+    });
+    assert.deepEqual(
+      await readFile(join(staged.root, "runtime", "node-arm64")),
+      await readFile(join(official, "runtime", "node-arm64")),
+    );
+    const devChannel = join(home, "gateway/payloads/dev");
+    await writeFile(join(devChannel, "current.json"), JSON.stringify({
+      schema: 1, kind: "tron-gateway-selection", channel: "dev", version: staged.manifest.version,
+      payloadFingerprint: staged.manifest.payloadFingerprint,
+    }));
+    await assert.rejects(handoffDebugCandidate({
+      devHome: home, stableHome: join(root, "stable-home"), stableBundledRoot: runtimeSource,
+      version: staged.manifest.version, expectedFingerprint: staged.manifest.payloadFingerprint,
+      preflight: async () => {},
+      requestInfo: async () => ({ gatewayChannel: "dev", buildFingerprint: staged.manifest.payloadFingerprint,
+        sourceRevision: staged.manifest.sourceRevision, runtimeEpoch: staged.manifest.runtimeEpoch }),
+    }), /runtime differs.*replace Tron.app manually/);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Debug stage fails closed for invalid or unsafe installed runtime source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-dev-signed-runtime-invalid-"));
+  try {
+    const official = await makePreflightFixture(join(root, "official"));
+    const validRuntime = await makePreflightFixture(join(root, "installed"));
+    const unsafeRuntime = join(root, "unsafe-installed");
+    await symlink(validRuntime, unsafeRuntime);
+    const home = join(root, "dev-home");
+    for (const [version, runtimeSource] of [
+      ["invalid-runtime", join(root, "missing-runtime")],
+      ["unsafe-runtime", unsafeRuntime],
+    ]) {
+      await assert.rejects(stagePayload({
+        home, channel: "dev", source: official, version,
+        sourceRevision: "a".repeat(40), runtimeSource,
+      }));
+      await assert.rejects(stat(join(home, "gateway/payloads/dev/versions", version)), { code: "ENOENT" });
+    }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
 test("apply accepts only bounded update controls and fails closed for source mode", async () => {
   assert.throws(() => validateApplyRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1", commandId: "command-1" }), /fingerprint/);
   assert.deepEqual(validateApplyRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1", candidateFingerprint: "a".repeat(64), commandId: "command-1" }), {
