@@ -56,9 +56,11 @@ ceiling. Only a caller that opts in owns that deadline; ordinary sessions and
 Automations do not inherit it. Expiry cancels the exact operation and waits for
 its terminal completion before reporting a joined stop. The
 `owned-operation.deadline-stop` diagnostic records only an opaque operation
-hash, elapsed time and whether cancellation joined. This helper is not task
-dispatch and does not prove the adversarial runaway contract until the
-step-4 faux-provider RuntimeSlot cases pass.
+hash, elapsed time and whether cancellation joined. The step-4 faux-provider
+RuntimeSlot integration cases exercise both nonproductive and successful tool
+loops, blocked provider I/O, and foreground-process join. This helper is not task
+dispatch; a later task-dispatch acceptance test must prove the same contract
+through task reports and task spend.
 
 ## The neutral working directory
 
