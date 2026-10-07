@@ -122,10 +122,33 @@ describe("DirectBashProcessOwner", () => {
     20_000,
   );
 
-  // #499 review: a shell that exits while a descendant keeps writing to the
-  // inherited pipe must still settle, with or without a timeout.
+  // #499 review: after the shell exits, a descendant holding the inherited pipe keeps
+  // the call reading for as long as it writes (Pi's rule, pi#5303), so its final
+  // output is not lost to a fixed deadline.
   it.skipIf(process.platform === "win32")(
-    "settles when the shell exits while a detached descendant keeps writing to its output",
+    "keeps reading a descendant that writes after the shell exits until it finishes",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
+      roots.push(root);
+      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")));
+      const marker = `tron-499-${randomUUID()}`;
+      markers.push(marker);
+      const writer = `/*${marker}*/ const t = setInterval(() => process.stdout.write('tick\\n'), 20); setTimeout(() => { clearInterval(t); process.stdout.write('final-output\\n'); }, 3000)`;
+      const launcher = `/*${marker}*/ require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref();`;
+      const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; echo started`;
+      const result = await owner.toolDefinition(root).execute("finite-writer", { command }, undefined, undefined, undefined);
+      const text = result.content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
+      expect(text).toContain("started");
+      expect(text).toContain("final-output");
+      expect(owner.hasActiveProcesses).toBe(false);
+    },
+    20_000,
+  );
+
+  // #499 review: once a timeout or Stop asks for termination, a descendant that left
+  // the process group and keeps writing to the inherited pipe cannot hold the call.
+  it.skipIf(process.platform === "win32")(
+    "settles a timed-out or stopped call whose escaped descendant keeps writing",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
@@ -136,11 +159,19 @@ describe("DirectBashProcessOwner", () => {
       const writer = `/*${marker}*/ setInterval(() => process.stdout.write('tick\\n'), 20)`;
       const launcher = `/*${marker}*/ require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref();`;
       const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; echo started`;
-      for (const params of [{ command }, { command, timeout: 30 }]) {
-        const result = await tool.execute("exited-shell", params, undefined, undefined, undefined);
-        expect(result.content.flatMap(part => part.type === "text" ? [part.text] : []).join("")).toContain("started");
-        expect(owner.hasActiveProcesses).toBe(false);
-      }
+      const failure = (promise: Promise<unknown>) =>
+        promise.then(() => "completed", (error: unknown) => error instanceof Error ? error.message : String(error));
+
+      const timedOut = await failure(tool.execute("escaped-timeout", { command, timeout: 1 }, undefined, undefined, undefined));
+      expect(timedOut).toContain("started");
+      expect(timedOut).toMatch(/Command timed out after 1 seconds/u);
+      expect(owner.hasActiveProcesses).toBe(false);
+
+      const stop = new AbortController();
+      const stopped = failure(tool.execute("escaped-stop", { command }, stop.signal, undefined, undefined));
+      setTimeout(() => stop.abort(), 1_000);
+      expect(await stopped).toMatch(/Command aborted/u);
+      expect(owner.hasActiveProcesses).toBe(false);
     },
     20_000,
   );

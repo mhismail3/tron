@@ -8,11 +8,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const POST_EXIT_OUTPUT_GRACE_MS = 100;
-/** The most output after the shell exits may extend a call: a descendant that
- * keeps writing to the inherited pipe (and may have left the process group)
- * would otherwise re-arm the grace forever (#499 review). Settling destroys the
- * pipe, so such a writer then fails on its next write. */
-const POST_EXIT_OUTPUT_MAX_MS = 2_000;
+/** How long output may still hold a call after a timeout or Stop has asked for
+ * termination and the shell has exited. Only a descendant that escaped the
+ * process group can still be writing then, and without this bound it would hold
+ * the call open for as long as it writes (#499 review). Without termination the
+ * call keeps reading, as Pi does (pi#5303), so legitimate output is never cut. */
+const TERMINATED_OUTPUT_MAX_MS = 2_000;
 const ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 /** Pi's own bound on a bash timeout (the largest `setTimeout` delay). */
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -34,6 +35,8 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 interface ActiveProcess {
   readonly child: ChildProcess;
   readonly settled: Promise<void>;
+  /** Terminates the owned tree and bounds how long output can still hold the call. */
+  readonly terminate: () => void;
   aborted: boolean;
 }
 
@@ -69,7 +72,7 @@ export class DirectBashProcessOwner {
     const owned = [...this.active.values()];
     for (const process of owned) {
       process.aborted = true;
-      this.terminateOwnedTree(process.child);
+      process.terminate();
     }
     if (owned.length === 0) return;
 
@@ -120,25 +123,28 @@ export class DirectBashProcessOwner {
         child.stdout?.on("data", options.onData);
         child.stderr?.on("data", options.onData);
 
-        const completion = this.waitForChild(child);
+        const { completion, terminating } = this.waitForChild(child);
         const settled = completion.then(() => undefined, () => undefined);
-        const active: ActiveProcess = { child, settled, aborted: false };
+        const terminate = () => {
+          terminating();
+          this.terminateOwnedTree(child);
+        };
+        const active: ActiveProcess = { child, settled, terminate, aborted: false };
         this.active.set(pid, active);
         const onAbort = () => {
           active.aborted = true;
-          this.terminateOwnedTree(child);
+          terminate();
         };
         if (options.signal) {
           if (options.signal.aborted) onAbort();
           else options.signal.addEventListener("abort", onAbort, { once: true });
         }
-        // The same freeze-then-kill of the owned tree as an abort, so a timed-out
-        // command cannot leave a descendant behind; `waitForChild` already settles
-        // shortly after the shell exits even if a straggler holds its output.
+        // The same termination as an abort: the freeze-then-kill of the owned tree,
+        // and a bounded settlement even if an escaped descendant holds the output.
         let timedOut = false;
         const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
           timedOut = true;
-          this.terminateOwnedTree(child);
+          terminate();
         }, timeoutMs);
 
         try {
@@ -238,10 +244,17 @@ export class DirectBashProcessOwner {
     return descendants;
   }
 
-  private waitForChild(child: ChildProcess): Promise<number | null> {
-    return new Promise((resolve, reject) => {
+  /** Settles once the shell has exited and its output is done: both pipes ended,
+   * or no output for the grace period. `terminating` marks that termination was
+   * requested; from then on output can extend the call by at most
+   * TERMINATED_OUTPUT_MAX_MS after the shell exits. Settlement always follows the
+   * shell's exit (or a spawn error), which `abortAll` relies on. */
+  private waitForChild(child: ChildProcess): { completion: Promise<number | null>; terminating: () => void } {
+    let terminating = () => {};
+    const completion = new Promise<number | null>((resolve, reject) => {
       let settled = false;
       let exited = false;
+      let terminationRequested = false;
       let exitCode: number | null = null;
       let grace: NodeJS.Timeout | undefined;
       let postExitLimit: NodeJS.Timeout | undefined;
@@ -274,6 +287,13 @@ export class DirectBashProcessOwner {
         if (grace) clearTimeout(grace);
         grace = setTimeout(() => finish(exitCode), POST_EXIT_OUTPUT_GRACE_MS);
       };
+      const armPostExitLimit = () => {
+        postExitLimit ??= setTimeout(() => finish(exitCode), TERMINATED_OUTPUT_MAX_MS);
+      };
+      terminating = () => {
+        terminationRequested = true;
+        if (exited && !settled) armPostExitLimit();
+      };
       const onData = () => { if (exited && !settled) armGrace(); };
       const onStdoutEnd = () => { stdoutEnded = true; maybeFinish(); };
       const onStderrEnd = () => { stderrEnded = true; maybeFinish(); };
@@ -289,7 +309,7 @@ export class DirectBashProcessOwner {
         maybeFinish();
         if (!settled) {
           armGrace();
-          postExitLimit = setTimeout(() => finish(exitCode), POST_EXIT_OUTPUT_MAX_MS);
+          if (terminationRequested) armPostExitLimit();
         }
       };
       const onClose = (code: number | null) => finish(code);
@@ -302,5 +322,6 @@ export class DirectBashProcessOwner {
       child.once("exit", onExit);
       child.once("close", onClose);
     });
+    return { completion, terminating: () => terminating() };
   }
 }
