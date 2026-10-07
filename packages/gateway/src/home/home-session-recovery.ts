@@ -4,6 +4,33 @@ import { resolve } from "node:path";
 const MAXIMUM_SESSION_FILES = 100_000;
 const MAXIMUM_SESSION_BYTES = 200 * 1_024 * 1_024;
 const MAXIMUM_LINE_BYTES = 8 * 1_024 * 1_024;
+const SESSION_ENTRY_TYPES = new Set([
+  "message", "thinking_level_change", "model_change", "usage", "compaction",
+  "branch_summary", "custom", "custom_message", "context_edit", "label", "session_info",
+]);
+
+function isCanonicalEntry(record: Record<string, unknown>): boolean {
+  if (!SESSION_ENTRY_TYPES.has(String(record.type)) || typeof record.id !== "string"
+    || !(record.parentId === null || typeof record.parentId === "string")
+    || typeof record.timestamp !== "string") return false;
+  switch (record.type) {
+    case "message": return !!record.message && typeof record.message === "object";
+    case "thinking_level_change": return typeof record.thinkingLevel === "string";
+    case "model_change": return typeof record.provider === "string" && typeof record.modelId === "string";
+    case "usage": return typeof record.kind === "string" && typeof record.provider === "string"
+      && typeof record.model === "string" && !!record.usage && typeof record.usage === "object";
+    case "compaction": return typeof record.summary === "string" && typeof record.firstKeptEntryId === "string"
+      && typeof record.tokensBefore === "number";
+    case "branch_summary": return typeof record.fromId === "string" && typeof record.summary === "string";
+    case "custom": return typeof record.customType === "string";
+    case "custom_message": return typeof record.customType === "string" && record.content !== undefined
+      && typeof record.display === "boolean";
+    case "context_edit": return typeof record.targetId === "string" && record.replacement !== undefined;
+    case "label": return typeof record.targetId === "string";
+    case "session_info": return true;
+    default: return false;
+  }
+}
 
 export type ReservedHomeSessionScan =
   | { action: "absent" }
@@ -64,6 +91,7 @@ export async function scanReservedHomeSession(input: {
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { action: "blocked" };
         const record = parsed as Record<string, unknown>;
         if (index === 0) header = record;
+        else if (!isCanonicalEntry(record)) return { action: "blocked" };
       }
       if (header?.type !== "session" || header.version !== 3 || typeof header.id !== "string") {
         return { action: "blocked" };

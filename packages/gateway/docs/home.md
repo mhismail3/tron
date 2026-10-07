@@ -26,7 +26,12 @@ materializes that reservation. A sealed chapter remains readable but refuses
 mutation regardless of Home's enabled state or the runtime's ordinary/Home
 profile. The chapter-state check is physical-session-owned and is not bypassed
 when Home is disabled. The Registry materializer claims one attempt per reserved
-chapter, scans every candidate before adoption or creation, and durably records
+chapter, scans every candidate before adoption or creation. The same strict
+complete-file scan runs before a cold Home runtime is opened and before a Home
+chapter is used as a fork source; unknown entry shapes and non-newline-terminated
+evidence block before Pi's loader can repair it. Sealed chapter memory reads use
+the read-only canonical JSONL projection, never a writer-capable SessionManager.
+The materializer durably records
 the exact SDK path and attempt ID before the caller can receive the runtime.
 The constructed RuntimeSlot owns immutable authority for that exact Home chapter,
 attempt, and path through its disposal; receipt persistence and the first

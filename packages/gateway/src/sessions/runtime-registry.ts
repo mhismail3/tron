@@ -1139,6 +1139,7 @@ export class RuntimeRegistry {
         const candidate = candidates[0]!;
         let manager: SessionManager;
         try {
+          await this.scanHomeBeforeManager(candidate.id, candidate.path, candidate.cwd);
           manager = SessionManager.open(candidate.path, this.sessionDirectoryFor(candidate.cwd));
           const current = await lstat(candidate.path);
           if (!current.isFile() || current.isSymbolicLink()
@@ -1247,7 +1248,10 @@ export class RuntimeRegistry {
       if (!candidates || candidates.length !== 1) continue;
       const path = candidates[0]!.path;
       let manager: SessionManager;
-      try { manager = SessionManager.open(path); }
+      try {
+        await this.scanHomeBeforeManager(sessionId, path, dirname(path));
+        manager = SessionManager.open(path);
+      }
       catch { continue; }
       for (const marker of markers) {
         const completion = completionOwnedByMarker(manager, marker);
@@ -2103,7 +2107,10 @@ export class RuntimeRegistry {
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry || entry.structuralSubagent) return {};
     let manager: SessionManager;
-    try { manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd)); }
+    try {
+      await this.scanHomeBeforeManager(sessionId, entry.path, entry.canonicalCwd);
+      manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd));
+    }
     catch { return {}; }
     const marker = (await this.markers.evidenceFor(sessionId)).find((candidate) => candidate.operationId === operationId);
     const invocation = invocationProjection(invocationReceipts(manager.getBranch(), sessionId))
@@ -2350,6 +2357,7 @@ export class RuntimeRegistry {
     // reader for its canonical leaf/branch. Physical line order is not branch
     // authority when sibling forks are present.
     const entries = parseStrictSessionJSONL(bytes);
+    await this.scanHomeBeforeManager(sessionId, info.path, this.sessionDirectoryFor(info.cwd));
     const coldManager = SessionManager.open(info.path);
     const selectedEntries = coldManager.getBranch();
     // Full-file graph validation is an admission gate; retain the SDK-selected
@@ -3288,6 +3296,21 @@ export class RuntimeRegistry {
     return pending.operation;
   }
 
+  private async scanHomeBeforeManager(sessionId: string, path: string, cwd: string): Promise<void> {
+    const chapter = this.home.chapterStateFor(sessionId);
+    if (!chapter.homeId) return;
+    if (chapter.sealed || chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
+      throw new GatewayError("conflict", "Home chapter cannot be opened as a writable runtime");
+    }
+    const canonicalPath = resolve(path);
+    const scan = await scanReservedHomeSession({
+      directory: this.sessionDirectoryFor(cwd), expectedPath: canonicalPath, sessionId,
+    });
+    if (scan.action !== "adopt" || scan.path !== canonicalPath) {
+      throw new GatewayError("conflict", "Home chapter is blocked by uncertain canonical evidence");
+    }
+  }
+
   private async startAcquiredSlot(
     sessionId: string,
     entry: CatalogAcquisitionEntry,
@@ -3305,6 +3328,7 @@ export class RuntimeRegistry {
       if (resolve(canonicalPath) !== entry.path) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
+      await this.scanHomeBeforeManager(sessionId, canonicalPath, entry.canonicalCwd);
       if (await this.projectTrustReloading(entry.canonicalCwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
@@ -3396,6 +3420,23 @@ export class RuntimeRegistry {
     const finishAdmission = this.beginSlotAdmission();
     try {
       const trust = await this.options.trust.requireResolved(cwdInput);
+      const sourcePath = resolve(await realpath(path));
+      const homeSource = this.sessionCatalog.rows().find(row => resolve(row.path) === sourcePath);
+      const homeSessionDirectory = this.sessionDirectoryFor(await this.home.homeWorkspacePath());
+      if (dirname(sourcePath) === resolve(homeSessionDirectory) && !homeSource) {
+        throw new GatewayError("conflict", "Home fork source is not uniquely present in the session catalog");
+      }
+      if (homeSource) {
+        const chapter = this.home.chapterStateFor(homeSource.id);
+        if (chapter.homeId) {
+          const scan = await scanReservedHomeSession({
+            directory: this.sessionDirectoryFor(homeSource.cwd), expectedPath: sourcePath, sessionId: homeSource.id,
+          });
+          if (scan.action !== "adopt" || scan.path !== sourcePath) {
+            throw new GatewayError("conflict", "Home fork source is blocked by uncertain canonical evidence");
+          }
+        }
+      }
       await this.evictIdle(true);
       // The fork copies the source transcript, so the source's bytes are the
       // bytes this admission has to fit beside the runtimes already loaded.
@@ -3416,7 +3457,7 @@ export class RuntimeRegistry {
         }
         this.requireLiveSlotCapacity();
         const sessionDirectory = this.sessionDirectoryFor(trust.cwd);
-        const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
+        const manager = SessionManager.forkFrom(sourcePath, trust.cwd, sessionDirectory);
         const importedId = manager.getSessionId();
         const importedPath = manager.getSessionFile();
         let slot: RuntimeSlot | undefined;

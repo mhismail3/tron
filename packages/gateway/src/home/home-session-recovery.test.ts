@@ -73,9 +73,7 @@ describe("reserved Home session recovery scan", () => {
       .resolves.toMatchObject({ action: "blocked" });
   });
 
-  // Failure-first baseline for #547 step 4. Keep skipped until the strict
-  // pre-open implementation validates supported canonical entry schemas.
-  it.skip.each([
+  it.each([
     ["an empty JSON object", "{}"],
     ["a message without a canonical entry type", JSON.stringify({ type: "message" })],
     ["an unsupported canonical entry type", JSON.stringify({ type: "future-entry-v99", id: "x" })],
