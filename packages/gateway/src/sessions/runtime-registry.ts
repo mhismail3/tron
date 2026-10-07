@@ -102,6 +102,7 @@ import {
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
+import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
@@ -1493,7 +1494,12 @@ export class RuntimeRegistry {
     throw new GatewayError("not_found", "Tron session was not found");
   }
 
+  private assertChapterWritable(sessionId: string): void {
+    assertChapterWritable(this.home.chapterStateFor(sessionId));
+  }
+
   async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
+    this.assertChapterWritable(sessionId);
     // Membership resolution is deliberately outside the attention lane. A cold
     // catalog read must not block completion/rekey/delete ordering for every
     // other session. Internal catalog mutations advance the generation and are
@@ -3331,6 +3337,7 @@ export class RuntimeRegistry {
     archived: boolean,
     initiatingWorkToken?: string,
   ): Promise<{ archived: boolean; archivedAt?: string }> {
+    this.assertChapterWritable(sessionId);
     return this.mutex.run(async () => {
       // Archive state is written for an admitted canonical session, so it needs
       // the same index membership delete uses rather than a mutable
@@ -3413,6 +3420,7 @@ export class RuntimeRegistry {
   }
 
   async delete(sessionId: string, initiatingWorkToken?: string): Promise<void> {
+    this.assertChapterWritable(sessionId);
     await this.attentionLane.run(async () => {
       await this.flushPendingProjectionRemovals();
       if (this.deletingSessionIds.has(sessionId)) throw new GatewayError("busy", "Session deletion is already in progress", true);

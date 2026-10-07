@@ -9,15 +9,19 @@ later slices. Ordinary sessions are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
 
-RuntimeSlot owns mutations to the physical session. Its serialized mutation
-owners consult a chapter-state provider before prompt admission, configuration,
-branch edits, and extension-driven session replacement. A sealed result is a
+RuntimeSlot owns physical-session mutations. Its serialized owners consult a
+chapter-state provider before prompt admission, configuration, rename/label
+edits, branch changes, bash, and extension-driven session replacement. Registry
+owners also preflight attention, archive and delete mutations against that same
+provider. A sealed result is a
 typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
 The current version-1 Home record has no chapter ledger, so HomeOwner's provider
 always reports unsealed. This seam does not change persisted data or activate
 rollover; read/open/acquire remain available. If a future SDK operation fails
 after staging canonical entries, RuntimeSlot retains the existing uncertain-
-outcome fence rather than treating the staged mutation as a clean refusal.
+outcome fence rather than treating the staged mutation as a clean refusal. A
+sealed check before a custom-entry append is a clean typed refusal: it exits the
+bounded ownership-write retry path without draining or fencing the runtime.
 
 ## The record
 

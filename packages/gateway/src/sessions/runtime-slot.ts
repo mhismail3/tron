@@ -36,7 +36,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
-import { assertChapterWritable, type HomeChapterState } from "../home/home-chapter-state.js";
+import { assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
@@ -1138,6 +1138,7 @@ export class RuntimeSlot {
   async commitArchiveWhileIdle<T>(exceptWorkToken: string | undefined, commit: () => Promise<T>): Promise<T> {
     return this.lane.run(async () => {
       this.assertUsable();
+      this.assertChapterWritable();
       this.assertArchivable(exceptWorkToken);
       return commit();
     });
@@ -3126,6 +3127,7 @@ export class RuntimeSlot {
           if (owner.blocked || performance.now() >= deadline
             || error instanceof RunMarkerCompletionConflictError
             || error instanceof CanonicalCustomEntryConflictError
+            || error instanceof SealedChapterMutationError
             || isUncertainOutcome(error)) throw error;
           attempt += 1;
           if (attempt === 1) this.emitPersistenceDiagnostic("canonical-ownership-persistence-retrying");
@@ -3137,7 +3139,8 @@ export class RuntimeSlot {
     owner.waiter = Promise.race([completion, expired]).then(() => {
       if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
     }, error => {
-      if (!owner.blocked && (error instanceof RunMarkerCompletionConflictError || error instanceof CanonicalCustomEntryConflictError)) {
+      if (!owner.blocked && (error instanceof RunMarkerCompletionConflictError
+        || error instanceof CanonicalCustomEntryConflictError || error instanceof SealedChapterMutationError)) {
         // These owner-validated conflicts reject before a new effect. Existing
         // canonical evidence remains authoritative; no unresolved write exists.
         if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
@@ -8320,6 +8323,7 @@ export class RuntimeSlot {
   async rename(name: string): Promise<void> {
     await this.lane.run(() => {
       this.assertUsable();
+      this.assertChapterWritable();
       this.runtime.session.setSessionName(name);
       this.summaryContentDirty = true;
       this.revision += 1;
