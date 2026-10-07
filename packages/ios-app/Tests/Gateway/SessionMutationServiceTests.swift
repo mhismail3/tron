@@ -762,53 +762,6 @@ struct SessionMutationServiceTests {
         }
     }
 
-    @Test("definitely-unsent Home attempt permits a later new command ID")
-    func definitelyUnsentHomeAttemptCanBeRetried() async throws {
-        try await withTestWatchdog {
-            let harness = try await makeHarness()
-            let localFailure = GatewayDefinitelyNotSentError(failure: GatewayFailure(
-                code: "disconnected", message: "The Home command was not sent.", retryable: true, details: nil
-            ))
-            var unsentAttempts = 0
-            do {
-                _ = try await harness.executor.performValue(
-                    method: "home.designate", commandID: "definitely-unsent-command", replayMissingReceipt: false
-                ) {
-                    unsentAttempts += 1
-                    throw localFailure
-                }
-                Issue.record("definitely-unsent Home attempt unexpectedly succeeded")
-            } catch let failure as GatewayDefinitelyNotSentError {
-                #expect(failure.failure.code == "disconnected")
-            }
-            #expect(unsentAttempts == 2)
-            let initialFrames = await harness.socket.sentFrames()
-            let initialRequests = try initialFrames.compactMap { frame -> String? in
-                let value = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
-                return value.objectValue?["method"]?.stringValue
-            }
-            #expect(!initialRequests.contains("home.designate"))
-
-            let retry = Task {
-                try await harness.executor.performValue(method: "home.designate", commandID: "new-home-command") {
-                    try await harness.client.request(
-                        "home.designate",
-                        JSONValue.object(["commandId": .string("new-home-command")])
-                    )
-                }
-            }
-            let sent = try await request(in: harness.socket, frameIndex: 1)
-            #expect(sent.method == "home.designate")
-            #expect(sent.params?["commandId"] == .string("new-home-command"))
-            await harness.socket.enqueue(successResponse(id: sent.id, result: .object([
-                "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
-            ])))
-            let result = try await retry.value
-            #expect(result.objectValue?["sessionId"] == .string("home-session"))
-            await harness.client.close()
-        }
-    }
-
     @Test("confirmed missing replays the exact command ID once")
     func stableCommandIDReplay() async throws {
         try await withTestWatchdog {

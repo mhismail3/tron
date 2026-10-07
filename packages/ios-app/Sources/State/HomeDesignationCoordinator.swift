@@ -39,12 +39,6 @@ final class HomeDesignationCoordinator {
         unresolvedCommand?.profileID == profileID
     }
 
-    static func retainsUnresolvedCommand(for error: Error) -> Bool {
-        guard !(error is GatewayDefinitelyNotSentError),
-              let failure = error as? GatewayFailure else { return false }
-        return failure.code == "outcome_unknown"
-    }
-
     func designate(profileID: String) async throws -> HomeDesignationReceipt {
         guard !isDesignating else {
             throw GatewayFailure(
@@ -98,17 +92,14 @@ final class HomeDesignationCoordinator {
             ) {
                 try await client.request("home.designate", Params(commandId: commandID))
             }
-        } catch {
-            if Self.retainsUnresolvedCommand(for: error) {
-                unresolvedCommand = (profileID, commandID)
-                hasUnresolvedCommand = true
-            }
-            if let definitelyNotSent = error as? GatewayDefinitelyNotSentError {
-                // The executor retains local transmission provenance; a new explicit
-                // attempt is safe because this command never reached the Gateway.
-                throw definitelyNotSent.failure
-            }
-            throw error
+        } catch let failure as GatewayFailure where failure.code == "outcome_unknown" {
+            unresolvedCommand = (profileID, commandID)
+            hasUnresolvedCommand = true
+            throw failure
+        } catch let definitelyNotSent as GatewayDefinitelyNotSentError {
+            // The executor retains local transmission provenance; a new explicit
+            // attempt is safe because this command never reached the Gateway.
+            throw definitelyNotSent.failure
         }
         guard lifecycle.selectedProfileID == profileID,
               lifecycle.currentLifecycleGeneration == admission.generation else {
