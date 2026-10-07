@@ -471,7 +471,7 @@ class Fixture:
         self.workflow = reinstall.Reinstall(self.home, self.platform)
 
     def args(self, **kwargs):
-        values = dict(app=None, confirm_offline=False, verify=False, status=False, finish=False)
+        values = dict(app=None, confirm_offline=False, verify=False, status=False, finish=False, restart=False)
         values.update(kwargs)
         return argparse.Namespace(**values)
 
@@ -663,6 +663,27 @@ class BundledSelectionTests(Fixture, unittest.TestCase):
 
 class ReinstallTests(Fixture, unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'darwin', 'Darwin OS copy attribution')
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin quarantine copy attribution')
+    def test_quarantined_file_can_be_backed_up_when_darwin_rewrites_its_value(self):
+        source = self.home / '.tron/profiles/downloaded.png'
+        source.write_bytes(b'fixture png')
+        subprocess.run(['/usr/bin/xattr', '-w', 'com.apple.quarantine',
+                        '0081;6abf03d1;Fixture;', source], check=True)
+        self.run_workflow(app=self.app, confirm_offline=True)
+        component = 'tron-' + hashlib.sha256(os.fsencode('profiles')).hexdigest()[:16]
+        expected = reinstall.read_json(self.workflow.operation / (component + '.json'))
+        backup = self.workflow.operation / 'backups' / component
+        self.assertIn('com.apple.quarantine', expected['downloaded.png']['xattrs'])
+        self.assertIn('com.apple.quarantine', reinstall.xattr_digests(backup / 'downloaded.png'))
+
+    def test_copy_comparison_keeps_non_os_xattrs_exact(self):
+        expected = {'type': 'file', 'mode': 0o600, 'acl': None, 'size': 0, 'sha256': 'empty',
+                    'xattrs': {'com.example.metadata': 'source'}}
+        actual = {**expected, 'xattrs': {'com.example.metadata': 'rewritten'}}
+        with self.assertRaisesRegex(reinstall.Stop, 'backup-mismatch'):
+            reinstall.require(reinstall.copied_entry_matches(actual, expected), 'backup-mismatch: fixture')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin OS copy attribution')
     def test_replacement_checks_copy_metadata_and_exact_source_attribution(self):
         real_xattrs = reinstall.xattr_digests
         source_provenance = ['a' * 64]
@@ -786,6 +807,37 @@ class ReinstallTests(Fixture, unittest.TestCase):
         (self.workflow.operation / 'backups/agent/credentials').write_bytes(b'corrupt')
         with self.assertRaisesRegex(reinstall.Stop, 'backup-mismatch'):
             self.run_workflow(confirm_offline=True)
+
+    def test_restart_reinventories_and_carries_selected_evidence_after_app_replacement(self):
+        self.selected_store_for_restart()
+        self.run_workflow(app=self.app)
+        self.run_workflow(select_bundled_offline=True)
+        self.run_workflow(confirm_offline=True)
+        predecessor = self.workflow.operation
+        # Reproduce a failed backup after Finder replacement: preserve the old
+        # operation's inventory and evidence, but new live state has advanced.
+        (self.installed / 'identity').write_text('new')
+        (self.home / '.tron/agent/credentials').write_bytes(b'new offline state')
+        self.workflow.receipt['phase'] = 'backing-up'
+        self.workflow.save()
+        self.run_workflow(restart=True)
+        restarted = self.workflow.operation
+        self.assertNotEqual(restarted, predecessor)
+        self.assertTrue((predecessor / 'receipt.json').exists())
+        self.assertEqual(self.workflow.receipt['predecessorOperationId'], predecessor.name)
+        self.assertEqual(self.workflow.receipt['bundledSelection']['operationId'], predecessor.name)
+        self.run_workflow(confirm_offline=True)
+        self.assertEqual((restarted / 'backups/agent/credentials').read_bytes(), b'new offline state')
+        self.run_workflow(confirm_offline=True)
+        self.run_workflow(verify=True)
+        self.run_workflow(finish=True)
+        self.assertFalse((self.workflow.store / 'active.json').exists())
+        self.assertTrue((predecessor / 'stable-selection.json').exists())
+
+    def selected_store_for_restart(self):
+        source = self.home / '.tron/gateway/payloads/stable'
+        source.mkdir(parents=True, mode=0o700)
+        (source / 'current.json').write_text('selection evidence')
 
     def test_interrupted_backup_resumes_same_operation(self):
         original = reinstall.copy_tree

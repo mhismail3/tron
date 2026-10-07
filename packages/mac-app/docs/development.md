@@ -532,12 +532,14 @@ the old app, machine-group file and separately owned default browser config
 (including explicit absence). The command never reads Keychain stores or copies
 browser profiles/cookies. POSIX modes, ACLs, extended attributes, file contents
 and symbolic-link text are checked; special files and unsafe root links stop
-preparation. A copied tree may have different `com.apple.provenance` values:
-macOS assigns the copying process's attribution even when `copyfile` reports
-successful metadata preservation. The helper leaves that OS-owned attribute
-alone and retains its observed source digest in the inventory. This is the only
-copy-comparison exception; ACLs, link modes, quarantine and every other xattr
-must still match. Live-source comparisons remain exact, including provenance.
+preparation. A copied tree may have different `com.apple.provenance` or
+`com.apple.quarantine` values: macOS assigns copying-process provenance and may
+rewrite a download quarantine marker even when `copyfile` reports successful
+metadata preservation. Both attributes must still be present on source and copy;
+the helper retains their observed source digests in the inventory but allows
+only their copied values to differ. ACLs, link modes, mode bits and every other
+xattr remain exact. Live-source comparisons remain exact, including both
+attributes.
 Exclusive Stable-channel retirement may also reassign provenance on the renamed
 root directory only; every nested entry and all other root metadata must match.
 The original source inventory is retained unchanged, and an interrupted rename
@@ -549,8 +551,15 @@ settings or browser overrides requires its own operator-managed backup.
 
 One stable cross-process lock serializes both commands. Repeated invocations
 resume the recorded operation; partial backups only accept already copied bytes
-that still match the frozen source inventory. Source changes, corrupt receipts,
-metadata loss, insufficient space and collisions stop without deleting evidence.
+that still match the frozen source inventory. If an operation cannot be resumed
+because its frozen source inventory is stale, use `scripts/tron mac reinstall
+--restart` to begin a fresh inventory without editing maintenance state. Restart
+is refused for an incomplete step, an unexpected installed app, or a verified
+operation (use `--finish` for the latter). It preserves the predecessor receipt
+and backups; a completed bundled selection remains linked directly to its
+original journal and retired payload evidence. After restart, stop writers and
+run `--confirm-offline` to take the new snapshot. Source changes, corrupt
+receipts, metadata loss, insufficient space and collisions stop without deleting evidence.
 Before offering either Finder replacement or Resume, every offline retry verifies
 the backups and unchanged data again. An already-replaced app exempts only that
 installed app from comparison with the old-app manifest; its exact candidate
