@@ -1733,6 +1733,7 @@ export class RuntimeSlot {
         // and the digest expectation is recorded after every SDK context stage.
         created.session.agent.transformContext = homeRequestPolicy.wrapTransformContext(
           created.session.agent.transformContext,
+          created.session.agent.convertToLlm,
         );
         created.session.agent.prepareRequest = homeRequestPolicy.wrapPrepareRequest(
           created.session,
