@@ -1700,10 +1700,10 @@ export class RuntimeSlot {
       this.directBashProcesses = directBashProcesses;
       const recordedHomeModel = home ? this.dependencies.homeModel?.(sessionManager.getSessionId()) : undefined;
       const homeModel = recordedHomeModel
-        ? modelRuntime.getModel(recordedHomeModel.provider, recordedHomeModel.id)
+        ? modelRuntime.getPhysicalModel(recordedHomeModel.provider, recordedHomeModel.id)
         : undefined;
       if (recordedHomeModel && !homeModel) {
-        throw new GatewayError("conflict", "Tron Home's recorded model is no longer available");
+        throw new GatewayError("conflict", "Tron Home's recorded model is unavailable or virtual");
       }
       const created = await createAgentSessionFromServices({
         services,

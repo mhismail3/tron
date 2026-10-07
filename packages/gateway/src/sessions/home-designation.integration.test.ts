@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -545,6 +545,32 @@ describe("Tron Home designation", () => {
     const home = await f.registry.acquire(fresh.sessionId);
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
     expect(await homeStatus(f)).toMatchObject({ enabled: true, sessionId: fresh.sessionId, live: true, sessionPresent: true });
+  });
+
+  homeCase("refuses a virtual model in the Home record on cold acquisition", async () => {
+    const f = await fixture("model-virtual-record", { virtualModel: true });
+    const designation = await designate(f, "home-designate-virtual-record");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-virtual-record" });
+    await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("persist virtual transcript")]);
+    await home.prompt("persist disabled transcript");
+    await waitUntil(() => !home.isBusy);
+
+    const recordPath = join(f.tronHome, "gateway", "home", "home.json");
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as { model: { provider: string; id: string } };
+    record.model = { provider: PROVIDER, id: VIRTUAL_MODEL_ID };
+    await writeFile(recordPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    expect(JSON.parse(await readFile(recordPath, "utf8")).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    await reopen(f);
+    await waitForCatalog(f);
+    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    await designate(f, "home-reenable-virtual-record", null);
+    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+
+    const requestsBeforeAcquire = f.faux.state.callCount;
+    await expect(f.registry.acquire(designation.sessionId)).rejects.toMatchObject({ code: "conflict" });
+    expect(f.faux.state.callCount).toBe(requestsBeforeAcquire);
   });
 
   homeCase("restores the recorded model when re-enabling an unloaded Home", async () => {
