@@ -261,6 +261,84 @@ describe("catalog projection admission", () => {
 });
 
 describe("transcript projection", () => {
+  // The SDK output may be removed only when it is the exact codemode image
+  // marker paired with its immediately following image; similar text can be user/tool content.
+  it("hides Pi's image-save label from live codemode output and result projections", () => {
+    const label = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const result = { content: [
+      { type: "text", text: label },
+      { type: "image", data: "AA==", mimeType: "image/png" },
+      { type: "text", text: "image complete" },
+    ] };
+
+    const liveOutput = projectToolOutput(result, 64_000, "codemode");
+    const liveResult = projectToolResult(result, 24_000, "codemode");
+
+    expect(liveOutput.output).toBe("image complete");
+    expect(liveResult).toMatchObject({ content: [
+      { type: "image", mimeType: "image/png" },
+      { type: "text", text: "image complete" },
+    ] });
+    expect(JSON.stringify(liveResult)).not.toContain(label);
+    expect(result.content[0]).toMatchObject({ text: label });
+  });
+
+  it("hides Pi's generated codemode image-save label while retaining the canonical message", () => {
+    const content: Extract<AgentMessage, { role: "toolResult" }>["content"] = [
+      { type: "text", text: "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]" },
+      { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" },
+    ];
+    const message: AgentMessage = {
+      role: "toolResult", toolCallId: "image", toolName: "codemode", content, isError: false, timestamp: 1,
+    };
+
+    const projected = projectMessage("image-result", null, "2026-01-01T00:00:00Z", message, new BlobStore());
+
+    expect(message.content).toEqual(content);
+    expect(projected).toMatchObject({ role: "toolResult", content: [{ type: "image", mimeType: "image/png" }] });
+  });
+
+  it("keeps a matching-looking codemode label without its adjacent image", () => {
+    const text = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const projected = projectMessage("text-only", null, "2026-01-01T00:00:00Z", {
+      role: "toolResult", toolCallId: "text-only", toolName: "codemode",
+      content: [{ type: "text", text }, { type: "text", text: "follow-up output" }],
+      isError: false, timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "text", text: "follow-up output" }] });
+  });
+
+  it("keeps adjacent-image text without Pi's generated output path", () => {
+    const text = "[Image saved to /tmp/generated.png (image/png, 70B)]";
+    const projected = projectMessage("custom-output", null, "2026-01-01T00:00:00Z", {
+      role: "toolResult", toolCallId: "custom-output", toolName: "codemode",
+      content: [{ type: "text", text }, { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" }],
+      isError: false, timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "image", mimeType: "image/png" }] });
+  });
+
+  it("keeps matching-looking image-save text in user content", () => {
+    const text = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const projected = projectMessage("user-content", null, "2026-01-01T00:00:00Z", {
+      role: "user", content: [{ type: "text", text }, { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" }], timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "image", mimeType: "image/png" }] });
+  });
+
+  it("keeps the same image-save text from other tools", () => {
+    const text = "[Image saved to /tmp/pi-codemode-0123456789abcdef.png (image/png, 70B)]";
+    const projected = projectMessage("other-tool", null, "2026-01-01T00:00:00Z", {
+      role: "toolResult", toolCallId: "other-tool", toolName: "read",
+      content: [{ type: "text", text }, { type: "image", data: Buffer.alloc(70).toString("base64"), mimeType: "image/png" }],
+      isError: false, timestamp: 1,
+    }, new BlobStore());
+
+    expect(projected).toMatchObject({ content: [{ type: "text", text }, { type: "image", mimeType: "image/png" }] });
+  });
 
   it("promotes only an exact reserved display result into the typed transcript field", () => {
     const details = {

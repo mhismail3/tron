@@ -3973,7 +3973,7 @@ export class RuntimeSlot {
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
-        const output = mergeLiveToolOutput(existing, projectToolOutput(event.partialResult));
+        const output = mergeLiveToolOutput(existing, projectToolOutput(event.partialResult, undefined, event.toolName));
         const startedAt = existing?.startedAt ?? now;
         const durationMs = this.measureToolDuration(
           event.toolCallId,
@@ -3994,7 +3994,7 @@ export class RuntimeSlot {
           order: existing?.order ?? this.nextToolOrder++,
           status: "running",
           arguments: projectJson(event.args),
-          partialResult: projectToolResult(event.partialResult),
+          partialResult: projectToolResult(event.partialResult, undefined, event.toolName),
           ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
@@ -4063,7 +4063,7 @@ export class RuntimeSlot {
           existing?.durationMs ?? 0,
           retained?.durationMs ?? 0
         );
-        const output = projectToolOutput(event.result);
+        const output = projectToolOutput(event.result, undefined, event.toolName);
         const extensionOrigin = this.extensionToolOrigin(event.toolName)
           ?? existing?.extensionOrigin
           ?? retained?.extensionOrigin;
@@ -4080,7 +4080,7 @@ export class RuntimeSlot {
           status: event.isError ? "failed" : "completed",
           arguments: existing?.arguments ?? null,
           ...(existing?.partialResult === undefined ? {} : { partialResult: existing.partialResult }),
-          result: projectToolResult(event.result),
+          result: projectToolResult(event.result, undefined, event.toolName),
           ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {

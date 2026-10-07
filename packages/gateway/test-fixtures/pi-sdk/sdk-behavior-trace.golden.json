@@ -2343,21 +2343,15 @@
           "type": "text"
         },
         {
-          "id": "<id>",
-          "ordinal": 1,
-          "text": "[Image saved to <tmp>/<path> (image/png, 70B)]",
-          "type": "text"
-        },
-        {
           "blobId": "_GR6o5BuKV6ZHkaAzZGTWa2pCuFDvv0nFJkIXHMA0xg",
           "id": "<id>",
           "mimeType": "image/png",
-          "ordinal": 2,
+          "ordinal": 1,
           "type": "image"
         },
         {
           "id": "<id>",
-          "ordinal": 3,
+          "ordinal": 2,
           "text": "nested=boundary notes | classified={\"api\":\"typesafe-system-one\",\"provider\":\"typesafe\",\"model\":\"jev-latest\",\"answers\":{\"relevant\":{\"type\":\"bool\",\"probability\":0.91}},\"stopReason\":\"stop\",\"timestamp\":<epoch>,\"usage\":{\"input\":128,\"output\":8,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":136,\"cost\":{\"input\":0.000005376000000000001,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.000005376000000000001}}} | scripted=fixture:echo:{\"value\":\"scripted\"}",
           "type": "text"
         }
