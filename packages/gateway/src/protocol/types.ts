@@ -1057,10 +1057,9 @@ export interface HomeMemoryStatus {
   configured: boolean;
   open: boolean;
   model?: ModelRef;
-  tokenBudget?: number;
   /** Tokens this memory has spent over its life, read from its persisted state;
-   * present whenever a store exists, open or not, because a restart restores it
-   * and charges it against the budget. */
+   * present whenever a store exists, open or not, because a restart restores it.
+   * Reported, never a ceiling: the memory regulates its own spend (#493). */
   spentTokens?: number;
   episodic?: {
     sourceSessionId: string;
@@ -1078,9 +1077,8 @@ export interface HomeMemoryStatus {
     coverage: { admitted: number; summarized: number };
     pump: { busy: number };
     blocked: { reason: string; detail?: string } | null;
+    /** Spend, reported and never a ceiling (#493). */
     tokens: {
-      limit: number;
-      reserved: number;
       used: number;
       sinceOpen: { input: number; output: number; cacheRead: number; cacheWrite: number };
     };

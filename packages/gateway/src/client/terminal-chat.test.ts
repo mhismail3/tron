@@ -5,7 +5,7 @@ import { afterEach } from "vitest";
 import {
   configureHomeMemory, connectResilient, designateHome, describeHomeContext, describeHomeMemory,
   describeHomeStatus, disableHome, homeContextCommand, homeStatusCommand, listSessions,
-  parseHomeCommand, parseHomeModelArgument, parseHomeTokenBudget, resumeHomeMemory, runHomeCommand,
+  parseHomeCommand, parseHomeModelArgument, resumeHomeMemory, runHomeCommand,
   synchronizeTerminalSession,
 } from "./terminal-chat.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -154,19 +154,15 @@ describe("terminal chat Home commands", () => {
     expect(parseHomeCommand("/home please")).toEqual({ kind: "usage" });
     expect(() => parseHomeCommand("/home designate anthropic")).toThrow(/provider\/id/);
 
-    // The memory commands: a fixed shape, a fixed model spelling, a whole budget.
+    // The memory commands: a fixed shape and a fixed model spelling; no budget (#493).
     expect(parseHomeCommand("/home resume")).toEqual({ kind: "resume" });
     expect(parseHomeCommand("/home context")).toEqual({ kind: "context" });
-    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5 5000")).toEqual({
-      kind: "memory", model: { provider: "anthropic", id: "claude-haiku-4-5" }, tokenBudget: 5000,
+    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5")).toEqual({
+      kind: "memory", model: { provider: "anthropic", id: "claude-haiku-4-5" },
     });
     expect(parseHomeCommand("/home memory")).toEqual({ kind: "usage" });
-    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5")).toEqual({ kind: "usage" });
-    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5 5000 extra")).toEqual({ kind: "usage" });
-    expect(() => parseHomeCommand("/home memory anthropic 5000")).toThrow(/provider\/id/);
-    expect(() => parseHomeCommand("/home memory anthropic/claude-haiku-4-5 0")).toThrow(/at least one token/);
-    expect(() => parseHomeCommand("/home memory anthropic/claude-haiku-4-5 1.5")).toThrow(/whole number/);
-    expect(parseHomeTokenBudget("1000000")).toBe(1_000_000);
+    expect(parseHomeCommand("/home memory anthropic/claude-haiku-4-5 5000")).toEqual({ kind: "usage" });
+    expect(() => parseHomeCommand("/home memory anthropic")).toThrow(/provider\/id/);
   });
 
   it("reads home.status and reports what the Gateway returned", async () => {
@@ -202,36 +198,35 @@ describe("terminal chat Home commands", () => {
     expect(disabled).toContain("session");
   });
 
-  it("configures Home's memory with the model and budget it was given", async () => {
+  it("configures Home's memory with the model it was given", async () => {
     const model = { provider: "anthropic", id: "claude-haiku-4-5" };
     const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({
-      configured: true, open: false, model, tokenBudget: 5_000,
+      configured: true, open: false, model,
     }));
     const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
 
-    const described = await configureHomeMemory(client, model, 5_000);
-    expect(request).toHaveBeenLastCalledWith("home.configureMemory", {
-      commandId: expect.any(String), model, tokenBudget: 5_000,
-    });
+    const described = await configureHomeMemory(client, model);
+    expect(request).toHaveBeenLastCalledWith("home.configureMemory", { commandId: expect.any(String), model });
     expect(described).toContain(model.id);
+    expect(described).not.toContain("budget");
 
     // The state the projection reports is what makes each outcome distinguishable:
     // an open store with a spend, a blocked one with its reason, and none at all.
-    expect(describeHomeMemory({ configured: true, open: true, model, tokenBudget: 5_000, spentTokens: 1_200 }))
+    expect(describeHomeMemory({ configured: true, open: true, model, spentTokens: 1_200 }))
       .toContain("1200");
-    expect(describeHomeMemory({ configured: true, open: false, model, tokenBudget: 5_000, blocked: "budget-exhausted" }))
-      .toContain("budget-exhausted");
+    expect(describeHomeMemory({ configured: true, open: false, model, blocked: "permanent-failure" }))
+      .toContain("permanent-failure");
     expect(describeHomeMemory({ configured: false, open: false })).toContain("not configured");
   });
 
   it("resumes Home's memory and reports the state it left", async () => {
     const model = { provider: "anthropic", id: "claude-haiku-4-5" };
     const request = vi.fn(async () => ({
-      configured: true, open: true, model, tokenBudget: 5_000, spentTokens: 900,
+      configured: true, open: true, model, spentTokens: 900,
     }));
     const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
 
-    const before = describeHomeMemory({ configured: true, open: false, model, tokenBudget: 5_000, blocked: "retries-exhausted" });
+    const before = describeHomeMemory({ configured: true, open: false, model, blocked: "retries-exhausted" });
     const after = await resumeHomeMemory(client);
     expect(request).toHaveBeenLastCalledWith("home.resumeMemory", { commandId: expect.any(String) });
     expect(before).toContain("retries-exhausted");

@@ -647,10 +647,10 @@ created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns the bounded projection
 `{ available, reason?, enabled, homeId?, sessionId?, generation?, model?, live,
   sessionPresent, memory }`, where `memory` is
-`{ configured, open, model?, tokenBudget?, spentTokens?, episodic?, blocked?,
+`{ configured, open, model?, spentTokens?, episodic?, blocked?,
   reason? }`, `episodic` is the memory owner's own bounded status and
 `spentTokens` is the persisted spend (present whenever a store exists, open or
-not, because a restart restores it and charges it against the budget). `home.designate`,
+not, because a restart restores it; reported, never a ceiling). `home.designate`,
 `home.disable`, `home.configureMemory` and `home.resumeMemory` are
 command-id-receipted mutations,
 `home.context` (a read) returns the bounded request context of Home's current or
@@ -660,7 +660,7 @@ absent when it was refused before it prepared a request), and never a message
 body — and
 `home.v1` is advertised in `hello`/`system.info`. There are no memory defaults:
 Home refuses its activations until `home.configureMemory` records a physical
-model and a token budget. Home runs in the neutral
+model; there is no budget to manage (memory spend is bounded by construction and reported). Home runs in the neutral
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an

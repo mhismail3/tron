@@ -141,14 +141,12 @@ owner.
   the session stays an ordinary session afterwards. A record whose session is
   gone is only marked disabled.
 - `home.configureMemory` is a mutation with a command-id receipt:
-  `{ model, tokenBudget }` must name a registered physical model — a virtual or
-  unavailable one is refused — and a budget from 1 to 100000000. It is refused on
-  a disabled Home, and it resumes a block its change addresses (see
-  [Recovery](#recovery)). It returns the bounded memory projection.
-- `home.resumeMemory` is a mutation with a command-id receipt. It clears a
-  `retries-exhausted`, `permanent-failure` or `source-unavailable` block and
-  returns the bounded memory projection; a `budget-exhausted` block is refused
-  with the way out.
+  `{ model }` must name a registered physical model; a virtual or unavailable
+  one is refused. There is no budget to set (#493): memory spend is bounded by
+  construction and reported. It is refused on a disabled Home, and it resumes a block its change
+  addresses (see [Recovery](#recovery)). It returns the bounded memory projection.
+- `home.resumeMemory` is a mutation with a command-id receipt. It clears any block
+  and returns the bounded memory projection.
 - `home.context` is a read with no parameters: the bounded request context of
   Home's current or last activation (see [Activations](#activations)), never a
   message body.
@@ -174,7 +172,7 @@ touching the Gateway, so a bad argument is answered before any RPC:
 | `/home`, `/home status` | `home.status`, printed as the bounded projection |
 | `/home designate [provider/id]` | `home.designate`; without a model the Gateway's default is used |
 | `/home disable` | `home.disable` |
-| `/home memory <provider/id> <tokenBudget>` | `home.configureMemory`, then the memory projection it returns |
+| `/home memory <provider/id>` | `home.configureMemory`, then the memory projection it returns |
 | `/home resume` | `home.resumeMemory`, then the memory projection it returns |
 | `/home context` | `home.context`: the activation's start, whether it is open, the request's sizes and its refusal |
 
@@ -304,20 +302,22 @@ that canonical entries changed (persisted messages, custom entries, navigation);
 the memory re-reads the log after its cursor and builds its tree in the background
 under its own bounds.
 
-There are **no defaults** (decision D4). The record's optional `memory` field holds
-the model and the token budget: `home.configureMemory` (a command-id-receipted
-mutation, `{ model, tokenBudget }`, refusing a virtual or unregistered model and a
-budget outside `1…100000000`) writes it, and its result is the same bounded memory
-projection `home.status` carries as `memory`. Reconfiguring with the same values
-changes nothing and never resets spend; a raised budget resumes a memory that
-stopped with `budget-exhausted`, and only the nodes it has not built cost
-anything, because the tree is durable. Token spend is persisted with the memory's
-state, so a Gateway restart never hands the budget back.
+There is **no default model** (decision D4). The record's optional `memory` field
+holds the model: `home.configureMemory` (a command-id-receipted mutation,
+`{ model }`, refusing a virtual or unregistered model) writes it, and its result
+is the same bounded memory projection `home.status` carries as `memory`.
+Reconfiguring with the same model changes nothing.
 
-A fresh-session designation keeps the memory configuration — the model and the
-budget are the user's decision about *how* Home remembers — but the replacement
-session gets a NEW memory store with its own spend, because the store is keyed by
-session id. Disabling Home and re-enabling it keeps the same session and store,
+There is **no budget to manage** (maintainer decision on #411, #493). Memory
+spend is bounded by construction ([episodic-memory.md](episodic-memory.md)): a
+summary is built only when missing, with bounded tries and retries, and rebuilt
+only after its source changed, so spend grows only with the conversation and its
+edits. Token spend is persisted with the memory's state and reported as
+`spentTokens`, as information.
+
+A fresh-session designation keeps the memory configuration (the model is the
+user's decision about *how* Home remembers), but the replacement session gets a
+NEW memory store with its own spend, because the store is keyed by session id. Disabling Home and re-enabling it keeps the same session and store,
 so nothing is re-spent.
 
 A Home whose memory is unconfigured, blocked, or unable to place the activation's
@@ -337,9 +337,8 @@ the block's reason:
 | block | what clears it |
 | --- | --- |
 | `retries-exhausted` | the next activation resumes it once by itself, re-arming the bounded retries; if it blocks again while that activation waits, the activation is refused with the reason |
-| `permanent-failure`, `source-unavailable` | `home.resumeMemory` (a command-id-receipted mutation) — the operator's statement that the cause is gone |
-| `budget-exhausted` | `home.configureMemory` with a raised `tokenBudget`; `home.resumeMemory` refuses it, because the cause is the configured ceiling |
-| any non-budget block | `home.configureMemory` with a *different model*, which resumes it as part of re-opening the store |
+| `permanent-failure`, `source-unavailable` | `home.resumeMemory` (a command-id-receipted mutation): the operator's statement that the cause is gone |
+| any block | `home.configureMemory` with a *different model*, which resumes it as part of re-opening the store |
 
 None of these waits for the summary catch-up: the block is cleared, the canonical
 log is re-read and the pump restarts, while the activation that asked waits only

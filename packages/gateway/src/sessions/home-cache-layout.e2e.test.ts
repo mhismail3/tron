@@ -227,7 +227,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("lays out Home turns and summarizer calls as the recipe's cached prefix", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "cache-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "cache-memory", model: MODEL, tokenBudget: 100_000_000 });
+    await f.service.invoke(client, "home.configureMemory", { commandId: "cache-memory", model: MODEL });
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
 
@@ -337,7 +337,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("keeps Home's cached view across turns past the view budget", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "budget-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "budget-memory", model: MODEL, tokenBudget: 100_000_000 });
+    await f.service.invoke(client, "home.configureMemory", { commandId: "budget-memory", model: MODEL });
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
     // About 1 KB of summaries per turn: the 128,000-byte view fills near turn 125.
@@ -382,7 +382,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("keeps the cached view's end across an activation refused before dispatch", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "refused-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "refused-memory", model: MODEL, tokenBudget: 100_000_000 });
+    await f.service.invoke(client, "home.configureMemory", { commandId: "refused-memory", model: MODEL });
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
     for (let turn = 0; turn < 3; turn += 1) {

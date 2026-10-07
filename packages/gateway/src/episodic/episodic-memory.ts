@@ -8,11 +8,11 @@ import {
   type EpisodicBlocked, type EpisodicBlockedReason, type EpisodicCompactorRequest, type EpisodicDiagnostic,
   type EpisodicInvalidationRecord, type EpisodicLimits, type EpisodicMemoryDependencies, type EpisodicMemoryStatus,
   type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicSourceCursor, type EpisodicStoreState,
-  type EpisodicSummarizer, type EpisodicTokenBudget, type EpisodicUsage, type EpisodicViewPartStatus,
+  type EpisodicSummarizer, type EpisodicUsage, type EpisodicViewPartStatus,
 } from "./episodic-contract.js";
 import {
   EPISODIC_COMPACT_PROMPT, classifyReply, classifyThrown, compactorRequest, contextBlock,
-  createModelRuntimeSummarizer, emptyReplyDetail, estimateCompactorReservation, leafStep, mergeStep, sizeFeedback,
+  createModelRuntimeSummarizer, emptyReplyDetail, leafStep, mergeStep, sizeFeedback,
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
 import {
@@ -128,7 +128,12 @@ export class EpisodicMemory {
   private readonly limits: EpisodicLimits;
   private readonly store: EpisodicStore;
   private readonly summarizer: EpisodicSummarizer;
-  private readonly budget: EpisodicTokenBudget;
+  /** Tokens this memory's compactor calls have spent over the store's life:
+   * reported, never a ceiling (#493). Spend is bounded by construction: a node
+   * builds only when it is missing, with at most `tries` size-loop calls of at
+   * most `maxRetries + 1` attempts each, and a built node is rebuilt only after
+   * its source changed. So spend grows only with the conversation and its edits. */
+  private spend = 0;
   private readonly usageSinceOpen: EpisodicUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly diagnostic: (record: EpisodicDiagnostic) => void;
@@ -158,7 +163,6 @@ export class EpisodicMemory {
   private constructor(private readonly dependencies: EpisodicMemoryDependencies, limits: EpisodicLimits) {
     this.limits = limits;
     this.store = new EpisodicStore(dependencies.workspace, dependencies.sessionId, limits.maxStoreLineBytes);
-    this.budget = dependencies.budget;
     this.summarizer = dependencies.summarizer ?? createModelRuntimeSummarizer(dependencies.modelRuntime, dependencies.model);
     this.sleep = dependencies.sleep ?? defaultSleep;
     this.diagnostic = dependencies.diagnostic ?? (() => {});
@@ -198,9 +202,8 @@ export class EpisodicMemory {
       if (snapshot.state) {
         memory.sourceCursor = snapshot.state.cursor;
         memory.blocked = snapshot.state.blocked;
-        // Spend is restored before any compactor call, so a restarted Gateway
-        // cannot spend a second budget on the same history.
-        memory.budget.restore(snapshot.state.spend);
+        // Restored before any compactor call: a restart never resets recorded spend.
+        memory.spend = snapshot.state.spend;
       }
       if (snapshot.recoveredTornBytes > 0) {
         memory.diagnostic({
@@ -408,8 +411,9 @@ export class EpisodicMemory {
   }
 
   /** Clear the blocked state, re-read the source and restart the pump
-   * (departure 5). The cause must have been fixed by the caller: a larger budget,
-   * a different model, a reachable source. */
+   * (departure 5). The cause must have been fixed by the caller, or be one a new
+   * attempt addresses: a different model, a reachable source, a recovered
+   * provider. */
   async resume(): Promise<void> {
     await this.resumeIngested();
     await this.drain();
@@ -418,7 +422,7 @@ export class EpisodicMemory {
   /**
    * The same, WITHOUT waiting for the pump: the block is cleared and the source
    * re-read under the lock, and the pump is started, not awaited. An operator
-   * command (a raised budget, `home.resumeMemory`) must return once the memory is
+   * command (a reconfiguration, `home.resumeMemory`) must return once the memory is
    * unblocked, not after the whole summary backlog; a caller that needs the lines
    * it will send waits on `whenReady` as a turn does.
    */
@@ -457,7 +461,7 @@ export class EpisodicMemory {
       const state = this.partBytes(part);
       parts.push({ address: nodeAddress(part.level, part.index), start: part.start, messages: part.span, bytes: state.bytes, built: state.built });
     }
-    const tokens = this.budget.snapshot();
+    const tokens = { used: this.spend };
     return {
       sourceSessionId: this.dependencies.sessionId,
       generation: this.generation,
@@ -899,7 +903,7 @@ export class EpisodicMemory {
     return viewContext(this.view, end, part => this.nodes.get(nodeAddress(part.level, part.index))?.text);
   }
 
-  // ---- one compactor call, the size loop, retries and the budget ---------------
+  // ---- one compactor call, the size loop and retries -----------------------------
 
   private async compact(lines: readonly string[], step: string, stamp: BuildStamp): Promise<string> {
     let request = compactorRequest(EPISODIC_COMPACT_PROMPT, contextBlock(lines), step, this.abort.signal,
@@ -919,18 +923,13 @@ export class EpisodicMemory {
   private async compactCall(request: EpisodicCompactorRequest, stamp: BuildStamp): Promise<string> {
     for (let attempt = 0; ; attempt += 1) {
       if (this.stale(stamp)) throw new EpisodicClosedSignal();
-      const estimate = estimateCompactorReservation(request);
-      if (!this.budget.reserve(estimate)) {
-        throw new EpisodicBlockedSignal({ reason: "budget-exhausted", detail: `A compactor call estimated at ${estimate} tokens does not fit the remaining budget` });
-      }
       let message: AssistantMessage;
       try {
         message = await this.summarizerWithinBound(request);
       } catch (error) {
-        this.budget.settle(estimate, 0);
         if (this.closed || error instanceof EpisodicClosedSignal) throw new EpisodicClosedSignal();
         // A call that overran its bound answered too late to be used, so it is a
-        // transient failure and its reservation was released above.
+        // transient failure; a thrown call reports no usage.
         const verdict = error instanceof EpisodicCallTimeout ? "transient" : classifyThrown(error);
         const detail = error instanceof Error ? error.message : "the compactor call failed";
         if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
@@ -938,12 +937,12 @@ export class EpisodicMemory {
         await this.wait(this.limits.retryMs);
         continue;
       }
-      this.budget.settle(estimate, usageTokens(message.usage));
+      this.spend += usageTokens(message.usage);
       this.usageSinceOpen.input += message.usage?.input ?? 0;
       this.usageSinceOpen.output += message.usage?.output ?? 0;
       this.usageSinceOpen.cacheRead += message.usage?.cacheRead ?? 0;
       this.usageSinceOpen.cacheWrite += message.usage?.cacheWrite ?? 0;
-      // Durable before the next call: a crash must not hand the budget back.
+      // Durable before the next call: a crash must not lose recorded spend.
       await this.saveState();
       const verdict = classifyReply(message);
       if (verdict === "ok") return summarizerText(message);
@@ -1074,7 +1073,7 @@ export class EpisodicMemory {
       generation: this.generation,
       cursor: this.sourceCursor,
       blocked: this.blocked,
-      spend: this.budget.snapshot().used,
+      spend: this.spend,
     }));
   }
 

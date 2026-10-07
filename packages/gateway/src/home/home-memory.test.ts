@@ -57,8 +57,9 @@ describe("HomeMemory", () => {
       if (lookups.length === 1) await held;
       return undefined;
     });
-    const first = instance.configure({ model: { provider: "p", id: "m" }, tokenBudget: 1_000 });
-    const second = instance.configure({ model: { provider: "p", id: "m" }, tokenBudget: 2_000 });
+    // Two different models: the second configuration must reopen the store.
+    const first = instance.configure({ model: { provider: "p", id: "m" } });
+    const second = instance.configure({ model: { provider: "p", id: "m2" } });
     // The first configuration is inside the open; the second has not started.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(lookups.length).toBe(1);

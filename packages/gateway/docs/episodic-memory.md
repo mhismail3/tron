@@ -14,10 +14,10 @@ it the commits the runtime reports, and sends each activation the view it render
 ## The owner and its inputs
 
 - `EpisodicMemory.open` loads (or starts) the memory for one source session:
-  the workspace, the source session id and its canonical JSONL path, a token
-  budget, limits, and either an injected compactor or the pi-ai model and
-  `ModelRuntime` the default compactor runs on. There is **no default model and
-  no default budget**: both are the caller's. One store has **one opener per
+  the workspace, the source session id and its canonical JSONL path, limits,
+  and either an injected compactor or the pi-ai model and `ModelRuntime` the
+  default compactor runs on. There is **no default model**: it is the caller's,
+  and there is no budget (#493). One store has **one opener per
   process**: a second `open` for the same session refuses with `already-open`,
   because two memories would write the same files without a lock between them.
 - `entriesCommitted(sessionId)` re-reads the canonical file after its cursor,
@@ -91,11 +91,10 @@ state/episodic/<sourceSessionId>/
   instead of restarting and re-spending every compactor call. The marker describes
   the container, never one session. Each session's namespace is created lazily
   inside it, so a session without one, such as a new Home session after another
-  session's memory set the marker, starts fresh within its own token budget
-  (#483). Spend is recorded inside the namespace, so a surviving session whose
-  own namespace was deleted rebuilds from its source and may spend up to its
-  configured budget again (D5: repair within the memory budget; #420 owns
-  restore).
+  session's memory set the marker, starts fresh (#483). Spend is recorded inside
+  the namespace, so a surviving session whose own namespace was deleted rebuilds
+  from its source and its recorded spend starts again (D5: repair, with no
+  budget; #420 owns restore).
 - The version is `EPISODIC_STORE_VERSION` (1). There is no migration path: a
   store this owner cannot read is refused rather than guessed at.
 
@@ -306,10 +305,10 @@ recovery self-healing without a second file or a marker.
 The view's budget is soft and `fit` can only merge pairs whose parent is built,
 so a memory that ingests a large backlog in one `entriesCommitted` call holds a
 view far over `VIEW` until the pump catches up, and the compactor calls in that
-window carry that whole view as context. The 1,000-message measurement below is
-run with a large budget for exactly this reason. A live session that commits
-continuously stays inside the budget, because each commit adds one message and
-the pump keeps up.
+window carry that whole view as context, so that catch-up costs more per call.
+A live
+session that commits continuously stays inside the view budget, because each
+commit adds one message and the pump keeps up.
 
 ## Invalidation semantics and measured cost
 
@@ -339,7 +338,7 @@ view at step 8 of a 300-message run. A uniform exponent shift provably cannot
 diverge — `(T-s1)/2^(l1+e) > (T-s2)/2^(l2+e)` is independent of `e` — which is
 why that control was removed rather than kept as a permanent test.
 
-## Retries, budget and blocked states
+## Retries, spend and blocked states
 
 - **Transient** provider failures (a thrown call, or an error the pinned
   classifier `isRetryableAssistantError` calls retryable) retry after
@@ -359,16 +358,25 @@ why that control was removed rather than kept as a permanent test.
   (DeepSeek v4.1 Flash on OpenCode Go) reasoned through the whole ceiling on long
   messages (#467). A store record the append cannot write (an oversized
   line) blocks the same way rather than stalling the cursor silently.
-- A **token budget** is injected. Each call reserves the prompt estimate **plus
-  its whole output ceiling** before it runs, and settles with the actual usage
-  afterwards: the provider's own `usage.totalTokens` when it reports one, and
-  otherwise every billed bucket (input, output, cache read, cache write). A
-  reservation that does not fit blocks with `budget-exhausted`.
+- **Spend** (#493) is recorded and reported, never a ceiling: there is no budget
+  to inject or manage. Each call is charged the provider's own `usage.totalTokens`
+  when it reports one, and otherwise every billed bucket (input, output, cache
+  read, cache write). Spend is bounded by construction:
+  - a node builds only when it is missing;
+  - one build makes at most `TRIES` size-loop calls, each with at most
+    `maxRetries + 1` attempts before the memory blocks;
+  - a built node is rebuilt only after its source changed;
+  - the one block a later activation resumes by itself (`retries-exhausted`)
+    resumes once per activation.
+
+  So spend grows only with the conversation and its edits, as in the recipe,
+  which has no budget either. A guard on top of that could only catch a defect,
+  and could misfire on legitimate edit races, so there is none.
 - A canonical read failure blocks with `source-unavailable`.
 - A blocked memory stops its pump, is visible in `status().blocked`, rejects
   `whenReady`, and survives a restart. `resume()` clears it, re-reads the source
-  and restarts the pump; the caller must have fixed the cause (a larger budget, a
-  reachable source, a recovered provider).
+  and restarts the pump; the caller must have fixed the cause (a reachable
+  source, a recovered provider).
 
 ## Status query
 
@@ -376,7 +384,7 @@ why that control was removed rather than kept as a permanent test.
 counts by level and kind, the view (parts, bytes, `VIEW` budget, built/unbuilt
 counts, and the parts themselves up to a bounded list with a `truncatedParts`
 count), coverage counters (admitted messages, summarized leaves), the pump's busy
-count, the blocked state and its reason, and reserved/used tokens. `sinceOpen`
+count, the blocked state and its reason, and the tokens used. `sinceOpen`
 adds the provider-reported input, output, cache-read and cache-write tokens since
 the memory opened, so caching can be checked from the provider's own usage
 fields (gist §8). It is not persisted.
@@ -401,7 +409,7 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 ## Test artifacts
 
 - `packages/gateway/test-results/episodic-memory/report.json` — the end-to-end
-  run's counts, invalidation sizes, concurrency, budget, oversized-record and
+  run's counts, invalidation sizes, concurrency, usage accounting, oversized-record and
   blocked outcomes (`npx vitest run src/episodic`).
 - `packages/gateway/test-results/home-memory-tools/report.json` — the memory
   tools' end-to-end run: the zoom children and refusals, the projected text, the
@@ -430,8 +438,8 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
   `searchMessages` through `HomeMemory`, which ingests the latest commits first,
   never awaits the pump, and answers a typed result for a memory that is not
   open, not configured or stopped.
-- The model and the budget are the Home record's (`home.configureMemory`); what
-  this module persists about spend, blocking and its cursor is described above.
+- The model is the Home record's (`home.configureMemory`); what this module
+  persists about spend, blocking and its cursor is described above.
 
 Still outside this module: any per-project compactor instructions, and the tool
 surface itself — the memory answers `zoomLines`, `entryTimestamp` and

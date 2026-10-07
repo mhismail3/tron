@@ -12,7 +12,7 @@ import {
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
-  createEpisodicTokenBudget, EpisodicMemoryError, resolveLimits,
+  EpisodicMemoryError, resolveLimits,
   type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer,
 } from "./episodic-contract.js";
 import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
@@ -45,7 +45,7 @@ interface Report {
   invalidations: Array<{ generation: number; chunks: number; invalidated: number; predicted: number; nodesBefore: number }>;
   concurrency: { indices: number; catalogRecords: number; duplicateViewParts: number };
   inFlightEdit: { invalidated: number; predicted: number; stalePublished: number };
-  budget: { totalTokensUsed: number; summedUsageUsed: number; reservedAfterDrain: number };
+  usage: { totalTokensUsed: number; summedUsageUsed: number };
   oversized: { recordChars: number; capped: boolean; headKept: boolean; tailKept: boolean; blockedOnLineBound: string | null };
   blocked: Array<{ reason: string; resumed: boolean; nodesAtBlock: number }>;
   recordedOnce: { negativeControl: string };
@@ -62,7 +62,7 @@ const report: Report = {
   invalidations: [],
   concurrency: { indices: 0, catalogRecords: 0, duplicateViewParts: 0 },
   inFlightEdit: { invalidated: 0, predicted: 0, stalePublished: 0 },
-  budget: { totalTokensUsed: 0, summedUsageUsed: 0, reservedAfterDrain: 0 },
+  usage: { totalTokensUsed: 0, summedUsageUsed: 0 },
   oversized: { recordChars: 0, capped: false, headKept: false, tailKept: false, blockedOnLineBound: null },
   blocked: [],
   recordedOnce: {
@@ -360,14 +360,13 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
   };
 }
 
-async function openMemory(fx: Fixture, summarizer?: EpisodicSummarizer, budget = createEpisodicTokenBudget(50_000_000)): Promise<EpisodicMemory> {
+async function openMemory(fx: Fixture, summarizer?: EpisodicSummarizer): Promise<EpisodicMemory> {
   return EpisodicMemory.open({
     workspace: fx.workspace,
     sessionId: fx.sessionId,
     sessionFile: fx.sessionFile,
     modelRuntime: fx.modelRuntime,
     model: fx.model,
-    budget,
     limits: fx.limits,
     summarizer: summarizer ?? fx.summarizer,
     sleep: async () => {},
@@ -674,7 +673,7 @@ describe("episodic memory end to end", () => {
     await reopened.dispose();
   }, 300_000);
 
-  it("blocks on a permanent refusal, exhausted retries and an exhausted budget, and resumes", async () => {
+  it("blocks on a permanent refusal and exhausted retries, and resumes", async () => {
     const fx = await fixture("blocked", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxRetries: 2 });
     for (let index = 0; index < 12; index += 1) {
       fx.manager.appendMessage(userMessage(`blocked case message ${index} ${"b".repeat(600)}`));
@@ -743,55 +742,33 @@ describe("episodic memory end to end", () => {
     expect(retried.status().nodes.total).toBeGreaterThan(0);
     await retried.dispose();
 
-    // 4. A budget that cannot fit the next call blocks; a larger budget resumes.
-    const budgetFixture = await fixture("budget", { viewBytes: 1_024, jobs: 2, retryMs: 1 });
-    for (let index = 0; index < 4; index += 1) budgetFixture.manager.appendMessage(userMessage(`budget case message ${index} ${"d".repeat(600)}`));
-    const budgeted = await openMemory(budgetFixture, undefined, createEpisodicTokenBudget(10));
-    await budgeted.entriesCommitted(budgetFixture.sessionId);
-    expect(budgeted.status().blocked?.reason).toBe("budget-exhausted");
-    // The seed message is short, so it is a free node; no compactor call was
-    // ever admitted, so no summary node exists.
-    expect(budgeted.status().nodes.summary).toBe(0);
-    report.blocked.push({ reason: "budget-exhausted", resumed: false, nodesAtBlock: budgeted.status().nodes.total });
-    await budgeted.dispose();
-    const funded = await openMemory(budgetFixture);
-    expect(funded.status().blocked?.reason).toBe("budget-exhausted");
-    await funded.resume();
-    expect(funded.status().blocked).toBeNull();
-    expect(funded.status().nodes.total).toBeGreaterThan(0);
-    expect(funded.status().tokens.used).toBeGreaterThan(0);
-    await funded.dispose();
   }, 300_000);
 
   it("charges the provider's total usage when it reports one and every bucket otherwise", async () => {
-    const fixtureFor = async (label: string, usage: Usage): Promise<{ fx: Fixture; used: number; reserved: number }> => {
+    const fixtureFor = async (label: string, usage: Usage): Promise<{ fx: Fixture; used: number }> => {
       const fx = await fixture(label, { viewBytes: 1_024, jobs: 1, retryMs: 1 });
       fx.manager.appendMessage(userMessage(`usage case message ${"u".repeat(600)}`));
-      const budget = createEpisodicTokenBudget(1_000_000);
-      // The reply's usage is what the budget reconciles against, so the real
+      // The reply's usage is what the memory records as spend, so the real
       // faux reply is returned with the injected usage.
       const injected: EpisodicSummarizer = async (request) => ({ ...await fx.summarizer(request), usage });
-      const memory = await openMemory(fx, injected, budget);
+      const memory = await openMemory(fx, injected);
       await memory.entriesCommitted(fx.sessionId);
       expect(memory.status().blocked).toBeNull();
-      const snapshot = budget.snapshot();
+      const snapshot = memory.status().tokens;
       await memory.dispose();
-      return { fx, used: snapshot.used, reserved: snapshot.reserved };
+      return { fx, used: snapshot.used };
     };
-    // The provider's own total wins when it reports one, and a call reserves the
-    // prompt estimate plus its whole output ceiling (released on settlement).
+    // The provider's own total wins when it reports one.
     const withTotal = await fixtureFor("usage-total", { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, totalTokens: 40, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
     // Every call is charged the reported total (40), never the bucket sum (24).
     expect(withTotal.used).toBeGreaterThanOrEqual(40);
     expect(withTotal.used % 40).toBe(0);
     expect(withTotal.used % 24).not.toBe(0);
-    expect(withTotal.reserved).toBe(0);
     // Without a reported total, every billed bucket counts, cache reads included.
     const summed = await fixtureFor("usage-sum", { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, totalTokens: undefined as unknown as number, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
     expect(summed.used).toBeGreaterThanOrEqual(25);
     expect(summed.used % 25).toBe(0);
-    expect(summed.reserved).toBe(0);
-    report.budget = { totalTokensUsed: withTotal.used, summedUsageUsed: summed.used, reservedAfterDrain: summed.reserved };
+    report.usage = { totalTokensUsed: withTotal.used, summedUsageUsed: summed.used };
   }, 300_000);
 
   it("caps a 1.5 MB paste below the store's line bound and blocks visibly when it cannot", async () => {

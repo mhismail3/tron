@@ -7,7 +7,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxProvider, fauxText, type Message, type TranscriptContext } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { createEpisodicTokenBudget, type EpisodicSummarizer } from "./episodic-contract.js";
+import type { EpisodicSummarizer } from "./episodic-contract.js";
 import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { decodeContextRuns, encodeContextRuns, foldView, foldViewSliced, nodeAddress } from "./episodic-tree.js";
@@ -117,14 +117,18 @@ describe("episodic memory scale", () => {
     const summarizer: EpisodicSummarizer = async (request) => {
       faux.appendResponses([(context: TranscriptContext) => {
         const last = [...context.messages].reverse().find(message => message.role === "user");
-        const text = last && last.role === "user" && typeof last.content === "string" ? last.content : "";
+        // The compactor sends its context as cache pieces (#466), so the user
+        // message is text blocks, not one string.
+        const content = last && last.role === "user" ? last.content : "";
+        const text = typeof content === "string" ? content
+          : content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
         return fauxAssistantMessage(text.replace(/\s+/gu, " ").trim().slice(-200));
       }]);
       return base(request);
     };
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, modelRuntime, model,
-      budget: createEpisodicTokenBudget(2_000_000_000), summarizer,
+      summarizer,
       limits: { viewBytes: 8_192, jobs: 8, retryMs: 1 }, sleep: async () => {},
     });
     // The fixture's seed message plus 999 more make a 1,000-message history.

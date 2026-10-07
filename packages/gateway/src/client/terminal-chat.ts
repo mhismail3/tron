@@ -164,7 +164,7 @@ export async function listSessions(
 function usage(): never {
   process.stderr.write(`Usage: tron-chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]\n\n`);
   process.stderr.write(`Attaches to the Gateway-owned canonical runtime. It never opens Pi JSONL directly.\n`);
-  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id> <tokenBudget>, /home resume, /home context, /abort, /quit\n`);
+  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id>, /home resume, /home context, /abort, /quit\n`);
   process.exit(64);
 }
 
@@ -189,7 +189,6 @@ export interface HomeMemoryEnvelope {
   configured: boolean;
   open: boolean;
   model?: { provider: string; id: string };
-  tokenBudget?: number;
   spentTokens?: number;
   blocked?: string;
   reason?: string;
@@ -214,7 +213,7 @@ export type HomeCommand =
   | { kind: "status" }
   | { kind: "designate"; model?: { provider: string; id: string } }
   | { kind: "disable" }
-  | { kind: "memory"; model: { provider: string; id: string }; tokenBudget: number }
+  | { kind: "memory"; model: { provider: string; id: string } }
   | { kind: "resume" }
   | { kind: "context" }
   | { kind: "usage" };
@@ -234,14 +233,10 @@ export function parseHomeCommand(input: string): HomeCommand | undefined {
   }
   if (input === "/home memory" || input.startsWith("/home memory ")) {
     const arguments_ = input.slice("/home memory".length).trim().split(/\s+/u).filter((part) => part !== "");
-    // The shape is exactly a model and a budget. Any other shape is usage; a
-    // value that cannot be read is reported with its own reason.
-    if (arguments_.length !== 2) return { kind: "usage" };
-    return {
-      kind: "memory",
-      model: parseHomeModelArgument(arguments_[0]!),
-      tokenBudget: parseHomeTokenBudget(arguments_[1]!),
-    };
+    // The shape is exactly a model; the memory regulates its own spend (#493).
+    // Any other shape is usage; a model that cannot be read reports its reason.
+    if (arguments_.length !== 1) return { kind: "usage" };
+    return { kind: "memory", model: parseHomeModelArgument(arguments_[0]!) };
   }
   return { kind: "usage" };
 }
@@ -254,7 +249,7 @@ export function describeHomeStatus(status: HomeStatusEnvelope): string {
   return `Home is designated: session ${status.sessionId}, generation ${status.generation}${model}, ${status.live ? "runtime live" : "runtime not loaded"}${session}.`;
 }
 
-const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> <tokenBudget> | /home resume | /home context\n";
+const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context\n";
 
 export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
@@ -269,26 +264,15 @@ export function parseHomeModelArgument(argument: string): { provider: string; id
   return { provider, id };
 }
 
-/** A positive whole number of tokens. The Gateway owns the ceiling, so a value it
- * refuses is the RPC's refusal to report; this only has to be a number. */
-export function parseHomeTokenBudget(argument: string): number {
-  if (!/^\d+$/u.test(argument)) throw new Error("The token budget is a whole number of tokens, for example 1000000");
-  const budget = Number(argument);
-  if (!Number.isSafeInteger(budget) || budget < 1) throw new Error("The token budget is at least one token");
-  return budget;
-}
-
-/** What the memory projection says, in one line: the model and budget it is
- * spending against, the spend so far, whether its store is open yet and the
- * reason it is blocked. */
+/** What the memory projection says, in one line: its model, the spend so far,
+ * whether its store is open yet and the reason it is blocked. */
 export function describeHomeMemory(memory: HomeMemoryEnvelope): string {
-  if (!memory.configured) return "Home memory is not configured. /home memory <provider/id> <tokenBudget> configures it.";
+  if (!memory.configured) return "Home memory is not configured. /home memory <provider/id> configures it.";
   const model = memory.model ? `model ${memory.model.provider}/${memory.model.id}` : "an unrecorded model";
-  const budget = memory.tokenBudget === undefined ? "no recorded budget" : `budget ${memory.tokenBudget} tokens`;
-  const spend = memory.spentTokens === undefined ? "" : `, ${memory.spentTokens} spent`;
+  const spend = memory.spentTokens === undefined ? "" : `, ${memory.spentTokens} tokens spent`;
   const open = memory.open ? "open" : "not open yet (it opens at the first activation)";
   const blocked = memory.blocked ? `, blocked: ${memory.blocked}` : "";
-  return `Home memory: ${model}, ${budget}${spend}, ${open}${blocked}.`;
+  return `Home memory: ${model}${spend}, ${open}${blocked}.`;
 }
 
 /** What the request-context projection says: the activation's start, whether it
@@ -309,11 +293,8 @@ export function describeHomeContext(context: HomeContextEnvelope): string {
 export async function configureHomeMemory(
   client: Pick<GatewayProtocolClient, "request">,
   model: { provider: string; id: string },
-  tokenBudget: number,
 ): Promise<string> {
-  const result = await client.request("home.configureMemory", {
-    commandId: randomUUID(), model, tokenBudget,
-  }) as unknown as HomeMemoryEnvelope;
+  const result = await client.request("home.configureMemory", { commandId: randomUUID(), model }) as unknown as HomeMemoryEnvelope;
   return describeHomeMemory(result);
 }
 
@@ -352,7 +333,7 @@ export async function runHomeCommand(client: Pick<GatewayProtocolClient, "reques
   try {
     if (command.kind === "status") process.stdout.write(`${await homeStatusCommand(client)}\n`);
     else if (command.kind === "designate") process.stdout.write(`${await designateHome(client, command.model)}\n`);
-    else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.model, command.tokenBudget)}\n`);
+    else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.model)}\n`);
     else if (command.kind === "resume") process.stdout.write(`${await resumeHomeMemory(client)}\n`);
     else if (command.kind === "context") process.stdout.write(`${await homeContextCommand(client)}\n`);
     else process.stdout.write(`${await disableHome(client)}\n`);

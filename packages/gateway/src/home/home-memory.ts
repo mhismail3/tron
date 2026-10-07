@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import {
-  createEpisodicTokenBudget, EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS,
+  EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS,
   type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
 } from "../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
@@ -23,15 +23,11 @@ import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView
  * the log after its cursor under its own bounds, and a request waits for the
  * lines it will send before it sends them.
  *
- * There is no default model and no default budget (decision D4): an unconfigured
- * memory refuses every activation fail-closed, so nothing is ever served from an
- * empty or partial memory.
+ * There is no default model (decision D4): an unconfigured memory refuses every
+ * activation fail-closed, so nothing is ever served from an empty or partial
+ * memory. There is no budget to manage (#493): the memory regulates its own
+ * spend.
  */
-
-/** The most a Home memory token budget may be. A budget is a spend ceiling, not
- * a trust boundary, but an unbounded one would make `budget-exhausted` — the one
- * Home state that stops by itself — unreachable. */
-export const MAXIMUM_MEMORY_TOKEN_BUDGET = 100_000_000;
 /** Marker shared by the frozen view's attribution line. One spelling, so a
  * request carrying the memory view is recognizable without matching prose. */
 export const HOME_MEMORY_VIEW_MARKER = "Tron Home memory";
@@ -87,10 +83,9 @@ const UNAVAILABLE_TEXT: Readonly<Record<HomeMemoryUnavailableReason, string>> = 
   "timestamp-unavailable": "That message's date is no longer available from the source.",
 };
 
-/** The Home memory's configured model and spend ceiling. */
+/** The Home memory's configured model. */
 export interface HomeMemoryConfig {
   model: ModelRef;
-  tokenBudget: number;
 }
 
 /**
@@ -206,56 +201,43 @@ export class HomeMemory {
   constructor(private readonly options: HomeMemoryOptions) {}
 
   /**
-   * Record the memory's model and budget, and open its store when the session
-   * already has a canonical file.
+   * Record the memory's model, and open its store when the session already has
+   * a canonical file.
    *
    * A configuration is not a promise: a session that has no line yet, or a
    * runtime that is idle-evicted, is normal, and the store then opens at the
-   * first activation. `previousTokenBudget` is what the durable record held
-   * before this call, so a raised budget resumes a `budget-exhausted` memory
-   * instead of leaving the block it was written with.
+   * first activation.
    */
-  async configure(config: HomeMemoryConfig, options: { previousTokenBudget?: number } = {}): Promise<void> {
+  async configure(config: HomeMemoryConfig): Promise<void> {
     const summarizer = this.resolve(config);
     return await this.mutex.run(async () => {
       const current = this.config;
       const modelChanged = current !== undefined
         && (current.model.provider !== config.model.provider || current.model.id !== config.model.id);
-      const same = current !== undefined && !modelChanged && current.tokenBudget === config.tokenBudget;
-      if (same && this.binding) return;
-      const previous = options.previousTokenBudget ?? current?.tokenBudget;
-      const raised = previous !== undefined && config.tokenBudget > previous;
+      if (current !== undefined && !modelChanged && this.binding) return;
       await this.closeLocked();
-      this.config = { model: { ...config.model }, tokenBudget: config.tokenBudget };
+      this.config = { model: { ...config.model } };
       this.summarizer = summarizer;
       this.failure = undefined;
       const sessionFile = await this.existingSessionFile();
       if (!sessionFile) return;
-      await this.openStore(sessionFile, raised, modelChanged);
+      await this.openStore(sessionFile, modelChanged);
     });
   }
 
   /**
    * Clear a block the caller has addressed with an operator action:
-   * `home.resumeMemory`. A budget block is not that: its cause is the configured
-   * ceiling, so it is refused here and the caller raises the budget instead.
-   * The re-read and the pump start happen under the lock; the drain does not.
+   * `home.resumeMemory`. The re-read and the pump start happen under the lock;
+   * the drain does not.
    */
   async resumeBlock(): Promise<void> {
     const binding = await this.mutex.run(() => this.bindingForViewLocked());
-    const blocked = binding.memory.status().blocked;
-    if (!blocked) return;
-    if (blocked.reason === "budget-exhausted") {
-      throw new HomeMemoryRefusal(
-        "memory-blocked",
-        "Home memory is blocked by its token budget: raise tokenBudget with home.configureMemory",
-      );
-    }
+    if (!binding.memory.status().blocked) return;
     await binding.memory.resumeIngested();
   }
 
-  /** The persisted state of this memory's store, without opening it: the spend a
-   * budget is charged for and the block that refuses every activation. */
+  /** The persisted state of this memory's store, without opening it: its recorded
+   * spend and the block that refuses every activation. */
   async persistedState(): Promise<{ spend: number; blocked: EpisodicBlocked | null } | undefined> {
     const state = await readEpisodicState({
       workspace: this.options.workspace,
@@ -316,16 +298,16 @@ export class HomeMemory {
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not read the session: ${messageOf(error)}`);
     }
     // A blocked memory stopped its pump, so it can never cover this activation.
-    // Naming the block first is the actionable answer: its cause (a budget, an
-    // unreachable model) is what the user fixes.
+    // Naming the block first is the actionable answer: its cause (an unreachable
+    // or refusing model) is what the user fixes.
     let blocked = binding.memory.status().blocked;
     if (blocked?.reason === "retries-exhausted") {
       // The one block a transient outage leaves behind, and the only one this
       // activation re-arms by itself: resumeIngested clears it, re-reads the
       // source and restarts the pump with the bounded retries re-armed, and the
       // wait below then behaves as usual. A block that recurs during that wait is
-      // refused by the wait's own error path. Permanent, source and budget blocks
-      // are never resumed here: their causes are not time.
+      // refused by the wait's own error path. Permanent and source blocks are
+      // never resumed here: their causes are not time.
       await binding.memory.resumeIngested();
       blocked = binding.memory.status().blocked;
     }
@@ -362,13 +344,12 @@ export class HomeMemory {
     const config = this.config;
     const binding = this.binding;
     if (!config) return { configured: false, open: false, ...(this.failure ? { reason: this.failure } : {}) };
-    if (!binding) return { configured: true, open: false, model: { ...config.model }, tokenBudget: config.tokenBudget };
+    if (!binding) return { configured: true, open: false, model: { ...config.model } };
     const memory = binding.memory.status();
     return {
       configured: true,
       open: true,
       model: { ...config.model },
-      tokenBudget: config.tokenBudget,
       episodic: memory,
       spentTokens: memory.tokens.used,
       ...(memory.blocked ? { blocked: memory.blocked.reason } : {}),
@@ -494,9 +475,6 @@ export class HomeMemory {
   }
 
   private resolve(config: HomeMemoryConfig): EpisodicSummarizer {
-    if (!Number.isSafeInteger(config.tokenBudget) || config.tokenBudget < 1 || config.tokenBudget > MAXIMUM_MEMORY_TOKEN_BUDGET) {
-      throw new HomeMemoryRefusal("memory-unavailable", `A Home memory token budget must be an integer from 1 to ${MAXIMUM_MEMORY_TOKEN_BUDGET}`);
-    }
     const resolution = this.options.modelSummarizer(config.model);
     if ("refusal" in resolution) {
       throw new HomeMemoryRefusal("memory-unavailable", resolution.refusal === "virtual-model"
@@ -518,7 +496,7 @@ export class HomeMemory {
     if (!sessionFile) {
       throw new HomeMemoryRefusal("memory-unavailable", "the Home session has no canonical file to read yet");
     }
-    return await this.openStore(sessionFile, false, false);
+    return await this.openStore(sessionFile, false);
   }
 
   /** The canonical file, when the session already has one. A session exists
@@ -531,7 +509,7 @@ export class HomeMemory {
     return info?.isFile() ? path : undefined;
   }
 
-  private async openStore(sessionFile: string, raised: boolean, modelChanged: boolean): Promise<MemoryBinding> {
+  private async openStore(sessionFile: string, modelChanged: boolean): Promise<MemoryBinding> {
     const summarizer = this.summarizer;
     const config = this.config;
     if (!summarizer || !config) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
@@ -542,7 +520,6 @@ export class HomeMemory {
         sessionId: this.options.sessionId,
         sessionFile,
         summarizer,
-        budget: createEpisodicTokenBudget(config.tokenBudget),
         ...(this.options.limits ? { limits: this.options.limits } : {}),
         ...(this.options.diagnostic ? { diagnostic: this.options.diagnostic } : {}),
       });
@@ -553,16 +530,12 @@ export class HomeMemory {
       throw error;
     }
     this.binding = { memory };
-    // A stored block outlives the process that wrote it, so a change that
-    // addresses its cause clears it here rather than waiting for the next commit
-    // to be refused: a raised budget for a budget block, and a different model
-    // for every other block (an unreachable or refusing model is the one a new
-    // model replaces). Nodes are durable, so re-opening re-spends nothing, and
-    // the resume does not wait for the pump: the caller is an operator command.
-    const blocked = memory.status().blocked;
-    const addressed = blocked !== null
-      && ((raised && blocked.reason === "budget-exhausted") || (modelChanged && blocked.reason !== "budget-exhausted"));
-    if (addressed) await memory.resumeIngested();
+    // A stored block outlives the process that wrote it, so a different model,
+    // the change that addresses an unreachable or refusing model, clears it here
+    // rather than waiting for the next commit to be refused. Nodes are durable,
+    // so re-opening re-spends nothing, and the resume does not wait for the pump:
+    // the caller is an operator command.
+    if (modelChanged && memory.status().blocked !== null) await memory.resumeIngested();
     return this.binding;
   }
 

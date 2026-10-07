@@ -134,7 +134,6 @@ interface FixtureOptions {
   home?: boolean;
   /** Configure Home's memory (only with `home`). */
   memory?: boolean;
-  tokenBudget?: number;
   /** What the Gateway's model resolver says about the memory's model. */
   memoryModel?: "available" | "virtual-model" | "unavailable";
   summarizer?: EpisodicSummarizer;
@@ -207,7 +206,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   if (options.home) {
     homeSessionId = (await registry.homeOwner().designate({ model: modelRef }, () => modelRef)).sessionId;
     if (options.memory) {
-      await registry.homeOwner().configureMemory({ model: MEMORY_MODEL, tokenBudget: options.tokenBudget ?? 1_000_000 });
+      await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
     }
   }
   const slot = homeSessionId ? await registry.acquire(homeSessionId) : await registry.create(cwd);
@@ -594,7 +593,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
 
   it("C7c a virtual memory model is refused at configuration", async () => {
     const item = await open("c7c", { home: true, memoryModel: "virtual-model" });
-    const outcome = await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL, tokenBudget: 1_000 }).then(
+    const outcome = await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL }).then(
       () => "accepted",
       (error: unknown) => error instanceof Error ? error.message : String(error),
     );
@@ -890,7 +889,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await waitUntil(() => !before.slot.isBusy);
     const modelRef = { provider: PROVIDER, id: MODEL_ID };
     await item.registry.homeOwner().designate({ model: modelRef }, () => modelRef);
-    await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL, tokenBudget: 1_000_000 });
+    await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
     const requestsBefore = [...item.requests];
     item.requests.length = 0;
     const after = await item.extra("ordinary", item.cwd);

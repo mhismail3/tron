@@ -11,7 +11,7 @@ import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
-  HomeMemory, homeMemoryToolUnavailable, MAXIMUM_MEMORY_TOKEN_BUDGET,
+  HomeMemory, homeMemoryToolUnavailable,
   type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
@@ -36,10 +36,10 @@ export interface HomeRecord {
   model: ModelRef;
   createdAt: string;
   updatedAt: string;
-  /** Home's memory model and spend ceiling. Absent on a record written before
+  /** Home's memory model. Absent on a record written before
    * Home's memory existed, and absent until `home.configureMemory` records one:
    * there are no defaults (decision D4), so an unconfigured memory refuses. */
-  memory?: { model: ModelRef; tokenBudget: number };
+  memory?: { model: ModelRef };
 }
 
 /** What the Home record says about one session id. `unnamed` means the record
@@ -237,13 +237,13 @@ export class HomeOwner {
   }
 
   /**
-   * `home.configureMemory`: record the model and the token budget Home's memory
-   * spends on its compactor calls. The memory is opened (or re-opened, when the
-   * model or the budget changed) before the record is written, so a refused
-   * configuration changes nothing and a raised budget unblocks a
-   * budget-exhausted memory without losing the nodes it already built.
+   * `home.configureMemory`: record the model Home's memory runs its compactor
+   * calls on. There is no budget to manage (#493): the memory's spend is bounded
+   * by construction and grows only with the conversation. The memory is opened (or re-opened, when the model changed)
+   * before the record is written, so a refused configuration changes nothing and
+   * a different model resumes a blocked memory without losing the nodes it built.
    */
-  async configureMemory(input: { model: ModelRef; tokenBudget: number }): Promise<HomeMemoryStatus> {
+  async configureMemory(input: { model: ModelRef }): Promise<HomeMemoryStatus> {
     return this.mutex.run(async () => {
       this.assertAvailable();
       const record = this.record;
@@ -253,12 +253,9 @@ export class HomeOwner {
         // name spending nothing can use. Designate it first.
         throw new GatewayError("conflict", "Tron Home is disabled: designate it before configuring its memory");
       }
-      const memory = { model: { ...input.model }, tokenBudget: input.tokenBudget };
+      const memory = { model: { ...input.model } };
       const owner = this.ownerFor(record.sessionId);
-      // The record's previous budget is what a raise is measured against, even
-      // when this process never applied it (a configuration made before a
-      // restart).
-      await owner.configure(memory, { ...(record.memory ? { previousTokenBudget: record.memory.tokenBudget } : {}) });
+      await owner.configure(memory);
       await this.write({ ...record, memory, updatedAt: new Date().toISOString() });
       // No designation diagnostic: configuring the memory is not a Home
       // lifecycle outcome. The memory reports itself on its own channel.
@@ -267,12 +264,10 @@ export class HomeOwner {
   }
 
   /**
-   * `home.resumeMemory`: clear a block that is not about the budget, re-read the
-   * source and restart the pump. The operator's answer to a `permanent-failure`
-   * (a model that refused a whole batch), a `retries-exhausted` block or a
-   * `source-unavailable` one whose cause is gone. A `budget-exhausted` memory is
-   * refused here: its cause is the configured ceiling, so the answer is a raised
-   * budget through `home.configureMemory`.
+   * `home.resumeMemory`: clear a block, re-read the source and restart the pump.
+   * The operator's answer to a `permanent-failure` (a model that refused a whole
+   * batch) or a `source-unavailable` block whose cause is gone. The memory resumes
+   * a `retries-exhausted` block by itself on the next activation.
    */
   async resumeMemory(): Promise<HomeMemoryStatus> {
     return this.mutex.run(async () => {
@@ -299,9 +294,9 @@ export class HomeOwner {
 
   /**
    * The bounded memory status `home.status` reports. A memory whose store is not
-   * open yet still reports what a restart would restore — the spend a budget is
-   * charged for and the block that refuses every activation — read from the
-   * store's own state document without opening it.
+   * open yet still reports what a restart would restore (its recorded spend and
+   * the block that refuses every activation), read from the store's own state
+   * document without opening it.
    */
   async memoryStatus(): Promise<HomeMemoryStatus> {
     const record = this.record;
@@ -309,7 +304,7 @@ export class HomeOwner {
     const owner = this.memory?.sessionId === record.sessionId ? this.memory.owner : undefined;
     if (owner?.open) return owner.status();
     const base: HomeMemoryStatus = record.memory
-      ? { configured: true, open: false, model: { ...record.memory.model }, tokenBudget: record.memory.tokenBudget }
+      ? { configured: true, open: false, model: { ...record.memory.model } }
       : { configured: false, open: false };
     const persisted = await (owner ?? this.ownerFor(record.sessionId)).persistedState().catch(() => undefined);
     if (!persisted) return base;
@@ -478,7 +473,7 @@ export class HomeOwner {
           // The memory's configuration is the user's decision about *how* Home
           // remembers, so a replacement session keeps it; the spend is the old
           // session's, and a new store starts its own (docs/home.md).
-          ...(existing?.memory ? { memory: { model: { ...existing.memory.model }, tokenBudget: existing.memory.tokenBudget } } : {}),
+          ...(existing?.memory ? { memory: { model: { ...existing.memory.model } } } : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
@@ -645,7 +640,7 @@ function admitRecord(value: unknown): HomeRecord | undefined {
 
 /** `undefined` for an absent field, the admitted value for a valid one, and
  * `null` for a field this build cannot use. */
-function admitMemory(value: unknown): { model: ModelRef; tokenBudget: number } | null | undefined {
+function admitMemory(value: unknown): { model: ModelRef } | null | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -653,8 +648,6 @@ function admitMemory(value: unknown): { model: ModelRef; tokenBudget: number } |
   if (!model || typeof model !== "object" || Array.isArray(model)) return null;
   const modelRecord = model as Record<string, unknown>;
   if (!boundedString(modelRecord.provider, MAXIMUM_PROVIDER_BYTES)
-    || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)
-    || !Number.isSafeInteger(record.tokenBudget) || (record.tokenBudget as number) < 1
-    || (record.tokenBudget as number) > MAXIMUM_MEMORY_TOKEN_BUDGET) return null;
-  return { model: { provider: modelRecord.provider, id: modelRecord.id }, tokenBudget: record.tokenBudget as number };
+    || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)) return null;
+  return { model: { provider: modelRecord.provider, id: modelRecord.id } };
 }

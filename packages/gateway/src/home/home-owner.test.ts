@@ -348,7 +348,7 @@ describe("Tron Home record", () => {
     await mkdir(h.directory, { recursive: true });
     await writeFile(h.recordPath, recordBytes({ enabled: false }), { mode: 0o600 });
     await h.owner.initialize();
-    await expect(h.owner.configureMemory({ model: MODEL, tokenBudget: 1_000 })).rejects.toMatchObject({ code: "conflict" });
+    await expect(h.owner.configureMemory({ model: MODEL })).rejects.toMatchObject({ code: "conflict" });
     expect((JSON.parse(await readFile(h.recordPath, "utf8")) as HomeRecord).memory).toBeUndefined();
     await h.owner.dispose();
   });
@@ -358,7 +358,7 @@ describe("Tron Home record", () => {
     // spend belongs to the session, and the new session's store starts its own.
     const h = await harness();
     await mkdir(h.directory, { recursive: true });
-    const memory = { model: { provider: "anthropic", id: "haiku-4-5" }, tokenBudget: 5_000 };
+    const memory = { model: { provider: "anthropic", id: "haiku-4-5" } };
     await writeFile(h.recordPath, recordBytes({ sessionId: "session-gone", memory }), { mode: 0o600 });
     await h.owner.initialize();
     expect(h.present.has("session-gone")).toBe(false);

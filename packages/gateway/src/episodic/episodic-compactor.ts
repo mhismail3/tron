@@ -75,7 +75,7 @@ non-ASCII characters cost 2-4 bytes.`;
  * thinking before it writes it: a 2,048-token ceiling let DeepSeek on OpenCode
  * Go reason through the whole budget and write nothing (#480). 8,192 leaves room
  * for bounded reasoning, the line and the overshoot the size loop trims, while
- * a runaway reply stays bounded. It is also what a call reserves for its output. */
+ * a runaway reply stays bounded. */
 export const COMPACTOR_MAX_TOKENS = 8_192;
 
 /** The reasoning asked of a model: off (maintainer decision on #485), clamped
@@ -210,14 +210,6 @@ export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   }
   if (message.stopReason === "error") return isRetryableAssistantError(message) ? "transient" : "permanent";
   return "permanent";
-}
-
-/** The tokens one call will cost, estimated before it is made (departure 5):
- * the prompt's estimate plus the call's whole output ceiling, so a call can
- * never overshoot its reservation by more than the provider's own accounting. */
-export function estimateCompactorReservation(request: EpisodicCompactorRequest): number {
-  const text = request.turns.reduce((total, turn) => total + turn.text.length, request.system.length);
-  return Math.ceil(text / 4) + COMPACTOR_MAX_TOKENS;
 }
 
 /** What one call actually cost. The provider's own total is authoritative when

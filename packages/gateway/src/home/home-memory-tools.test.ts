@@ -84,7 +84,7 @@ describe("Home memory tools", () => {
     // Configured, but the store is not open: configuration is recorded for a
     // session that has no canonical file yet, and a tool call never opens it.
     const unopened = await memory(missing);
-    await unopened.configure({ model: { provider: "p", id: "m" }, tokenBudget: 1_000 });
+    await unopened.configure({ model: { provider: "p", id: "m" } });
     expect(unopened.open).toBe(false);
     const answer = await callTool(homeMemoryTools(() => unopened), "zoom", { id: 0, n: 1 });
     expect(answer.details).toEqual({ status: "unavailable", reason: "memory-unavailable" });

@@ -9,7 +9,7 @@ import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
-  createEpisodicTokenBudget, EpisodicMemoryError,
+  EpisodicMemoryError,
   type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
 } from "./episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
@@ -91,14 +91,12 @@ async function fixture(label: string, messages: number): Promise<RecoveryFixture
 async function openMemory(
   fx: RecoveryFixture,
   summarizer: EpisodicSummarizer = stubSummarizer,
-  budget = createEpisodicTokenBudget(2_000_000_000),
   limits: Partial<EpisodicLimits> = {},
 ): Promise<EpisodicMemory> {
   return EpisodicMemory.open({
     workspace: fx.workspace,
     sessionId: fx.sessionId,
     sessionFile: fx.sessionFile,
-    budget,
     summarizer,
     limits: { viewBytes: 4_096, jobs: 4, retryMs: 1, ...limits },
     diagnostic: record => fx.diagnostics.push(record),
@@ -177,7 +175,7 @@ async function writeChildProgram(fx: RecoveryFixture, readyMarker: string): Prom
   const program = join(fx.root, "child.mjs");
   const hook = join(fx.root, "hook.mjs");
   await writeFile(hook, `import { registerHooks } from "node:module";\nimport { pathToFileURL } from "node:url";\nregisterHooks({\n  resolve(specifier, context, nextResolve) {\n    try { return nextResolve(specifier, context); }\n    catch (error) {\n      if (specifier.endsWith(".js")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n      throw error;\n    }\n  },\n});\nawait import(pathToFileURL(process.argv[1]).href);\n`, "utf8");
-  await writeFile(program, `import { existsSync } from "node:fs";\nimport { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { createEpisodicTokenBudget } from ${JSON.stringify(CONTRACT_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId, marker] = process.argv.slice(2);\nconst zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  budget: createEpisodicTokenBudget(2000000000),\n  limits: { viewBytes: 4096, jobs: 4, retryMs: 1 },\n  summarizer: async (request) => {\n    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);\n    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };\n  },\n  sleep: async () => {},\n});\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("ready\\n");\n// The parent appends the edit and then drops this marker; the window we are\n// testing is inside the commit that follows.\nfor (;;) {\n  if (existsSync(marker)) break;\n  await new Promise(resolve => setTimeout(resolve, 1));\n}\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("done\\n");\n`, "utf8");
+  await writeFile(program, `import { existsSync } from "node:fs";\nimport { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId, marker] = process.argv.slice(2);\nconst zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  limits: { viewBytes: 4096, jobs: 4, retryMs: 1 },\n  summarizer: async (request) => {\n    const last = request.turns[request.turns.length - 1].text.replace(/\\s+/g, " ").trim().slice(-200);\n    return { role: "assistant", content: [{ type: "text", text: last }], api: "faux", provider: "faux", model: "child", usage: zero, stopReason: "stop", timestamp: Date.now() };\n  },\n  sleep: async () => {},\n});\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("ready\\n");\n// The parent appends the edit and then drops this marker; the window we are\n// testing is inside the commit that follows.\nfor (;;) {\n  if (existsSync(marker)) break;\n  await new Promise(resolve => setTimeout(resolve, 1));\n}\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write("done\\n");\n`, "utf8");
   return { program, hook };
 }
 
@@ -236,15 +234,14 @@ describe("episodic memory crash recovery", () => {
   }, 120_000);
 
   it("keeps the token spend a killed child had already recorded", async () => {
-    // Spend is the one piece of a memory that no restart may hand back: a budget
-    // bounded in name is unbounded in practice if a crash resets it. The child is
-    // killed mid-pump, and the parent's reopen must both restore the spend and
-    // charge it against the same budget.
+    // Spend is the one piece of a memory that no restart may hand back: a crash
+    // must not reset the record of what was spent. The child is killed mid-pump,
+    // and the parent's reopen must restore the spend.
     const fx = await fixture("spend-crash", 12);
     const hook = join(fx.root, "hook.mjs");
     const program = join(fx.root, "spend-child.mjs");
     await writeFile(hook, `import { registerHooks } from "node:module";\nimport { pathToFileURL } from "node:url";\nregisterHooks({\n  resolve(specifier, context, nextResolve) {\n    try { return nextResolve(specifier, context); }\n    catch (error) {\n      if (specifier.endsWith(".js")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n      throw error;\n    }\n  },\n});\nawait import(pathToFileURL(process.argv[1]).href);\n`, "utf8");
-    await writeFile(program, `import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { createEpisodicTokenBudget } from ${JSON.stringify(CONTRACT_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId] = process.argv.slice(2);\nconst usage = { input: 80, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 100, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  budget: createEpisodicTokenBudget(100000),\n  limits: { viewBytes: 4096, jobs: 1, retryMs: 1 },\n  summarizer: async (request) => ({\n    role: "assistant", content: [{ type: "text", text: \`spend line \${request.turns.length}\` }],\n    api: "faux", provider: "faux", model: "child", usage, stopReason: "stop", timestamp: Date.now(),\n  }),\n  sleep: async () => {},\n});\nprocess.stdout.write("opened\\n");\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write(\`spent \${memory.status().tokens.used}\\n\`);\nfor (;;) await new Promise(resolve => setTimeout(resolve, 5));\n`, "utf8");
+    await writeFile(program, `import { EpisodicMemory } from ${JSON.stringify(EPISODIC_MEMORY_MODULE)};\nimport { TronWorkspace } from ${JSON.stringify(WORKSPACE_MODULE)};\n\nconst [home, sessionFile, sessionId] = process.argv.slice(2);\nconst usage = { input: 80, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 100, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };\nconst workspace = new TronWorkspace(home);\nconst memory = await EpisodicMemory.open({\n  workspace, sessionId, sessionFile,\n  limits: { viewBytes: 4096, jobs: 1, retryMs: 1 },\n  summarizer: async (request) => ({\n    role: "assistant", content: [{ type: "text", text: \`spend line \${request.turns.length}\` }],\n    api: "faux", provider: "faux", model: "child", usage, stopReason: "stop", timestamp: Date.now(),\n  }),\n  sleep: async () => {},\n});\nprocess.stdout.write("opened\\n");\nawait memory.entriesCommitted(sessionId);\nprocess.stdout.write(\`spent \${memory.status().tokens.used}\\n\`);\nfor (;;) await new Promise(resolve => setTimeout(resolve, 5));\n`, "utf8");
     const child = spawn(process.execPath, ["--experimental-transform-types", "--import", hook, program, fx.home, fx.sessionFile, fx.sessionId], { stdio: ["ignore", "pipe", "pipe"] });
     children.push(child);
     let output = "";
@@ -269,12 +266,11 @@ describe("episodic memory crash recovery", () => {
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
 
-    // Reopened with the same budget, the memory starts from what the child spent.
+    // Reopened, the memory starts from what the child spent.
     const reopened = await EpisodicMemory.open({
       workspace: fx.workspace,
       sessionId: fx.sessionId,
       sessionFile: fx.sessionFile,
-      budget: createEpisodicTokenBudget(100_000),
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
       sleep: async () => {},
@@ -284,20 +280,19 @@ describe("episodic memory crash recovery", () => {
     expect(reopenedUsed).toBeGreaterThanOrEqual(durableSpend);
     await reopened.dispose();
 
-    // The restored spend is charged: a budget that is already spent is blocked
-    // rather than handed a fresh ceiling.
-    const exhausted = await EpisodicMemory.open({
+    // #493: spend is reported, never a ceiling: a reopened memory keeps it and is
+    // not blocked by it.
+    const again = await EpisodicMemory.open({
       workspace: fx.workspace,
       sessionId: fx.sessionId,
       sessionFile: fx.sessionFile,
-      budget: createEpisodicTokenBudget(reopenedUsed),
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
       sleep: async () => {},
     });
-    expect(exhausted.status().tokens.used).toBe(reopenedUsed);
-    expect(exhausted.status().tokens.limit).toBe(reopenedUsed);
-    await exhausted.dispose();
+    expect(again.status().tokens.used).toBe(reopenedUsed);
+    expect(again.status().blocked).toBeNull();
+    await again.dispose();
   }, 120_000);
 
   it("serializes state writes and snapshots them inside the serialized step", async () => {
@@ -363,7 +358,7 @@ describe("episodic memory crash recovery", () => {
   }, 120_000);
 
   it("resumes without waiting for the pump backlog", async () => {
-    // Raising a budget or clearing a block is an operator command: it must return
+    // Clearing a block is an operator command: it must return
     // once the memory is unblocked and re-read, not after the whole summary
     // catch-up, or the RPC holds the Home mutex for the entire pump.
     const fx = await fixture("resume-ingested", 12);
@@ -378,7 +373,7 @@ describe("episodic memory crash recovery", () => {
       await parked;
       return await stubSummarizer(request);
     };
-    const memory = await openMemory(fx, summarizer, createEpisodicTokenBudget(2_000_000_000), { maxRetries: 3 });
+    const memory = await openMemory(fx, summarizer, { maxRetries: 3 });
     await memory.entriesCommitted(fx.sessionId);
     expect(memory.status().blocked?.reason).toBe("retries-exhausted");
 
@@ -399,7 +394,7 @@ describe("episodic memory crash recovery", () => {
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       return await stubSummarizer(request);
     };
-    const memory = await openMemory(fx, slow, createEpisodicTokenBudget(2_000_000_000), { compactorTimeoutMs: 20, maxRetries: 1 });
+    const memory = await openMemory(fx, slow, { compactorTimeoutMs: 20, maxRetries: 1 });
     await memory.entriesCommitted(fx.sessionId);
     expect(memory.status().blocked?.reason).toBe("retries-exhausted");
     await memory.dispose();
@@ -407,7 +402,7 @@ describe("episodic memory crash recovery", () => {
 
   it("reads the persisted blocked state and spend without opening the memory", async () => {
     // `home.status` has to report what a restart would restore before any
-    // activation opens the store: the spend a budget is charged for, and the
+    // activation opens the store: its recorded spend, and the
     // block that refuses every activation.
     const fx = await fixture("state-peek", 6);
     const memory = await openMemory(fx, chargedSummarizer);
@@ -502,7 +497,6 @@ describe("episodic memory crash recovery", () => {
       workspace: prebuild,
       sessionId: fx.sessionId,
       sessionFile: fx.sessionFile,
-      budget: createEpisodicTokenBudget(2_000_000_000),
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 4, retryMs: 1 },
       sleep: async () => {},
