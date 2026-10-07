@@ -49,7 +49,8 @@ it the commits the runtime reports, and sends each activation the view it render
   a mismatch. When a source parse fails, the reader compares file identity, size,
   modification time and change time across the read. If these differ, or the
   final snapshot cannot be inspected, ingestion leaves the cursor unchanged and
-  unblocked; the next commit/open retries from the source. A stable malformed
+  unblocked; the next ingestion attempt (for example, a commit or activation)
+  retries from the source. A stable malformed
   file still blocks as `source-unavailable`. The session file remains append-only
   under its owner; the reader neither repairs nor migrates it, and whole-file
   reads are bounded per line.

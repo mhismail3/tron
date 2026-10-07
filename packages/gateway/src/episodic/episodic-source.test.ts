@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { EpisodicMemoryError, type EpisodicSummarizer } from "./episodic-contract.js";
+import { EpisodicMemoryError, type EpisodicDiagnostic, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { readCanonicalSession } from "./episodic-source.js";
 
@@ -57,13 +57,14 @@ async function fixture(label: string): Promise<SourceFixture> {
   return { root, home, sessionFile, sessionId, manager, workspace, catalogPath: join(home, "workspace", "state", "episodic", sessionId, "catalog.jsonl") };
 }
 
-function memoryFor(fx: SourceFixture, limits: { maxSourceLineBytes?: number } = {}): Promise<EpisodicMemory> {
+function memoryFor(fx: SourceFixture, limits: { maxSourceLineBytes?: number } = {}, diagnostic?: (record: EpisodicDiagnostic) => void): Promise<EpisodicMemory> {
   return EpisodicMemory.open({
     workspace: fx.workspace,
     sessionId: fx.sessionId,
     sessionFile: fx.sessionFile,
     summarizer: stubSummarizer,
     limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, ...limits },
+    ...(diagnostic ? { diagnostic } : {}),
     sleep: async () => {},
   });
 }
@@ -150,13 +151,16 @@ describe("episodic canonical source reader", () => {
     const header = raw.split("\n")[0]!;
     await appendFile(broken, `${header}\nnot json\n`);
     await expect(readCanonicalSession({ path: broken, sessionId: fx.sessionId, maxLineBytes: 1_024 })).rejects.toThrowError(/not JSON/u);
+    const stableInvalidDiagnostics: EpisodicDiagnostic[] = [];
     const stableInvalidMemory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: broken,
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+      diagnostic: record => stableInvalidDiagnostics.push(record),
     });
     await stableInvalidMemory.entriesCommitted(fx.sessionId);
     expect(stableInvalidMemory.status().blocked?.reason).toBe("source-unavailable");
+    expect(stableInvalidDiagnostics.some(record => record.event === "episodic.source-read-retried")).toBe(false);
     await stableInvalidMemory.dispose();
 
     const oversized = join(fx.root, "oversized.jsonl");
@@ -240,7 +244,8 @@ describe("episodic canonical source reader", () => {
     const stable = await readFile(fx.sessionFile);
     const invalid = Buffer.from(`${stable.toString("utf8").split("\n")[0]}\nnot json\n`);
     await writeFile(fx.sessionFile, invalid);
-    const memory = await memoryFor(fx);
+    const diagnostics: EpisodicDiagnostic[] = [];
+    const memory = await memoryFor(fx, {}, record => diagnostics.push(record));
     const probe = await fsPromises.open(fx.sessionFile, "r");
     const prototype = Object.getPrototypeOf(probe) as { read: (...args: unknown[]) => Promise<{ bytesRead: number }> };
     await probe.close();
@@ -260,6 +265,10 @@ describe("episodic canonical source reader", () => {
       readSpy.mockRestore();
     }
     expect(rewritten).toBe(true);
+    expect(diagnostics).toContainEqual({
+      event: "episodic.source-read-retried", level: "warning",
+      message: "Canonical session changed during a failed read; ingestion will retry on the next source update",
+    });
     expect(memory.status().blocked).toBeNull();
     expect(memory.status().messages).toBe(0);
     await memory.entriesCommitted(fx.sessionId);

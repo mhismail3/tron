@@ -545,8 +545,14 @@ export class EpisodicMemory {
       }
     } catch (error) {
       // A concurrent in-place rewrite can make a syntactically invalid read a
-      // transient cut. Leave the cursor untouched so the next commit re-reads.
-      if (error instanceof EpisodicSourceChangedError) return;
+      // transient cut. Leave the cursor untouched so the next ingestion retries.
+      if (error instanceof EpisodicSourceChangedError) {
+        this.diagnostic({
+          event: "episodic.source-read-retried", level: "warning",
+          message: "Canonical session changed during a failed read; ingestion will retry on the next source update",
+        });
+        return;
+      }
       if (error instanceof EpisodicMemoryError && error.kind === "source") {
         await this.block("source-unavailable", error.message);
         return;
