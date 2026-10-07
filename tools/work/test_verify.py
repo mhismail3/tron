@@ -15,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import verify
@@ -65,6 +66,13 @@ def git(cwd: Path, *args: str) -> str:
 
 
 class VerifyFixture(unittest.TestCase):
+    def test_live_home_environment_fails_before_check_selection(self):
+        root = Path(__file__).resolve().parents[2]
+        live_home = Path.home() / ".tron"
+        with mock.patch.dict(os.environ, {"PI_SESSION_FILE": str(live_home / "sessions" / "guard.jsonl")}):
+            with self.assertRaisesRegex(verify.VerifyError, "Tron-home environment"):
+                verify.verify(root, {})
+
     def test_scale_suite_selector_is_narrow(self):
         root = Path(__file__).resolve().parents[2]
         config = json.loads((root / ".github/work.json").read_text())

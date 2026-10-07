@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
@@ -206,7 +206,7 @@ describe("DirectBashProcessOwner", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-env-"));
     roots.push(root);
     const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), "opaque-session-561");
-    const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SESSION_ID", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT"] as const;
+    const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SESSION_ID", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT", "TRON_DATA_DIR", "TRON_HOME_NAME"] as const;
     const previous = new Map(names.map(name => [name, process.env[name]]));
     process.env.PI_SUBAGENTS_TEMP_ROOT = join(root, "tron", "internal", "subagents");
     process.env.PI_CODING_AGENT_DIR = join(root, "tron", "agent");
@@ -215,6 +215,10 @@ describe("DirectBashProcessOwner", () => {
     process.env.PI_SUBAGENT_PARENT_SESSION = "supervision-parent";
     process.env.TRON_GATEWAY_SUPERVISED = "1";
     process.env.TRON_GATEWAY_PAYLOAD_ROOT = join(root, "tron", "payload");
+    process.env.TRON_DATA_DIR = join(root, "overridden-live-home");
+    process.env.TRON_HOME_NAME = "alternate-live-home";
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${join(root, "overridden-live-home", "bin")}${delimiter}${previousPath ?? ""}`;
     try {
       const result = await owner.toolDefinition(root).execute(
         "environment", { command: "env | sort" }, undefined, undefined, undefined,
@@ -224,9 +228,11 @@ describe("DirectBashProcessOwner", () => {
       for (const name of names.filter(name => name !== "PI_SESSION_ID")) {
         expect(output).not.toContain(`${name}=`);
       }
-      expect(output).not.toContain(`${process.env.HOME}/.tron/`);
-      expect(output).not.toContain(`${process.env.HOME}/.tron-dev/`);
+      expect(output).not.toContain("overridden-live-home");
+      expect(output).not.toContain("alternate-live-home");
     } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
       for (const [name, value] of previous) {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;

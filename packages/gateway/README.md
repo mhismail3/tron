@@ -3257,13 +3257,16 @@ administrative work, and shell grandchildren inferred from command syntax remain
 this surface and continue through their existing transcript/tool presentation. The built-in
 foreground bash owner gives each shell a filtered snapshot: it withholds all inherited
 `PI_*` and `TRON_GATEWAY_*` variables, then supplies only that canonical session's opaque
-`PI_SESSION_ID` for `scripts/tron work`; PATH entries rooted inside either Tron home are also
-removed so a shell cannot recover the home through command lookup. The delegated-provider
+`PI_SESSION_ID` for `scripts/tron work`; PATH entries rooted inside the resolved live Tron
+home are also removed so a shell cannot recover that home through command lookup. The delegated-provider
 keeps its separate in-process `PI_SUBAGENTS_TEMP_ROOT` for pi-subagents children; arbitrary
-shell commands and their process trees do not receive that live-home root or Gateway
-supervision/payload identity. Both
-Gateway Vitest configurations fail during setup if any inherited environment value points
-into `~/.tron` or `~/.tron-dev`.
+shell commands and their process trees do not receive that live-home root, Gateway
+supervision/payload identity, or the `TRON_DATA_DIR` and `TRON_HOME_NAME` selectors. PATH
+entries under the resolved live home are removed. Gateway Vitest configurations (regular,
+scale and corpus), Node test scripts, and `scripts/tron work verify` share one environment
+policy and fail before tests or checks are selected when an inherited value resolves into a
+live Tron home. The policy expands SDK-style `~` paths and normalizes dot segments, including
+path-list entries.
 
 `SessionProcessActivity` gives subagent rows a stable namespaced `processId`, typed
 source/mode/lifecycle, bounded current-tool/output facts,

@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { delimiter, join, resolve, sep } from "node:path";
-import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
+import { isTronHomePath } from "../tron-home-environment-policy.mjs";
+import { resolveTronHome } from "../tron-home.js";
 import {
   createBashToolDefinition,
   getShellConfig,
@@ -18,12 +19,6 @@ const TERMINATED_OUTPUT_MAX_MS = 2_000;
 const ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 /** Pi's own bound on a bash timeout (the largest `setTimeout` delay). */
 const MAX_TIMEOUT_MS = 2_147_483_647;
-const TRON_HOME_PATHS = [resolve(homedir(), ".tron"), resolve(homedir(), ".tron-dev")];
-
-function isTronHomePath(value: string): boolean {
-  return TRON_HOME_PATHS.some((home) => value === home || value.startsWith(`${home}${sep}`));
-}
-
 /**
  * The tool's `timeout` (seconds) as milliseconds, validated exactly as Pi's own
  * bash operations do. `BashOperations.exec` owns the timeout: Pi's tool only
@@ -100,11 +95,14 @@ export class DirectBashProcessOwner {
    * paths or supervision controls to arbitrary shell commands. */
   private commandEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const commandEnvironment = Object.fromEntries(
-      Object.entries(environment ?? process.env).filter(([name]) => !name.startsWith("PI_") && !name.startsWith("TRON_GATEWAY_")),
+      Object.entries(environment ?? process.env).filter(([name]) =>
+        !name.startsWith("PI_") && !name.startsWith("TRON_GATEWAY_") && name !== "TRON_DATA_DIR" && name !== "TRON_HOME_NAME"),
     );
     commandEnvironment.PI_SESSION_ID = this.sessionId;
+    const liveHomes = [resolveTronHome()];
     if (commandEnvironment.PATH) {
-      commandEnvironment.PATH = commandEnvironment.PATH.split(delimiter).filter((entry) => !isTronHomePath(entry)).join(delimiter);
+      commandEnvironment.PATH = commandEnvironment.PATH.split(delimiter)
+        .filter((entry) => !isTronHomePath(entry, liveHomes)).join(delimiter);
     }
     return commandEnvironment;
   }
