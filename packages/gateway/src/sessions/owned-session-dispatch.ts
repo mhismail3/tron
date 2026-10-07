@@ -63,11 +63,6 @@ export class OwnedSessionDispatch {
     return this.sessions.clearOwnedOperationMarker(sessionId, operationId);
   }
 
-  /** A neutral observation never interprets a RuntimeSlot lifecycle as success. */
-  observe<T>(handle: OperationHandle<T>): Promise<T> {
-    return handle.completion;
-  }
-
   /** Apply only to the opted-in task operation. The deadline is intentionally
    * not configurable in production; tests advance the timer by the fixed value. */
   async enforceDeadline<T>(handle: OperationHandle<T>): Promise<
