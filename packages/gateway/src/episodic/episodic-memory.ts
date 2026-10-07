@@ -216,6 +216,9 @@ export class EpisodicMemory {
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
+      if (snapshot.present) await memory.enqueueAppend(() => memory.store.checkpoint({
+        messages: memory.messages.values(), nodes: memory.nodes.values(), state: memory.currentStoreState(), watermark: memory.revision - 1,
+      }));
       return memory;
     } catch (error) {
       EpisodicMemory.openStores.delete(storeKey);
@@ -590,6 +593,13 @@ export class EpisodicMemory {
     this.sourceCursor = cut.cursor;
     this.sourceBranch = cut.branch;
     await this.saveState();
+    await this.enqueueAppend(() => this.store.checkpoint({
+      messages: this.messages.values(), nodes: this.nodes.values(), state: this.currentStoreState(), watermark: this.revision - 1,
+    }));
+  }
+
+  private currentStoreState(): EpisodicStoreState {
+    return { version: EPISODIC_STORE_VERSION, generation: this.generation, cursor: this.sourceCursor, blocked: this.blocked, spend: this.spend };
   }
 
   /** Repair survivors of an interrupted chunked invalidation before serving. */

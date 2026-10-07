@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, mkdir, open, type FileHandle } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readSecureJson } from "../util/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
@@ -40,6 +40,7 @@ interface StorePaths {
   catalog: string;
   nodes: string;
   state: string;
+  checkpointPointer: string;
 }
 
 export interface EpisodicStoreSnapshot {
@@ -66,7 +67,7 @@ export class EpisodicStore {
 
   private async paths(): Promise<StorePaths> {
     const root = join(await this.workspaceStateRoot(), "episodic", this.sessionId);
-    return { root, initialized: join(root, "initialized.json"), catalog: join(root, "catalog.jsonl"), nodes: join(root, "nodes.jsonl"), state: join(root, "state.json") };
+    return { root, initialized: join(root, "initialized.json"), catalog: join(root, "catalog.jsonl"), nodes: join(root, "nodes.jsonl"), state: join(root, "state.json"), checkpointPointer: join(root, "checkpoint.current.json") };
   }
 
   /** The workspace's `state/` root. The store never creates it here: creation
@@ -99,22 +100,25 @@ export class EpisodicStore {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
     }
 
-    const catalogRead = await readJsonl<EpisodicMessageRecord>(paths.catalog, this.maxLineBytes, isCatalogRecord);
-    const nodesRead = await readJsonl<EpisodicNodeLogRecord>(paths.nodes, this.maxLineBytes, isNodeLogRecord);
     const stateRead = await readSecureJson<unknown>(paths.state, STATE_MAX_BYTES);
     let state: EpisodicStoreState | null = null;
     if (stateRead.present) state = validateState(stateRead.value);
+    const checkpoint = await readCheckpoint(paths, this.maxLineBytes);
+    const catalogRead = await readJsonl<EpisodicMessageRecord>(paths.catalog, this.maxLineBytes, isCatalogRecord);
+    const nodesRead = await readJsonl<EpisodicNodeLogRecord>(paths.nodes, this.maxLineBytes, isNodeLogRecord);
+    const catalogRecords = checkpoint.messages.concat(catalogRead.records.filter(record => record.revision > checkpoint.watermark));
+    const nodeRecords = checkpoint.nodes.concat(nodesRead.records.filter(record => record.revision > checkpoint.watermark));
     let highestGeneration = 0;
-    let highestRevision = 0;
-    for (const record of nodesRead.records) {
+    let highestRevision = checkpoint.watermark;
+    for (const record of nodeRecords) {
       if ("nodes" in record && record.generation > highestGeneration) highestGeneration = record.generation;
       if (record.revision > highestRevision) highestRevision = record.revision;
     }
-    for (const record of catalogRead.records) if (record.revision > highestRevision) highestRevision = record.revision;
+    for (const record of catalogRecords) if (record.revision > highestRevision) highestRevision = record.revision;
     return {
       present: true,
-      messages: catalogRead.records,
-      nodes: nodesRead.records,
+      messages: catalogRecords,
+      nodes: nodeRecords,
       state,
       recoveredTornBytes: catalogRead.tornBytes + nodesRead.tornBytes,
       highestGeneration,
@@ -152,6 +156,39 @@ export class EpisodicStore {
   async saveState(state: EpisodicStoreState): Promise<void> {
     await this.ensureRoot();
     await durableAtomicWriteJson((await this.paths()).state, state, 0o600);
+  }
+
+  /** Publish a bounded-line checkpoint before reclaiming append history. */
+  async checkpoint(options: { messages: Iterable<EpisodicMessageRecord>; nodes: Iterable<EpisodicNodeRecord>; state: EpisodicStoreState; watermark: number }): Promise<void> {
+    const paths = await this.ensureRoot();
+    await durableAtomicWriteJson(paths.state, options.state, 0o600);
+    const name = `checkpoint-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const staging = join(paths.root, ".checkpoint-staging");
+    const stagingInfo = await lstat(staging).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+    if (stagingInfo) {
+      if (!stagingInfo.isDirectory() || stagingInfo.uid !== process.getuid?.() || (stagingInfo.mode & 0o077) !== 0) {
+        throw new EpisodicMemoryError("unsafe-store", "Episodic checkpoint staging entry is unsafe");
+      }
+      await rm(staging, { recursive: true, force: false });
+    }
+    await mkdir(staging, { mode: 0o700 });
+    try {
+      await writeCheckpointLines(join(staging, "catalog.jsonl"), options.messages, this.maxLineBytes);
+      await writeCheckpointLines(join(staging, "nodes.jsonl"), options.nodes, this.maxLineBytes);
+      await writeFile(join(staging, "state.json"), `${JSON.stringify(options.state)}\n`, { mode: 0o600 });
+      const stateFile = await open(join(staging, "state.json"), constants.O_RDONLY);
+      try { await syncDurably(stateFile); } finally { await stateFile.close(); }
+      await syncDirectory(staging);
+      const checkpoint = join(paths.root, name);
+      await rename(staging, checkpoint);
+      await syncDirectory(paths.root);
+      await durableAtomicWriteJson(paths.checkpointPointer, { version: 1, directory: name, watermark: options.watermark }, 0o600);
+      await truncateLog(paths.catalog, paths.root);
+      await truncateLog(paths.nodes, paths.root);
+      await cleanupCheckpoints(paths, name);
+    } catch (error) {
+      throw new EpisodicMemoryError("invalid-store", `Episodic checkpoint could not be committed: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+    }
   }
 
   private async append(path: string, record: unknown): Promise<void> {
@@ -194,6 +231,60 @@ export class EpisodicStore {
       catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record could not be recorded"); }
     }
     return paths;
+  }
+}
+
+async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<{ messages: EpisodicMessageRecord[]; nodes: EpisodicNodeLogRecord[]; watermark: number }> {
+  const pointer = await readSecureJson<unknown>(paths.checkpointPointer, 4_096);
+  if (!pointer.present) return { messages: [], nodes: [], watermark: 0 };
+  const value = pointer.value as { version?: unknown; directory?: unknown; watermark?: unknown };
+  if (!value || value.version !== 1 || typeof value.directory !== "string" || !/^checkpoint-[A-Za-z0-9.-]+$/u.test(value.directory)
+    || typeof value.watermark !== "number" || !Number.isSafeInteger(value.watermark) || value.watermark < 0) {
+    throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint pointer is malformed");
+  }
+  const directory = join(paths.root, value.directory);
+  await assertOwnerDirectory(directory);
+  const checkpointState = await readSecureJson<unknown>(join(directory, "state.json"), STATE_MAX_BYTES);
+  if (!checkpointState.present) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint state is missing");
+  validateState(checkpointState.value);
+  // state.json is the authority and can advance independently of catalog/node
+  // revisions (for example, a spend or blocked-state update after publication).
+  const messages = await readJsonl<EpisodicMessageRecord>(join(directory, "catalog.jsonl"), maxLineBytes, isCatalogRecord);
+  const nodes = await readJsonl<EpisodicNodeLogRecord>(join(directory, "nodes.jsonl"), maxLineBytes, isNodeLogRecord);
+  return { messages: messages.records, nodes: nodes.records, watermark: value.watermark };
+}
+
+async function writeCheckpointLines<T>(path: string, records: Iterable<T>, maxLineBytes: number): Promise<void> {
+  const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    for (const record of records) {
+      const line = `${JSON.stringify(record)}\n`;
+      if (Buffer.byteLength(line, "utf8") > maxLineBytes) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint record exceeds the store's line bound");
+      await handle.writeFile(line, "utf8");
+    }
+    await syncDurably(handle);
+  } finally { await handle.close(); }
+}
+
+async function truncateLog(path: string, root: string): Promise<void> {
+  const temp = join(root, `.checkpoint-log-${Math.random().toString(36).slice(2)}`);
+  const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try { await syncDurably(handle); } finally { await handle.close(); }
+  await rename(temp, path);
+  await syncDirectory(root);
+}
+
+async function cleanupCheckpoints(paths: StorePaths, active: string): Promise<void> {
+  const names = await readdir(paths.root);
+  for (const name of names) {
+    if (name === active || name === "checkpoint.current.json" || name === "catalog.jsonl" || name === "nodes.jsonl" || name === "state.json" || name === "initialized.json") continue;
+    if (name !== ".checkpoint-staging" && !name.startsWith("checkpoint-")) continue;
+    const path = join(paths.root, name);
+    const info = await lstat(path);
+    if (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0 || (name === ".checkpoint-staging" ? !info.isDirectory() : !info.isDirectory())) {
+      throw new EpisodicMemoryError("unsafe-store", "Episodic checkpoint cleanup encountered an unsafe entry");
+    }
+    await rm(path, { recursive: true, force: false });
   }
 }
 

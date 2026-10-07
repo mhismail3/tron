@@ -62,9 +62,11 @@ lazily on the first write, owner-only files, secure bounded reads):
 ```text
 state/episodic/<sourceSessionId>/
   initialized.json   # namespace-local version marker
-  catalog.jsonl      # append-only projected messages
-  nodes.jsonl        # append-only node records and invalidation chunks
-  state.json         # source cursor, generation, blocked state
+  catalog.jsonl      # bounded post-checkpoint projected-message tail
+  nodes.jsonl        # bounded post-checkpoint node/invalidation tail
+  state.json         # authoritative source cursor, generation, blocked state
+  checkpoint.current.json # committed watermark and immutable checkpoint directory
+  checkpoint-*/      # live catalog/node JSONL plus the captured state
 ```
 
 - Every record is written with one append and fsynced **before** it is used
@@ -73,10 +75,16 @@ state/episodic/<sourceSessionId>/
   cannot be lost with the records already acknowledged inside it.
 - Files are opened `O_NOFOLLOW`, verified to be owner-only regular files, and
   checked against a `lstat` dev/ino so a replaced path cannot be written.
-- The catalog and node log are append-only. The latest record for a message
-  index, and for a node address, wins; `revision` is a store-wide monotonic
-  sequence that orders them. Appends are chained, so the durable order is the
-  order the owner asked for and the in-memory publication order matches it.
+- Catalog and node records are append-only between checkpoints. The latest
+  record for a message index, and for a node address, wins; `revision` orders
+  records. A checkpoint streams the current live projections to bounded-line
+  JSONL in an owner-only staging directory, syncs the files and directory, then
+  renames it to an immutable directory and publishes `checkpoint.current.json`.
+  The pointer watermark identifies records represented by that checkpoint.
+  Reads validate the checkpoint and every log record, then apply only tail
+  records above the watermark. `state.json` remains authoritative; its exact
+  captured value is also stored in the checkpoint and must match on open.
+  Superseded checkpoint data is reclaimed only after pointer publication.
 - A **torn trailing line** is a write that never became durable. It is
   discarded and the file is truncated to its last complete record, because
   leaving it would let the next append concatenate onto it. The bytes discarded
@@ -98,6 +106,12 @@ state/episodic/<sourceSessionId>/
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
   budget; #420 owns restore).
+- A successful source ingestion and every open of an existing store publish a
+  fold-forward checkpoint before returning/admitting further writes. Once the
+  pointer is durable, append logs are replaced by empty owner-only files and
+  superseded checkpoint directories are removed. Legacy JSONL logs seed this
+  same checkpoint representation; no schema migration or canonical history
+  mutation is performed.
 - The version is `EPISODIC_STORE_VERSION` (1). There is no migration path: a
   store this owner cannot read is refused rather than guessed at.
 
@@ -256,12 +270,11 @@ projection is never stale.
    revision expands the affected parts and refits the live view instead
    (departure 4). Measured by `episodic-memory.scale.test.ts`: 10,000 messages in
    0.20 s and 100,000 in 2.5 s (every node built; the same shape as a real
-   memory), with the worst synchronous slice 6.3 ms. That is why there is
-   deliberately **no persisted view checkpoint**: a fold that costs seconds must
-   not run per commit, and the live view is maintained incrementally instead. A
-   restart therefore refolds the view and may produce a slightly coarser one than
-   the process was maintaining; the recipe's own load path does the same, and the
-   cost is one cache miss, not correctness.
+   memory), with the worst synchronous slice 6.3 ms. The persisted store
+   checkpoint bounds replay of catalog and node history; it does not persist the
+   derived presentation view. The live view is maintained incrementally, and a
+   restart refolds it from the checkpointed live nodes. The recipe's own load
+   path does the same, and the cost is one cache miss, not correctness.
 4. **A revoked merged part is expanded in the view.** Only level-0 parts may be
    unbuilt (gist §6), so a part whose node was invalidated is replaced by the two
    lines under it, recursively down to the leaves, and `fit` merges them again as
