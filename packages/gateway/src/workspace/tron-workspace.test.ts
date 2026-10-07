@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TronWorkspace } from "./tron-workspace.js";
+import { TronWorkspace, type TronWorkspaceUnavailableCause } from "./tron-workspace.js";
 import * as durableJson from "../util/durable-json.js";
 import lockfile from "proper-lockfile";
 
@@ -21,7 +21,16 @@ async function fixture() {
   roots.push(root);
   return root;
 }
-function owner(home: string) { const value = new TronWorkspace(home); owners.push(value); return value; }
+function owner(home: string, unavailable?: (cause: TronWorkspaceUnavailableCause) => void) {
+  const value = new TronWorkspace(home, unavailable ? { unavailable } : {});
+  owners.push(value);
+  return value;
+}
+/** The keys every shipped build accepts in the shared record. A shipped build
+ * makes the whole workspace unavailable on any other key, and a rollback reads
+ * what this build wrote, so this set is an external contract that never grows:
+ * a new feature records its setup in its own file (#507). */
+const SHIPPED_SHARED_RECORD_KEYS = ["knowledgeInitialized", "version"];
 
 describe("Tron internal workspace", () => {
   it("initializes once, retains content, and does not create speculative namespaces", async () => {
@@ -47,17 +56,23 @@ describe("Tron internal workspace", () => {
     await rm(root, { recursive: true });
     expect((await first.describe()).available).toBe(false);
     await first.dispose();
-    expect((await owner(home).describe()).available).toBe(false);
+    const causes: TronWorkspaceUnavailableCause[] = [];
+    expect((await owner(home, cause => causes.push(cause)).describe()).available).toBe(false);
+    expect(causes).toEqual(["missing-root"]);
     await expect(lstat(root)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects same-path directory replacement during a live ownership period", async () => {
     const home = join(await fixture(), "home");
-    const value = owner(home);
+    const causes: TronWorkspaceUnavailableCause[] = [];
+    const value = owner(home, cause => causes.push(cause));
     const { root } = await value.describe();
     await rename(root, `${root}-original`);
     await mkdir(root, { mode: 0o700 });
     expect((await value.describe()).available).toBe(false);
+    // Reported once, when it happens, not on every later read.
+    expect((await value.describe()).available).toBe(false);
+    expect(causes).toEqual(["root-changed"]);
   });
 
   it.each(["file", "symlink", "permissions", "readOnly"])("preserves an unsafe %s root and does not repair it", async kind => {
@@ -69,7 +84,9 @@ describe("Tron internal workspace", () => {
     if (kind === "permissions") await chmod(path, 0o777);
     if (kind === "readOnly") { await mkdir(path); await chmod(path, 0o500); }
     const before = await lstat(path);
-    expect((await owner(home).describe()).available).toBe(false);
+    const causes: TronWorkspaceUnavailableCause[] = [];
+    expect((await owner(home, cause => causes.push(cause)).describe()).available).toBe(false);
+    expect(causes).toEqual(["unsafe-directory"]);
     expect((await lstat(path)).ino).toBe(before.ino);
     expect((await lstat(path)).mode).toBe(before.mode);
   });
@@ -80,7 +97,9 @@ describe("Tron internal workspace", () => {
     await mkdir(state, { recursive: true, mode: 0o700 });
     const path = join(state, "initialized.json");
     await writeFile(path, contents, { mode: 0o600 });
-    expect((await owner(home).describe()).available).toBe(false);
+    const causes: TronWorkspaceUnavailableCause[] = [];
+    expect((await owner(home, cause => causes.push(cause)).describe()).available).toBe(false);
+    expect(causes).toEqual(["invalid-record"]);
     expect(await readFile(path, "utf8")).toBe(contents);
     await expect(lstat(join(home, "workspace"))).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -92,7 +111,9 @@ describe("Tron internal workspace", () => {
     await writeFile(join(root, "kept.txt"), "existing data");
     const publication = vi.spyOn(durableJson, "durableAtomicWriteJson")
       .mockRejectedValueOnce(Object.assign(new Error("publication failed"), { code }));
-    expect((await owner(home).describe()).available).toBe(false);
+    const causes: TronWorkspaceUnavailableCause[] = [];
+    expect((await owner(home, cause => causes.push(cause)).describe()).available).toBe(false);
+    expect(causes).toEqual(["record-write-failed"]);
     expect(await readFile(join(root, "kept.txt"), "utf8")).toBe("existing data");
     await expect(lstat(join(home, "gateway/workspace-state/initialized.json"))).rejects.toMatchObject({ code: "ENOENT" });
     publication.mockRestore();
@@ -106,7 +127,9 @@ describe("Tron internal workspace", () => {
     const [a, b] = await Promise.all([stable.describe(), debug.describe()]);
     expect(a.available && b.available).toBe(true);
     expect(a.root).not.toBe(b.root);
-    expect(await owner(join(base, "stable")).describe()).toMatchObject({ available: false, reason: "owned_elsewhere" });
+    const causes: TronWorkspaceUnavailableCause[] = [];
+    expect(await owner(join(base, "stable"), cause => causes.push(cause)).describe()).toMatchObject({ available: false, reason: "owned_elsewhere" });
+    expect(causes).toEqual(["owned-elsewhere"]);
     await stable.dispose();
     expect((await owner(join(base, "stable")).describe()).available).toBe(true);
   });
@@ -164,6 +187,70 @@ describe("Tron internal workspace", () => {
     await expect(value.dispose()).resolves.toBeUndefined();
     spy.mockRestore();
     expect((await owner(home).describe()).available).toBe(true);
+  });
+
+  // #507 F1, F2: every feature's setup leaves the shared record readable by
+  // shipped builds (a rollback), and concurrent first-time setup of two
+  // features keeps both records.
+  it("records each feature's setup without changing what shipped builds read", async () => {
+    const home = join(await fixture(), "home");
+    const first = owner(home);
+    await Promise.all([first.markFeatureInitialized("knowledge"), first.markFeatureInitialized("episodic")]);
+    const shared = JSON.parse(await readFile(join(home, "gateway/workspace-state/initialized.json"), "utf8")) as Record<string, unknown>;
+    expect(Object.keys(shared).filter(key => !SHIPPED_SHARED_RECORD_KEYS.includes(key))).toEqual([]);
+    await first.dispose();
+    const reopened = owner(home);
+    expect((await reopened.describe()).available).toBe(true);
+    expect(await reopened.featureInitialized("knowledge")).toBe(true);
+    expect(await reopened.featureInitialized("episodic")).toBe(true);
+  });
+
+  // #507 F5: Knowledge's evidence in a record a shipped build wrote still counts.
+  it("reads Knowledge's setup from a shared record a shipped build wrote", async () => {
+    const home = join(await fixture(), "home");
+    await mkdir(join(home, "workspace"), { recursive: true, mode: 0o700 });
+    await chmod(home, 0o700);
+    const state = join(home, "gateway/workspace-state");
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    await chmod(join(home, "gateway"), 0o700);
+    await writeFile(join(state, "initialized.json"), JSON.stringify({ version: 1, knowledgeInitialized: true }), { mode: 0o600 });
+    const value = owner(home);
+    expect((await value.describe()).available).toBe(true);
+    expect(await value.featureInitialized("knowledge")).toBe(true);
+    expect(await value.featureInitialized("episodic")).toBe(false);
+  });
+
+  // #507 F4: a bad record of one feature refuses that feature only. Reading it
+  // as "never set up" would let lost data look like a fresh installation.
+  it.each(["{}", '{"version":2}', '{"version":1,"extra":true}', "null", "[]", "broken", "symlink", "permissions", "oversize"])("refuses only the feature whose own record is %s", async kind => {
+    const home = join(await fixture(), "home");
+    const setUp = owner(home);
+    await setUp.markFeatureInitialized("episodic");
+    await setUp.dispose();
+    const path = join(home, "gateway/workspace-state/episodic-initialized.json");
+    await rm(path);
+    if (kind === "symlink") {
+      await writeFile(join(home, "elsewhere.json"), '{"version":1}', { mode: 0o600 });
+      await symlink(join(home, "elsewhere.json"), path);
+    } else {
+      await writeFile(path, kind === "oversize" ? " ".repeat(257) : kind === "permissions" ? '{"version":1}' : kind, { mode: 0o600 });
+      if (kind === "permissions") await chmod(path, 0o644);
+    }
+    const before = await lstat(path);
+    const value = owner(home);
+    expect((await value.describe()).available).toBe(true);
+    await expect(value.featureInitialized("episodic")).rejects.toThrow(/episodic/u);
+    await expect(value.markFeatureInitialized("episodic")).rejects.toThrow(/episodic/u);
+    expect(await value.featureInitialized("knowledge")).toBe(false);
+    expect((await lstat(path)).ino).toBe(before.ino);
+  });
+
+  it("does not republish valid feature evidence", async () => {
+    const value = owner(join(await fixture(), "home"));
+    await value.markFeatureInitialized("episodic");
+    const publish = vi.spyOn(durableJson, "durableAtomicWriteJson");
+    await value.markFeatureInitialized("episodic");
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("disposal closes initialization and releases its lock idempotently", async () => {

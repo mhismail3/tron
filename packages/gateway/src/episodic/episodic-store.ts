@@ -79,13 +79,14 @@ export class EpisodicStore {
 
   async read(): Promise<EpisodicStoreSnapshot> {
     const paths = await this.paths();
+    const initialized = await this.featureInitialized();
     if (!(await directoryExists(paths.root))) {
       // The workspace-wide marker describes the shared container, never one
       // session: reading it per session refused every Home after the first (#483).
       // Marker first: `ensureRoot` creates the container before it sets the
       // marker, so a set marker proves the container existed, and a container
       // created concurrently after a missing-container read cannot look lost.
-      if (await this.workspace.featureInitialized("episodic") && !(await directoryExists(dirname(paths.root)))) {
+      if (initialized && !(await directoryExists(dirname(paths.root)))) {
         throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
       }
       return { present: false, messages: [], nodes: [], state: null, recoveredTornBytes: 0, highestGeneration: 0, highestRevision: 0 };
@@ -173,7 +174,13 @@ export class EpisodicStore {
     if (created) await syncDirectory(paths.root);
   }
 
+  private async featureInitialized(): Promise<boolean> {
+    try { return await this.workspace.featureInitialized("episodic"); }
+    catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record is invalid"); }
+  }
+
   private async ensureRoot(): Promise<StorePaths> {
+    await this.featureInitialized();
     const paths = await this.paths();
     const stateRoot = await this.workspaceStateRoot();
     await assertOwnerDirectory(stateRoot, true);
@@ -183,7 +190,8 @@ export class EpisodicStore {
       await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
       // The workspace marker is what tells a later start that a missing shared
       // container is lost state rather than a fresh installation.
-      await this.workspace.markFeatureInitialized("episodic");
+      try { await this.workspace.markFeatureInitialized("episodic"); }
+      catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record could not be recorded"); }
     }
     return paths;
   }

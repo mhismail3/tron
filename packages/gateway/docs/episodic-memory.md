@@ -86,11 +86,14 @@ state/episodic/<sourceSessionId>/
   live node whose children are missing or rebuilt refuses the store visibly
   (`invalid-store` / `unsafe-store`), and `episodic.store-refused` is raised.
   Nothing is silently skipped or migrated.
-- The workspace's feature marker records that the shared `state/episodic`
-  container was initialized, so a **deleted container is lost state**: it refuses
-  instead of restarting and re-spending every compactor call. The marker describes
-  the container, never one session. Each session's namespace is created lazily
-  inside it, so a session without one, such as a new Home session after another
+- The workspace feature record at
+  `gateway/workspace-state/episodic-initialized.json` records that the shared
+  `state/episodic` container was initialized, so a **deleted container is lost
+  state**: it refuses instead of restarting and re-spending every compactor call.
+  This strict version-1 record is separate from the frozen shared workspace
+  record. It describes the container, never one session. Each session's namespace
+  is created lazily inside it, so a session without one, such as a new Home
+  session after another
   session's memory set the marker, starts fresh (#483). Spend is recorded inside
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
