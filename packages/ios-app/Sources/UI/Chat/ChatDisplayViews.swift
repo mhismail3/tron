@@ -1607,9 +1607,13 @@ struct DisplaySheet: View {
                 detents: isVideo ? [.medium, .large] : [.large],
                 initialDetent: isVideo ? .medium : nil
             ) {
-                DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
+                let content = DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .tronDocumentTopBlurSurface()
+                if isVideo {
+                    content.tronTopBlurSurface()
+                } else {
+                    content.tronDocumentTopBlurSurface()
+                }
             }
         }
     }

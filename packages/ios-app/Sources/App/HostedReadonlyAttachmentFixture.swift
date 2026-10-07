@@ -165,19 +165,29 @@ private actor ReadonlyAttachmentGateway {
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64,
         ])
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64,
         ])
         writer.add(input)
         guard writer.startWriting() else { throw writer.error ?? URLError(.cannotCreateFile) }
         writer.startSession(atSourceTime: .zero)
-        for frame in 0..<30 {
+        for frame in 0..<300 {
             while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
             var buffer: CVPixelBuffer?
-            guard CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32ARGB, nil, &buffer) == kCVReturnSuccess,
+            guard CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, nil, &buffer) == kCVReturnSuccess,
                   let pixel = buffer else { throw URLError(.cannotCreateFile) }
             CVPixelBufferLockBaseAddress(pixel, [])
-            memset(CVPixelBufferGetBaseAddress(pixel), frame.isMultiple(of: 2) ? 0x40 : 0xC0, CVPixelBufferGetDataSize(pixel))
+            let base = CVPixelBufferGetBaseAddress(pixel)!.assumingMemoryBound(to: UInt8.self)
+            let stride = CVPixelBufferGetBytesPerRow(pixel)
+            for row in 0..<64 {
+                for column in 0..<64 {
+                    let offset = row * stride + column * 4
+                    base[offset] = 224
+                    base[offset + 1] = 220
+                    base[offset + 2] = 32
+                    base[offset + 3] = 255
+                }
+            }
             CVPixelBufferUnlockBaseAddress(pixel, [])
             guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 10)) else {
                 throw writer.error ?? URLError(.cannotCreateFile)

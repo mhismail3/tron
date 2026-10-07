@@ -1496,8 +1496,9 @@ Document-style sheets use the shared `TronDocumentSheet` for the standard
 configuration. Its default detents remain unchanged; a caller may explicitly
 provide an initial detent, in which case the shared owner keeps the other
 configured detents available for native dragging. Video display sheets use this
-to open at medium with large available, so their aspect-fit player and controls
-remain usable without auto-expanding the sheet.
+to open at medium with large available. Their player starts below the title's
+custom top blur rather than underlapping it, so the aspect-fit viewport and
+controls remain visible and usable without auto-expanding the sheet.
 
 `TronPresentation.swift` is the app-wide presentation boundary. The app root
 installs the selected type family and emerald interaction tint; every app-owned
