@@ -83,9 +83,102 @@ struct HostedChatDisplayFixture: View {
                     return target.generation
                 }
                 ready = true
-
             } catch { self.error = String(describing: error) }
         }
+    }
+}
+
+@MainActor
+struct HostedHomeDashboardFixture: View {
+    @State private var status: HomeStatusDTO?
+    @State private var isDesignating = false
+    @State private var route: String?
+    private let capabilityEnabled: Bool
+    private let darkAppearance: Bool
+    private let accessibilityType: Bool
+
+    init() {
+        let arguments = ProcessInfo.processInfo.arguments
+        capabilityEnabled = !arguments.contains("-home-capability-absent")
+        darkAppearance = arguments.contains("-home-dark")
+        accessibilityType = arguments.contains("-home-accessibility-type")
+        let phase: HomeStatusDTO.Phase = arguments.contains("-home-disabled") ? .disabled
+            : arguments.contains("-home-missing-session") ? .missingSession
+            : arguments.contains("-home-undesignated") ? .undesignated : .ready
+        _status = State(initialValue: Self.status(phase: phase))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if capabilityEnabled {
+                    Section {
+                        Button(action: activateHome) {
+                            HomePinnedRow(status: status, isDesignating: isDesignating)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("home-pinned-row")
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(SessionDashboardLayout.rowInsets)
+                    }
+                }
+                Section {
+                    Text("Ordinary session")
+                        .accessibilityIdentifier("ordinary-session-row")
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Sessions")
+            .navigationDestination(isPresented: Binding(
+                get: { route != nil },
+                set: { if !$0 { route = nil } }
+            )) {
+                if let route {
+                    Text("Profile route: \(route)")
+                        .accessibilityIdentifier("home-exact-profile-route")
+                }
+            }
+        }
+        .preferredColorScheme(darkAppearance ? .dark : .light)
+        .dynamicTypeSize(accessibilityType ? .accessibility3 : .large)
+        .tronPresentation()
+    }
+
+    private func activateHome() {
+        switch HomePinnedRowPolicy.action(for: status) {
+        case .open(let sessionID): route = "home-fixture:\(sessionID)"
+        case .designate:
+            isDesignating = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(80))
+                status = Self.status(phase: .ready)
+                isDesignating = false
+                if case .open(let sessionID) = HomePinnedRowPolicy.action(for: status) {
+                    route = "home-fixture:\(sessionID)"
+                }
+            }
+        case .unavailable:
+            break
+        }
+    }
+
+    private static func status(phase: HomeStatusDTO.Phase) -> HomeStatusDTO? {
+        let sessionPresent = phase != .undesignated && phase != .missingSession
+        let enabled = phase != .undesignated && phase != .disabled
+        var value: [String: JSONValue] = [
+            "phase": .string(phase.rawValue),
+            "activation": .object(["available": .bool(false)]),
+            "readiness": .object(["ready": .bool(phase == .ready), "gaps": .array([])]),
+            "recovery": .object(["action": .string("none")]),
+            "available": .bool(true), "enabled": .bool(enabled),
+            "live": .bool(false), "sessionPresent": .bool(sessionPresent),
+            "memory": .object(["configured": .bool(false), "open": .bool(false)]),
+        ]
+        if sessionPresent { value["sessionId"] = .string("home-current-session") }
+        if enabled { value["homeId"] = .string("home-fixture-id") }
+        value["generation"] = .number(1)
+        return try? HomeStatusDTO.decode(.object(value))
     }
 }
 

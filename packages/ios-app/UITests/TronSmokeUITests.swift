@@ -4,6 +4,55 @@ import Vision
 import XCTest
 
 final class TronSmokeUITests: XCTestCase {
+    @MainActor
+    func testHomePinnedRowCapabilityDesignationAndExactProfileRoute() {
+        continueAfterFailure = false
+        let unsupported = XCUIApplication()
+        unsupported.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
+        unsupported.launch()
+        XCTAssertFalse(unsupported.buttons["home-pinned-row"].exists)
+        XCTAssertTrue(unsupported.staticTexts["ordinary-session-row"].exists)
+        unsupported.terminate()
+
+        let ready = XCUIApplication()
+        ready.launchArguments = ["-tron-home-dashboard-fixture"]
+        ready.launch()
+        let home = ready.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 5))
+        home.tap()
+        XCTAssertTrue(ready.staticTexts["Profile route: home-fixture:home-current-session"].waitForExistence(timeout: 5))
+        ready.terminate()
+
+        for state in ["-home-undesignated", "-home-disabled", "-home-missing-session"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", state]
+            app.launch()
+            let setup = app.buttons["home-pinned-row"]
+            XCTAssertTrue(setup.waitForExistence(timeout: 5), state)
+            setup.tap()
+            XCTAssertTrue(app.staticTexts["Profile route: home-fixture:home-current-session"].waitForExistence(timeout: 5), state)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testHomePinnedRowLightDarkAndAccessibilityCaptures() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for type in ["normal", "accessibility"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture"]
+                if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
+                app.launch()
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["ordinary-session-row"].exists)
+                keepScreenshot(named: "home-pinned-\(appearance)-\(type)")
+                app.terminate()
+            }
+        }
+    }
+
     // Failure modes: an unexplained disabled control; pending work mistaken for
     // a lock; browsing/dismissal blocked; receipt settlement leaving controls stuck.
     @MainActor

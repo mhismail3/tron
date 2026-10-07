@@ -248,6 +248,8 @@ final class AppModel {
     let automationCatalog: AutomationCatalogCoordinator
     /// Focused-profile, disposable Home status; never a mirror of Home storage.
     let homeStatus = HomeStatusPresentationOwner()
+    /// Owns idempotent Home designation receipts independently of dashboard reads.
+    let homeDesignation: HomeDesignationCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
     /// The Library's bounded first-page projection and its preview images. Both
@@ -556,6 +558,12 @@ final class AppModel {
             clock: clock,
             performanceSignposts: appLogSignposts
         )
+        let homeDesignation = HomeDesignationCoordinator(
+            client: client,
+            lifecycle: lifecycle,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let sessionMutations = SessionMutationService(
             client: client,
             executor: mutationExecutor,
@@ -727,6 +735,7 @@ final class AppModel {
         self.knowledgeLibraryCache = knowledgeLibraryCache
         self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
+        self.homeDesignation = homeDesignation
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -4712,6 +4721,49 @@ final class AppModel {
 
     func unmountHomeStatus(surfaceToken: PresentationSurfaceToken) {
         homeStatus.retireSurface(surfaceToken)
+    }
+
+    /// Forms a profile-qualified route only from the current authenticated Home
+    /// projection; it never switches profiles based on a stale row tap.
+    func navigationRouteForHome(profileID: String, status: HomeStatusDTO) throws -> SessionNavigationRoute {
+        guard lifecycle.selectedProfileID == profileID,
+              connectionState == .connected,
+              gatewayInfo?.capabilities.contains("home.v1") == true,
+              homeStatus.isCapabilityEnabled,
+              homeStatus.status == status,
+              status.enabled, status.sessionPresent,
+              let sessionID = status.sessionId, !sessionID.isEmpty else {
+            throw CancellationError()
+        }
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: lifecycle.currentLifecycleGeneration
+        )
+    }
+
+    /// Designates Home through the mutation receipt owner, then requires a fresh
+    /// mounted `home.status` projection before exposing its session route.
+    func designateHomeAndRefreshStatus() async throws -> HomeStatusDTO {
+        guard let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
+        let designation = try await homeDesignation.designate(profileID: profileID)
+        guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+        await homeStatus.refreshMounted()
+        guard let status = homeStatus.status,
+              status.enabled,
+              status.sessionPresent,
+              status.homeId == designation.homeId,
+              status.sessionId == designation.sessionId,
+              status.generation == designation.generation else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "Home was designated, but its current session is not available yet.",
+                retryable: true,
+                details: nil
+            )
+        }
+        return status
     }
 
     func handle(_ event: GatewayEvent) async {

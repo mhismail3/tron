@@ -110,6 +110,7 @@ final class HomeStatusPresentationOwner {
     static let fallbackInterval: Duration = .seconds(5)
 
     private(set) var status: HomeStatusDTO?
+    var isCapabilityEnabled: Bool { capabilityEnabled }
     @ObservationIgnored private var readGeneration: UInt64 = 0
     @ObservationIgnored private var surfaceGeneration: UInt64 = 0
     @ObservationIgnored private var latestFence: HomeStatusReadFence?
@@ -117,7 +118,7 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private weak var activityCoordinator: PresentationActivityCoordinator?
     @ObservationIgnored private var profileID: String?
     @ObservationIgnored private var connectionID: String?
-    @ObservationIgnored private var capabilityEnabled = false
+    private(set) var capabilityEnabled = false
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO)?
     @ObservationIgnored private var activeReadTask: Task<Void, Never>?
