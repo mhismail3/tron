@@ -82,6 +82,24 @@ step "first build downloads the pinned runtimes"
 bundle ${install_args[@]+"${install_args[@]}"} || fail "first build failed"
 first_epoch="$(manifest_field runtimeEpoch)"
 
+step "read-only verify works without a source Node/npm toolchain"
+valid_payload_snapshot="$(snapshot)"
+valid_launcher_sha="$(sha "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")"
+set +e
+PATH="/usr/bin:/bin" HOME="$TMP/no-source-home" NVM_DIR="$TMP/no-source-nvm" \
+    TRON_NODE_BIN="$TMP/no-source-node/bin/node" \
+    "$SCRIPT_DIR/bundle-gateway.sh" --verify-only >"$TMP/verify-without-source-node.log" 2>&1
+verify_status=$?
+set -e
+cat "$TMP/verify-without-source-node.log" >> "$LOG"
+[[ "$verify_status" -eq 0 ]] || fail "read-only verification required an ambient/source Node/npm toolchain (status $verify_status)"
+[[ "$(snapshot)" == "$valid_payload_snapshot" ]] || fail "read-only verification changed the published tree"
+[[ "$(sha "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")" == "$valid_launcher_sha" ]] || fail "read-only verification changed the published launcher"
+[[ -z "$(leftovers)" ]] || fail "read-only verification left temporary publication roots: $(leftovers)"
+if grep -Eq 'installing locked gateway dependencies|downloading pinned Node' "$TMP/verify-without-source-node.log"; then
+    fail "read-only verification attempted an install or download"
+fi
+
 step "second build reuses the published runtimes (--skip-install --skip-download)"
 bundle --skip-install --skip-download || fail "second build with --skip-download failed"
 bundle --verify-only || fail "second build published a payload that does not verify"

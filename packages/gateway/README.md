@@ -1188,7 +1188,20 @@ sealed in `versions/` before any candidate state names the version. The trusted
 source checkout must already have its lockfile-pinned Gateway development dependencies
 installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
-registry during an update. Source-only updates require the package lock and dependency declarations
+registry during an update. Before compiling, it compares applicable npm hidden-lock package
+records with the source lock, then walks the actual install to require every locked package for
+this platform/mode at its locked name and version, with no missing or extra package directories.
+Unsupported package-directory symlinks are rejected before their nested dependency trees are
+traversed, so a link cannot redirect the validator outside the install.
+The hidden lock is not compared byte-for-byte with the root lock: npm omits root metadata,
+platform-inapplicable optional packages, and—on production installs—development packages. This
+structural check does not cryptographically re-hash every installed package file. Source rebuild
+records a bounded `app/build-inputs.json` receipt for the explicit compiler, copied-helper,
+configuration, and toolchain inputs used to produce each payload. Dirty development builds are
+allowed, but the receipt must match those exact bytes; returning to a clean checkout at the same
+`sourceRevision` therefore cannot reuse output built from reverted edits. Unrelated untracked files
+are not build inputs. If installed inputs are stale or cannot be proved, source rebuild refuses
+before compilation and names `npm ci` as the remedy. Source-only updates require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or

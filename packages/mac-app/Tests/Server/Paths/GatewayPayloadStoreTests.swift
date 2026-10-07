@@ -13,6 +13,25 @@ struct GatewayPayloadStoreTests {
         #expect(store.versionRoot("2025.01").path == "/tmp/tron-home/gateway/payloads/dev/versions/2025.01")
     }
 
+    @Test("ordinary app build-input receipt is covered by and accepted with payload integrity")
+    func validatesBuildInputReceiptFile() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let root = GatewayPayloadStore(home: temporary.root, channel: "dev").versionRoot("receipt")
+        let receipt = "{\"schema\":1,\"sourceRevision\":\"0123456789abcdef0123456789abcdef01234567\",\"sourceInputFingerprint\":\"\(String(repeating: "b", count: 64))\"}\n"
+        try makeGatewayPayload(
+            root: root, channel: "dev", version: "receipt", fingerprint: String(repeating: "a", count: 64),
+            additionalFiles: [("app/build-inputs.json", Data(receipt.utf8))]
+        )
+        let receiptURL = root.appendingPathComponent("app/build-inputs.json")
+        var info = stat()
+        #expect(lstat(receiptURL.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFREG)
+        guard case .success = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "dev") else {
+            Issue.record("a regular build-input receipt inside app/** should pass the existing recursive fingerprint contract")
+            return
+        }
+    }
+
     @Test("selection and payload manifests must agree on identity")
     func validatesManifestIdentity() throws {
         let temporary = try TemporaryPayloadDirectory()

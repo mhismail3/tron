@@ -82,8 +82,15 @@ under the Tron home outside immutable payload directories and survive updates.
 
 The script:
 
-1. runs locked gateway install and TypeScript build;
-2. creates an independent `npm ci --omit=dev` production tree, including the
+1. runs locked Gateway install and TypeScript build. Before trusting an existing
+   source install or compiling, `scripts/gateway-install-inputs.mjs` checks the
+   applicable records in npm's hidden lock against `package-lock.json` and walks
+   the installed package directories, checking locked package names/versions,
+   completeness and absence of unlocked packages. It accounts for optional
+   packages not applicable to the host platform; it does not require byte-equal
+   root/hidden lockfiles or claim to hash every installed package byte;
+2. creates an independent `npm ci --omit=dev` production tree, validates that
+   documented production mode against the same lock owner, and includes the
    owned node-pty postinstall helper;
 3. downloads exact Node 22.22.0 arm64 and x64 archives;
 4. checks hard-coded SHA-256 values;
@@ -94,10 +101,12 @@ The script:
 8. the launcher exports `TRON_GATEWAY_SEARCH_EMBEDDING_HELPER` as the signed
    helper in app `Contents/Resources`; the Gateway still admits it through its
    signature check, independently of the selected source payload version;
-9. hashes every regular file and safe internal symlink under `app/**` (including
-   the complete production `node_modules` tree) and `runtime/**` with the
-   launcher's bounded in-process hasher, then writes that fingerprint into the
-   bundled `manifest.json` and stamps a runtime epoch. The shell hash helper
+9. writes `app/build-inputs.json` with the digest of explicit Gateway compiler,
+   copied-helper, configuration, and toolchain inputs used for the build, then
+   hashes every regular file and safe internal symlink under `app/**` (including
+   that receipt and the complete production `node_modules` tree) and `runtime/**`
+   with the launcher's bounded in-process hasher. It writes that fingerprint into
+   the bundled `manifest.json` and stamps a runtime epoch. The shell hash helper
    remains the readable cross-implementation test fixture. Use
    `scripts/gateway-payload-deploy.mjs` for immutable payload operations;
    `scripts/tron dev` is the sole Debug supervisor on port 9848.
@@ -112,14 +121,23 @@ otherwise it uses the validated bundled payload. Promotion additionally checks
 the complete fingerprint before publishing.
 
 Before accepting an existing generated payload, `ensure-gateway-bundle.sh`
-invokes `bundle-gateway.sh --verify-only`. Verification is read-only: it checks
-bounded manifest identity against `.node-version`, compiles a fresh trusted
+invokes `bundle-gateway.sh --verify-only`. Verification is read-only: it first
+checks ordinary payload integrity (including the receipt file), then compares
+the staged `sourceRevision`, package manifest/lockfile, and build-input digest
+with their current source counterparts. Dirty Gateway edits may be staged, but
+reverting them at the same revision invalidates the receipt; unrelated untracked
+files do not invalidate this build-input fast path. A mismatch rebuilds the
+payload. Debug's separate source-dirtiness record and clean-checkout handoff gate
+remain unchanged; build freshness is established by the receipt, while lifecycle
+handoff provenance retains its broader checkout rule. Debug staging also checks
+the full development install before compilation. Verification checks bounded manifest identity against `.node-version`, compiles a fresh trusted
 launcher verifier for the complete fingerprint, validates runtime hashes,
 architectures, required paths, safe symlinks, immutable publication modes,
 exact source/package manifest identity, and byte equality with a freshly
-compiled unsigned universal helper. Staged runtimes are never executed during
-validation; only the host build Node selected by `.node-version` is executed.
-Verification also requires every runtime command alias to be an exact symlink
+compiled unsigned universal helper. Only after that validator proves the staged
+runtime does `--verify-only` run the matching architecture's bundled Node to
+check the source-input receipt; it does not require source Node/npm, install
+packages, or download runtimes. Verification also requires every runtime command alias to be an exact symlink
 with exact relative target text resolving to its signed architecture runtime or
 bundled SDK CLI. Missing, substituted, dangling, absolute, wrong-target, or
 escaping aliases fail closed. A failed check triggers one explicit rebuild and a second verification;
@@ -141,7 +159,7 @@ signed without that extra entitlement.
 Useful iteration options:
 
 ```bash
-# Reuse gateway node_modules/dist, but refresh runtime payloads
+# Reuse gateway node_modules, compile current Gateway inputs, and refresh runtime payloads
 packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install
 
 # Reuse the published payload's Node and npm runtimes too; they are copied into
@@ -153,8 +171,11 @@ packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-inst
 # Remove generated payloads only
 packages/mac-app/scripts/bundle-gateway.sh --clean
 
-# Read-only publication verification (does not build, install, or redownload)
+# Read-only publication/source-input verification (does not build, install, or redownload)
 packages/mac-app/scripts/bundle-gateway.sh --verify-only
+
+# Check the canonical full Gateway install without installing or rebuilding
+node scripts/gateway-install-inputs.mjs check packages/gateway full
 
 # Pure helper check against a staged payload (does not build or install)
 packages/mac-app/scripts/hash-gateway-payload.sh Sources/Resources/Gateway

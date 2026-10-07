@@ -400,11 +400,15 @@
           "scripts/validate-push-service-config.sh",
           "config/PushService.xcconfig",
           "scripts/gateway-payload-deploy.mjs",
+          "scripts/gateway-install-inputs.mjs",
+          "scripts/gateway-install-inputs.test.mjs",
+          "scripts/gateway-payload-deploy.test.mjs",
+          "scripts/tron-dev",
           "scripts/hash-npm-runtime.py",
           "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
+        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
       },
       {
         "name": "mac-native-computer-control",
