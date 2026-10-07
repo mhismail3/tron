@@ -9,11 +9,12 @@ import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
-  EpisodicMemoryError,
+  EpisodicMemoryError, EPISODIC_DEFAULTS,
   type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer, type EpisodicNodeRecord, type EpisodicInvalidationRecord,
 } from "./episodic-contract.js";
 import { decodeContextRuns } from "./episodic-tree.js";
 import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
+import { EpisodicStore } from "./episodic-store.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /*
@@ -123,6 +124,11 @@ async function readRecords(path: string): Promise<Array<Record<string, unknown>>
   }
 }
 
+async function readPersistedState(fx: RecoveryFixture): Promise<{ catalog: Array<Record<string, unknown>>; nodes: Array<Record<string, unknown>> }> {
+  const snapshot = await new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes).read();
+  return { catalog: [...snapshot.messages.values()], nodes: [...snapshot.nodes.values()] };
+}
+
 interface LiveNode { revision: number; level: number; index: number; kind: string; childRevisions?: [number, number] }
 
 function liveNodes(log: Array<Record<string, unknown>>): Map<string, LiveNode> {
@@ -221,8 +227,8 @@ describe("episodic memory crash recovery", () => {
       owner.store.appendNode = append;
       await memory.dispose();
     }
-    const beforeLog = await readRecords(fx.nodesPath);
-    const before = liveNodes(beforeLog);
+    const beforeState = await readPersistedState(fx);
+    const before = liveNodes(beforeState.nodes);
     expect(before.size).toBeGreaterThan(0);
     expect([...before.values()].some(node =>
       decodeContextRuns((node as unknown as EpisodicNodeRecord).contextRuns).some(dependency => !before.has(dependency)),
@@ -230,7 +236,7 @@ describe("episodic memory crash recovery", () => {
     let calls = 0;
     const reopened = await openMemory(fx, async request => { calls++; return stubSummarizer(request); });
     try {
-      const live = assertConsistentStore(await readRecords(fx.nodesPath), 2100);
+      const live = assertConsistentStore((await readPersistedState(fx)).nodes, 2100);
       for (const node of live.values()) {
         for (const dependency of decodeContextRuns((node as unknown as EpisodicNodeRecord).contextRuns)) {
           expect(live.has(dependency), `surviving context references revoked ${dependency}`).toBe(true);
@@ -238,10 +244,10 @@ describe("episodic memory crash recovery", () => {
       }
       expect(calls).toBe(0);
     } finally { await reopened.dispose(); }
-    const repaired = await readFile(fx.nodesPath, "utf8");
+    const repaired = await readPersistedState(fx);
     const again = await openMemory(fx);
     await again.dispose();
-    expect(await readFile(fx.nodesPath, "utf8")).toBe(repaired);
+    expect(await readPersistedState(fx)).toEqual(repaired);
   }, 180_000);
 
   it("serializes durable parent publication with child invalidation", async () => {
@@ -279,11 +285,11 @@ describe("episodic memory crash recovery", () => {
       await memory.dispose();
     }
     // Inspect before open: recovery must not mask a broken publication boundary.
-    const live = liveNodes(await readRecords(fx.nodesPath));
+    const live = liveNodes((await readPersistedState(fx)).nodes);
     const reopened = await openMemory(fx);
     await reopened.dispose();
     expect(live.has("0+2")).toBe(false);
-    assertConsistentStore(await readRecords(fx.nodesPath), 2);
+    assertConsistentStore((await readPersistedState(fx)).nodes, 2);
   }, 120_000);
 
   it("refuses a waiter instead of stranding it when the pump dies unexpectedly", async () => {
@@ -527,12 +533,10 @@ describe("episodic memory crash recovery", () => {
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
 
-    const catalog = await readRecords(fx.catalogPath);
-    const messages = catalog.length;
+    const persistedBefore = await readPersistedState(fx);
+    const messages = persistedBefore.catalog.length;
     expect(messages).toBe(120);
-    const log = await readRecords(fx.nodesPath);
-    expect(log.length).toBeGreaterThan(0);
-    const liveBefore = assertConsistentStore(log, messages);
+    const liveBefore = assertConsistentStore(persistedBefore.nodes, messages);
 
     // Reopen: the store loads, the torn tail (if the kill produced one) is gone,
     // and the pump resumes to a complete tree.
@@ -551,9 +555,7 @@ describe("episodic memory crash recovery", () => {
     expect(cursor).toBe(messages);
     // Every node of the full tree exists, so the crash lost no acknowledged work
     // and produced no duplicate or orphaned node.
-    const raw = await readFile(fx.nodesPath, "utf8");
-    expect(raw.endsWith("\n")).toBe(true);
-    const liveAfter = assertConsistentStore(await readRecords(fx.nodesPath), messages);
+    const liveAfter = assertConsistentStore((await readPersistedState(fx)).nodes, messages);
     expect(liveAfter.size).toBeGreaterThanOrEqual(liveBefore.size);
     // Every node whose whole range exists: one per level per full span.
     let expectedNodes = 0;
@@ -614,26 +616,27 @@ describe("episodic memory crash recovery", () => {
     const editedRecord = [...new Map(records(await readFile(fx.catalogPath, "utf8")).map(record => [record.index as number, record])).values()]
       .find(record => record.text === editedText)!;
     expect(editedRecord).toBeDefined();
-    const before = liveNodes(await readRecords(fx.nodesPath));
+    const lock = join(fx.home, "gateway", "workspace-state.lock");
+    const past = new Date(Date.now() - 120_000);
+    await utimes(lock, past, past);
+    const before = liveNodes((await readPersistedState(fx)).nodes);
     const leafBefore = before.get(`${editedRecord.index}+1`)!;
     expect(leafBefore).toBeDefined();
     expect(leafBefore.kind).not.toBe("free");
 
-    const lock = join(fx.home, "gateway", "workspace-state.lock");
-    const past = new Date(Date.now() - 120_000);
-    await utimes(lock, past, past);
     const memory = await openMemory(fx);
     // open() repaired it: the generation moved and the stale leaf is revoked
     // before the pump rebuilds it.
     expect(memory.status().generation).toBeGreaterThan(0);
-    expect(liveNodes(await readRecords(fx.nodesPath)).get(`${editedRecord.index}+1`)).toBeUndefined();
+    const liveMemoryNodes = (): Array<Record<string, unknown>> => [...(memory as unknown as { nodes: Map<string, Record<string, unknown>> }).nodes.values()];
+    expect(liveNodes(liveMemoryNodes()).get(`${editedRecord.index}+1`)).toBeUndefined();
     await memory.entriesCommitted(fx.sessionId);
-    const leafAfter = liveNodes(await readRecords(fx.nodesPath)).get(`${editedRecord.index}+1`)!;
+    const leafAfter = liveNodes(liveMemoryNodes()).get(`${editedRecord.index}+1`)!;
     expect(leafAfter).toBeDefined();
     expect(leafAfter.sourceDigest).not.toBe(leafBefore.sourceDigest);
     expect(memory.status().blocked).toBeNull();
     expect(memory.status().view.unbuilt).toBe(0);
-    assertConsistentStore(await readRecords(fx.nodesPath), memory.status().messages);
+    assertConsistentStore(liveMemoryNodes(), memory.status().messages);
     await memory.dispose();
   }, 180_000);
 
@@ -641,7 +644,7 @@ describe("episodic memory crash recovery", () => {
     const fx = await fixture("torn", 4);
     const first = await openMemory(fx);
     await first.entriesCommitted(fx.sessionId);
-    const complete = await readRecords(fx.nodesPath);
+    const complete = (await readPersistedState(fx)).nodes;
     await first.dispose();
 
     // A crash mid-write leaves a partial line. It was never acknowledged, so it
@@ -649,12 +652,12 @@ describe("episodic memory crash recovery", () => {
     const torn = `{"revision": 99999, "level": 0, "index": 0, "kind": "summary", "text": "partial`;
     await appendFile(fx.nodesPath, torn);
     const reopened = await openMemory(fx);
-    expect(reopened.status().nodes.total).toBe(complete.filter(record => typeof record.nodes !== "string").length);
+    expect(reopened.status().nodes.total).toBe(complete.length);
     expect(fx.diagnostics.some(record => record.event === "episodic.store-recovered" && record.counts?.bytes === torn.length)).toBe(true);
-    const raw = await readFile(fx.nodesPath, "utf8");
-    expect(raw.endsWith("\n")).toBe(true);
-    expect(raw).not.toContain("partial");
-    expect(raw).not.toContain("99999");
+    const recovered = await readPersistedState(fx);
+    expect(recovered.nodes).toHaveLength(complete.length);
+    expect(JSON.stringify(recovered)).not.toContain("partial");
+    expect(JSON.stringify(recovered)).not.toContain("99999");
     // The store continues to work after the torn record was dropped.
     await reopened.entriesCommitted(fx.sessionId);
     expect(reopened.status().blocked).toBeNull();
@@ -686,10 +689,10 @@ describe("episodic memory crash recovery", () => {
     // Not awaited: the ingest is inside the mutex when dispose runs.
     const ingest = memory.entriesIngested(fx.sessionId);
     await memory.dispose();
-    const atDispose = (await readRecords(fx.catalogPath)).length;
+    const atDispose = (await readPersistedState(fx)).catalog.length;
     await ingest.catch(() => {});
     // Nothing was appended after the store was closed...
-    expect((await readRecords(fx.catalogPath)).length).toBe(atDispose);
+    expect((await readPersistedState(fx)).catalog.length).toBe(atDispose);
     // ...because the ingest it owed had already finished when dispose returned.
     expect(atDispose).toBe(300);
     // The opener is released, so the next owner reads the store it closed.
