@@ -37,6 +37,16 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         XCTAssertNil(owner.status)
     }
 
+    func testBackgroundedSurfaceRetiresItsPendingStatusRead() throws {
+        let owner = HomeStatusPresentationOwner()
+        let fence = try XCTUnwrap(owner.beginRead(profileID: "p", connectionID: "c", capabilityEnabled: true, presentationActive: true))
+        let value = try HomeStatusDTO.decode(JSONValue.parse(Data(validStatus.utf8)))
+        XCTAssertTrue(owner.publish(value, for: fence, currentProfileID: "p", currentConnectionID: "c", presentationActive: true))
+        owner.mountFallback(profileID: "p", connectionID: "c", capabilityEnabled: true, presentationActive: false) { _ in value }
+        XCTAssertNil(owner.status)
+        XCTAssertFalse(owner.publish(value, for: fence, currentProfileID: "p", currentConnectionID: "c", presentationActive: true))
+    }
+
     func testOlderProfileAndReadGenerationCannotPublish() throws {
         let owner = HomeStatusPresentationOwner()
         let first = try XCTUnwrap(owner.beginRead(profileID: "p1", connectionID: "c1", capabilityEnabled: true, presentationActive: true))

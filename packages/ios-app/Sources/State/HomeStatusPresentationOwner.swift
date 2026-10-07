@@ -181,6 +181,8 @@ final class HomeStatusPresentationOwner {
         }
         guard Self.shouldRefreshForInvalidation(isMounted: true, isForeground: presentationActive) else {
             mountedRead = nil
+            admittedIdentity = nil
+            invalidateReads(clearStatus: true)
             return
         }
         mountedRead = (profileID, connectionID, capabilityEnabled, fetch)
