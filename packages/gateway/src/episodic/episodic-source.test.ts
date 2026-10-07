@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { createEpisodicTokenBudget, EpisodicMemoryError, type EpisodicSummarizer } from "./episodic-contract.js";
+import { EpisodicMemoryError, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { readCanonicalSession } from "./episodic-source.js";
 
@@ -61,7 +61,6 @@ function memoryFor(fx: SourceFixture, limits: { maxSourceLineBytes?: number } = 
     workspace: fx.workspace,
     sessionId: fx.sessionId,
     sessionFile: fx.sessionFile,
-    budget: createEpisodicTokenBudget(1_000_000),
     summarizer: stubSummarizer,
     limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, ...limits },
     sleep: async () => {},
@@ -129,7 +128,7 @@ describe("episodic canonical source reader", () => {
     // The refusal is visible to the memory as a blocked source, not a silent skip.
     const memory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: oversized,
-      budget: createEpisodicTokenBudget(1_000_000), summarizer: stubSummarizer,
+      summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, maxSourceLineBytes: 1_024 }, sleep: async () => {},
     });
     await memory.entriesCommitted(fx.sessionId);
@@ -202,7 +201,7 @@ describe("episodic canonical source reader", () => {
     const fx = await fixture("missing");
     const memory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: join(fx.root, "absent.jsonl"),
-      budget: createEpisodicTokenBudget(1_000_000), summarizer: stubSummarizer,
+      summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
     });
     await memory.entriesCommitted(fx.sessionId);

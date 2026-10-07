@@ -7,7 +7,6 @@ import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { createEpisodicTokenBudget } from "./episodic-contract.js";
 import { COMPACTOR_MAX_TOKENS, compactorRequest, createModelRuntimeSummarizer, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -105,7 +104,6 @@ describe("the episodic summarizer on a reasoning model", () => {
     cleanups.push(async () => { await workspace.dispose(); });
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!,
-      budget: createEpisodicTokenBudget(10_000_000),
       summarizer: createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!),
       sleep: async () => {},
     });

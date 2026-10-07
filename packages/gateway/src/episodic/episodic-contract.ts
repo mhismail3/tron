@@ -98,7 +98,6 @@ export const EPISODIC_SEARCH_SNIPPET_CHARS = 300;
 export type EpisodicBlockedReason =
   | "permanent-failure"
   | "retries-exhausted"
-  | "budget-exhausted"
   | "source-unavailable";
 
 export interface EpisodicBlocked {
@@ -220,8 +219,7 @@ export interface EpisodicStoreState {
   cursor: EpisodicSourceCursor | null;
   blocked: EpisodicBlocked | null;
   /** Tokens this memory's compactor calls have spent, over the whole life of the
-   * store. Durability is the point: a restart must not reset spend, or a budget
-   * bounded in name would be unbounded in practice. */
+   * store. Reported, never a ceiling (#493); a restart must not reset it. */
   spend: number;
 }
 
@@ -251,9 +249,8 @@ export interface EpisodicMemoryStatus {
   coverage: { admitted: number; summarized: number };
   pump: { busy: number };
   blocked: EpisodicBlocked | null;
+  /** Spend, reported and never a ceiling (#493). */
   tokens: {
-    limit: number;
-    reserved: number;
     used: number;
     /** What the provider reported since this memory opened, so caching can be
      * checked from its own usage fields (gist §8); not persisted. */
@@ -285,39 +282,6 @@ export interface EpisodicCompactorRequest {
  * implementation uses `ModelRuntime.completeSimple`. */
 export type EpisodicSummarizer = (request: EpisodicCompactorRequest) => Promise<AssistantMessage>;
 
-/** The injected token budget (departure 5). A reservation that does not fit
- * blocks the memory with `budget-exhausted`. */
-export interface EpisodicTokenBudget {
-  reserve(tokens: number): boolean;
-  settle(reserved: number, used: number): void;
-  /** Account for spend a previous process persisted, so a restart never resets
-   * it (`EpisodicMemory.open` calls this with the store's recorded spend). */
-  restore(usedTokens: number): void;
-  snapshot(): { limit: number; reserved: number; used: number };
-}
-
-export function createEpisodicTokenBudget(limitTokens: number): EpisodicTokenBudget {
-  if (!Number.isSafeInteger(limitTokens) || limitTokens < 0) throw new EpisodicMemoryError("invalid-request", "Token budget must be a non-negative integer");
-  let reserved = 0;
-  let used = 0;
-  return {
-    reserve(tokens) {
-      if (tokens < 0 || used + reserved + tokens > limitTokens) return false;
-      reserved += tokens;
-      return true;
-    },
-    settle(estimate, actual) {
-      reserved = Math.max(0, reserved - estimate);
-      used += actual;
-    },
-    restore(usedTokens) {
-      if (!Number.isSafeInteger(usedTokens) || usedTokens < 0) throw new EpisodicMemoryError("invalid-request", "Restored token spend must be a non-negative integer");
-      used = Math.max(used, usedTokens);
-    },
-    snapshot: () => ({ limit: limitTokens, reserved, used }),
-  };
-}
-
 export interface EpisodicDiagnostic {
   event: "episodic.source-invalidated" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered";
   level: "info" | "warning" | "error";
@@ -327,8 +291,7 @@ export interface EpisodicDiagnostic {
 }
 
 /** Either the caller injects its own compactor, or it names the model and
- * runtime the default compactor runs on. There is no default model and no
- * default budget: both are the caller's. */
+ * runtime the default compactor runs on. There is no default model. */
 export type EpisodicCompactorDependency =
   | { summarizer: EpisodicSummarizer; modelRuntime?: never; model?: never }
   | { summarizer?: undefined; modelRuntime: ModelRuntime; model: Model<Api> };
@@ -339,7 +302,6 @@ export type EpisodicMemoryDependencies = {
   sessionId: string;
   /** The canonical session JSONL path. Read only, never repaired. */
   sessionFile: string;
-  budget: EpisodicTokenBudget;
   limits?: Partial<EpisodicLimits>;
   /** Where this module raises its bounded records; the caller (gateway-main)
    * decides whether to persist them. */

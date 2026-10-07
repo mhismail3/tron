@@ -27,13 +27,12 @@ import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
  * installation: it refuses rather than restarting and re-spending every
  * compactor call. One session's namespace is created lazily inside the container,
  * and the marker carries no per-session evidence, so a session without one
- * starts fresh within its own budget (#483), including one whose namespace was
- * deleted (D5: repair within the memory budget).
+ * starts fresh (#483), including one whose namespace was deleted (D5: repair).
  */
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
 const STATE_MAX_BYTES = 64 * 1_024;
-const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "budget-exhausted", "source-unavailable"]);
+const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "source-unavailable"]);
 
 interface StorePaths {
   root: string;

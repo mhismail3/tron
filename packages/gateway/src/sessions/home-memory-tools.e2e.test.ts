@@ -42,6 +42,8 @@ const MODEL_ID = "chat";
 const MEMORY_PROVIDER = "tron-home-tools-memory";
 const MEMORY_MODEL_ID = "compactor";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
+/** A second physical memory model: a reconfiguration that reopens the store. */
+const OTHER_MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor-2" };
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const REPORT_PATH = "test-results/home-memory-tools/report.json";
 
@@ -169,7 +171,7 @@ async function fixture(label: string, options: { configure?: boolean } = {}): Pr
     tokensPerSecond: 1_000_000,
     tokenSize: { min: 10, max: 10 },
   });
-  const memoryFaux = fauxProvider({ provider: MEMORY_PROVIDER, models: [{ id: MEMORY_MODEL_ID, reasoning: false }] });
+  const memoryFaux = fauxProvider({ provider: MEMORY_PROVIDER, models: [{ id: MEMORY_MODEL_ID, reasoning: false }, { id: OTHER_MEMORY_MODEL.id, reasoning: false }] });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
   runtime.registerNativeProvider(memoryFaux.provider);
@@ -198,7 +200,7 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
   await registry.catalog("all");
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   if (options.configure !== false) {
-    await registry.homeOwner().configureMemory({ model: MEMORY_MODEL, tokenBudget: 1_000_000 });
+    await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
   }
   f.sessionId = designation.sessionId;
   f.slot = await registry.acquire(designation.sessionId);
@@ -878,7 +880,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
     await waitForBuiltTree(f);
     let reconfigured = "not attempted";
     let catalogAfterReconfigure = "";
-    let budgetAfterReconfigure = 0;
+    let modelAfterReconfigure: unknown;
 
     const answers = await toolAnswers(f, "race tools", [
       {
@@ -890,12 +892,12 @@ describe.sequential("Tron Home memory tools end to end", () => {
           // written.
           for (let index = 0; index < 200; index += 1) managerOf(f).appendMessage(userMessage(`bulk ${index}`));
           f.registry.homeOwner().noteEntriesCommitted(f.sessionId);
-          reconfigured = await f.registry.homeOwner().configureMemory({ model: MEMORY_MODEL, tokenBudget: 2_000_000 })
+          reconfigured = await f.registry.homeOwner().configureMemory({ model: OTHER_MEMORY_MODEL })
             .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
           // Read the store the reconfiguration reopened, before anything else
           // touches it.
           catalogAfterReconfigure = await readFile(catalogPathOf(f), "utf8");
-          budgetAfterReconfigure = (await memoryStatus(f)).tokenBudget ?? 0;
+          modelAfterReconfigure = (await memoryStatus(f)).model;
         },
       },
     ]);
@@ -903,7 +905,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
       reconfigured,
       commitIngestedBeforeReopen: catalogAfterReconfigure.includes("bulk 199"),
       recordsAfterReconfigure: catalogAfterReconfigure.split("\n").filter((line) => line !== "").length,
-      budgetAfterReconfigure,
+      modelAfterReconfigure,
       toolAnswer: answers[0]!.details,
       ingestDiagnostics: f.memoryDiagnostics.filter((record) => record.event === "home.memory-ingest"),
       refusals: refusalsOf(f),
@@ -914,7 +916,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
     // every record that commit owed, so no second opener was admitted over a store
     // that was still being written, and no record was written after the close.
     expect(row.commitIngestedBeforeReopen).toBe(true);
-    expect(row.budgetAfterReconfigure).toBe(2_000_000);
+    expect(row.modelAfterReconfigure).toEqual(OTHER_MEMORY_MODEL);
     expect(row.toolAnswer).toEqual({ status: "ok" });
     expect(ok(answers[0]!)).toBe("0+0|user: race start");
     expect(row.ingestDiagnostics).toEqual([]);

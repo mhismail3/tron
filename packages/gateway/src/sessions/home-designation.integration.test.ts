@@ -68,7 +68,7 @@ const client = { id: "terminal", identity: "device:home-designation", isLocal: f
 /** Home has no memory defaults (decision D4): a Home session serves requests only
  * once its memory is configured. Cases that need a Home run configure it here. */
 async function configureHomeMemory(f: Fixture): Promise<void> {
-  await f.registry.homeOwner().configureMemory({ model: MODEL, tokenBudget: 1_000_000 });
+  await f.registry.homeOwner().configureMemory({ model: MODEL });
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {

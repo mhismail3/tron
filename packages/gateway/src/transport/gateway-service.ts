@@ -73,7 +73,6 @@ import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import type { HomeOwner } from "../home/home-owner.js";
-import { MAXIMUM_MEMORY_TOKEN_BUDGET } from "../home/home-memory.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
@@ -486,21 +485,15 @@ export class GatewayService {
         });
       case "home.configureMemory":
         return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "model", "tokenBudget"], method);
+          // The memory's model and nothing else: spend regulates itself (#493).
+          rejectUnknownFields(params, ["commandId", "model"], method);
           const model = this.admitNamedHomeModel(params.model);
           if (!model) throw new GatewayError("invalid_request", "home.configureMemory requires model");
-          // A budget is a spend ceiling, not a trust boundary; its bound keeps a
-          // value no compactor could ever exhaust out of the record.
-          return safeJson(await this.requireHome().configureMemory({
-            model,
-            tokenBudget: integer(params.tokenBudget, "tokenBudget", 1, MAXIMUM_MEMORY_TOKEN_BUDGET),
-          }));
+          return safeJson(await this.requireHome().configureMemory({ model }));
         });
       case "home.resumeMemory":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);
-          // A budget block is refused here: its cause is the configured ceiling,
-          // so the answer is home.configureMemory with a raised budget.
           return safeJson(await this.requireHome().resumeMemory());
         });
       case "home.context": {
