@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants, existsSync, readFileSync } from "node:fs";
 import { appendFile, chmod, lstat, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
   EpisodicMemoryError, EPISODIC_DEFAULTS,
-  type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer, type EpisodicNodeRecord, type EpisodicInvalidationRecord,
+  type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer, type EpisodicMessageRecord, type EpisodicNodeRecord, type EpisodicInvalidationRecord,
 } from "./episodic-contract.js";
 import { decodeContextRuns } from "./episodic-tree.js";
 import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
@@ -207,9 +208,51 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 
 describe("episodic memory crash recovery", () => {
   it("completes an interrupted chunked invalidation before serving memory", async () => {
-    const fx = await fixture("chunk-boundary", 1050);
+    const fx = await fixture("chunk-boundary", 0);
+    // Persist a realistic-sized dependency fanout directly through the store's
+    // supported checkpoint API; exercising chunk recovery does not need 2,100 real
+    // session messages or compactor/view work.
+    const initial = await openMemory(fx);
+    await initial.entriesCommitted(fx.sessionId);
+    await initial.dispose();
+    const seedStore = new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+    const state = (await seedStore.read()).state;
+    if (!state) throw new Error("initial memory did not persist its store state");
+    const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+    const messages: EpisodicMessageRecord[] = [];
+    const nodes: EpisodicNodeRecord[] = [];
+    for (let index = 0; index < 2_100; index += 1) {
+      const text = `seed ${index}`;
+      messages.push({
+        revision: index + 1,
+        index,
+        sessionId: fx.sessionId,
+        entryId: `seed-${index}`,
+        kind: "user",
+        text,
+        sourceDigest: digest(text),
+        projectedDigest: digest(text),
+        omissions: [],
+        omitted: false,
+      });
+      nodes.push({
+        revision: index + 2_101,
+        level: 0,
+        index,
+        kind: "summary",
+        text,
+        contextRuns: index === 0 ? [] : [[0, index]],
+        textDigest: digest(text),
+        sourceDigest: digest(`user: ${text}`),
+      });
+    }
+    await seedStore.checkpoint({
+      messages,
+      nodes,
+      state,
+      watermark: nodes.at(-1)!.revision,
+    });
     const memory = await openMemory(fx);
-    await memory.entriesCommitted(fx.sessionId);
     const owner = memory as unknown as {
       invalidate: (indices: number[]) => Promise<void>;
       store: { appendNode: (record: EpisodicNodeRecord | EpisodicInvalidationRecord) => Promise<void> };
@@ -236,7 +279,7 @@ describe("episodic memory crash recovery", () => {
     let calls = 0;
     const reopened = await openMemory(fx, async request => { calls++; return stubSummarizer(request); });
     try {
-      const live = assertConsistentStore((await readPersistedState(fx)).nodes, 2100);
+      const live = assertConsistentStore((await readPersistedState(fx)).nodes, 2_100);
       for (const node of live.values()) {
         for (const dependency of decodeContextRuns((node as unknown as EpisodicNodeRecord).contextRuns)) {
           expect(live.has(dependency), `surviving context references revoked ${dependency}`).toBe(true);
