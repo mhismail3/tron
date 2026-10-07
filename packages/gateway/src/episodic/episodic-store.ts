@@ -101,6 +101,7 @@ export class EpisodicStore {
     const marker = await readSecureJson<unknown>(paths.initialized, 256);
     if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
     if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
+      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
       || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
     }
@@ -126,6 +127,7 @@ export class EpisodicStore {
     const marker = await readSecureJson<unknown>(paths.initialized, 256);
     if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
     if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
+      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
       || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
     }
@@ -362,14 +364,21 @@ async function removeOwnedTree(path: string, fileSystem: EpisodicStoreFileSystem
   await fileSystem.rm(path, { recursive: info.isDirectory(), force: false });
 }
 
+function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(record).every(key => keys.includes(key));
+}
+
 function validateState(value: unknown): EpisodicStoreState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state is not an object");
   const state = value as Partial<EpisodicStoreState>;
-  if (state.version !== EPISODIC_STORE_VERSION) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an unknown version");
+  if (!hasOnlyKeys(value as Record<string, unknown>, ["version", "generation", "cursor", "blocked", "spend"])
+    || state.version !== EPISODIC_STORE_VERSION) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an unknown version or fields");
   if (typeof state.generation !== "number" || !Number.isSafeInteger(state.generation) || state.generation < 0) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has no generation");
+  if (!("cursor" in state) || !("blocked" in state) || !("spend" in state)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state is missing required fields");
   const cursor = state.cursor;
-  if (cursor !== null && cursor !== undefined) {
-    if (typeof cursor !== "object" || Array.isArray(cursor)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
+  if (cursor !== null) {
+    if (typeof cursor !== "object" || Array.isArray(cursor)
+      || !hasOnlyKeys(cursor as unknown as Record<string, unknown>, ["dev", "ino", "size", "completeBytes", "leafEntryId", "completePrefixDigest", "leafLineDigest"])) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
     for (const field of ["dev", "ino", "size", "completeBytes"] as const) {
       if (typeof cursor[field] !== "number" || !Number.isSafeInteger(cursor[field]) || cursor[field] < 0) {
         throw new EpisodicMemoryError("invalid-store", `Episodic memory state cursor has no ${field}`);
@@ -383,14 +392,16 @@ function validateState(value: unknown): EpisodicStoreState {
     }
   }
   const blocked = state.blocked;
-  if (blocked !== null && blocked !== undefined) {
-    if (typeof blocked !== "object" || Array.isArray(blocked) || typeof blocked.reason !== "string" || !BLOCKED_REASONS.has(blocked.reason)
+  if (blocked !== null) {
+    if (typeof blocked !== "object" || Array.isArray(blocked)
+      || !hasOnlyKeys(blocked as unknown as Record<string, unknown>, ["reason", "detail"])
+      || typeof blocked.reason !== "string" || !BLOCKED_REASONS.has(blocked.reason)
       || (blocked.detail !== undefined && typeof blocked.detail !== "string")) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid blocked state");
     }
   }
   const spend = state.spend;
-  if (spend !== undefined && (typeof spend !== "number" || !Number.isSafeInteger(spend) || spend < 0)) {
+  if (typeof spend !== "number" || !Number.isSafeInteger(spend) || spend < 0) {
     throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid token spend");
   }
   return {
@@ -401,7 +412,7 @@ function validateState(value: unknown): EpisodicStoreState {
     // A state written before spend was recorded reads as zero spend: the tokens
     // already spent are unknown, and inventing a number would be worse than
     // starting the ceiling again from a known point.
-    spend: spend ?? 0,
+    spend,
   };
 }
 

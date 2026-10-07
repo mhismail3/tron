@@ -7,6 +7,25 @@ request seam that sends each activation the memory's view instead of the
 canonical transcript. Tasks, the wake inbox and Home's own client surface are
 later slices. Ordinary sessions are unaffected by every rule here.
 
+## Physical chapter mutation boundary
+
+RuntimeSlot owns physical-session mutations. Its serialized owners consult a
+chapter-state provider before prompt admission, configuration, rename/label
+edits, branch changes, bash, and extension-driven session replacement. Registry
+owners also preflight attention, archive and delete mutations against that same
+provider. A sealed result is a
+typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
+The version-2 Home record carries an ordered chapter ledger. At this step Home
+operates on one active physical session; no rollover path creates a successor.
+An active chapter is writable; a sealed chapter remains readable but refuses
+mutation regardless of Home's enabled state or the runtime's ordinary/Home
+profile. The chapter-state check is physical-session-owned and is not bypassed
+when Home is disabled. If a future SDK operation fails
+after staging canonical entries, RuntimeSlot retains the existing uncertain-
+outcome fence rather than treating the staged mutation as a clean refusal. A
+sealed check before a custom-entry append is a clean typed refusal: it exits the
+bounded ownership-write retry path without draining or fencing the runtime.
+
 ## The record
 
 `<tronHome>/gateway/home/home.json`, written 0600 and published atomically and
@@ -15,22 +34,24 @@ record per installation:
 
 | field | meaning |
 | --- | --- |
-| `version` | `1`; any other version is not this build's record |
+| `version` | `2`; other versions, unknown fields, and invalid chapter topology are preserved and refused |
 | `homeId` | Stable identity of this installation's Home, generated once |
-| `sessionId` | The session that is Home; designation is keyed by this id |
+| `chapters` | Ordered, unique physical sessions; step 3 starts with exactly one `active` chapter |
+| `bindingRevision` | Advances when designation binds Home to a different physical session |
 | `generation` | Advances on every profile change (designate, re-enable, disable) |
 | `policyRevision` | The curated-profile revision in force; a re-enable writes this build's |
 | `enabled` | Whether Home is currently designated |
 | `model` | The model applied at the last designation, updated when the Home session's model changes |
 | `createdAt` / `updatedAt` | ISO-8601 instants |
 
-The file is read with the Gateway's owner-only JSON boundary: a missing file
+The file is read with the Gateway's bounded owner-only JSON boundary: a missing file
 means no designation, while a **malformed, empty, symlinked, oversized or
 group/world-readable** one is **preserved and reported as unavailable**
 (`home.status` returns `available: false` with a `reason`) and `home.designate`
-refuses with a conflict. Only `version` gates admission, so a record written
-against a newer `policyRevision` is still read, preserved and re-enabled. A
-record is never overwritten or migrated: an unusable one is not evidence that
+refuses with a conflict. The strict version-2 format admits a newer
+`policyRevision` without treating it as a format change, but rejects unknown
+fields and invalid chapter topology. Version-1 records are preserved and refused,
+not migrated. An unusable record is not evidence that
 the user has no Home. Runtime admission from Home's neutral workspace also
 refuses with a typed conflict while the record is unavailable; this is the
 canonical installation workspace identity that distinguishes sessions which
@@ -49,9 +70,9 @@ is the second, independent guard.
 ## The curated runtime profile
 
 The profile is decided at runtime creation, once per runtime, from the Home
-owner's answer for that session id: `home` when the enabled record names it,
-`ordinary` when a disabled record names it, and `unnamed` when the record names
-another session. A new Home's *first* runtime is already the Home profile:
+owner's answer for that session id: `home` when the enabled record names it as a
+chapter, `ordinary` when a disabled record names it, and `unnamed` when the
+record names another session. A new Home's *first* runtime is already the Home profile:
 `RuntimeRegistry.create(cwd, "home")` carries an explicit creation profile,
 which applies only to that session and only while the record does not name it —
 so a fork or a reset, which produce a new session id, is never Home.
@@ -326,8 +347,8 @@ belong to the Home profile.
 
 ## Memory and readiness
 
-Home owns ONE `EpisodicMemory` ([episodic-memory.md](episodic-memory.md)) over the
-Home session's canonical entries, outside the session's runtime so an idle
+Home currently owns ONE `EpisodicMemory` ([episodic-memory.md](episodic-memory.md))
+over the active chapter's canonical entries, outside the session's runtime so an idle
 eviction, a reload or a profile change cannot lose it. The runtime only reports
 that canonical entries changed (persisted messages, custom entries, navigation);
 the memory re-reads the log after its cursor and builds its tree in the background

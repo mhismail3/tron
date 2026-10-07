@@ -53,6 +53,7 @@ import { TrustService } from "../admin/trust-service.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
+import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason } from "../home/home-request-policy.js";
 import * as tronModules from "../extensions/tron-modules.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -273,6 +274,223 @@ async function open(label: string, options: FixtureOptions = {}) {
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe.sequential("Home request seam inside the Gateway runtime", () => {
+  it("continues refusing sealed physical mutations after Home is disabled", async () => {
+    const item = await open("disabled-sealed-chapter", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+    await item.registry.homeOwner().disable();
+    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        ...current.chapters.map(chapter => chapter.sessionId === item.slot.id
+          ? { ...chapter, state: "sealed" as const, sealedAt: new Date().toISOString() }
+          : chapter),
+        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+    expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toEqual({ sessionId: item.slot.id, sealed: true });
+    const oldBytes = await item.jsonl();
+    await item.registry.dispose();
+
+    const coldModelRuntime = await ModelRuntime.create({ authPath: join(item.root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    coldModelRuntime.registerNativeProvider(item.faux.provider);
+    const coldRegistry = new RuntimeRegistry({
+      agentDir: item.agentDir,
+      tronHome: item.tronHome,
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => coldModelRuntime,
+      trust: new TrustService(item.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      homeMemorySummarizer: () => ({ summarizer: async () => "summary" }),
+    });
+    disposals.push(() => coldRegistry.dispose());
+    await coldRegistry.initialize();
+    await coldRegistry.recoverCanonicalAttention();
+    const coldSlot = await coldRegistry.acquire(item.slot.id);
+    const coldSession = (coldSlot as unknown as { runtime: { session: AgentSession } }).runtime.session;
+    expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    const entries = coldSession.sessionManager.getEntries();
+    const leaf = coldSession.sessionManager.getLeafId();
+    const bytes = await readFile(coldSlot.sessionFile!, "utf8");
+    await expect(coldSlot.setThinking("low")).rejects.toMatchObject({
+      code: "conflict", details: { reason: "sealed-chapter", sessionId: item.slot.id },
+    });
+    expect(coldSession.sessionManager.getEntries()).toEqual(entries);
+    expect(coldSession.sessionManager.getLeafId()).toBe(leaf);
+    expect(await readFile(coldSlot.sessionFile!, "utf8")).toBe(bytes);
+    expect(bytes).toBe(oldBytes);
+    item.record("disabled-sealed-chapter", { profile: "ordinary", refused: true, bytesUnchanged: true });
+  });
+
+  it("refuses sealed Slot mutation paths before changing SDK state or the canonical file", async () => {
+    const item = await open("sealed-mutation-paths", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      runtime: { session: AgentSession };
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const owner = item.registry.homeOwner() as unknown as {
+      chapterStateFor: (sessionId: string) => { sessionId: string; sealed: boolean };
+    };
+    owner.chapterStateFor = runtime.dependencies.homeChapterState;
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalFile = await item.jsonl();
+    const originalRequestCount = item.requests.length;
+    const actions = (item.slot as unknown as { commandActions: () => Record<string, (...args: unknown[]) => unknown> }).commandActions();
+    const extensionMutation = (name: string, ...arguments_: unknown[]) => async () => {
+      await actions[name]!(...arguments_);
+    };
+    const sealedRefusal = { code: "conflict", details: { reason: "sealed-chapter", sessionId: item.slot.id } };
+    const mutationPaths: Array<[string, () => Promise<unknown>]> = [
+      ["prompt", () => item.slot.prompt("sealed input")],
+      ["steer", () => item.slot.prompt("sealed steering input", [], "steer")],
+      ["follow-up", () => item.slot.prompt("sealed follow-up input", [], "followUp")],
+      ["setModel", () => item.slot.setModel(PROVIDER, MODEL_ID)],
+      ["setContextWindow", () => item.slot.setContextWindow(PROVIDER, MODEL_ID, 8_000, -1, "stale")],
+      ["setThinking", () => item.slot.setThinking("off")],
+      ["setTools", () => item.slot.setTools(["ask_user"])],
+      ["rename", () => item.slot.rename("sealed rename")],
+      ["setLabel", () => item.slot.setLabel(originalLeaf!, "sealed label")],
+      ["fork", () => item.slot.fork(originalLeaf!)],
+      ["navigate", () => item.slot.navigate(originalLeaf!, { summarize: false })],
+      ["reload", () => item.slot.reload()],
+      ["extension newSession", extensionMutation("newSession")],
+      ["extension fork", extensionMutation("fork", originalLeaf)],
+      ["extension navigateTree", extensionMutation("navigateTree", originalLeaf, {})],
+      ["extension switchSession", extensionMutation("switchSession", "unused", {})],
+      ["extension reload", extensionMutation("reload")],
+      ["bash", () => item.slot.executeBash("echo sealed", false)],
+      ["archive lane", () => item.slot.commitArchiveWhileIdle(undefined, async () => undefined)],
+      ["attention", () => item.registry.setAttention(item.slot.id, true)],
+      ["archive", () => item.registry.setArchived(item.slot.id, true)],
+      ["delete", () => item.registry.delete(item.slot.id)],
+    ];
+
+    for (const [name, mutation] of mutationPaths) {
+      const refusal = await mutation().then(() => undefined, (error: unknown) => error);
+      expect(refusal, `${name} was not refused`).toMatchObject(sealedRefusal);
+      expect(manager.getEntries(), `${name} changed live SDK entries`).toEqual(originalEntries);
+      expect(manager.getLeafId(), `${name} changed the live leaf`).toBe(originalLeaf);
+      expect(await item.jsonl(), `${name} changed canonical file bytes`).toBe(originalFile);
+    }
+    expect(item.requests).toHaveLength(originalRequestCount);
+  }, 30_000);
+
+  it("refuses a sealed first activation before the SDK first flush can materialize a file", async () => {
+    const item = await open("sealed-first-flush", { home: true, memory: true });
+    item.faux.setResponses([item.response("unexpected sealed mutation response")]);
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      runtime: { session: AgentSession };
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalSessionFile = item.slot.sessionFile;
+    const originalRequestCount = item.requests.length;
+    const fileBefore = originalSessionFile
+      ? await readFile(originalSessionFile, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error))
+      : undefined;
+
+    await expect(item.slot.prompt("must not materialize sealed Home")).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "sealed-chapter", sessionId: item.slot.id },
+    });
+    expect(manager.getEntries()).toEqual(originalEntries);
+    expect(manager.getLeafId()).toBe(originalLeaf);
+    expect(item.slot.sessionFile).toBe(originalSessionFile);
+    expect(item.requests).toHaveLength(originalRequestCount);
+    if (originalSessionFile) {
+      const fileAfter = await readFile(originalSessionFile, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+      expect(fileAfter).toBe(fileBefore);
+    }
+  }, 30_000);
+
+  it("keeps a pre-append sealed custom-entry refusal out of the uncertain-write fence", async () => {
+    const item = await open("sealed-custom-entry", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
+      hasBlockedOwnershipWrite: boolean;
+      durableWrites: Map<string, unknown>;
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalFile = await item.jsonl();
+
+    vi.useFakeTimers();
+    try {
+      const write = runtime.persistCanonicalCustomEntry("test.sealed-entry", { receiptId: "sealed-receipt" }, "sealed-receipt");
+      await vi.advanceTimersByTimeAsync(20_001);
+      await expect(write).rejects.toMatchObject({
+        code: "conflict",
+        details: { reason: "sealed-chapter", sessionId: item.slot.id },
+      });
+      expect(runtime.hasBlockedOwnershipWrite).toBe(false);
+      expect(manager.getEntries()).toEqual(originalEntries);
+      expect(manager.getLeafId()).toBe(originalLeaf);
+      expect(await item.jsonl()).toBe(originalFile);
+    } finally {
+      runtime.durableWrites.clear();
+      vi.useRealTimers();
+    }
+  }, 30_000);
+
+  it("fences a custom entry that fails after the SDK has staged it", async () => {
+    const item = await open("staged-custom-entry-failure", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
+      hasBlockedOwnershipWrite: boolean;
+      durableWrites: Map<string, unknown>;
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: false });
+    const manager = item.session.sessionManager;
+    const append = manager.appendCustomEntry.bind(manager);
+    const appendAttempt = vi.spyOn(manager, "appendCustomEntry").mockImplementation((...arguments_) => {
+      append(...arguments_);
+      throw new Error("injected failure after SDK staging");
+    });
+    try {
+      await expect(runtime.persistCanonicalCustomEntry(
+        "test.staged-entry", { receiptId: "staged-receipt" }, "staged-receipt",
+      )).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(appendAttempt).toHaveBeenCalledTimes(1);
+      expect(manager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "test.staged-entry")).toHaveLength(1);
+      expect(runtime.hasBlockedOwnershipWrite).toBe(true);
+      await expect(item.slot.prompt("must remain fenced")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    } finally {
+      appendAttempt.mockRestore();
+      // This isolated fixture intentionally poisons one runtime. Remove its
+      // unresolved owner only so the test runner can dispose its temporary tree;
+      // production recovery remains an authoritative reopen, never this reset.
+      runtime.durableWrites.clear();
+    }
+  }, 30_000);
+
   // F1: Pi's supported image replacement must not look like a context mutation.
   // Disable resizing here to isolate the settings-aware converter at the guard.
   it("C21 image conversion follows live session settings without rebuilding", async () => {

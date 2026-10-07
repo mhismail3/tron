@@ -742,6 +742,20 @@ describe("episodic memory crash recovery", () => {
     await reopened.dispose();
   }, 180_000);
 
+  it("preserves a legacy per-session memory store and refuses to open it", async () => {
+    const fx = await fixture("legacy-format", 2);
+    const memory = await openMemory(fx);
+    await memory.entriesCommitted(fx.sessionId);
+    await memory.dispose();
+    const markerPath = join(fx.storeRoot, "initialized.json");
+    const statePath = join(fx.storeRoot, "state.json");
+    const originalState = await readFile(statePath, "utf8");
+    await writeFile(markerPath, '{"version":1}', { mode: 0o600 });
+    await expect(openMemory(fx)).rejects.toMatchObject({ kind: "invalid-store" });
+    expect(await readFile(markerPath, "utf8")).toBe('{"version":1}');
+    expect(await readFile(statePath, "utf8")).toBe(originalState);
+  });
+
   it("refuses a deleted container, an unknown version and a second opener, and keeps every store path owner-only", async () => {
     const fx = await fixture("version", 2);
     const memory = await openMemory(fx);
@@ -771,6 +785,11 @@ describe("episodic memory crash recovery", () => {
     await expect(openMemory(fresh)).rejects.toThrowError(/unknown version/u);
     await writeFile(statePath, JSON.stringify({ ...state, blocked: { reason: "not-a-reason" } }), { mode: 0o600 });
     await expect(openMemory(fresh)).rejects.toThrowError(/invalid blocked state/u);
+    await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+    const unsupportedState = JSON.stringify({ ...state, unrecognized: true });
+    await writeFile(statePath, unsupportedState, { mode: 0o600 });
+    await expect(openMemory(fresh)).rejects.toThrowError(/unknown version or fields/u);
+    expect(await readFile(statePath, "utf8")).toBe(unsupportedState);
     await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
 
     for (const path of [fresh.storeRoot, join(fresh.home, "workspace", "state"), join(fresh.home, "workspace", "state", "episodic")]) {
