@@ -212,9 +212,11 @@ export class EpisodicMemory {
           counts: { bytes: snapshot.recoveredTornBytes },
         });
       }
-      memory.assertConsistent();
       memory.view = await foldViewSliced(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
+      await memory.repairOrphanedDependencies();
+      memory.assertConsistent();
       await memory.repairCatalogMismatch();
+      memory.assertConsistent();
       return memory;
     } catch (error) {
       EpisodicMemory.openStores.delete(storeKey);
@@ -594,6 +596,20 @@ export class EpisodicMemory {
   /** A catalog revision whose invalidation a crash lost: a live leaf whose
    * recorded source digest disagrees with the message it summarizes is a leaf
    * whose summary is stale, so the closure runs again at load. */
+  private async repairOrphanedDependencies(): Promise<void> {
+    const orphaned = new Set<string>();
+    for (const [address, node] of this.nodes) {
+      if (decodeContextRuns(node.contextRuns).some(dependency => !this.nodes.has(dependency))) orphaned.add(address);
+      if (node.level > 0) {
+        const childA = this.nodes.get(nodeAddress(node.level - 1, node.index * 2));
+        const childB = this.nodes.get(nodeAddress(node.level - 1, node.index * 2 + 1));
+        if (!childA || !childB || !node.childRevisions
+          || childA.revision !== node.childRevisions[0] || childB.revision !== node.childRevisions[1]) orphaned.add(address);
+      }
+    }
+    if (orphaned.size > 0) await this.invalidateNodes(orphaned);
+  }
+
   private async repairCatalogMismatch(): Promise<void> {
     const changed: number[] = [];
     for (const node of this.nodes.values()) {
@@ -625,79 +641,79 @@ export class EpisodicMemory {
     return this.legacyTimestamps;
   }
 
-  /** Invalidate exactly the affected leaves, their ancestors, and every node
-   * whose recorded summarizer context included any invalidated node,
-   * transitively (departure 3). A node added by the closure brings its own
-   * ancestors with it: a parent stands in for its children, so a revoked child
-   * under a live parent would be an inconsistent store.
-   *
-   * The revocation is written in ancestor-first chunks. Any prefix of that order
-   * leaves every live parent with live children, so a crash between chunks is a
-   * consistent (if under-invalidated) store, and `repairCatalogMismatch` finds
-   * the changed leaf again on the next open. */
+  /** Revoke changed leaves and their transitive dependent closure. */
   private async invalidate(changedIndices: readonly number[]): Promise<void> {
-    const invalid = new Set<string>();
-    const ancestorsOf = (address: string): string[] => {
-      const parsed = parseNodeAddress(address);
-      if (!parsed) return [];
-      const ancestors: string[] = [];
-      for (let level = parsed.level, i = parsed.index; level <= 63; level += 1, i = Math.floor(i / 2)) {
-        const ancestor = nodeAddress(level, i);
-        // Children are written before their parents, so an absent ancestor means
-        // every ancestor above it is absent too.
-        if (!this.nodes.has(ancestor)) break;
-        ancestors.push(ancestor);
-      }
-      return ancestors;
-    };
-    const dependents = new Map<string, string[]>();
-    for (const [address, node] of this.nodes) {
-      for (const dependency of decodeContextRuns(node.contextRuns)) {
-        const list = dependents.get(dependency);
-        if (list) list.push(address); else dependents.set(dependency, [address]);
-      }
-    }
-    const queue: string[] = [];
-    const add = (address: string): void => {
-      if (invalid.has(address)) return;
-      invalid.add(address);
-      queue.push(address);
-    };
-    for (const index of changedIndices) for (const ancestor of ancestorsOf(nodeAddress(0, index))) add(ancestor);
-    while (queue.length > 0) {
-      const address = queue.pop()!;
-      for (const ancestor of ancestorsOf(address)) add(ancestor);
-      for (const dependent of dependents.get(address) ?? []) add(dependent);
-    }
-    if (invalid.size === 0) return;
-    this.generation += 1;
-    const generation = this.generation;
-    const ordered = [...invalid].sort((left, right) => {
-      const a = parseNodeAddress(left)!;
-      const b = parseNodeAddress(right)!;
-      return b.level - a.level || a.index - b.index;
-    });
-    const parts = Math.ceil(ordered.length / EPISODIC_INVALIDATION_CHUNK);
-    for (let part = 0; part < parts; part += 1) {
-      const chunk = ordered.slice(part * EPISODIC_INVALIDATION_CHUNK, (part + 1) * EPISODIC_INVALIDATION_CHUNK);
-      const record: EpisodicInvalidationRecord = {
-        revision: this.takeRevision(), generation, part, parts,
-        nodes: chunk.map(address => {
-          const parsed = parseNodeAddress(address)!;
-          return encodeNodeCode(parsed.level, parsed.index);
-        }).join(" "),
+    await this.invalidateNodes(changedIndices.map(index => nodeAddress(0, index)));
+  }
+
+  private async invalidateNodes(seeds: Iterable<string>): Promise<void> {
+    await this.enqueueAppend(async () => {
+      const invalid = new Set<string>();
+      const ancestorsOf = (address: string): string[] => {
+        const parsed = parseNodeAddress(address);
+        if (!parsed) return [];
+        const ancestors: string[] = [];
+        for (let level = parsed.level, i = parsed.index; level <= 63; level += 1, i = Math.floor(i / 2)) {
+          const ancestor = nodeAddress(level, i);
+          // Children are written before their parents, so an absent ancestor means
+          // every ancestor above it is absent too.
+          if (!this.nodes.has(ancestor)) break;
+          ancestors.push(ancestor);
+        }
+        return ancestors;
       };
-      // Durable before use: a crash between revoking and rebuilding must not
-      // leave a revoked child under a live parent.
-      await this.appendNode(record);
-      for (const address of chunk) this.nodes.delete(address);
-      this.expandInvalidatedParts(new Set(chunk));
-      this.fit();
-    }
-    this.diagnostic({
-      event: "episodic.source-invalidated", level: "info",
-      message: "A source revision invalidated summarized nodes",
-      counts: { invalidated: invalid.size, generation },
+      const dependents = new Map<string, string[]>();
+      for (const [address, node] of this.nodes) {
+        for (const dependency of decodeContextRuns(node.contextRuns)) {
+          const list = dependents.get(dependency);
+          if (list) list.push(address); else dependents.set(dependency, [address]);
+        }
+      }
+      const queue: string[] = [];
+      const add = (address: string): void => {
+        if (invalid.has(address)) return;
+        invalid.add(address);
+        queue.push(address);
+      };
+      for (const seed of seeds) {
+        if (this.nodes.has(seed)) add(seed);
+        for (const ancestor of ancestorsOf(seed)) add(ancestor);
+      }
+      while (queue.length > 0) {
+        const address = queue.pop()!;
+        for (const ancestor of ancestorsOf(address)) add(ancestor);
+        for (const dependent of dependents.get(address) ?? []) add(dependent);
+      }
+      if (invalid.size === 0) return;
+      this.generation += 1;
+      const generation = this.generation;
+      const ordered = [...invalid].sort((left, right) => {
+        const a = parseNodeAddress(left)!;
+        const b = parseNodeAddress(right)!;
+        return b.level - a.level || a.index - b.index;
+      });
+      const parts = Math.ceil(ordered.length / EPISODIC_INVALIDATION_CHUNK);
+      for (let part = 0; part < parts; part += 1) {
+        const chunk = ordered.slice(part * EPISODIC_INVALIDATION_CHUNK, (part + 1) * EPISODIC_INVALIDATION_CHUNK);
+        const record: EpisodicInvalidationRecord = {
+          revision: this.takeRevision(), generation, part, parts,
+          nodes: chunk.map(address => {
+            const parsed = parseNodeAddress(address)!;
+            return encodeNodeCode(parsed.level, parsed.index);
+          }).join(" "),
+        };
+        // Durable before use: a crash between revoking and rebuilding must not
+        // leave a revoked child under a live parent.
+        await this.store.appendNode(record);
+        for (const address of chunk) this.nodes.delete(address);
+        this.expandInvalidatedParts(new Set(chunk));
+        this.fit();
+      }
+      this.diagnostic({
+        event: "episodic.source-invalidated", level: "info",
+        message: "A source revision invalidated summarized nodes",
+        counts: { invalidated: invalid.size, generation },
+      });
     });
   }
 
@@ -811,12 +827,14 @@ export class EpisodicMemory {
       }
       const record = await this.composeNode(level, index, stamp);
       if (!record || this.stale(stamp)) return;
-      // The append is serialized, so the durable order is the publication order
-      // and the view fits the same sequence the log replays.
-      await this.appendNode(record);
-      if (this.stale(stamp)) return;
-      this.nodes.set(address, record);
-      this.fit();
+      // Serialize the final stamp check with invalidation and publish memory in
+      // the same queue operation as the durable append.
+      await this.enqueueAppend(async () => {
+        if (this.stale(stamp)) return;
+        await this.store.appendNode(record);
+        this.nodes.set(address, record);
+        this.fit();
+      });
     } catch (error) {
       if (error instanceof EpisodicBlockedSignal) await this.block(error.blocked.reason, error.blocked.detail);
       else if (error instanceof EpisodicClosedSignal) return;
