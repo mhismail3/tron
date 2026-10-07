@@ -7476,6 +7476,193 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
+  it("retires completion observations after queued successful operations settle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseFollowUp!: () => void;
+    let releaseAttention!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
+    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(() => {
+      releaseInitial();
+      releaseFollowUp();
+      releaseAttention();
+    });
+    const faux = fauxProvider({ provider: "tron-completion-observation-retirement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        followUpStarted();
+        await followUpBarrier;
+        return fauxAssistantMessage("follow-up complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const attention = (registry as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+    }).attention;
+    const originalComplete = attention.complete.bind(attention);
+    vi.spyOn(attention, "complete").mockImplementation(async (...args) => {
+      await attentionBarrier;
+      return originalComplete(...args);
+    });
+    // This lifecycle-only record has no public projection. Inspect private
+    // state rather than adding a production accessor for the regression.
+    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
+
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const queued = await slot.prompt("queued follow-up", [], "followUp");
+    releaseInitial();
+    await followUpStart;
+    releaseFollowUp();
+    await waitFor(() => faux.state.callCount === 2, "both successful model responses");
+    await initial;
+    releaseAttention();
+    await waitFor(() => !slot.isBusy, "both operations to settle");
+
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
+    expect(slotInternals.operationObservations.has(queued.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.size).toBe(0);
+  });
+
+  it("retires a steered operation observation when a successful queued follow-up takes ownership", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-steering-follow-up-observation-retirement-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseSteering!: () => void;
+    let steeringStarted!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const steeringBarrier = new Promise<void>((resolve) => { releaseSteering = resolve; });
+    const steeringStart = new Promise<void>((resolve) => { steeringStarted = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(() => {
+      releaseInitial();
+      releaseSteering();
+    });
+    const faux = fauxProvider({ provider: "tron-steering-follow-up-observation-retirement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        steeringStarted();
+        await steeringBarrier;
+        return fauxAssistantMessage("steering complete");
+      },
+      async () => {
+        followUpStarted();
+        return fauxAssistantMessage("follow-up complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    const admissions: any[] = [];
+    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), {
+      admit(cut: any) { admissions.push(structuredClone(cut)); },
+      dispose() {},
+    } as any));
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
+
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const steer = await slot.prompt("steer during foreground run", [], "steer");
+    releaseInitial();
+    await steeringStart;
+    const initialCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("initial complete"));
+    expect(initialCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === initialCompletion!.id), "the initial completion observation");
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(true);
+
+    const queuedFollowUp = await slot.prompt("queued successful follow-up", [], "followUp");
+    releaseSteering();
+    await followUpStart;
+    await waitFor(() => !slot.isBusy, "the steering and queued follow-up to settle");
+    await initial;
+
+    const steeringCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("steering complete"));
+    const followUpCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("follow-up complete"));
+    expect(steeringCompletion?.type).toBe("message");
+    expect(followUpCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === followUpCompletion!.id), "the follow-up completion observation");
+    const initialCut = admissions.filter(cut => cut.completionId === initialCompletion!.id);
+    const steeringCut = admissions.filter(cut => cut.completionId === steeringCompletion!.id);
+    const followUpCut = admissions.filter(cut => cut.completionId === followUpCompletion!.id);
+    expect(initialCut).toHaveLength(1);
+    expect(steeringCut).toHaveLength(1);
+    expect(followUpCut).toHaveLength(1);
+    expect(initialCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"))).toBe(true);
+    expect(steeringCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("steering complete"))).toBe(true);
+    expect(steeringCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"))).toBe(false);
+    expect(followUpCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("follow-up complete"))).toBe(true);
+    expect(admissions.filter(cut => [initialCompletion!.id, steeringCompletion!.id, followUpCompletion!.id]
+      .includes(cut.completionId))).toHaveLength(3);
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
+    expect(slotInternals.operationObservations.has(steer.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.has(queuedFollowUp.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.size).toBe(0);
+  });
+
   it("settles a reply before the queued follow-up runs so steering remains admissible", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-follow-up-steering-settlement-"));
     const agentDir = join(root, "agent");

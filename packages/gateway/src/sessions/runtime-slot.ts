@@ -324,6 +324,12 @@ export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "trans
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
+interface OperationObservation {
+  cursor?: { entryIndex: number; branchId: string };
+  observedCompletionId?: string;
+  pendingCompletionId?: string;
+}
+
 interface CommandReplacement {
   /** Set once Pi commits the replacement and the command is settled in its origin. */
   settlement?: Promise<void>;
@@ -462,6 +468,7 @@ type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
   observationSettled: boolean;
+  observationCursor?: { entryIndex: number; branchId: string };
   fallbackWork?: GatewayWorkHandle;
 };
 
@@ -585,7 +592,6 @@ export class RuntimeSlot {
    * are started independently so a failed projection head cannot hide a newer
    * continuation from restart reconciliation. */
   private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
-  private readonly completionWorkOwners = new Map<string, string>();
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** The session replacement a running extension command requested. */
@@ -1018,10 +1024,10 @@ export class RuntimeSlot {
     return this.observationBranchId(this.canonicalSessionEntries());
   }
 
-  private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {
+  private observationEntries(operationId: string, endEntryId?: string, cursorOverride?: OperationObservation["cursor"]): { entries: readonly FileEntry[]; branchId: string } {
     const entries = this.canonicalSessionEntries();
     const branchId = this.observationBranchId(entries);
-    const start = this.observationStarts.get(operationId);
+    const start = cursorOverride ?? this.operationObservations.get(operationId)?.cursor;
     // Observation admission must use the operation's immutable cut. A missing
     // start marker is an unavailable range, never permission to expose the
     // entire session history to a background model.
@@ -1217,7 +1223,9 @@ export class RuntimeSlot {
       this.pendingAssistantCompletion?.operationId,
       this.pendingQueueAdmission?.id,
       ...this.completionOwnershipQueue.map((item) => item.completion.operationId),
-      ...this.completionWorkOwners.values(),
+      ...[...this.operationObservations.entries()]
+        .filter(([, observation]) => observation.pendingCompletionId !== undefined)
+        .map(([operationId]) => operationId),
       ...this.queuedMessages.map((item) => item.id),
       ...this.heldPrompts.map((item) => item.id),
       ...this.dequeuedFollowUpOwners,
@@ -2760,10 +2768,28 @@ export class RuntimeSlot {
     });
   }
 
-  private readonly observationStarts = new Map<string, { entryIndex: number; branchId: string }>();
-  /** Exact last completion already admitted for an operation, used only to
-   * suppress the later agent_settled duplicate when canonical settlement won. */
-  private readonly observedCompletionsByOperation = new Map<string, string>();
+  /** Observation cursor and terminal-callback deduplication share the operation lifetime. */
+  private readonly operationObservations = new Map<string, OperationObservation>();
+
+  private observationFor(operationId: string): OperationObservation {
+    let observation = this.operationObservations.get(operationId);
+    if (!observation) {
+      observation = {};
+      this.operationObservations.set(operationId, observation);
+    }
+    return observation;
+  }
+
+  private retireOperationObservation(operationId: string | undefined): void {
+    if (operationId) this.operationObservations.delete(operationId);
+  }
+
+  private completionOperationId(completionId: string): string | undefined {
+    for (const [operationId, observation] of this.operationObservations) {
+      if (observation.pendingCompletionId === completionId) return operationId;
+    }
+    return undefined;
+  }
 
   private completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
@@ -3223,12 +3249,15 @@ export class RuntimeSlot {
       // attention settlement and agent_settled notification handling must read
       // this same disposition rather than resampling a close/completion race.
       this.completionObserved(completion.id);
-      const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+      const operationId = completion.operationId ?? this.completionOperationId(completion.id);
       const exactOwner = operationId ? this.operationWork.get(operationId) : undefined;
       item = {
         completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
         observationSettled: false,
+        ...(operationId && this.operationObservations.get(operationId)?.cursor
+          ? { observationCursor: this.operationObservations.get(operationId)!.cursor }
+          : {}),
         ...(exactOwner ? {} : {
           fallbackWork: this.dependencies.workRegistry.beginDerived({
             kind: "terminal-receipt-persistence",
@@ -3282,7 +3311,7 @@ export class RuntimeSlot {
     _error: unknown,
     fallbackWork?: GatewayWorkHandle,
   ): void {
-    const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+    const operationId = completion.operationId ?? this.completionOperationId(completion.id);
     this.dependencies.persistenceDiagnostic?.(this.id, "terminal-receipt-persistence-failed");
     this.emit("session.diagnostic", {
       code: "terminal-receipt-persistence-failed",
@@ -3290,20 +3319,21 @@ export class RuntimeSlot {
     });
     this.settleOperationWork(operationId);
     fallbackWork?.settle();
-    this.completionWorkOwners.delete(completion.id);
+    const pendingOwnerId = this.completionOperationId(completion.id);
+    if (pendingOwnerId) delete this.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
     if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
   }
 
   private admitCompletionObservation(item: CompletionOwnershipItem): void {
     if (item.observationSettled) return;
-    const operationId = item.completion.operationId ?? this.completionWorkOwners.get(item.completion.id);
+    const operationId = item.completion.operationId ?? this.completionOperationId(item.completion.id);
     if (!operationId) return;
-    const start = this.observationStarts.get(operationId);
+    const start = item.observationCursor ?? this.operationObservations.get(operationId)?.cursor;
     if (!start) return;
     const entries = this.canonicalSessionEntries();
     const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
     if (completionIndex < start.entryIndex) return;
-    const observed = this.observationEntries(operationId, item.completion.id);
+    const observed = this.observationEntries(operationId, item.completion.id, start);
     if (observed.entries.length === 0) return;
     try {
       this.hooks.turnSettled?.(
@@ -3320,16 +3350,19 @@ export class RuntimeSlot {
       return;
     }
     item.observationSettled = true;
-    if (!this.hasActiveAgentRun || this.activeOperationId === operationId) {
-      this.observedCompletionsByOperation.set(operationId, item.completion.id);
+    // The deduplication record belongs only to the operation whose eventual
+    // agent_settled callback can consume it. A completion from an earlier
+    // operation in a queued run may settle after its callback ownership ended.
+    if (this.activeOperationId === operationId) {
+      this.observationFor(operationId).observedCompletionId = item.completion.id;
     }
     if (this.hasActiveAgentRun && this.activeOperationId === operationId) {
       // The same foreground operation can continue after a completion (for
       // example, a consumed steer). Advance to the exact next canonical entry;
       // its later completion owns only the remaining range.
-      this.observationStarts.set(operationId, { entryIndex: completionIndex + 1, branchId: start.branchId });
+      this.observationFor(operationId).cursor = { entryIndex: completionIndex + 1, branchId: start.branchId };
     } else {
-      this.observationStarts.delete(operationId);
+      this.retireOperationObservation(operationId);
     }
   }
 
@@ -3368,9 +3401,10 @@ export class RuntimeSlot {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       this.admitCompletionObservation(item);
-      const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+      const completionWorkOwner = completion.operationId ?? this.completionOperationId(completion.id);
       this.settleOperationWork(completionWorkOwner);
-      this.completionWorkOwners.delete(completion.id);
+      const pendingOwner = this.completionOperationId(completion.id);
+      if (pendingOwner) delete this.operationObservations.get(pendingOwner)!.pendingCompletionId;
       if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
       // A continuation may already own the agent while this older durable write
       // unwinds. Settlement retires only its exact completion; the newer run
@@ -3490,7 +3524,7 @@ export class RuntimeSlot {
             if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
               this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
             }
-            if (this.activeOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, this.activeOperationId);
+            if (this.activeOperationId) this.observationFor(this.activeOperationId).pendingCompletionId = this.pendingAssistantCompletion.id;
             // Pi may start an extension continuation before the older settlement
             // callback unwinds. Preserve and immediately commit the prior exact
             // completion, then give the continuation a distinct marker owner so
@@ -3543,6 +3577,7 @@ export class RuntimeSlot {
         this.notificationRun = {};
         if (dequeuedOwner && preflightOwner === dequeuedOwner) this.dequeuedFollowUpOwners.shift();
         if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
+          this.retireOperationObservation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
@@ -3553,7 +3588,7 @@ export class RuntimeSlot {
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
         const observationCut = this.canonicalSessionEntries();
-      this.observationStarts.set(this.activeOperationId, { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) });
+      this.observationFor(this.activeOperationId).cursor = { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) };
         if (!continuesToolSegment) {
           if (beginsWithUserInput) {
             this.ownToolSegment(this.activeOperationId);
@@ -3655,15 +3690,15 @@ export class RuntimeSlot {
                 await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
               }
               await this.beginAttentionSettlement(completion);
-              const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
-              if (completionOperationId) this.observedCompletionsByOperation.delete(completionOperationId);
+              const completionOperationId = completion.operationId ?? this.completionOperationId(completion.id);
+              if (completionOperationId) this.retireOperationObservation(completionOperationId);
               // A successful earlier completion is admitted by its exact
               // settlement owner; this lane admits only a distinct follow-up cut.
               if (settledOperationId && settledOperationId !== completionOperationId) {
                 const followUpObserved = this.observationEntries(settledOperationId);
                 this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
               }
-              if (settledOperationId) this.observationStarts.delete(settledOperationId);
+              this.retireOperationObservation(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
                 this.abortedOperations.delete(settledOperationId);
@@ -3681,8 +3716,8 @@ export class RuntimeSlot {
               terminalErrorCode,
             ).then(async () => {
               const alreadyObservedCompletion = terminalNotification !== undefined
-                && this.observedCompletionsByOperation.get(settledOperationId) === terminalNotification.sourceId;
-              if (!alreadyObservedCompletion && this.observationStarts.has(settledOperationId)) {
+                && this.operationObservations.get(settledOperationId)?.observedCompletionId === terminalNotification.sourceId;
+              if (!alreadyObservedCompletion && this.operationObservations.get(settledOperationId)?.cursor) {
                 const observed = this.observationEntries(settledOperationId);
                 if (observed.entries.length > 0) {
                   this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
@@ -3690,8 +3725,7 @@ export class RuntimeSlot {
               }
               // Only the exact completion ID proves that this terminal cut was
               // already admitted. A missing cursor alone never means coverage.
-              this.observationStarts.delete(settledOperationId);
-              this.observedCompletionsByOperation.delete(settledOperationId);
+              this.retireOperationObservation(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });
@@ -3912,6 +3946,7 @@ export class RuntimeSlot {
               this.pendingQueueAdmission = undefined;
               reclassifiedAdmission.resolveDisposition("foreground");
               const displacedOwner = this.activeOperationId;
+              if (displacedOwner !== reclassifiedAdmission.id) this.retireOperationObservation(displacedOwner);
               this.activeOperationId = reclassifiedAdmission.id;
               const invocation = this.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
@@ -4299,10 +4334,13 @@ export class RuntimeSlot {
             // Pi can admit a same-agent queued follow-up without emitting a
             // second agent_start. The canonical user binding is the exact
             // prospective cut boundary; never fall back to session history.
-            if (!this.observationStarts.has(operationID)) {
+            // Steering is nested input in the foreground run, not an observation owner.
+            const isConsumedSteering = this.consumedSteeringOperationIDs.has(operationID);
+            const observationOwnerId = isConsumedSteering ? this.activeOperationId ?? operationID : operationID;
+            if (isConsumedSteering || !this.operationObservations.get(observationOwnerId)?.cursor) {
               const canonical = this.canonicalSessionEntries();
               const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
-              if (entryIndex >= 0) this.observationStarts.set(operationID, { entryIndex, branchId: this.observationBranchId(canonical) });
+              if (entryIndex >= 0) this.observationFor(observationOwnerId).cursor = { entryIndex, branchId: this.observationBranchId(canonical) };
             }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
@@ -6128,6 +6166,7 @@ export class RuntimeSlot {
           // follow-up then retrospectively transfers its pre-cutoff token into
           // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.activeOperationId;
+          if (syntheticOwner !== item.id) this.retireOperationObservation(syntheticOwner);
           this.activeOperationId = item.id;
           this.operation = {
             id: item.id,
@@ -8835,6 +8874,7 @@ export class RuntimeSlot {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.operationObservations.clear();
     this.detachOpenAIEligibility?.();
     this.detachOpenAIEligibility = undefined;
     this.dependencies.browserLiveViews?.retireSession(this.id);
