@@ -648,8 +648,13 @@ worktrees, or branches.
 Every run durably snapshots its target and concrete execution-session ID before
 dispatch. Existing targets reuse their session ID; workspace runs receive a new
 predetermined UUID and create that exact identity through
-`RuntimeRegistry`/`RuntimeSlot`. A live-only generated slot carries an exact
-operation-owned lease until Pi persists its first user or assistant message.
+`RuntimeRegistry`/`RuntimeSlot`. `OwnedSessionDispatch` is the neutral boundary
+for shared session leases, exact recovery evidence, and terminal acknowledgement;
+Automation retains its own operation identity and result interpretation above
+that seam. The seam also owns the fixed 24-hour deadline primitive for callers
+that explicitly opt in; it does not impose a deadline on ordinary sessions or
+Automation. A live-only generated slot carries an exact operation-owned lease
+until Pi persists its first user or assistant message.
 Restart recovery always consults the run snapshot and concrete session identity.
 A new session with no user or assistant message remains memory-only; after the
 first user message, Pi persists the transcript and any earlier canonical

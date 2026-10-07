@@ -4,6 +4,7 @@ import type { ResourceInvocation } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import type { AutomationOperationTerminal } from "../sessions/runtime-slot.js";
 import {
   AutomationAdmissionError,
@@ -42,12 +43,16 @@ function promptText(text: string, resource: ResourceInvocation | undefined): str
 }
 
 export class GatewayAutomationExecutor implements AutomationExecutor {
+  private readonly dispatch: OwnedSessionDispatch;
+
   constructor(
     private readonly sessions: RuntimeRegistry,
     private readonly workRegistry: GatewayWorkRegistry,
     private readonly notifications: NotificationService | undefined,
     private readonly machineId: string | undefined,
-  ) {}
+  ) {
+    this.dispatch = new OwnedSessionDispatch(sessions);
+  }
 
   async start(record: AutomationRecord, run: AutomationRun, signal?: AbortSignal): Promise<AutomationExecutionHandle> {
     signal?.throwIfAborted();
@@ -79,7 +84,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
         slot = leased.slot;
         releaseLease = leased.release;
       } else {
-        const leased = await this.sessions.acquireAutomationLease(sessionId);
+        const leased = await this.dispatch.lease(sessionId);
         slot = leased.slot;
         releaseLease = leased.release;
       }
@@ -171,8 +176,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
             completion: Promise.resolve(observedResult),
             cancel: async () => {},
             acknowledgeTerminal: async () => {
-              await this.sessions.clearAutomationMarker(sessionId, operationId);
-              releaseLease?.();
+              await this.dispatch.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
               work.settle();
             },
           };
@@ -199,8 +203,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           }
         },
         acknowledgeTerminal: async () => {
-          await this.sessions.clearAutomationMarker(sessionId, operationId);
-          releaseLease?.();
+          await this.dispatch.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
           work.settle();
         },
       };
@@ -233,7 +236,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
 
   async recover(record: AutomationRecord, run: AutomationRun): Promise<AutomationRecoveryResult> {
     if (!run.operationId) return { state: "outcomeUnknown", reason: "operation-identity-missing" };
-    const evidence = await this.sessions.automationRecoveryEvidence(run.executionSessionId, run.operationId);
+    const evidence = await this.dispatch.recoveryEvidence(run.executionSessionId, run.operationId);
     const invocation = evidence.invocation;
     const marker = evidence.marker;
     if (marker?.assistantCompletionId) {
