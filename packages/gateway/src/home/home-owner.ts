@@ -31,6 +31,8 @@ const MAXIMUM_MODEL_ID_BYTES = 300;
 const HOME_POLICY_REVISION = 1;
 const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
 const HOME_SOFT_ENTRIES = 50_000;
+const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
+const HOME_HARD_ENTRIES = 100_000;
 
 export interface HomeChapter {
   sessionId: string;
@@ -104,8 +106,14 @@ export interface HomeMemoryPort {
 
 export type HomeDiagnostic = (diagnostic: {
   outcome: "designated" | "enabled" | "disabled" | "refused" | "unavailable"
-    | "chapter-rollover" | "chapter-recovery" | "chapter-refused" | "route-bound";
+    | "chapter-rollover" | "chapter-recovery" | "chapter-refused" | "chapter-limit-stop" | "route-bound";
   reason?: string;
+  chapterOrdinal?: number;
+  boundary?: "hard-bytes" | "hard-entries";
+  crossingBytes?: number;
+  crossingEntries?: number;
+  settledBytes?: number;
+  settledEntries?: number;
 }) => void;
 
 export interface HomeOwnerOptions {
@@ -272,6 +280,18 @@ export class HomeOwner {
    * is fixed before it can receive a command. */
   noteRouteBound(): void {
     this.options.diagnostic?.({ outcome: "route-bound", reason: "logical-home" });
+  }
+
+  /** Hard admission is a durable chapter transition before the command receipt binds a target. */
+  async ensureChapterBelowHardLimit(): Promise<void> {
+    const chapter = this.record?.chapters.at(-1);
+    if (!chapter || chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
+    const metrics = await this.options.sessions.chapterMetrics(chapter.sessionId);
+    if (metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES) return;
+    if (!metrics.quiescent) {
+      throw new GatewayError("busy", "Tron Home is stopping an activation at the chapter limit; retry after it settles", true);
+    }
+    await this.chapterQuiescent(chapter.sessionId);
   }
 
   open(): HomeOpen {
@@ -467,7 +487,10 @@ export class HomeOwner {
       return true;
     });
     if (rolled) this.options.diagnostic?.({
-      outcome: "chapter-rollover", reason: metrics.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
+      outcome: "chapter-rollover",
+      reason: metrics.bytes >= HOME_HARD_BYTES ? "hard-byte-limit"
+        : metrics.entries >= HOME_HARD_ENTRIES ? "hard-entry-limit"
+          : metrics.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
     });
   }
 

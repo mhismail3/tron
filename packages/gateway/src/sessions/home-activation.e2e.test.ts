@@ -12,7 +12,7 @@
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
-import { mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
@@ -36,6 +36,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { invocationReceipts } from "../sessions/invocation-receipts.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
@@ -171,6 +172,7 @@ interface Fixture {
   requestRecords: HomeRequestRecord[];
   /** Every record Home's memory reported. */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
+  homeDiagnostics: Array<Record<string, unknown>>;
   openChatProvider: () => FauxProviderHandle;
 }
 
@@ -187,6 +189,7 @@ function openRegistry(f: Fixture): void {
     homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
+    homeDiagnostic: (record) => f.homeDiagnostics.push(record),
   });
   registries.push(registry);
   const service = new GatewayService({
@@ -239,6 +242,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     summarizer: options.summarizer ?? deterministicSummarizer(compactor),
     requestRecords: [],
     memoryDiagnostics: [],
+    homeDiagnostics: [],
     registry: undefined!, service: undefined!,
     openChatProvider: () => faux,
   };
@@ -372,32 +376,55 @@ describe("Tron Home activations end to end", () => {
     report.cases.push({ case: "soft-rollover", trigger: _label, oldState: stored.chapters[0]!.state, successorState: stored.chapters[1]!.state, successorMaterialized: false });
   });
 
-  it.each(["hard bytes", "hard entries"] as const)("refuses a Home activation before staged state at the %s boundary", async boundary => {
+  it.each(["hard bytes", "hard entries"] as const)("rolls Home admission over before effects at the %s threshold", async boundary => {
     const f = await fixture(`hard-boundary-${boundary.replaceAll(" ", "-")}`);
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, `e2e-hard-boundary-${boundary.replaceAll(" ", "-")}`);
-    let providerCalls = 0;
-    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("seed the Home transcript"); }]);
-    await slot.prompt("seed the canonical Home chapter");
-    await waitUntil(() => providerCalls === 1);
-    await waitUntil(() => !slot.isBusy);
-    providerCalls = 0;
-    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("unexpected hard-boundary dispatch"); }]);
-    const branchBefore = slot.sessionManager.getBranch();
-    const file = slot.sessionFile!;
-    if (boundary === "hard bytes") {
-      await truncate(file, 200 * 1_024 * 1_024 + 1);
-    } else {
-      Object.defineProperty(slot, "canonicalEntryCount", { configurable: true, get: () => 100_000 });
-    }
-    const sizeBefore = (await stat(file)).size;
-    await expect(slot.prompt("must not dispatch beyond the hard Home limit")).rejects.toMatchObject({
-      code: "conflict",
-      details: { reason: boundary === "hard bytes" ? "hard-bytes" : "hard-entries" },
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+    };
+    const hardBytes = 200 * 1_024 * 1_024;
+    const hardEntries = 100_000;
+    owner.options.sessions.chapterMetrics = async () => ({
+      bytes: boundary === "hard bytes" ? hardBytes : 3,
+      entries: boundary === "hard entries" ? hardEntries : 3,
+      quiescent: true,
     });
-    expect(slot.sessionManager.getBranch()).toEqual(branchBefore);
-    expect((await stat(file)).size).toBe(sizeBefore);
+    let providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("successor chapter response"); }]);
+    const accepted = await f.service.invoke(client, "home.prompt", {
+      commandId: `hard-admission-${boundary.replaceAll(" ", "-")}`,
+      text: "must dispatch only after the hard-limit rollover",
+    }) as unknown as { sessionId: string; operationId: string };
+    expect(accepted.sessionId).not.toBe(slot.id);
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters).toHaveLength(2);
+    expect(stored.chapters[0]).toMatchObject({
+      state: "sealed",
+      ...(boundary === "hard bytes" ? { sizeAtSeal: hardBytes } : { entriesAtSeal: hardEntries }),
+    });
+    expect(stored.chapters[1]).toMatchObject({ sessionId: accepted.sessionId, ordinal: 2 });
     expect(providerCalls).toBe(0);
+  });
+
+  it("stops one running Home operation on its first canonical hard-entry crossing and retains its writes", async () => {
+    const f = await fixture("hard-running-crossing");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-hard-running-crossing");
+    Object.defineProperty(slot, "canonicalEntryCount", { configurable: true, get: () => 100_000 });
+    let providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("settlement response retained"); }]);
+    await slot.prompt("cross while running");
+    await waitUntil(() => !slot.isBusy, 30_000);
+    const stopped = f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop");
+    const branch = slot.sessionManager.getBranch();
+    const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0]).toMatchObject({ boundary: "hard-entries", crossingEntries: 100_000, settledEntries: 100_000 });
+    expect(branch).toEqual(canonical.slice(1));
+    expect(invocationReceipts(branch, slot.id).find(receipt => receipt.receiptKind === "terminal" && receipt.operationId)?.errorCode).toBe("chapter-limit");
+    expect(providerCalls).toBe(0);
+    expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === "hard-entries")).toBe(false);
   });
 
   // Failure-first race contract: admission must be revalidated after async
@@ -466,29 +493,6 @@ describe("Tron Home activations end to end", () => {
     } finally {
       release();
     }
-  });
-
-  it("rejects a serialized SDK entry that would cross the hard byte limit before staging", async () => {
-    const f = await fixture("hard-byte-projection");
-    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
-    const slot = await designateHome(f, "e2e-hard-byte-projection");
-    let providerCalls = 0;
-    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("seed"); }]);
-    await slot.prompt("seed");
-    await waitUntil(() => providerCalls === 1);
-    await waitUntil(() => !slot.isBusy);
-    const file = slot.sessionFile!;
-    const nearLimit = 200 * 1_024 * 1_024 - 64;
-    await truncate(file, nearLimit);
-    const before = slot.sessionManager.getBranch();
-    const bytesBefore = (await stat(file)).size;
-    providerCalls = 0;
-    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("must not reach provider"); }]);
-    await expect(slot.prompt("x")).rejects.toMatchObject({ code: "conflict", details: { reason: "hard-bytes" } });
-    expect(slot.sessionManager.getBranch()).toEqual(before);
-    expect((await stat(file)).size).toBe(bytesBefore);
-    expect(providerCalls).toBe(0);
-    report.cases.push({ case: "hard-byte-preflight", canonicalBytesBefore: bytesBefore, canonicalEntriesStable: true, providerDispatches: providerCalls });
   });
 
   it("recovers a durable reservation after restart and routes the next activation to one successor", async () => {

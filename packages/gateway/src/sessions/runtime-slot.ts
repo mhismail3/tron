@@ -211,8 +211,6 @@ type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
 
 const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
 const HOME_HARD_ENTRIES = 100_000;
-const HOME_ADMISSION_RESERVE_BYTES = 64 * 1_024;
-const HOME_ADMISSION_RESERVE_ENTRIES = 4;
 
 type HomeMaterializationAuthority = Readonly<{
   homeId: string;
@@ -397,7 +395,15 @@ interface RuntimeSlotHooks {
   settled: (sessionId: string) => void;
   /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
   homeQuiescent?: (sessionId: string) => Promise<void>;
-  homeChapterRefused?: (reason: "sealed-write" | "hard-bytes" | "hard-entries") => void;
+  homeChapterRefused?: (reason: "sealed-write") => void;
+  homeChapterLimitStopped?: (details: {
+    chapterOrdinal: number;
+    boundary: "hard-bytes" | "hard-entries";
+    crossingBytes: number;
+    crossingEntries: number;
+    settledBytes: number;
+    settledEntries: number;
+  }) => void;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
   turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
@@ -845,6 +851,7 @@ export class RuntimeSlot {
    * runtime creation. */
   private explicitHomeSessionId: string | undefined;
   private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
+  private homeLimitStop?: { operationId: string; boundary: "hard-bytes" | "hard-entries"; crossingBytes: number; crossingEntries: number };
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -876,23 +883,16 @@ export class RuntimeSlot {
   private installCanonicalWriteGuard(): void {
     const manager = this.sessionManager as unknown as {
       _appendEntry: (entry: FileEntry) => void;
-      getEntries: () => FileEntry[];
     };
     const appendEntry = manager._appendEntry.bind(manager);
     manager._appendEntry = (entry) => {
       if (this.isHomeProfile(this.sessionManager)) {
         const path = this.sessionManager.getSessionFile();
         const fileExists = path ? existsSync(path) : false;
-        if (this.activeOperationId !== undefined || fileExists) {
-          const stagedBytes = fileExists ? 0 : manager.getEntries().reduce(
-            (total, staged) => total + Buffer.byteLength(JSON.stringify(staged)) + 1,
-            0,
-          );
-          const projectedBytes = stagedBytes + Buffer.byteLength(JSON.stringify(entry)) + 1;
-          this.assertChapterWritable(projectedBytes, 1);
-        }
+        if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable();
       }
       appendEntry(entry);
+      this.observeHomeChapterGrowth();
     };
   }
 
@@ -3782,7 +3782,8 @@ export class RuntimeSlot {
           : terminalNotification?.outcome === "unknown" ? "outcomeUnknown" as const
           : "completed" as const;
         const terminalErrorCode = terminalLifecycle === "interrupted"
-          ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
+          ? (settledOperationId && this.homeLimitStop?.operationId === settledOperationId ? "chapter-limit"
+            : settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
         // Observation admission is issued only after the exact terminal receipt
         // path below settles; before that point canonical durability is still
@@ -6892,10 +6893,8 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
-    this.assertChapterWritable(
-      Buffer.byteLength(text) + HOME_ADMISSION_RESERVE_BYTES,
-      HOME_ADMISSION_RESERVE_ENTRIES,
-    );
+    this.assertHomeLimitNotStopping();
+    this.assertChapterWritable();
     if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
@@ -7046,10 +7045,8 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
-      this.assertChapterWritable(
-        Buffer.byteLength(queueDisplay?.text ?? "") + HOME_ADMISSION_RESERVE_BYTES,
-        HOME_ADMISSION_RESERVE_ENTRIES,
-      );
+      this.assertHomeLimitNotStopping();
+      this.assertChapterWritable();
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -7705,6 +7702,7 @@ export class RuntimeSlot {
   async abort(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
     expectedOperationId?: string,
+    terminalErrorCode = "user-abort",
   ): Promise<void> {
     // A persistence blocker must not disable the owner's Stop route. Stop still
     // proves exact operation identity and reports any unresolved receipt after
@@ -7748,7 +7746,7 @@ export class RuntimeSlot {
         throw new GatewayError("conflict", "Foreground work did not stop", true);
       }
       if (invocationOperationId) {
-        await this.terminalizeInvocation(invocationOperationId, "interrupted", "user-abort");
+        await this.terminalizeInvocation(invocationOperationId, "interrupted", terminalErrorCode);
         interruptionPersisted = true;
       }
     } finally {
@@ -9218,46 +9216,65 @@ export class RuntimeSlot {
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
-  private assertChapterWritable(addedBytes = 0, addedEntries = 1): void {
+  private assertChapterWritable(): void {
     const state = this.dependencies.homeChapterState?.(this.id);
-    if (state) {
-      const authority = this.homeMaterializationAuthority;
-      const ownsMaterialization = Boolean(authority
-        && state.materializing
-        && state.homeId === authority.homeId
-        && state.ordinal === authority.ordinal
-        && state.sessionId === authority.sessionId
-        && state.attemptId === authority.attemptId
-        && state.expectedPath === authority.expectedPath
-        && this.sessionManager.getSessionId() === authority.sessionId
-        && this.sessionManager.getSessionFile() === authority.expectedPath);
-      try { assertChapterWritable(state, ownsMaterialization); }
-      catch (error) {
-        if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
-        throw error;
-      }
+    if (!state) return;
+    const authority = this.homeMaterializationAuthority;
+    const ownsMaterialization = Boolean(authority
+      && state.materializing
+      && state.homeId === authority.homeId
+      && state.ordinal === authority.ordinal
+      && state.sessionId === authority.sessionId
+      && state.attemptId === authority.attemptId
+      && state.expectedPath === authority.expectedPath
+      && this.sessionManager.getSessionId() === authority.sessionId
+      && this.sessionManager.getSessionFile() === authority.expectedPath);
+    try { assertChapterWritable(state, ownsMaterialization); }
+    catch (error) {
+      if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
+      throw error;
     }
-    if (!this.isHomeProfile(this.sessionManager)) return;
-    const entries = this.canonicalEntryCount;
-    if (entries + addedEntries > HOME_HARD_ENTRIES) {
-      this.hooks.homeChapterRefused?.("hard-entries");
-      throw new GatewayError("conflict", "This Home chapter reached its canonical entry limit", false, {
-        reason: "hard-entries", chapterOrdinal: state?.ordinal ?? 0, entries,
-      });
-    }
+  }
+
+  private assertHomeLimitNotStopping(): void {
+    if (this.homeLimitStop) throw new GatewayError("conflict", "Home stopped this activation at its chapter limit", true, {
+      reason: "chapter-limit-stop",
+    });
+  }
+
+  private observeHomeChapterGrowth(): void {
+    if (!this.isHomeProfile(this.sessionManager) || this.homeLimitStop) return;
+    const operationId = this.activeOperationId;
+    if (!operationId) return;
     const path = this.sessionManager.getSessionFile();
     let bytes = 0;
     if (path) {
       try { bytes = statSync(path).size; } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
       }
     }
-    if (bytes + addedBytes > HOME_HARD_BYTES) {
-      this.hooks.homeChapterRefused?.("hard-bytes");
-      throw new GatewayError("conflict", "This Home chapter reached its canonical byte limit", false, {
-        reason: "hard-bytes", chapterOrdinal: state?.ordinal ?? 0, bytes, entries,
+    const entries = this.canonicalEntryCount;
+    const boundary = bytes >= HOME_HARD_BYTES ? "hard-bytes"
+      : entries >= HOME_HARD_ENTRIES ? "hard-entries" : undefined;
+    if (!boundary) return;
+    const crossing = { operationId, boundary, crossingBytes: bytes, crossingEntries: entries } as const;
+    this.homeLimitStop = crossing;
+    void this.abort("agent", operationId, "chapter-limit").then(() => {
+      const settledBytes = path ? statSync(path).size : 0;
+      const settledEntries = this.canonicalEntryCount;
+      this.hooks.homeChapterLimitStopped?.({
+        chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
+        boundary,
+        crossingBytes: crossing.crossingBytes,
+        crossingEntries: crossing.crossingEntries,
+        settledBytes,
+        settledEntries,
       });
-    }
+      if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+    }, error => {
+      // If exact-operation Stop could not settle, preserve the admission fence.
+      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
+    });
   }
 
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {

@@ -341,8 +341,15 @@ const sessions = new RuntimeRegistry({
       event: diagnostic.outcome === "chapter-rollover" ? "home.chapter-rollover"
         : diagnostic.outcome === "chapter-recovery" ? "home.chapter-recovery"
           : diagnostic.outcome === "chapter-refused" ? "home.chapter-refused"
-            : diagnostic.outcome === "route-bound" ? "home.route-bound" : `home.${diagnostic.outcome}`,
+            : diagnostic.outcome === "chapter-limit-stop" ? "home.chapter-limit-stop"
+              : diagnostic.outcome === "route-bound" ? "home.route-bound" : `home.${diagnostic.outcome}`,
       source: "home", ...(diagnostic.reason ? { reason: diagnostic.reason } : {}),
+      ...(diagnostic.chapterOrdinal === undefined ? {} : { chapterOrdinal: diagnostic.chapterOrdinal }),
+      ...(diagnostic.boundary ? { boundary: diagnostic.boundary } : {}),
+      ...(diagnostic.crossingBytes === undefined ? {} : { crossingBytes: diagnostic.crossingBytes }),
+      ...(diagnostic.crossingEntries === undefined ? {} : { crossingEntries: diagnostic.crossingEntries }),
+      ...(diagnostic.settledBytes === undefined ? {} : { settledBytes: diagnostic.settledBytes }),
+      ...(diagnostic.settledEntries === undefined ? {} : { settledEntries: diagnostic.settledEntries }),
     },
   ),
   machineId: config.machineId,

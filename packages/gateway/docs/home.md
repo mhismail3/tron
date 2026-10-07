@@ -18,10 +18,11 @@ typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
 The version-2 Home record carries an ordered chapter ledger. At a quiescent
 turn boundary, crossing either the 24 MiB canonical-byte or 50,000-entry soft
 limit seals the active chapter and durably reserves its successor; this writes
-only bounded metadata. RuntimeSlot also refuses an admission before dispatch
-when the current chapter would exceed its 200 MiB or 100,000-entry hard limit.
-The next `home.prompt` activation is the only path that materializes that
-reservation. A sealed chapter remains readable but refuses
+only bounded metadata. Before a new `home.prompt` receipt binds its physical
+target, Home checks canonical bytes and entries; a chapter already at or above
+200 MiB or 100,000 entries is sealed and its successor reserved before any
+activation effect. The next `home.prompt` activation is the only path that
+materializes that reservation. A sealed chapter remains readable but refuses
 mutation regardless of Home's enabled state or the runtime's ordinary/Home
 profile. The chapter-state check is physical-session-owned and is not bypassed
 when Home is disabled. The Registry materializer claims one attempt per reserved
@@ -61,11 +62,15 @@ refusal. A sealed check before a custom-entry append is a clean typed refusal: i
 exits the bounded ownership-write retry path without draining or fencing the
 runtime.
 
-The Home hard limits guard every canonical SDK entry before it is staged. Prompt
-admission also reserves bounded headroom for serialized receipts and the first
-user entry; later SDK-generated messages and tool entries are checked at their
-own append boundary. Exceeding the limit after an accepted provider response
-leaves an uncertain operation rather than staging an over-limit canonical entry.
+A running activation's canonical writes are never refused at the hard limit.
+RuntimeSlot observes successful canonical growth and, on the first crossing,
+requests Stop for that exact operation. The crossing entry and all writes needed
+to settle that abort remain canonical. No new turn, tool dispatch, steering, or
+follow-up is admitted while that stop settles. The bounded
+`home.chapter-limit-stop` signal records the chapter ordinal, hard boundary, and
+canonical byte/entry counts at crossing and after settlement. The activation
+receipt is terminalized as interrupted with error code `chapter-limit`; the next
+admission rolls over to the successor.
 
 ## The record
 

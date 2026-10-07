@@ -1492,8 +1492,10 @@ export class GatewayService {
             logicalSessionId: "home", homeId: binding.homeId, bindingRevision: binding.bindingRevision,
             sessionId: binding.physicalSessionId, operationId: accepted.operationId,
           });
-        }, false, true, () => {
-          const route = this.requireHome().routeBinding();
+        }, false, true, async () => {
+          const home = this.requireHome();
+          await home.ensureChapterBelowHardLimit();
+          const route = home.routeBinding();
           binding = { homeId: route.homeId, bindingRevision: route.bindingRevision, physicalSessionId: route.physicalSessionId };
           return binding;
         });
@@ -2366,7 +2368,7 @@ export class GatewayService {
     operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
     respondBeforeReceiptCompletion = false,
-    resolveBinding?: () => CommandReceiptBinding,
+    resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
     // The entry spans the whole receipt-backed operation (a compaction or a

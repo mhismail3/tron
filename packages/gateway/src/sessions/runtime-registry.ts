@@ -1291,8 +1291,18 @@ export class RuntimeRegistry {
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
       homeQuiescent: (sessionId: string) => this.home.chapterQuiescent(sessionId),
-      homeChapterRefused: (reason: "sealed-write" | "hard-bytes" | "hard-entries") => {
+      homeChapterRefused: (reason: "sealed-write") => {
         this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason });
+      },
+      homeChapterLimitStopped: (details: {
+        chapterOrdinal: number;
+        boundary: "hard-bytes" | "hard-entries";
+        crossingBytes: number;
+        crossingEntries: number;
+        settledBytes: number;
+        settledEntries: number;
+      }) => {
+        this.options.homeDiagnostic?.({ outcome: "chapter-limit-stop", ...details });
       },
       turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
         // Admission is detached from inference, but RuntimeSlot invokes this

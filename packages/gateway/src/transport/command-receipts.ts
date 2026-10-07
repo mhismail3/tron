@@ -45,7 +45,7 @@ export interface CommandReceiptBinding {
 
 export interface CommandReceiptExecutionOptions {
   /** Resolve and persist a logical route after replay/fence lookup but before effects. */
-  resolveBinding?: () => CommandReceiptBinding;
+  resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>;
   /** Only prompts may answer once admitted while their completed receipt is still being fsynced. */
   respondBeforeCompletion?: boolean;
   /** Own the still-running completed write before the early result can be delivered. */
@@ -372,7 +372,7 @@ export class CommandReceiptStore {
             if (existing.status === "completed") return { exists: true, result: existing.result ?? null } as const;
             throw new GatewayError("conflict", "Previous command outcome is uncertain; refresh authoritative state instead of replaying", false, { outcomeUnknown: true });
           }
-          const binding = options.resolveBinding?.();
+          const binding = await options.resolveBinding?.();
           pending = {
             version: binding ? 2 : 1,
             identityHash,
