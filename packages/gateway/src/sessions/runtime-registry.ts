@@ -950,6 +950,14 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
     }
     this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
+    // Pi's public newSession API selects a timestamped path and writes its
+    // header immediately. Once a previous attempt durably named a different
+    // path, absence is not permission to silently replace that binding: no
+    // verified exact-path adapter exists in the pinned SDK, so preserve and
+    // block rather than create evidence outside the recorded attempt.
+    if (chapter.expectedPath && scan.action === "absent") {
+      throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
+    }
 
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;

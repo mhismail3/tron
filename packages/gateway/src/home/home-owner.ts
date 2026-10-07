@@ -9,7 +9,7 @@ import { EPISODIC_DEFAULTS, type EpisodicDiagnostic, type EpisodicSourceCursor }
 import { readCanonicalHomeSessions, type EpisodicCanonicalCut, type EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durablePublishBoundedJson } from "../util/durable-json.js";
+import { durablePublishBoundedJson, isDurablePublicationUncertain } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
@@ -308,6 +308,7 @@ export class HomeOwner {
   }
 
   routeBinding(): { homeId: string; bindingRevision: number; physicalSessionId: string } {
+    this.assertAvailable();
     const record = this.record;
     if (!record || !record.enabled) throw new GatewayError("not_found", "Tron Home is not enabled");
     const chapter = record.chapters.at(-1)!;
@@ -945,10 +946,17 @@ export class HomeOwner {
   }
 
   private async writeLocked(record: HomeRecord): Promise<void> {
+    this.assertAvailable();
     if (!admitRecord(record)) throw new GatewayError("conflict", "The Home record is invalid or exceeds its chapter bounds");
     try {
       await durablePublishBoundedJson(this.recordPath, record, MAXIMUM_RECORD_BYTES);
     } catch (error) {
+      if (isDurablePublicationUncertain(error)) {
+        // A visible replacement makes the caller's prior in-memory record
+        // untrustworthy. Fence synchronous route readers before reloading.
+        this.unavailable = "Home ledger publication is being reconciled";
+        await this.load();
+      }
       if (error instanceof Error && error.message === "JSON document exceeds its byte limit") {
         throw new GatewayError("conflict", "The Home chapter ledger exceeds its persisted size limit");
       }

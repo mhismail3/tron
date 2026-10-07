@@ -38,7 +38,7 @@ attempt, and path through its disposal; receipt persistence and the first
 conversation append use that same owner. Authority is checked against the live
 ledger and exact session identity, not granted by an individual operation or
 receipt lifetime. Unreadable, malformed, torn, duplicate, symlinked, or
-path-mismatched evidence blocks recovery without changing canonical bytes. Gateway JSONL and HTML exports
+path-mismatched evidence blocks recovery without changing canonical bytes. If a durable prior attempt names a path that is now absent, recovery also preserves and blocks: the pinned SDK has no verified exact-path constructor, and its ordinary new-session API selects and writes a different timestamped path. A post-rename ledger publication error fences Home routing while the owner securely reloads the visible record; an unreadable or unsupported reload remains unavailable rather than trusting stale memory. Gateway JSONL and HTML exports
 are noncanonical destination writes owned by RuntimeSlot's existing temporary-
 artifact export boundary: it snapshots the canonical source into a fresh temporary
 directory, then registers that artifact. Home does not expose arbitrary SDK export

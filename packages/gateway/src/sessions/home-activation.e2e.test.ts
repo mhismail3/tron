@@ -545,6 +545,35 @@ describe("Tron Home activations end to end", () => {
     expect(status).toMatchObject({ sessionId: reservedId, bindingRevision: current.bindingRevision + 1 });
   });
 
+  it("preserves and blocks a recorded materialization path that is absent after restart", async () => {
+    const f = await fixture("recorded-home-path-absent");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    await designateHome(f, "e2e-recorded-path-absent");
+    const registry = f.registry as unknown as {
+      homeOwner(): { writeLocked(record: HomeRecord): Promise<void> };
+      sessionDirectoryFor(cwd: string): string;
+      home: { homeWorkspacePath(): string };
+      materializeReservedHome(sessionId: string): Promise<unknown>;
+    };
+    const owner = f.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const active = current.chapters[0]!;
+    const reservedId = "recorded-path-absent-session";
+    const expectedPath = join(registry.sessionDirectoryFor(registry.home.homeWorkspacePath()), "missing-recorded-path.jsonl");
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...active, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "materializing", createdAt: new Date().toISOString(), attemptId: "old-attempt", expectedPath },
+      ],
+    });
+
+    await expect(f.registry.materializeReservedHome(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(readFile(expectedPath)).rejects.toMatchObject({ code: "ENOENT" });
+    const recovered = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(recovered.chapters.at(-1)).toMatchObject({ state: "materializing", expectedPath });
+  });
+
   it.each(["reserved", "materializing"] as const)("rebuilds a live runtime when re-enabling a pending %s chapter", async state => {
     const f = await fixture(`reenable-pending-${state}`);
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
