@@ -7,15 +7,15 @@ describe("OwnedSessionDispatch", () => {
   it("keeps lease, recovery evidence and acknowledgement at the shared runtime owner", async () => {
     const lease = { slot: {}, release: vi.fn() };
     const runtime = {
-      acquireAutomationLease: vi.fn(async () => lease),
-      automationRecoveryEvidence: vi.fn(async () => ({ marker: { operationId: "op-1" } })),
-      clearAutomationMarker: vi.fn(async () => {}),
+      acquireOwnedSessionLease: vi.fn(async () => lease),
+      ownedOperationRecoveryEvidence: vi.fn(async () => ({ marker: { operationId: "op-1" } })),
+      clearOwnedOperationMarker: vi.fn(async () => {}),
     };
     const dispatch = new OwnedSessionDispatch(runtime as any);
     await expect(dispatch.lease("session-1")).resolves.toBe(lease);
     await expect(dispatch.recoveryEvidence("session-1", "op-1")).resolves.toEqual({ marker: { operationId: "op-1" } });
     await dispatch.acknowledge("session-1", "op-1", lease);
-    expect(runtime.clearAutomationMarker).toHaveBeenCalledWith("session-1", "op-1");
+    expect(runtime.clearOwnedOperationMarker).toHaveBeenCalledWith("session-1", "op-1");
     expect(lease.release).toHaveBeenCalledOnce();
   });
 

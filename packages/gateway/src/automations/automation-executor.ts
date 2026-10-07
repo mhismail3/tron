@@ -150,7 +150,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       const cancelAdmission = () => { void slot.abort("agent", operationId).catch(() => {}); };
       signal?.addEventListener("abort", cancelAdmission, { once: true });
       try {
-        admission = await slot.prompt(
+        admission = await this.dispatch.admit(slot,
           promptText(run.actionSnapshot.text, resource),
           [],
           undefined,
@@ -285,6 +285,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
   }
 
   async acknowledgeRecovery(record: AutomationRecord, run: AutomationRun): Promise<void> {
-    if (run.operationId) await this.sessions.clearAutomationMarker(run.executionSessionId, run.operationId);
+    if (run.operationId) await this.dispatch.clearRecoveryMarker(run.executionSessionId, run.operationId);
   }
 }

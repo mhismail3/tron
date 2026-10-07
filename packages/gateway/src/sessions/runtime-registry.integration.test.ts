@@ -10985,7 +10985,7 @@ export default function (pi) {
       expect.soft(existsSync(sentinel)).toBe(false);
       expect.soft(work.size).toBe(0);
       expect.soft(slot.isEvictionProtected).toBe(false);
-      expect((await registry.automationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
+      expect((await registry.ownedOperationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
 
       // The same installed command remains available to an explicit user.
       await slot.prompt(action.text);

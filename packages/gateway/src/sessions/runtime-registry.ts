@@ -1888,7 +1888,7 @@ export class RuntimeRegistry {
     }
   }
 
-  async acquireAutomationLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+  async acquireOwnedSessionLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
     const slot = await this.acquire(sessionId);
     return this.mutex.run(() => {
       if (this.deletingSessionIds.has(sessionId) || this.slots.get(sessionId) !== slot
@@ -1899,7 +1899,7 @@ export class RuntimeRegistry {
     });
   }
 
-  async automationRecoveryEvidence(sessionId: string, operationId: string): Promise<{
+  async ownedOperationRecoveryEvidence(sessionId: string, operationId: string): Promise<{
     marker?: RunMarkerEvidence;
     invocation?: InvocationProjection;
   }> {
@@ -1921,8 +1921,7 @@ export class RuntimeRegistry {
     };
   }
 
-  async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
-    if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
+  async clearOwnedOperationMarker(sessionId: string, operationId: string): Promise<void> {
     await this.markers.clear(sessionId, operationId);
     if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
   }

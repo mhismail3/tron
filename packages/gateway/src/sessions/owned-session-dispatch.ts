@@ -43,16 +43,24 @@ export class OwnedSessionDispatch {
   }
 
   lease(sessionId: string): Promise<OwnedLease> {
-    return this.sessions.acquireAutomationLease(sessionId);
+    return this.sessions.acquireOwnedSessionLease(sessionId);
   }
 
   recoveryEvidence(sessionId: string, operationId: string) {
-    return this.sessions.automationRecoveryEvidence(sessionId, operationId);
+    return this.sessions.ownedOperationRecoveryEvidence(sessionId, operationId);
+  }
+
+  admit(slot: RuntimeSlot, ...args: Parameters<RuntimeSlot["prompt"]>): ReturnType<RuntimeSlot["prompt"]> {
+    return slot.prompt(...args);
   }
 
   async acknowledge(sessionId: string, operationId: string, lease: OwnedLease): Promise<void> {
-    await this.sessions.clearAutomationMarker(sessionId, operationId);
+    await this.sessions.clearOwnedOperationMarker(sessionId, operationId);
     lease.release();
+  }
+
+  clearRecoveryMarker(sessionId: string, operationId: string): Promise<void> {
+    return this.sessions.clearOwnedOperationMarker(sessionId, operationId);
   }
 
   /** A neutral observation never interprets a RuntimeSlot lifecycle as success. */
