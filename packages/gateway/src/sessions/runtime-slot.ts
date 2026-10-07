@@ -458,6 +458,7 @@ class CanonicalCustomEntryConflictError extends Error {}
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
+  observationSettled: boolean;
   fallbackWork?: GatewayWorkHandle;
 };
 
@@ -2702,8 +2703,11 @@ export class RuntimeSlot {
             ...(binding.operationId ? { operationId: binding.operationId } : {}),
           });
           this.pendingAssistantCompletion = item.completion;
-          // Pi has synchronously appended the canonical entry. Its exact durable
-          // stamp has started; truthful agent settlement still gates projection.
+          // Pi has synchronously appended the canonical entry. Settle this exact
+          // completion immediately: a queued follow-up can start inside the same
+          // agent loop without a continuation/agent-settled boundary in between.
+          void this.beginAttentionSettlement(item.completion).catch((error) =>
+            this.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork));
         }
         if (presentationID && this.streamPresentationId === presentationID) {
           this.latestStreamingMessage = undefined;
@@ -2721,6 +2725,9 @@ export class RuntimeSlot {
   }
 
   private readonly observationStarts = new Map<string, { entryIndex: number; branchId: string }>();
+  /** Exact last completion already admitted for an operation, used only to
+   * suppress the later agent_settled duplicate when canonical settlement won. */
+  private readonly observedCompletionsByOperation = new Map<string, string>();
 
   private completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
@@ -3185,6 +3192,7 @@ export class RuntimeSlot {
       item = {
         completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
+        observationSettled: false,
         ...(exactOwner ? {} : {
           fallbackWork: this.dependencies.workRegistry.beginDerived({
             kind: "terminal-receipt-persistence",
@@ -3250,6 +3258,45 @@ export class RuntimeSlot {
     if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
   }
 
+  private admitCompletionObservation(item: CompletionOwnershipItem): void {
+    if (item.observationSettled) return;
+    const operationId = item.completion.operationId ?? this.completionWorkOwners.get(item.completion.id);
+    if (!operationId) return;
+    const start = this.observationStarts.get(operationId);
+    if (!start) return;
+    const entries = this.canonicalSessionEntries();
+    const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
+    if (completionIndex < start.entryIndex) return;
+    const observed = this.observationEntries(operationId, item.completion.id);
+    if (observed.entries.length === 0) return;
+    try {
+      this.hooks.turnSettled?.(
+        this.id,
+        observed.entries,
+        "completed",
+        item.completion.id,
+        observed.branchId,
+        this.cwd,
+        this.invocationForOperation(operationId)?.invocationId,
+      );
+    } catch {
+      // Observation admission is fire-and-forget; it cannot undo durable completion.
+      return;
+    }
+    item.observationSettled = true;
+    if (!this.hasActiveAgentRun || this.activeOperationId === operationId) {
+      this.observedCompletionsByOperation.set(operationId, item.completion.id);
+    }
+    if (this.hasActiveAgentRun && this.activeOperationId === operationId) {
+      // The same foreground operation can continue after a completion (for
+      // example, a consumed steer). Advance to the exact next canonical entry;
+      // its later completion owns only the remaining range.
+      this.observationStarts.set(operationId, { entryIndex: completionIndex + 1, branchId: start.branchId });
+    } else {
+      this.observationStarts.delete(operationId);
+    }
+  }
+
   private async settleAssistantCompletion(item: CompletionOwnershipItem): Promise<void> {
     const { completion } = item;
     try {
@@ -3284,6 +3331,7 @@ export class RuntimeSlot {
       if (!completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
+      this.admitCompletionObservation(item);
       const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
       this.settleOperationWork(completionWorkOwner);
       this.completionWorkOwners.delete(completion.id);
@@ -3572,11 +3620,9 @@ export class RuntimeSlot {
               }
               await this.beginAttentionSettlement(completion);
               const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
-              const observed = this.observationEntries(completionOperationId ?? "", completion.id);
-              // The completion waiting for attention is a separate owner from
-              // the follow-up that just settled. Admit each exact cut with its
-              // own outcome and invocation provenance.
-              this.hooks.turnSettled?.(this.id, observed.entries, "completed", completion.id, observed.branchId, this.cwd, completionOperationId ? this.invocationForOperation(completionOperationId)?.invocationId : undefined);
+              if (completionOperationId) this.observedCompletionsByOperation.delete(completionOperationId);
+              // A successful earlier completion is admitted by its exact
+              // settlement owner; this lane admits only a distinct follow-up cut.
               if (settledOperationId && settledOperationId !== completionOperationId) {
                 const followUpObserved = this.observationEntries(settledOperationId);
                 this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
@@ -3598,9 +3644,18 @@ export class RuntimeSlot {
               terminalLifecycle,
               terminalErrorCode,
             ).then(async () => {
-              const observed = this.observationEntries(settledOperationId);
-              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+              const alreadyObservedCompletion = terminalNotification !== undefined
+                && this.observedCompletionsByOperation.get(settledOperationId) === terminalNotification.sourceId;
+              if (!alreadyObservedCompletion && this.observationStarts.has(settledOperationId)) {
+                const observed = this.observationEntries(settledOperationId);
+                if (observed.entries.length > 0) {
+                  this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+                }
+              }
+              // Only the exact completion ID proves that this terminal cut was
+              // already admitted. A missing cursor alone never means coverage.
               this.observationStarts.delete(settledOperationId);
+              this.observedCompletionsByOperation.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });
@@ -6756,6 +6811,26 @@ export class RuntimeSlot {
     return true;
   }
 
+  private attentionPendingError(): GatewayError {
+    const completion = this.pendingAssistantCompletion ?? this.completionOwnershipQueue[0]?.completion;
+    const ageMs = completion ? Math.max(0, Date.now() - Date.parse(completion.completedAt)) : undefined;
+    const completionId = completion?.operationId ?? completion?.id;
+    this.emit("session.diagnostic", {
+      code: "attention-pending",
+      ...(completionId ? { operationId: completionId } : {}),
+      ...(ageMs !== undefined ? { ageMs } : {}),
+    });
+    return new GatewayError(
+      "busy",
+      completion
+        ? `The prior response is still committing durable attention state (completion ${completionId} pending for ${Math.floor((ageMs ?? 0) / 1000)} s)`
+        : "The prior response is still committing durable attention state",
+      true,
+      { reason: "attention-pending", ...(completionId ? { operationId: completionId } : {}), ...(ageMs !== undefined ? { ageMs } : {}) },
+      "attention-pending",
+    );
+  }
+
   private async admitPrompt(
     text: string,
     images: ImageContent[],
@@ -6773,10 +6848,10 @@ export class RuntimeSlot {
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
-        throw new GatewayError("busy", "The prior response is still committing durable attention state", true);
+        throw this.attentionPendingError();
       }
       if (this.completionOwnershipQueue.length > 0 || this.pendingAssistantCompletion) {
-        throw new GatewayError("busy", "The prior response is still committing durable attention state", true);
+        throw this.attentionPendingError();
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
