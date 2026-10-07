@@ -666,6 +666,25 @@ class TypeSpecificPullBodyTests(LandFixture):
         self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n```md\nexample\n")
         self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n## Summary\n\nconflicting wrapper\n")
 
+    def test_unclosed_html_comment_is_refused_before_generated_verification(self):
+        self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n<!-- unclosed comment")
+
+    def test_fence_trailer_text_is_not_a_closing_delimiter(self):
+        self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n```md\n```not-a-closing-fence\n")
+
+    def test_heading_shaped_code_output_counts_as_meaningful_evidence(self):
+        summary = ("## Repro\n\n```text\n# Actual failing output\n```\n\n"
+                   "## Cause\n\nThe cause is known.\n\n## Fix\n\nThe fix is applied.\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_balanced_html_comment_keeps_generated_verification_visible(self):
+        summary = ("<!-- evidence context\nnot a heading: ## Verification\n-->\n"
+                   + self.BUG_SUMMARY)
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("## Verification", self.state()["pulls"][0]["body"])
+
     def test_nonempty_fenced_evidence_and_harmless_comments_are_valid(self):
         summary = ("<!-- issue evidence -->\n## Repro\n\n```text\nexpected failure\n```\n\n"
                    "## Cause\n\nThe parser lost the boundary.\n\n<!-- note -->\n## Fix\n\nRestore it.\n")

@@ -259,7 +259,7 @@ def acceptance_evidence(records: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool]:
+def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool, bool]:
     """Blank HTML comments and fence delimiters while retaining code payload and line positions."""
     visible: List[str] = []
     code_lines: List[bool] = []
@@ -274,7 +274,8 @@ def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool]:
                 visible.append("")
                 code_lines.append(False)
                 continue
-            if marker[0] == fence[0] and len(marker) >= fence[1]:
+            remainder = line.lstrip()[len(marker):]
+            if marker[0] == fence[0] and len(marker) >= fence[1] and not remainder.strip():
                 fence = None
                 visible.append("")
                 code_lines.append(False)
@@ -313,12 +314,12 @@ def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool]:
                         cursor = end + 3
         visible.append("".join(output))
         code_lines.append(False)
-    return visible, code_lines, fence is None
+    return visible, code_lines, fence is None, not in_comment
 
 
-def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool]:
+def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool, bool]:
     """Return ATX heading depth/title/line outside comments and fenced code."""
-    lines, code_lines, balanced_fence = _visible_markdown(text)
+    lines, code_lines, balanced_fence, balanced_comment = _visible_markdown(text)
     headings: List[Tuple[str, int, int]] = []
     for index, line in enumerate(lines):
         if code_lines[index]:
@@ -326,12 +327,12 @@ def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool]:
         match = re.fullmatch(r"(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*", line)
         if match:
             headings.append((match.group(2).strip(), len(match.group(1)), index))
-    return headings, balanced_fence
+    return headings, balanced_fence, balanced_comment
 
 
-def _has_meaningful_content(lines: List[str]) -> bool:
-    for line in lines:
-        if re.match(r"^[ \t]*#{1,6}[ \t]+", line):
+def _has_meaningful_content(lines: List[Tuple[str, bool]]) -> bool:
+    for line, is_code in lines:
+        if not is_code and re.match(r"^[ \t]*#{1,6}[ \t]+", line):
             continue
         # Blank lines, Markdown delimiters, and empty list/table scaffolding are not evidence.
         payload = re.sub(r"[\s#>*_~`|!()\[\]{}+\-]", "", line)
@@ -344,10 +345,10 @@ def validate_issue_summary(summary: str, labels: List[str]) -> None:
     """Require meaningful, ordered bug evidence before any landing writes."""
     if "kind:bug" not in labels:
         return
-    lines, code_lines, balanced_fence = _visible_markdown(summary)
-    headings, _ = _markdown_headings(summary)
+    lines, code_lines, balanced_fence, balanced_comment = _visible_markdown(summary)
+    headings, _, _ = _markdown_headings(summary)
     required = {name: [] for name in _BUG_SUMMARY_SECTIONS}
-    sections: Dict[str, List[str]] = {name: [] for name in _BUG_SUMMARY_SECTIONS}
+    sections: Dict[str, List[Tuple[str, bool]]] = {name: [] for name in _BUG_SUMMARY_SECTIONS}
     reserved: List[str] = []
     for title, depth, index in headings:
         if depth != 2:
@@ -360,7 +361,7 @@ def validate_issue_summary(summary: str, labels: List[str]) -> None:
     current: Optional[str] = None
     for index, line in enumerate(lines):
         if current is not None and index not in heading_at:
-            sections[current].append(line)
+            sections[current].append((line, code_lines[index]))
         if index in heading_at:
             title, depth = heading_at[index]
             if depth <= 2:
@@ -371,7 +372,7 @@ def validate_issue_summary(summary: str, labels: List[str]) -> None:
     ordered = len(positions) == len(_BUG_SUMMARY_SECTIONS) and positions == sorted(positions)
     empty = [name for name in _BUG_SUMMARY_SECTIONS if len(required[name]) == 1
              and not _has_meaningful_content(sections[name])]
-    if absent or empty or not ordered or reserved or not balanced_fence:
+    if absent or empty or not ordered or reserved or not balanced_fence or not balanced_comment:
         reasons = absent + [name for name in empty if name not in absent]
         if not ordered and not absent:
             reasons.append("sections in Repro, Cause, Fix order")
@@ -379,14 +380,16 @@ def validate_issue_summary(summary: str, labels: List[str]) -> None:
             reasons.append("generated heading(s): " + ", ".join(reserved))
         if not balanced_fence:
             reasons.append("unclosed fenced example")
+        if not balanced_comment:
+            reasons.append("unclosed HTML comment")
         raise LandError("bug summary requires exactly one meaningful `## Repro`, `## Cause`, and `## Fix` "
                         "section in order before the generated `## Verification`; " + ", ".join(reasons))
 
 
-def _markdown_h2_sections(text: str) -> Tuple[List[Tuple[str, int]], bool]:
+def _markdown_h2_sections(text: str) -> Tuple[List[Tuple[str, int]], bool, bool]:
     """Return top-level H2 headings outside comments/fences, with line indexes."""
-    headings, balanced_fence = _markdown_headings(text)
-    return [(title, index) for title, depth, index in headings if depth == 2], balanced_fence
+    headings, balanced_fence, balanced_comment = _markdown_headings(text)
+    return [(title, index) for title, depth, index in headings if depth == 2], balanced_fence, balanced_comment
 
 
 def validate_existing_bug_body(body: str, labels: List[str], pull: int) -> None:
@@ -394,10 +397,10 @@ def validate_existing_bug_body(body: str, labels: List[str], pull: int) -> None:
     if "kind:bug" not in labels:
         return
     text = (body or "").replace("\r\n", "\n")
-    headings, balanced_fence = _markdown_h2_sections(text)
+    headings, balanced_fence, balanced_comment = _markdown_h2_sections(text)
     summaries = [index for title, index in headings if title == "Summary"]
     verifications = [index for title, index in headings if title == "Verification"]
-    if (not balanced_fence or len(summaries) != 1 or len(verifications) != 1
+    if (not balanced_fence or not balanced_comment or len(summaries) != 1 or len(verifications) != 1
             or summaries[0] >= verifications[0]):
         raise LandError(f"#{pull} bug pull request must have one Summary and one generated Verification section")
     summary = "\n".join(text.splitlines()[summaries[0] + 1:verifications[0]])
@@ -422,7 +425,7 @@ def merge_intent(pull: int, body: str, number: int) -> Tuple[str, Optional[str]]
     keyword = re.match(rf"(Closes|Refs) #{number}(?!\d)", text)
     if keyword is None:
         raise LandError(f"#{pull} neither closes nor refers to #{number}")
-    headings, _ = _markdown_h2_sections(text)
+    headings, _, _ = _markdown_h2_sections(text)
     summary_index = next((index for title, index in headings if title == "Summary"), None)
     verification_index = next((index for title, index in headings
                                if title == "Verification" and (summary_index is None or index > summary_index)), None)
@@ -703,7 +706,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     elif pull is not None and "kind:bug" in issue["labels"]:
         validate_existing_bug_body(pull["body"], issue["labels"], pull["number"])
         body_lines = pull["body"].replace("\r\n", "\n").splitlines()
-        headings, _ = _markdown_h2_sections(pull["body"].replace("\r\n", "\n"))
+        headings, _, _ = _markdown_h2_sections(pull["body"].replace("\r\n", "\n"))
         summary_index = next(index for title, index in headings if title == "Summary")
         verification_index = next(index for title, index in headings if title == "Verification")
         summary = "\n".join(body_lines[summary_index + 1:verification_index])
