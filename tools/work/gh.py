@@ -10,6 +10,7 @@ import stat
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
@@ -108,6 +109,20 @@ class Gh:
             raise GhError("local GitHub write audit directory is not privately owned")
         os.chmod(self._audit_dir, 0o700)
         return self._audit_dir / "github-writes.jsonl", self._audit_dir / "github-writes.lock"
+
+    @contextmanager
+    def taxonomy_labels_lock(self):
+        """Serialize taxonomy read-modify-writes across linked worktrees."""
+        audit_path, _ = self._audit_location()
+        # One fixed lock avoids a persistent per-issue lock-file registry.
+        lock_path = audit_path.with_name("issue-label-taxonomy.lock")
+        fd = self._open_private(lock_path, os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     @staticmethod
     def _open_private(path: Path, flags: int, mode: int = 0o600) -> int:

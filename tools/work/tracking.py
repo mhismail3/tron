@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import quote
 
 import bootstrap
 from gh import Gh, GhError
@@ -124,20 +126,43 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
         raise TrackingError("only labels declared in .github/work.json may be added")
     if {"task", "epic"} & (set(additions) | set(removals)):
         raise TrackingError("issue type labels are fixed at creation")
+    if number <= 0:
+        raise TrackingError("issue numbers must be positive")
+
+    taxonomy_prefixes = ("kind:", "visibility:", "area:")
+    changes_taxonomy = any(label.startswith(taxonomy_prefixes)
+                           for label in additions + removals)
     owner, name = _repository(gh)
-    issue = _issue(gh, f"{owner}/{name}", number)
-    current = [label["name"] for label in issue.get("labels", [])]
-    updated = [label for label in current if label not in removals]
-    updated.extend(label for label in additions if label not in updated)
-    if "epic" not in updated:
-        for prefix in ("kind:", "visibility:", "area:"):
-            classified = [label for label in updated if label.startswith(prefix)]
-            if len(classified) != 1 or classified[0] not in declared:
-                raise TrackingError(f"issue labels must retain exactly one declared {prefix[:-1]} classification")
-    if updated == current:
-        print(f"labels unchanged on issue #{number}")
-        return
-    gh.rest("PATCH", f"repos/{owner}/{name}/issues/{number}", {"labels": updated})
+    lock = gh.taxonomy_labels_lock() if changes_taxonomy else nullcontext()
+    with lock:
+        issue = _issue(gh, f"{owner}/{name}", number)
+        current = [label["name"] for label in issue.get("labels", [])]
+        updated = [label for label in current if label not in removals]
+        updated.extend(label for label in additions if label not in updated)
+        if "epic" not in updated:
+            for prefix in taxonomy_prefixes:
+                classified = [label for label in updated if label.startswith(prefix)]
+                if len(classified) != 1 or classified[0] not in declared:
+                    raise TrackingError(f"issue labels must retain exactly one declared {prefix[:-1]} classification")
+        additions_needed = [label for label in additions if label not in current]
+        removals_needed = [label for label in removals if label in current]
+        if not additions_needed and not removals_needed:
+            print(f"labels unchanged on issue #{number}")
+            return
+
+        completed: List[str] = []
+        try:
+            if additions_needed:
+                gh.rest("POST", f"repos/{owner}/{name}/issues/{number}/labels",
+                        {"labels": additions_needed})
+                completed.extend(f"added {label}" for label in additions_needed)
+            for label in removals_needed:
+                gh.rest("DELETE", f"repos/{owner}/{name}/issues/{number}/labels/{quote(label, safe='')}")
+                completed.append(f"removed {label}")
+        except GhError as error:
+            if completed:
+                raise TrackingError(f"{', '.join(completed)}; next label mutation failed or is uncertain") from error
+            raise TrackingError("issue label mutation failed or is uncertain") from error
     print(f"updated labels on issue #{number}")
 
 
@@ -205,7 +230,7 @@ def set_project_fields(gh: Gh, repo: Path, config: dict, number: int,
         raise TrackingError(f"issue #{number} is not in the work Project; run work project add first")
 
     field_map = {field["name"]: field for field in project["fields"]["nodes"] if field}
-    completed: List[str] = []
+    resolved: List[Tuple[str, str, str]] = []
     for field_name, value in (("Status", status), ("Priority", priority)):
         if value is None:
             continue
@@ -214,9 +239,13 @@ def set_project_fields(gh: Gh, repo: Path, config: dict, number: int,
                        if option["name"] == value), None)
         if not field or option is None:
             raise TrackingError(f"Project has no configured {field_name} option {value!r}; run work bootstrap")
+        resolved.append((field_name, field["id"], option))
+
+    completed: List[str] = []
+    for field_name, field_id, option_id in resolved:
         try:
             gh.graphql(_UPDATE_FIELD, project=project["id"], item=items[0]["id"],
-                       field=field["id"], option=option)
+                       field=field_id, option=option_id)
         except GhError as error:
             if completed:
                 raise TrackingError(f"{', '.join(completed)} updated; {field_name} failed or is uncertain") from error

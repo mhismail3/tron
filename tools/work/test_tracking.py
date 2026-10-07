@@ -4,12 +4,15 @@ Failure modes: (1) filing/triage/promotion and native links have no typed
 work command; (2) arbitrary labels/statuses can bypass taxonomy and claim
 ownership; (3) a compound Project update hides a committed first field when a
 later write fails; (4) retrying issue/Project links duplicates canonical work;
-(5) a failed request leaks public text or bypasses the shared audit.
+(5) a failed request leaks public text or bypasses the shared audit; (6)
+overlapping independent label additions overwrite each other; (7) a missing
+live Project option is discovered only after another requested field commits.
 """
 from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -22,7 +25,7 @@ sys.path.insert(0, str(HERE))
 
 
 _FAKE_GH = r'''#!/usr/bin/env python3
-import json, os, sys
+import fcntl, json, os, sys, time
 args=sys.argv[1:]
 state_path=os.environ['TRACKING_STATE']
 trace_path=os.environ['TRACKING_TRACE']
@@ -30,6 +33,17 @@ try: state=json.load(open(state_path))
 except FileNotFoundError: state={'number':101,'item':False,'fields':{},'labels':[],'writes':[],'updates':0,'subs':[],'blockers':[]}
 with open(trace_path,'a') as f: f.write(json.dumps(args)+'\n')
 def save(): json.dump(state,open(state_path,'w'))
+def update_state(change):
+ lock=os.open(state_path+'.lock',os.O_CREAT|os.O_RDWR,0o600); fcntl.flock(lock,fcntl.LOCK_EX)
+ try:
+  current=json.load(open(state_path)); change(current); json.dump(current,open(state_path,'w'))
+ finally:
+  fcntl.flock(lock,fcntl.LOCK_UN); os.close(lock)
+def wait_for(path):
+ deadline=time.time()+10
+ while not os.path.exists(path):
+  if time.time()>deadline: print('fixture barrier timed out',file=sys.stderr); sys.exit(3)
+  time.sleep(.01)
 def output(value, code=0):
  print(json.dumps(value)); sys.exit(code)
 if args[:2] == ['repo','view']:
@@ -44,17 +58,38 @@ if args and args[0]=='api' and args[1]!='graphql':
   state['labels']=body['labels']; state['writes'].append({'method':method,'path':path,'body':body}); save()
   output({'number':101,'node_id':'ISSUE_101','title':body['title'],'labels':[{'name':x} for x in body['labels']]})
  if '/issues/' in path and method=='GET':
-  number=int(path.rsplit('/',1)[-1]); labels=state['labels'] if number==101 else (['epic'] if number==154 else ['task'])
+  number=int(path.rsplit('/',1)[-1]); labels=list(state['labels']) if number==101 else (['epic'] if number==154 else ['task'])
+  barrier=os.environ.get('TRACKING_LABEL_BARRIER'); worker=os.environ.get('TRACKING_LABEL_WORKER')
+  if barrier and worker:
+   open(os.path.join(barrier,worker+'-read'),'w').close()
+   wait_for(os.path.join(barrier,'a-read')); wait_for(os.path.join(barrier,'b-read'))
   output({'number':number,'node_id':f'ISSUE_{number}','labels':[{'name':x} for x in labels]})
- if '/issues/' in path and method=='PATCH':
-  state['labels']=body.get('labels',state['labels']); state['writes'].append({'method':method,'path':path,'body':body}); save()
-  output({'number':101,'labels':[{'name':x} for x in state['labels']]})
+ if '/issues/' in path and (method=='PATCH' or (method=='POST' and path.endswith('/labels'))):
+  worker=os.environ.get('TRACKING_LABEL_WORKER'); barrier=os.environ.get('TRACKING_LABEL_BARRIER')
+  if worker=='b' and barrier: wait_for(os.path.join(barrier,'a-written'))
+  def change(current):
+   if method=='PATCH': current['labels']=body.get('labels',current['labels'])
+   else: current['labels']=list(dict.fromkeys(current['labels']+body.get('labels',[])))
+   current['writes'].append({'method':method,'path':path,'body':body})
+  update_state(change)
+  latest=json.load(open(state_path))
+  if worker=='a' and barrier: open(os.path.join(barrier,'a-written'),'w').close()
+  output({'number':101,'labels':[{'name':x} for x in latest['labels']]})
+ if '/issues/' in path and method=='DELETE' and '/labels/' in path:
+  from urllib.parse import unquote
+  label=unquote(path.rsplit('/',1)[-1])
+  def change(current):
+   current['labels']=[x for x in current['labels'] if x!=label]
+   current['writes'].append({'method':method,'path':path,'label':label})
+  update_state(change); output(None)
  print('unhandled REST',args,file=sys.stderr); sys.exit(2)
 if args[:3]==['api','graphql','--input']:
  request=json.load(sys.stdin); q=request['query']; v=request.get('variables',{})
  if 'mutation' not in q:
   if 'projectsV2' in q:
    fields=[{'id':'STATUS_FIELD','name':'Status','dataType':'SINGLE_SELECT','options':[{'id':'PROPOSED','name':'Proposed'},{'id':'READY','name':'Ready'},{'id':'NEEDS','name':'Needs you'},{'id':'BLOCKED','name':'Blocked'},{'id':'PROGRESS','name':'In progress'},{'id':'REVIEW','name':'In review'},{'id':'DONE','name':'Done'}]},{'id':'PRIORITY_FIELD','name':'Priority','dataType':'SINGLE_SELECT','options':[{'id':'P0','name':'P0'},{'id':'P1','name':'P1'},{'id':'P2','name':'P2'},{'id':'P3','name':'P3'}]}]
+   if os.environ.get('TRACKING_MISSING_PRIORITY_OPTION'):
+    fields[1]['options']=[option for option in fields[1]['options'] if option['name']!='P2']
    project={'id':'PROJECT_NODE','number':1,'title':'Tron','closed':False,'public':False,'shortDescription':'','url':'https://example.invalid/project','repositories':{'nodes':[{'id':'REPO_NODE'}]},'fields':{'nodes':fields}}
    output({'data':{'repositoryOwner':{'id':'OWNER_NODE','projectsV2':{'pageInfo':{'hasNextPage':False,'endCursor':None},'nodes':[project]}}}})
   if 'projectItems' in q:
@@ -140,9 +175,10 @@ class TypedTrackingCommandTests(unittest.TestCase):
         state = self.state_json()
         self.assertEqual(set(state['labels']), {'task', 'needs-decision', 'kind:maintenance',
                                                 'visibility:internal', 'area:tooling'})
-        self.assertIn({'method': 'PATCH', 'path': 'repos/owner/repo/issues/101',
-                       'body': {'labels': ['task', 'kind:maintenance', 'visibility:internal',
-                                           'area:tooling', 'needs-decision']}}, state['writes'])
+        self.assertIn({'method': 'POST', 'path': 'repos/owner/repo/issues/101/labels',
+                       'body': {'labels': ['needs-decision']}}, state['writes'])
+        self.assertIn({'method': 'DELETE', 'path': 'repos/owner/repo/issues/101/labels/needs-triage',
+                       'label': 'needs-triage'}, state['writes'])
         self.assertTrue(state['item'])
         self.assertEqual(state['fields'], {'STATUS_FIELD': 'PROPOSED', 'PRIORITY_FIELD': 'P2'})
         self.assertEqual(state['subs'], ['ISSUE_101'])
@@ -153,11 +189,60 @@ class TypedTrackingCommandTests(unittest.TestCase):
         audit = [json.loads(line) for line in (Path(self.root / '.git/work/github-writes.jsonl')).read_text().splitlines()]
         attempts = [row for row in audit if row['event'] == 'attempt']
         results = [row for row in audit if row['event'] == 'result']
-        self.assertEqual(len(attempts), 7)
-        self.assertEqual(len(results), 7)
+        self.assertEqual(len(attempts), 8)
+        self.assertEqual(len(results), 8)
         self.assertTrue(all(row['status'] == 'succeeded' for row in results))
         self.assertNotIn('Bounded task', json.dumps(audit))
         self.assertNotIn('A bounded task body.', json.dumps(audit))
+
+    def test_overlapping_independent_label_additions_preserve_both_remote_flags(self):
+        created = self.cli('issue', 'create', '--title', 'Concurrent labels', '--body-file', str(self.body),
+                           '--kind', 'kind:maintenance', '--visibility', 'visibility:internal', '--area', 'area:tooling')
+        self.assertEqual(created.returncode, 0, created.stderr)
+        barrier = self.root / 'barrier'
+        barrier.mkdir()
+        processes = []
+        for worker, label in (('a', 'needs-decision'), ('b', 'regression')):
+            env = dict(self.env, TRACKING_LABEL_BARRIER=str(barrier), TRACKING_LABEL_WORKER=worker)
+            processes.append(subprocess.Popen(
+                [sys.executable, str(HERE / 'cli.py'), 'issue', 'labels', '101', '--add', label],
+                cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                start_new_session=True))
+        try:
+            outputs = [process.communicate(timeout=30) for process in processes]
+        except BaseException:
+            for process in processes:
+                if process.poll() is None:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+            for process in processes:
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate()
+            raise
+        self.assertEqual([process.returncode for process in processes], [0, 0], outputs)
+        self.assertTrue({'needs-decision', 'regression'} <= set(self.state_json()['labels']))
+
+    def test_live_project_options_are_preflighted_before_any_field_mutation(self):
+        created = self.cli('issue', 'create', '--title', 'Option drift', '--body-file', str(self.body),
+                           '--kind', 'kind:maintenance', '--visibility', 'visibility:internal', '--area', 'area:tooling')
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.assertEqual(self.cli('project', 'add', '101').returncode, 0)
+        env = dict(self.env, TRACKING_MISSING_PRIORITY_OPTION='1')
+        result = self.cli('project', 'set', '101', '--status', 'Proposed', '--priority', 'P2', env=env)
+        self.assertNotEqual(result.returncode, 0)
+        state = self.state_json()
+        self.assertEqual(state['fields'], {})
+        self.assertEqual(state['updates'], 0)
+        self.assertFalse(any(write.get('mutation') == 'updateProjectV2ItemFieldValue'
+                             for write in state['writes']))
 
     def test_taxonomy_and_claim_owned_statuses_refuse_before_any_remote_write(self):
         self.body.write_text('BLOCKED_TEXT', encoding='utf-8')
