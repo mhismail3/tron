@@ -737,7 +737,12 @@ describe("episodic memory crash recovery", () => {
     // fresh installation that re-spends every compactor call.
     const reopened = await openMemory(fx);
     await reopened.dispose();
+    const featureRecord = join(fx.home, "gateway/workspace-state/episodic-initialized.json");
+    await writeFile(featureRecord, '{"version":2}', { mode: 0o600 });
+    await expect(openMemory(fx)).rejects.toMatchObject({ kind: "invalid-store" });
     await rm(dirname(fx.storeRoot), { recursive: true });
+    await expect(openMemory(fx)).rejects.toMatchObject({ kind: "invalid-store" });
+    await writeFile(featureRecord, '{"version":1}', { mode: 0o600 });
     await expect(openMemory(fx)).rejects.toThrowError(/container is missing/u);
 
     const fresh = await fixture("version-2", 2);

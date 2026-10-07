@@ -42,6 +42,16 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
   });
 
+  it("persists workspace unavailability causes as bounded diagnostic fields", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "Tron internal workspace is unavailable", {
+      event: "workspace.unavailable", source: "workspace", cause: "x".repeat(200),
+    });
+
+    expect(lines(path)[0]).toMatchObject({ event: "workspace.unavailable", source: "workspace", cause: "x".repeat(64) });
+  });
+
   it("keeps the request span breakdown beside the request it explains", () => {
     const path = logPath();
     const logger = new GatewayLogger(path);
