@@ -65,6 +65,21 @@ def git(cwd: Path, *args: str) -> str:
 
 
 class VerifyFixture(unittest.TestCase):
+    def test_scale_suite_selector_is_narrow(self):
+        root = Path(__file__).resolve().parents[2]
+        config = json.loads((root / ".github/work.json").read_text())
+        checks = verify.load_checks(config["verify"])
+        scale = next(check for check in checks if check.name == "gateway-scale")
+        for path in (
+            "packages/gateway/src/knowledge/knowledge-catalog.scale.test.ts",
+            "packages/gateway/src/knowledge/paid-budget-ledger.ts",
+            "packages/gateway/src/knowledge/knowledge-curation.ts",
+            "packages/gateway/vitest.scale.config.ts",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(scale.matches(path))
+        self.assertFalse(scale.matches("packages/gateway/src/sessions/session-manager.ts"))
+
     def setUp(self):
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
