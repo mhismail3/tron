@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationState } from "./home-task-authorization.js";
 
@@ -30,12 +31,18 @@ function fixture() {
 
 describe("HomeTaskAuthorization", () => {
   it("binds a standing scope to its restore epoch and requires explicit reconfirmation after restore", async () => {
-    const { owner, request } = fixture();
+    const { owner, request, diagnostics } = fixture();
     const scope = await owner.enableInitialScope(request.restoreEpoch);
     await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "standing-scope", scopeId: scope.id });
     await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "grant-required" });
+    diagnostics.length = 0;
     const confirmed = await owner.enableInitialScope("epoch-2");
     expect(confirmed.id).not.toBe(scope.id);
+    const hash = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 16);
+    expect(diagnostics).toEqual([
+      { event: "home.task.authorization", outcome: "scope-revoked", referenceHash: hash(scope.id) },
+      { event: "home.task.authorization", outcome: "scope-enabled", referenceHash: hash(confirmed.id) },
+    ]);
     await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).resolves.toMatchObject({ kind: "standing-scope", scopeId: confirmed.id });
     await expect(owner.authorize(request)).rejects.toMatchObject({ code: "grant-required" });
   });

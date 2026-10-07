@@ -97,10 +97,12 @@ export class HomeTaskAuthorization {
       const scope: HomeTaskAuthorizationScope = {
         id: randomUUID(), kind: "all-trusted-projects", active: true, restoreEpoch, createdAt,
       };
+      const retiredScopes = state.scopes.filter((scope) => scope.kind === "all-trusted-projects" && scope.active);
       const scopes = state.scopes.map((scope) => scope.kind === "all-trusted-projects" && scope.active
         ? { ...scope, active: false, revokedAt: createdAt }
         : scope);
       await this.options.store.save({ ...state, scopes: [...scopes, scope] });
+      for (const retired of retiredScopes) this.diagnostic("scope-revoked", retired.id);
       this.diagnostic("scope-enabled", scope.id);
       return scope;
     });
