@@ -60,11 +60,13 @@ not a log stream. No stream is shipped off the machine.
 ## Test and verification environment preflight
 
 The shared `packages/gateway/src/tron-home-environment-policy.mjs` preflight rejects an
-inherited environment that resolves into a Tron home. Its `Tron-home environment preflight
-failed` message is written to the invoking process's stderr: Vitest emits it during
-`setupFiles` before test modules execute, Node test entry points emit it before tests start,
-and `scripts/tron work verify` surfaces that stderr as a verification error before checks
-are selected or carried. This is a command-line guard, not a Gateway runtime log event, and
+inherited environment that resolves into a Tron home. It has two invocation owners with
+distinct messages on the invoking process's stderr: Vitest (during `setupFiles`, before test
+modules execute) and Node test entry points (before tests start) import
+`test-support/tron-home-environment-preflight.mjs`, which throws `Gateway tests refuse
+inherited Tron-home environment values`; `scripts/tron work verify` runs the policy directly,
+which prints `Tron-home environment preflight failed` and is surfaced as a verification error
+before checks are selected or carried. This is a command-line guard, not a Gateway runtime log event, and
 is not persisted in `gateway.jsonl` or `gateway-stderr.log`.
 
 Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-sdk-scripts`;
