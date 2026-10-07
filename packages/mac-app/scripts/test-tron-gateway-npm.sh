@@ -8,7 +8,7 @@ NODE_ROOT="${TRON_NODE_ROOT:-}"
 if [[ -z "$NODE_ROOT" ]]; then
     "$REPO_ROOT/scripts/install-ci-tools.sh" node
     case "$(uname -m)" in arm64|aarch64) NODE_ARCH=arm64 ;; x86_64) NODE_ARCH=x64 ;; *) echo "unsupported Node architecture: $(uname -m)" >&2; exit 2 ;; esac
-    NODE_ROOT="$REPO_ROOT/.ci-tools/node-v$(<"$REPO_ROOT/.node-version")-$NODE_ARCH"
+    NODE_ROOT="${TRON_CI_TOOLS_DIR:-$REPO_ROOT/.ci-tools}/node-v$(<"$REPO_ROOT/.node-version")-$NODE_ARCH"
 fi
 EXPECTED_NODE_VERSION="$(<"$REPO_ROOT/.node-version")"
 [[ -x "$NODE_ROOT/bin/node" \

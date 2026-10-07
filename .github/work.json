@@ -395,6 +395,8 @@
         "name": "mac-scripts",
         "paths": [
           "packages/mac-app/scripts/**",
+          "scripts/install-ci-tools.sh",
+          "scripts/test-install-ci-tools-node.sh",
           "scripts/validate-push-service-config.sh",
           "config/PushService.xcconfig",
           "scripts/gateway-payload-deploy.mjs",

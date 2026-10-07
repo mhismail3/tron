@@ -24,9 +24,10 @@ before installing anything, then derives `npm` from that Node's sibling `bin`
 directory. The launcher and npm shell checks install the official archive into
 `.ci-tools` using the pinned archive checksum and the vendor's `SHASUMS256.txt`,
 then verify the complete npm tree against `config/ci-toolchain.env`; the cache is
-reused only while both checksums remain valid. Those checks default to this cache
-instead of the developer's Node on `PATH`; `TRON_NODE_ROOT` remains an explicit
-fixture/toolchain override. Candidate admission proves the complete pair: a wrong-version Node
+reused only while both checksums remain valid. Those checks default to
+`${TRON_CI_TOOLS_DIR:-.ci-tools}` instead of the developer's Node on `PATH`;
+`TRON_NODE_ROOT` remains an explicit fixture/toolchain override. Candidate
+admission proves the complete pair: a wrong-version Node
 or a pinned-version payload alias without sibling npm is skipped before the
 exact `$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew
 candidates are considered. `TRON_NODE_BIN` may explicitly name an absolute
