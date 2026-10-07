@@ -400,6 +400,74 @@ describe("Tron Home activations end to end", () => {
     expect(providerCalls).toBe(0);
   });
 
+  // Failure-first race contract: admission must be revalidated after async
+  // membership resolution so a concurrent seal cannot commit stale attention.
+  it.skip("refuses a Registry attention mutation whose admission resumes after chapter sealing", async () => {
+    const f = await fixture("attention-seal-race");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-attention-seal-race");
+    const registry = f.registry as unknown as {
+      resolveAttentionAdmission(sessionId: string): Promise<unknown>;
+      setAttention(sessionId: string, unread: boolean): Promise<unknown>;
+    };
+    const originalResolve = registry.resolveAttentionAdmission.bind(f.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    registry.resolveAttentionAdmission = async sessionId => {
+      entered();
+      await gate;
+      return originalResolve(sessionId);
+    };
+    try {
+      const mutation = registry.setAttention(slot.id, true);
+      await reached;
+      const owner = f.registry.homeOwner() as unknown as {
+        options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      };
+      owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      await f.registry.homeOwner().chapterQuiescent(slot.id);
+      release();
+      await expect(mutation).rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      release();
+    }
+  });
+
+  it.skip("refuses a Registry delete resumed after chapter sealing", async () => {
+    const f = await fixture("delete-seal-race");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-delete-seal-race");
+    const registry = f.registry as unknown as {
+      catalogMembership(sessionId: string): Promise<unknown>;
+      delete(sessionId: string): Promise<void>;
+    };
+    const originalMembership = registry.catalogMembership.bind(f.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    registry.catalogMembership = async sessionId => {
+      entered();
+      await gate;
+      return originalMembership(sessionId);
+    };
+    try {
+      const mutation = registry.delete(slot.id);
+      await reached;
+      const owner = f.registry.homeOwner() as unknown as {
+        options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      };
+      owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      await f.registry.homeOwner().chapterQuiescent(slot.id);
+      release();
+      await expect(mutation).rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      release();
+    }
+  });
+
   it("rejects a serialized SDK entry that would cross the hard byte limit before staging", async () => {
     const f = await fixture("hard-byte-projection");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
