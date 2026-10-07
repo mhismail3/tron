@@ -53,7 +53,7 @@ afterAll(async () => {
 
 /** A minimal Anthropic Messages endpoint: records each request, then streams one
  * text block, or the next scripted tool call for a Home turn. */
-async function endpoint(): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }> }> {
+async function endpoint(responses = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }> }> {
   const requests: Captured[] = [];
   const toolCalls: Array<{ name: string; input: unknown }> = [];
   let summaries = 0;
@@ -62,7 +62,7 @@ async function endpoint(): Promise<{ server: Server; port: number; requests: Cap
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
       const body = JSON.parse(raw) as Record<string, unknown>;
-      const system = JSON.stringify(body.system ?? "");
+      const system = JSON.stringify(body.system ?? body.input ?? "");
       const kind: Captured["kind"] = system.includes(EPISODIC_COMPACT_PROMPT.slice(0, 40)) ? "summarizer"
         : system.includes("## Tron Home") ? "home" : "ordinary";
       requests.push({ kind, body, headers: request.headers });
@@ -73,6 +73,18 @@ async function endpoint(): Promise<{ server: Server; port: number; requests: Cap
       // provider's own usage field through to Home's memory status.
       const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
         cache_creation_input_tokens: 0 };
+      if (responses) {
+        const output = tool
+          ? { type: "function_call", id: `fc_${requests.length}`, call_id: `call_${requests.length}`, name: tool.name, arguments: JSON.stringify(tool.input), status: "completed" }
+          : { type: "message", id: `msg_${requests.length}`, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] };
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(
+          event("response.output_item.added", { output_index: 0, item: output })
+          + event("response.output_item.done", { output_index: 0, item: output })
+          + event("response.completed", { response: { id: `resp_${requests.length}`, status: "completed", output: [output], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: kind === "summarizer" ? CACHE_READ : 0 } } } }),
+        );
+        return;
+      }
       const block = tool
         ? event("content_block_start", { index: 0, content_block: { type: "tool_use", id: `toolu_${requests.length}`, name: tool.name, input: {} } })
           + event("content_block_delta", { index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(tool.input) } })
@@ -93,9 +105,9 @@ async function endpoint(): Promise<{ server: Server; port: number; requests: Cap
   return { server, port: (server.address() as AddressInfo).port, requests, toolCalls };
 }
 
-async function fixture() {
+async function fixture(responses = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-home-cache-"));
-  const local = await endpoint();
+  const local = await endpoint(responses);
   disposals.push(async () => {
     await new Promise<void>((resolve) => local.server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
@@ -107,7 +119,7 @@ async function fixture() {
   // A models.json provider, as a maintainer configures a compatible endpoint;
   // session affinity puts each request's cache key on the wire.
   await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [PROVIDER]: {
-    baseUrl: `http://127.0.0.1:${local.port}`, api: "anthropic-messages", apiKey: "local-test-key",
+    baseUrl: `http://127.0.0.1:${local.port}`, api: responses ? "openai-responses" : "anthropic-messages", apiKey: "local-test-key",
     compat: { sendSessionAffinityHeaders: true },
     models: [
       { id: MODEL_ID, name: "Opus (local)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 },
@@ -224,6 +236,52 @@ function sharedViewBytes(previous: Captured, next: Captured): { shared: number; 
 }
 
 describe.sequential("Tron Home prompt caching on the wire", () => {
+  it("OpenAI Responses preserves Home's stable prefix, tool loop and cache affinity", async () => {
+    const f = await fixture(true);
+    await f.service.invoke(client, "home.designate", { commandId: "responses-designate", model: MODEL });
+    await f.service.invoke(client, "home.configureMemory", { commandId: "responses-memory", model: MODEL });
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const home = await f.registry.acquire(status.sessionId!);
+    for (let turn = 0; turn < 3; turn += 1) {
+      if (turn === 2) f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
+      await home.prompt(`responses input ${turn} ${"i".repeat(900)}`);
+      await waitFor(() => !home.isBusy, `Responses turn ${turn}`);
+    }
+    const requests = f.requests.filter((request) => request.kind === "home");
+    expect(requests).toHaveLength(4);
+    const [prior, activation, step] = requests.slice(-3).map((request) => request!.body);
+    type Input = { role?: string; type?: string; content?: Array<{ text?: string }> };
+    const input = (body: Record<string, unknown>) => body.input as Input[];
+    const memory = (body: Record<string, unknown>) => input(body).find((message) => JSON.stringify(message).includes(HOME_MEMORY_VIEW_MARKER))!;
+    const text = (message: Input) => message.content!.map((block) => block.text ?? "").join("");
+    const view = (body: Record<string, unknown>) => text(memory(body)).split("</chat>")[0]!;
+    expect(input(activation!)[0]!.role).toBe("system");
+    expect(input(activation!)[1]).toEqual(memory(activation!));
+    expect(input(activation!)[2]!.role).toBe("user");
+    expect(JSON.stringify(input(activation!)[2])).toContain("responses input 2");
+    expect(JSON.stringify(activation)).not.toContain("responses input 1");
+    expect(view(activation!).startsWith(view(prior!))).toBe(true);
+    expect(view(activation!).length).toBeGreaterThan(view(prior!).length);
+    expect(text(memory(activation!))).toMatch(new RegExp(`</chat>${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
+    expect(memory(step!)).toEqual(memory(activation!));
+    expect(input(step!).some((message) => message.type === "function_call_output")).toBe(true);
+    expect(step!.tools).toEqual(activation!.tools);
+    expect(input(step!)[0]).toEqual(input(activation!)[0]);
+    expect(input(prior!)[0]).toEqual(input(activation!)[0]);
+    expect(prior!.tools).toEqual(activation!.tools);
+    const keys = requests.map((request) => request.body.prompt_cache_key);
+    expect(typeof keys[0]).toBe("string");
+    expect(String(keys[0]).length).toBeGreaterThan(0);
+    expect(new Set(keys).size).toBe(1);
+    expect(requests.every((request) => request.body.prompt_cache_retention === "24h")).toBe(true);
+    const summaries = f.requests.filter((request) => request.kind === "summarizer");
+    expect(summaries.length).toBeGreaterThan(0);
+    expect(new Set(summaries.map((request) => request.body.prompt_cache_key))).toEqual(new Set([`tron-episodic:${status.sessionId}`]));
+    expect(summaries.every((request) => request.body.prompt_cache_retention === "24h")).toBe(true);
+    expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
+    report.cases.push({ case: "openai-responses", requests: requests.map((request) => request.body), summarizerCalls: summaries.length });
+  }, 60_000);
+
   it("lays out Home turns and summarizer calls as the recipe's cached prefix", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "cache-designate", model: MODEL });

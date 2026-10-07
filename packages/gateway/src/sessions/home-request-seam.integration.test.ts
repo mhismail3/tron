@@ -20,15 +20,8 @@
  *    steering inserts entries after it, which is what makes the activation's
  *    captured leaf an exact boundary.
  *
- * C16 exercises the context-handler mutation check through the policy's own
- * `transformContext` wrapper rather than through a real `pi.on("context")`
- * extension, because a Home runtime's extension factories are built inside
- * `RuntimeSlot`'s factory (`homeModuleFactories`) and the pinned SDK's
- * `ExtensionRunner` has no way to register a handler after construction: reaching
- * one from a test would need a production injection point that exists only for
- * the test. The wrapper is called with the exact array the SDK's context stage
- * produces (cloned, plus one appended message), so it still refuses a mutated
- * request and still makes zero provider requests.
+ * C16/C17 register a real SDK context handler through a test-only factory spy.
+ * No production injection hook is needed.
  *
  * Every case writes a row into `test-results/home-activation/seam-report.json`
  * and prints a one-line summary.
@@ -51,16 +44,17 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  convertToLlm, ModelRuntime, type AgentSession,
+  convertToLlm, ModelRuntime, type AgentSession, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason } from "../home/home-request-policy.js";
+import * as tronModules from "../extensions/tron-modules.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
@@ -132,6 +126,7 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
 interface FixtureOptions {
   /** Designate Tron Home through its owner before the cases prompt. */
   home?: boolean;
+  extension?: ExtensionFactory;
   /** Configure Home's memory (only with `home`). */
   memory?: boolean;
   /** What the Gateway's model resolver says about the memory's model. */
@@ -151,6 +146,13 @@ interface CapturedDiagnostic {
 }
 
 async function homeFixture(label: string, options: FixtureOptions = {}) {
+  if (options.extension) {
+    const original = tronModules.homeModuleFactories;
+    const spy = vi.spyOn(tronModules, "homeModuleFactories").mockImplementation((host) => [
+      ...original(host), { name: "qualification", factory: options.extension! },
+    ]);
+    disposals.push(async () => { spy.mockRestore(); });
+  }
   const root = await mkdtemp(join(tmpdir(), `tron-home-seam-${label}-`));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -271,6 +273,113 @@ async function open(label: string, options: FixtureOptions = {}) {
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe.sequential("Home request seam inside the Gateway runtime", () => {
+  // F1: Pi's supported image replacement must not look like a context mutation.
+  // Disable resizing here to isolate the settings-aware converter at the guard.
+  it("C21 image conversion follows live session settings without rebuilding", async () => {
+    const item = await open("c21", { home: true, memory: true, settings: { images: { blockImages: true, autoResize: false } } });
+    const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
+    item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
+    for (const blocked of [true, false]) {
+      item.session.settingsManager.setBlockImages(blocked);
+      const text = `C21 image input blocked=${blocked}`;
+      const before = item.requests.length;
+      await item.slot.prompt(text, [image]);
+      await waitUntil(() => !item.slot.isBusy);
+      const requests = item.requests.slice(before);
+      item.record("C21", { autoResize: false, blocked, requests, refusals: item.policy()!.refusalLog() });
+      expect(requests).toHaveLength(1);
+      const messages = JSON.parse(requests[0]!.blob) as Array<{ role: string; content: unknown }>;
+      const input = messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes(text));
+      expect(input?.content).toEqual([
+        { type: "text", text },
+        blocked ? { type: "text", text: "Image reading is disabled." } : image,
+      ]);
+    }
+  }, 30_000);
+
+  // F2: accepting the SDK converter must not authorize arbitrary stream edits.
+  it("C22 arbitrary message mutation after context conversion is refused", async () => {
+    const item = await open("c22", { home: true, memory: true });
+    item.faux.setResponses([item.response("prior activation response")]);
+    await item.slot.prompt(longInput("C22 prior input"));
+    await waitUntil(() => !item.slot.isBusy);
+    const policy = item.policy()!;
+    policy.admit("c22", null);
+    const prepared = policy.wrapPrepareRequest(item.session, undefined);
+    const projection = item.session.sessionManager.buildSessionProjection();
+    const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
+    const transformed = await policy.wrapTransformContext(undefined, item.session.agent.convertToLlm)((update as { context: { messages: AgentMessage[] } }).context.messages, undefined);
+    const messages = convertToLlm(transformed);
+    const input = messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes("C22 prior input"))!;
+    input.content = [{ type: "text", text: "C22 mutated input" }];
+    let innerCalls = 0;
+    const inner = (() => {
+      innerCalls += 1;
+      return { [Symbol.asyncIterator]: async function* () {} };
+    }) as unknown as StreamFn;
+    const guard = policy.wrapStreamFunction(inner);
+    let outcome = "returned";
+    try {
+      guard(item.faux.getModel(), { messages } as unknown as Parameters<StreamFn>[1], {} as Parameters<StreamFn>[2]);
+    } catch (error) {
+      outcome = error instanceof Error ? error.message : String(error);
+    }
+    const row = { outcome, refusal: policy.refusalLog().at(-1)?.reason, innerCalls };
+    item.record("C22", row);
+    expect(row.refusal).toBe("stream-digest");
+    expect(row.innerCalls).toBe(0);
+    policy.settle("c22");
+  }, 30_000);
+
+  // F4: the default SDK image path must preserve Pi's result for both Home and
+  // an ordinary session.
+  it("C23 default image handling matches an ordinary session for both block states", async () => {
+    const item = await open("c23", { home: true, memory: true });
+    const ordinary = await item.extra("ordinary");
+    const ordinarySession = (ordinary.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
+    const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
+    const cases = [] as Array<Record<string, unknown>>;
+    for (const blocked of [true, false]) {
+      item.session.settingsManager.setBlockImages(blocked);
+      ordinarySession.settingsManager.setBlockImages(blocked);
+      const text = `C23 default image input blocked=${blocked}`;
+      const homeStart = item.requests.length;
+      item.faux.setResponses([item.response("home response")]);
+      await item.slot.prompt(text, [image]);
+      await waitUntil(() => !item.slot.isBusy);
+      const homeRequests = item.requests.slice(homeStart);
+      expect(homeRequests).toHaveLength(1);
+      const homeRequest = homeRequests.at(-1);
+      const ordinaryStart = item.requests.length;
+      item.faux.setResponses([item.response("ordinary response")]);
+      await ordinary.slot.prompt(text, [image]);
+      await waitUntil(() => !ordinary.slot.isBusy);
+      const ordinaryRequests = item.requests.slice(ordinaryStart);
+      expect(ordinaryRequests).toHaveLength(1);
+      const ordinaryRequest = ordinaryRequests.at(-1);
+      const userContent = (request: CapturedRequest | undefined) => {
+        const messages = JSON.parse(request?.blob ?? "[]") as Array<{ role: string; content: unknown }>;
+        return messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes(text))?.content;
+      };
+      const homeContent = userContent(homeRequest);
+      const ordinaryContent = userContent(ordinaryRequest);
+      expect(homeContent).toBeDefined();
+      expect(ordinaryContent).toBeDefined();
+      const serializedHomeContent = JSON.stringify(homeContent);
+      if (blocked) {
+        expect(serializedHomeContent).toContain("Image reading is disabled.");
+      } else {
+        expect(serializedHomeContent).toContain('"type":"image"');
+        expect(serializedHomeContent).toContain(image.data);
+      }
+      cases.push({ blocked, homeContent, ordinaryContent, equal: JSON.stringify(homeContent) === JSON.stringify(ordinaryContent) });
+    }
+    const row = { cases };
+    item.record("C23", row);
+    expect(cases).toHaveLength(2);
+    expect(cases.every((entry) => entry.equal === true)).toBe(true);
+  }, 30_000);
+
   it("C1 control: an ordinary session re-sends canonical history", async () => {
     const item = await open("c1");
     item.faux.setResponses([item.response("first activation response"), item.response("second activation response")]);
@@ -742,66 +851,118 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.samePolicyAfterReload).toBe(true);
   }, 30_000);
 
-  // See the file header: a real `pi.on("context")` extension cannot be registered
-  // into a Home runtime from a test without a production test hook, so the policy's
-  // outermost `transformContext` wrapper is driven with exactly what the SDK's
-  // context stage produces.
-  it("C16 a context handler that appends a message is refused", async () => {
-    const item = await open("c16", { home: true, memory: true });
-    item.faux.setResponses([item.response("prior activation response")]);
-    await item.slot.prompt(longInput("C16 prior input"));
+  it("C16 a real SDK context handler mutation is refused before streaming", async () => {
+    let contextCalls = 0;
+    const item = await open("c16", { home: true, memory: true, extension: (pi) => {
+      pi.on("context", (event) => {
+        contextCalls += 1;
+        return { messages: [...event.messages, { role: "user", content: "INJECTED-BY-CONTEXT-HANDLER", timestamp: 0 }] };
+      });
+    } });
+    item.faux.setResponses([item.response("must not reach provider")]);
+    await item.slot.prompt("C16 input");
     await waitUntil(() => !item.slot.isBusy);
-    const callsBefore = item.faux.state.callCount;
-    const policy = item.policy()!;
-    policy.admit("c16", item.session.sessionManager.getLeafId() ?? null);
-    const prepared = policy.wrapPrepareRequest(item.session, undefined);
-    const projection = item.session.sessionManager.buildSessionProjection();
-    const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
-    const messages = (update as { context: { messages: AgentMessage[] } }).context.messages;
-    // Exactly the SDK's context stage: it clones, and one handler adds a message.
-    const injected = { role: "user", content: "INJECTED-BY-CONTEXT-HANDLER", timestamp: Date.now() } as unknown as AgentMessage;
-    const outer = async (value: AgentMessage[]) => [...value, injected];
-    const outcome = await policy.wrapTransformContext(outer)(messages, undefined)
-      .then(() => "accepted", (error: unknown) => error instanceof Error ? error.message : String(error));
-    const refusal = policy.refusalLog().at(-1);
-    policy.settle("c16");
-    const row = {
-      outcome,
-      refusalReason: refusal?.reason ?? null,
-      refusalDetail: refusal?.detail ?? null,
-      providerRequestsFromRefusedPath: item.faux.state.callCount - callsBefore,
-    };
+    const row = { contextCalls, providerCalls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
     item.record("C16", row);
-    expect(row.refusalReason).toBe("context-mutated");
-    expect(row.providerRequestsFromRefusedPath).toBe(0);
+    expect(contextCalls).toBe(1);
+    expect(row.refusal).toBe("context-mutated");
+    expect(row.providerCalls).toBe(0);
   }, 30_000);
 
-  it("C17 the recorded expectation is single-use for one provider stream call", async () => {
-    const item = await open("c17", { home: true, memory: true });
-    item.faux.setResponses([item.response("prior activation response")]);
-    await item.slot.prompt(longInput("C17 prior input"));
+  it("C17 a real stream consumes the SDK context pass exactly once", async () => {
+    let contextCalls = 0;
+    const item = await open("c17", { home: true, memory: true, extension: (pi) => {
+      pi.on("context", () => { contextCalls += 1; });
+    } });
+    const stream = item.session.agent.streamFunction;
+    let releaseProvider: (() => void) | undefined;
+    const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    let replay: Promise<string> | undefined;
+    item.session.agent.streamFunction = (...args) => {
+      const result = stream(...args);
+      const providerCallsBefore = item.faux.state.callCount;
+      // Let the first lazy stream pass Home's innermost guard and enter the
+      // provider, then replay while its response is parked and this activation
+      // is still live. Otherwise lazy-stream start order or settlement could
+      // make the replay win the race or observe no activation.
+      replay = waitUntil(() => item.faux.state.callCount > providerCallsBefore)
+        .then(() => stream(...args))
+        .then((value) => value.result())
+        .then((message) => message.errorMessage ?? "accepted", String)
+        .finally(() => releaseProvider?.());
+      return result;
+    };
+    item.faux.setResponses([async (context) => {
+      await providerGate;
+      return item.response("real stream response")(context);
+    }]);
+    await item.slot.prompt("C17 input");
     await waitUntil(() => !item.slot.isBusy);
-    const policy = item.policy()!;
-    let innerStreamCalls = 0;
-    const inner = ((() => { innerStreamCalls += 1; return { [Symbol.asyncIterator]: async function* () {} }; }) as unknown as StreamFn);
-    const guard = policy.wrapStreamFunction(inner);
-    policy.admit("c17", item.session.sessionManager.getLeafId() ?? null);
-    const prepared = policy.wrapPrepareRequest(item.session, undefined);
-    const projection = item.session.sessionManager.buildSessionProjection();
-    const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
-    const transformed = await policy.wrapTransformContext(undefined)((update as { context: { messages: AgentMessage[] } }).context.messages, undefined);
-    const llmContext = { messages: convertToLlm(transformed) } as unknown as Parameters<StreamFn>[1];
-    const options = {} as Parameters<StreamFn>[2];
-    let first = "returned";
-    try { guard(item.faux.getModel(), llmContext, options); } catch (error) { first = error instanceof Error ? error.message : String(error); }
-    let second = "returned";
-    try { guard(item.faux.getModel(), llmContext, options); } catch (error) { second = error instanceof Error ? error.message : String(error); }
-    const row = { firstStreamCall: first, secondStreamCall: second, secondRefusal: policy.refusalLog().at(-1)?.reason ?? null, innerStreamCalls };
-    policy.settle("c17");
+    const row = { contextCalls, replay: await replay, calls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
     item.record("C17", row);
-    expect(row.firstStreamCall).toBe("returned");
-    expect(row.secondRefusal).toBe("stream-replayed");
-    expect(row.innerStreamCalls).toBe(1);
+    expect(contextCalls).toBe(1);
+    expect(row.refusal).toBe("stream-replayed");
+    expect(row.replay).toContain("Home request refused");
+    expect(row.calls).toBe(1);
+    expect(await item.jsonl()).toContain("real stream response");
+  }, 30_000);
+
+  it("Home structurally omits MCP because Pi 1.0.4 non-MCP allowlists do not exclude it", async () => {
+    const item = await open("mcp", { home: true, memory: true });
+    const ordinary = await item.extra("ordinary-mcp");
+    const homeExtensions = item.session.resourceLoader.getExtensions().extensions.map((extension) => extension.path);
+    const context = await ordinary.slot.context() as unknown as { extensions: Array<{ name: string }> };
+    const ordinaryExtensions = context.extensions.map((extension) => extension.name);
+    // Test the runtime registration boundary: an empty mcp__ tool set would be
+    // inconclusive when the ordinary runtime has no configured MCP server.
+    item.record("MCP", { homeExtensions, ordinaryExtensions });
+    expect(ordinaryExtensions).toContain("builtin:mcp");
+    expect(homeExtensions).not.toContain("builtin:mcp");
+  }, 30_000);
+
+  it("D3 assistant tool call is durable before the SDK executes the tool", async () => {
+    let persisted: unknown[] = [];
+    let toolCalls = 0;
+    const item = await open("d3", { home: true, memory: true, extension: (pi) => {
+      pi.on("tool_call", async (_event, ctx) => {
+        toolCalls += 1;
+        persisted = await readEntries(ctx.sessionManager.getSessionFile());
+      });
+    } });
+    item.faux.setResponses([
+      async () => fauxAssistantMessage(fauxToolCall("date", { id: 0 })),
+      item.response("after date"),
+    ]);
+    await item.slot.prompt("D3 use date");
+    await waitUntil(() => !item.slot.isBusy);
+    const messages = (persisted as Array<{ message?: { role: string; content: unknown } }>).flatMap((entry) => entry.message ?? []);
+    item.record("D3", { toolCalls, rolesAtToolCall: messages.map((m) => m.role) });
+    expect(toolCalls).toBe(1);
+    expect(messages.at(-1)?.role).toBe("assistant");
+    expect(JSON.stringify(messages.at(-1)?.content)).toContain('"name":"date"');
+    expect(messages.some((m) => m.role === "toolResult")).toBe(false);
+  }, 30_000);
+
+  it("usage measures canonical history rather than Home's reduced request", async () => {
+    let tokens = 0;
+    let request = "";
+    const item = await open("usage", { home: true, memory: true, extension: (pi) => {
+      pi.on("context", (event, ctx) => {
+        tokens = ctx.getContextUsage()?.tokens ?? 0;
+        request = JSON.stringify(event.messages);
+      });
+    } });
+    // No assistant usage exists: Pi must estimate the canonical projection,
+    // including this historical entry that Home excludes from this activation.
+    item.session.sessionManager.appendMessage({ role: "user", content: "CANONICAL-ONLY " + "x".repeat(100_000), timestamp: 0 });
+    item.faux.setResponses([item.response("usage response")]);
+    await item.slot.prompt("usage current input");
+    await waitUntil(() => !item.slot.isBusy);
+    item.record("usage", { tokens, requestBytes: request.length });
+    expect(item.faux.state.callCount).toBe(1);
+    expect(request).not.toContain("CANONICAL-ONLY");
+    expect(tokens).toBeGreaterThan(25_000);
+    expect(request.length).toBeLessThan(30_000);
   }, 30_000);
 
   it("C18 readiness: a request waits for the memory instead of sending an unbuilt view", async () => {

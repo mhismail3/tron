@@ -72,7 +72,7 @@ import {
 } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
-import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
@@ -677,6 +677,7 @@ export class RuntimeRegistry {
     private readonly options: {
       agentDir: string;
       tronHome: string;
+      workspaceUnavailable?: (cause: TronWorkspaceUnavailableCause) => void;
       /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
       mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
@@ -761,7 +762,8 @@ export class RuntimeRegistry {
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
-    this.workspace = new TronWorkspace(options.tronHome);
+    this.workspace = new TronWorkspace(options.tronHome, options.workspaceUnavailable
+      ? { unavailable: options.workspaceUnavailable } : {});
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
