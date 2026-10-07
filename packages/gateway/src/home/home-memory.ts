@@ -312,7 +312,7 @@ export class HomeMemory {
       blocked = binding.memory.status().blocked;
     }
     if (blocked) throw this.blockedRefusal(blocked);
-    const cut = binding.memory.cutAtEntry(activation.boundaryEntryId);
+    const cut = await binding.memory.cutAtEntry(activation.boundaryEntryId);
     if (cut === undefined) {
       throw new HomeMemoryRefusal(
         "memory-boundary-missing",

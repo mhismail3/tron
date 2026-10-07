@@ -31,7 +31,11 @@ group/world-readable** one is **preserved and reported as unavailable**
 refuses with a conflict. Only `version` gates admission, so a record written
 against a newer `policyRevision` is still read, preserved and re-enabled. A
 record is never overwritten or migrated: an unusable one is not evidence that
-the user has no Home.
+the user has no Home. Runtime admission from Home's neutral workspace also
+refuses with a typed conflict while the record is unavailable; this is the
+canonical installation workspace identity that distinguishes sessions which
+may be Home's, including installations reached through a symlink. Sessions in
+ordinary project directories remain unaffected.
 
 ## The neutral working directory
 
@@ -109,7 +113,9 @@ The model is resolved at designation: the model named in the request, or — onl
 for a fresh session — this Gateway's default for new sessions. Re-enabling a
 disabled Home resolves the request's model, else the one the record was last
 designated with, and applies it to the live session through the normal
-`session.setModel` path when the live model differs. A virtual (routed) model is
+`session.setModel` path when the live model differs. When the runtime is unloaded,
+runtime construction supplies the recorded Home model explicitly rather than
+restoring an incidental model from the transcript. A virtual (routed) model is
 refused at every one of those points, because routing runs on the canonical
 transcript, which the Home profile does not own. `session.setModel` refuses a
 virtual model for a Home session too, and any model applied to the *enabled* Home
@@ -142,10 +148,13 @@ owner.
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
   and returns `{ homeId, sessionId, generation }`. An enabled record whose
-  session still exists is idempotent. A disabled record re-enables the same
-  session with `generation + 1`. A record whose session is **gone** (a session
-  that was never written, or was deleted) is kept and given a fresh session with
-  `generation + 1`, whether it was enabled or disabled: the record is the only
+  session still exists is idempotent when no model is supplied or the explicit
+  model matches the recorded model. A different explicit model is refused with
+  a typed conflict directing callers to `session.setModel`; designation enables
+  Home but does not own changes to its enabled session's model. A disabled record
+  re-enables the same session with `generation + 1`. A record whose session is
+  **gone** (a session that was never written, or was deleted) is kept and given
+  a fresh session with `generation + 1`, whether it was enabled or disabled: the record is the only
   evidence of the designation, and the dangling id must not be re-enabled.
 - `home.disable` is a mutation. It sets `enabled: false` with `generation + 1`;
   the session stays an ordinary session afterwards. A record whose session is
@@ -168,7 +177,11 @@ prompt admission uses the same lane. The session identity, its subscribers, its
 presentation and its (possibly never-persisted) in-memory session manager all
 survive. If the session is not idle the mutation is refused with a retryable
 `busy` error and nothing changes. A session with no live runtime needs no
-rebuild: the next runtime creation reads the record.
+rebuild: the next runtime creation reads the record, including its model.
+Lifecycle updates merge against the current record at the serialized profile
+commit boundary. Durable record commits use one serialization authority for
+memory and model updates; it is separate from the lifecycle mutex so a model
+callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 
 ## The terminal client
 
@@ -442,7 +455,10 @@ entry the file no longer holds is `timestamp-unavailable`.
 The recipe's tree navigation is otherwise unchanged, and both surfaces are
 exercised end to end by
 `packages/gateway/src/sessions/home-memory-tools.e2e.test.ts`
-(`test-results/home-memory-tools/report.json`).
+(`test-results/home-memory-tools/report.json`). The runtime lifecycle cases also
+retain `packages/gateway/test-results/home-provider-runtime/report.json`;
+regenerate it with `npx vitest run
+src/sessions/home-provider-runtime.e2e.test.ts`.
 
 ## Not built yet
 
