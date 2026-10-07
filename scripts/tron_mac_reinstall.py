@@ -269,11 +269,18 @@ def retired_channel_matches(actual, expected):
     # metadata remain exact. Keep the original source manifest unchanged.
     if actual is None or expected is None:
         return actual is expected
-    return actual.keys() == expected.keys() and all(
-        copied_entry_matches(actual[name], item)
-        if name == '.' and item['type'] == actual[name]['type'] == 'dir'
-        else actual[name] == item
-        for name, item in expected.items())
+    if actual.keys() != expected.keys():
+        return False
+    for name, item in expected.items():
+        current = actual[name]
+        if name == '.' and item['type'] == current['type'] == 'dir':
+            if not copied_entry_matches(current, item):
+                return False
+            if current['xattrs'].get('com.apple.quarantine') != item['xattrs'].get('com.apple.quarantine'):
+                return False
+        elif current != item:
+            return False
+    return True
 
 
 def sync_tree(root, manifest):
@@ -667,9 +674,16 @@ def _verify_post_components(operation, receipt):
         require(isinstance(selection, dict) and selection.get('phase') == 'selected'
                 and isinstance(selection.get('manifestDigest'), str),
                 'archive-post: invalid bundled selection evidence')
-        recorded = read_json(operation / 'stable-selection.json')
+        evidence_owner = operation
+        if 'operationId' in selection:
+            operation_id = selection['operationId']
+            require(isinstance(operation_id, str) and str(uuid.UUID(operation_id)) == operation_id,
+                    'archive-post: invalid bundled selection evidence owner')
+            evidence_owner = private_dir(operation.parent / operation_id)
+        recorded = read_json(evidence_owner / 'stable-selection.json')
         require(manifest_digest(recorded) == selection['manifestDigest'],
                 'archive-post: retired manifest digest mismatch')
+        retired = evidence_owner / 'retired-stable-payloads'
         require(exists(retired) and retired_channel_matches(tree_manifest(retired), recorded),
                 'archive-post: retired payload evidence differs')
         result['retired-stable-payloads'] = archive_fingerprint(retired)
@@ -1028,20 +1042,12 @@ class Reinstall:
                     'restart-selection-evidence: selected payload evidence is incomplete')
             carried_selection = {**selection, 'operationId': owner.name}
         components = previous['components']
-        if previous['phase'] == 'backing-up':
-            require(bool(components) and set(components) == set(previous['sourcePaths']),
-                    'restart-incomplete-step: backup inventory is incomplete')
-            for name, digest in components.items():
-                manifest = read_json(self.operation / f'{name}.json')
-                require(manifest_digest(manifest) == digest,
-                        'restart-incomplete-step: backup manifest is incomplete')
-                backup = self.operation / 'backups' / name
-                require(copied_tree_matches(tree_manifest(backup) if exists(backup) else None, manifest),
-                        'restart-incomplete-step: backup copy is incomplete')
-        elif previous['phase'] == 'awaiting-offline':
+        if previous['phase'] == 'awaiting-offline':
             require(not components, 'restart-incomplete-step: unexpected partial backup inventory')
-        elif previous['phase'] not in ('awaiting-replacement', 'awaiting-resume'):
+        elif previous['phase'] not in ('backing-up', 'awaiting-replacement', 'awaiting-resume'):
             raise Stop('restart-incomplete-step: operation phase cannot be restarted')
+        # Copying is reversible: incomplete bytes stay as predecessor evidence,
+        # while the new operation takes a fresh inventory after restart.
         self.begin(Path(previous['app']), predecessor=previous, bundled_selection=carried_selection)
 
     def backup(self):

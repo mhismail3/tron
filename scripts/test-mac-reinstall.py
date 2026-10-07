@@ -332,6 +332,26 @@ class RecoveryArchiveTests(unittest.TestCase):
         self.assertTrue(self.source.exists())
         self.assertFalse(self.archive.destination.exists())
 
+    def test_recovery_archive_resolves_selected_evidence_owner(self):
+        owner_id = '987e8794-9ef6-4726-a98e-b91edcd8c1ff'
+        owner = self.store / owner_id
+        owner.mkdir(mode=0o700)
+        retired = owner / 'retired-stable-payloads'
+        retired.mkdir(mode=0o700)
+        (retired / 'payload').write_text('selected payload')
+        proof = reinstall.tree_manifest(retired)
+        reinstall.write_json(owner / 'stable-selection.json', proof)
+        receipt = reinstall.read_json(self.operation / 'receipt.json')
+        receipt['bundledSelection'] = {
+            'phase': 'selected', 'manifestDigest': reinstall.manifest_digest(proof),
+            'operationId': owner_id,
+        }
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        archive = reinstall.RecoveryArchive(self.home, self.operation_id)
+        result = archive.relocate(self.source)
+        self.assertEqual(result['phase'], 'verified')
+        self.assertEqual(archive.verify()['phase'], 'verified')
+
     def test_retired_payload_must_match_historical_manifest(self):
         retired = self.operation / 'retired-stable-payloads'
         retired.mkdir(mode=0o700)
@@ -662,7 +682,6 @@ class BundledSelectionTests(Fixture, unittest.TestCase):
 
 
 class ReinstallTests(Fixture, unittest.TestCase):
-    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin OS copy attribution')
     @unittest.skipUnless(sys.platform == 'darwin', 'Darwin quarantine copy attribution')
     def test_quarantined_file_can_be_backed_up_when_darwin_rewrites_its_value(self):
         source = self.home / '.tron/profiles/downloaded.png'
@@ -682,6 +701,20 @@ class ReinstallTests(Fixture, unittest.TestCase):
         actual = {**expected, 'xattrs': {'com.example.metadata': 'rewritten'}}
         with self.assertRaisesRegex(reinstall.Stop, 'backup-mismatch'):
             reinstall.require(reinstall.copied_entry_matches(actual, expected), 'backup-mismatch: fixture')
+
+    def test_copy_comparison_requires_quarantine_on_both_sides(self):
+        expected = {'type': 'file', 'mode': 0o600, 'acl': None, 'size': 0, 'sha256': 'empty',
+                    'xattrs': {'com.apple.quarantine': 'source'}}
+        actual = {**expected, 'xattrs': {}}
+        self.assertFalse(reinstall.copied_entry_matches(actual, expected))
+        self.assertFalse(reinstall.copied_entry_matches(expected, actual))
+
+    def test_retirement_root_still_requires_exact_quarantine(self):
+        expected = {'.': {'type': 'dir', 'mode': 0o700, 'acl': None, 'xattrs': {
+            'com.apple.quarantine': 'source', 'com.apple.provenance': 'before'}}}
+        actual = {'.': {'type': 'dir', 'mode': 0o700, 'acl': None, 'xattrs': {
+            'com.apple.quarantine': 'rewritten', 'com.apple.provenance': 'after'}}}
+        self.assertFalse(reinstall.retired_channel_matches(actual, expected))
 
     @unittest.skipUnless(sys.platform == 'darwin', 'Darwin OS copy attribution')
     def test_replacement_checks_copy_metadata_and_exact_source_attribution(self):
@@ -838,6 +871,51 @@ class ReinstallTests(Fixture, unittest.TestCase):
         source = self.home / '.tron/gateway/payloads/stable'
         source.mkdir(parents=True, mode=0o700)
         (source / 'current.json').write_text('selection evidence')
+
+    def test_partial_backup_can_restart_with_fresh_inventory(self):
+        original = reinstall.copy_tree
+        count = 0
+        def interrupt(*args):
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise KeyboardInterrupt()
+            return original(*args)
+        with patch.object(reinstall, 'copy_tree', side_effect=interrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_workflow(app=self.app, confirm_offline=True)
+        predecessor = self.workflow.operation
+        (self.home / '.tron/agent/credentials').write_bytes(b'updated after failed backup')
+        self.run_workflow(restart=True)
+        restarted = self.workflow.operation
+        self.assertNotEqual(restarted, predecessor)
+        self.assertTrue((predecessor / 'receipt.json').exists())
+        self.run_workflow(confirm_offline=True)
+        self.assertEqual((restarted / 'backups/agent/credentials').read_bytes(),
+                         b'updated after failed backup')
+
+    def test_restart_refuses_incomplete_selection_unexpected_app_and_verified(self):
+        self.run_workflow(app=self.app)
+        self.workflow.receipt['bundledSelection'] = {
+            'phase': 'retiring', 'manifestDigest': '0' * 64,
+        }
+        self.workflow.save()
+        with self.assertRaisesRegex(reinstall.Stop, 'restart-incomplete-step'):
+            self.run_workflow(restart=True)
+        self.workflow.receipt.pop('bundledSelection')
+        self.workflow.save()
+        (self.installed / 'identity').write_text('unexpected')
+        with self.assertRaisesRegex(reinstall.Stop, 'restart-installed-app'):
+            self.run_workflow(restart=True)
+        (self.installed / 'identity').write_text('old')
+        self.run_workflow(confirm_offline=True)
+        (self.installed / 'identity').write_text('new')
+        self.run_workflow(confirm_offline=True)
+        self.run_workflow(verify=True)
+        with self.assertRaisesRegex(reinstall.Stop, 'restart-verified'):
+            self.run_workflow(restart=True)
+        with self.assertRaisesRegex(reinstall.Stop, '--restart cannot be combined with --app'):
+            self.run_workflow(restart=True, app=self.app)
 
     def test_interrupted_backup_resumes_same_operation(self):
         original = reinstall.copy_tree

@@ -541,7 +541,7 @@ only their copied values to differ. ACLs, link modes, mode bits and every other
 xattr remain exact. Live-source comparisons remain exact, including both
 attributes.
 Exclusive Stable-channel retirement may also reassign provenance on the renamed
-root directory only; every nested entry and all other root metadata must match.
+root directory only; quarantine and every other root metadata value must match.
 The original source inventory is retained unchanged, and an interrupted rename
 resumes through the same selection command. Link modes are applied without
 following targets.
@@ -554,11 +554,16 @@ resume the recorded operation; partial backups only accept already copied bytes
 that still match the frozen source inventory. If an operation cannot be resumed
 because its frozen source inventory is stale, use `scripts/tron mac reinstall
 --restart` to begin a fresh inventory without editing maintenance state. Restart
-is refused for an incomplete step, an unexpected installed app, or a verified
-operation (use `--finish` for the latter). It preserves the predecessor receipt
-and backups; a completed bundled selection remains linked directly to its
-original journal and retired payload evidence. After restart, stop writers and
-run `--confirm-offline` to take the new snapshot. Source changes, corrupt
+is refused for an incomplete step (for example, finish an interrupted bundled
+selection with `--select-bundled-offline` first), an unexpected installed app,
+or a verified operation (use `--finish` for the latter). A partial backup is
+reversible and may be restarted; its partial copy remains untouched as evidence
+in the predecessor. The predecessor's old-app backup remains the rollback
+authority after Finder replacement; the new operation records the currently
+installed candidate as its original app. A completed bundled selection remains
+linked directly to its original journal and retired payload evidence, including
+for recovery-archive verification. After restart, stop writers and run
+`--confirm-offline` to take the new snapshot. Source changes, corrupt
 receipts, metadata loss, insufficient space and collisions stop without deleting evidence.
 Before offering either Finder replacement or Resume, every offline retry verifies
 the backups and unchanged data again. An already-replaced app exempts only that
