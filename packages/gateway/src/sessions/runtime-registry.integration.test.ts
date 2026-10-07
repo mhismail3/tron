@@ -8,7 +8,7 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
@@ -12102,6 +12102,37 @@ export default function (pi) {
     expect(internal.activityHeartbeat).toBeUndefined();
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
+  });
+
+  it("filters Gateway-private environment from a real session Bash command", async () => {
+    const { manager, registry } = await coldFixture("bash-command-environment");
+    const slot = await registry.acquire(manager.getSessionId());
+    const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT"] as const;
+    const previous = new Map(names.map(name => [name, process.env[name]]));
+    process.env.PI_SUBAGENTS_TEMP_ROOT = join(homedir(), ".tron", "internal", "subagents");
+    process.env.PI_CODING_AGENT_DIR = join(homedir(), ".tron", "agent");
+    process.env.PI_SESSION_FILE = join(homedir(), ".tron", "sessions", "private.jsonl");
+    process.env.PI_SUBAGENT_PARENT_SESSION = "supervision-parent";
+    process.env.TRON_GATEWAY_SUPERVISED = "1";
+    process.env.TRON_GATEWAY_PAYLOAD_ROOT = join(homedir(), ".tron", "payload");
+    try {
+      await slot.executeBash("env | sort", true);
+      const bash = slot.snapshot().transcript.find((item) => item.kind === "bash");
+      expect(bash).toMatchObject({ kind: "bash" });
+      if (!bash || bash.kind !== "bash") throw new Error("expected canonical Bash projection");
+      expect(bash.output).toContain(`PI_SESSION_ID=${manager.getSessionId()}`);
+      for (const name of names) expect(bash.output).not.toContain(`${name}=`);
+      // PATH may legitimately locate Pi's managed agent tools under the live home;
+      // no other variable may name a path inside a Tron home.
+      const nonPath = bash.output.split("\n").filter((line) => !line.startsWith("PATH=")).join("\n");
+      expect(nonPath).not.toContain(`${homedir()}/.tron/`);
+      expect(nonPath).not.toContain(`${homedir()}/.tron-dev/`);
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 
   it("retains exact direct Bash timing for canonical projection", async () => {

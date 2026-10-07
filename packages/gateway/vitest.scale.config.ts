@@ -5,5 +5,6 @@ export default defineConfig({
     include: ["src/knowledge/*.scale.test.ts"],
     environment: "node",
     testTimeout: 60_000,
+    setupFiles: ["test-support/tron-home-environment-guard.ts"],
   },
 });
