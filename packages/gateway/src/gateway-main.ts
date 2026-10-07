@@ -30,6 +30,7 @@ import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-di
 import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { assertNewModelChoice, OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
@@ -148,6 +149,7 @@ const notifications = new NotificationService(
 await notifications.initialize();
 startupCheckpoint("notifications");
 
+const openAIModelEligibility = new OpenAIModelEligibility();
 const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
@@ -155,6 +157,7 @@ const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime
   refreshOnCreate: true,
   allowModelNetwork: false,
 })));
+openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
 const trust = new TrustService(config.agentDir);
@@ -213,6 +216,7 @@ const sessions = new RuntimeRegistry({
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
+  openAIModelEligibility,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
@@ -401,6 +405,14 @@ const knowledge = new KnowledgeService(
     );
   }),
   knowledgeTagging,
+  async modelReference => {
+    const separator = modelReference.indexOf("/");
+    if (separator <= 0 || separator === modelReference.length - 1) throw new GatewayError("invalid_request", "Knowledge model must identify a registered provider/model");
+    const provider = modelReference.slice(0, separator);
+    const id = modelReference.slice(separator + 1);
+    if (!modelRuntime.getModel(provider, id)) throw new GatewayError("invalid_request", "Knowledge model is not registered");
+    await assertNewModelChoice(modelRuntime, provider, id);
+  },
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
 sessions.setKnowledgeService(knowledge);
