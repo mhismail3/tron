@@ -185,6 +185,12 @@ describe("terminal chat Home commands", () => {
     expect(described).toContain("entry-1");
     expect(described).toContain("permanent-failure");
     expect(described).toContain("resume-memory");
+    const awaiting = describeHomeStatus({
+      ...status,
+      activation: { available: true, activationStartEntryId: null, activationOpen: true },
+    });
+    expect(awaiting).toContain("awaiting request preparation");
+    expect(awaiting).not.toContain("refused before it prepared a request");
 
     // Each state is distinguishable from the projection alone.
     const base = { activation: { available: false } as const, readiness: { ready: false, gaps: [] }, recovery: { action: "none" as const }, memory: { configured: false, open: false } };
@@ -228,6 +234,21 @@ describe("terminal chat Home commands", () => {
     // an open store with a spend, a blocked one with its reason, and none at all.
     expect(describeHomeMemory({ configured: true, open: true, model, spentTokens: 1_200 }))
       .toContain("1200");
+    const detailed = describeHomeMemory({
+      configured: true, open: true, model, reason: "summary ingestion delayed",
+      episodic: {
+        sourceSessionId: "session", generation: 1, messages: 4,
+        nodes: { total: 2, free: 0, summary: 2, byLevel: [{ level: 1, count: 2 }] },
+        view: { parts: [], truncatedParts: 0, bytes: 20, budgetBytes: 100, built: 1, unbuilt: 2 },
+        coverage: { admitted: 4, summarized: 2 }, pump: { busy: 1 }, blocked: null,
+        tokens: { used: 1_200, sinceOpen: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } },
+      },
+    });
+    expect(detailed).toContain("summary ingestion delayed");
+    expect(detailed).toContain("4 admitted");
+    expect(detailed).toContain("2 summarized");
+    expect(detailed).toContain("2 unbuilt");
+    expect(detailed).toContain("pump busy: 1");
     expect(describeHomeMemory({ configured: true, open: false, model, blocked: "permanent-failure" }))
       .toContain("permanent-failure");
     expect(describeHomeMemory({ configured: false, open: false })).toContain("not configured");
@@ -270,6 +291,8 @@ describe("terminal chat Home commands", () => {
     expect(refused).not.toContain("view lines");
     expect(describeHomeContext({ available: true, activationStartEntryId: null, activationOpen: true, viewLines: 0, viewBytes: 0, effectiveTokens: 0, contextWindow: 0 }))
       .toContain("open");
+    expect(describeHomeContext({ available: true, activationStartEntryId: null, activationOpen: true }))
+      .toContain("awaiting request preparation");
     expect(describeHomeContext({ available: false })).toContain("no activation");
   });
 

@@ -633,6 +633,16 @@ describe.sequential("Tron Home activations end to end", () => {
       terminal.stdin.write("/home status\n");
       await waitUntil(() => stdout.includes("configure-memory"), 10_000).catch(() => { throw new Error(`missing status; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
       await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 6, 10_000);
+      await f.service.invoke(client, "home.configureMemory", { commandId: "terminal-configure-memory", model: MEMORY_MODEL });
+      const requests: CapturedRequest[] = [];
+      f.faux.setResponses([responsesOf(f, requests)("TERMINAL-STREAMED-REPLY")]);
+      terminal.stdin.write("ordinary reply\n");
+      await waitUntil(() => (stdout.match(/TERMINAL-STREAMED-REPLY/gu)?.length ?? 0) >= 1, 10_000);
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 7, 10_000);
+      expect(stdout.match(/TERMINAL-STREAMED-REPLY/gu)).toHaveLength(1);
+      terminal.stdin.write("/home status\n");
+      await waitUntil(() => stdout.includes("pump busy:") || stdout.includes("summarized"), 10_000).catch(() => { throw new Error(`missing configured memory detail; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 8, 10_000);
       terminal.stdin.write("/quit\n");
       await waitUntil(() => methods.includes("session.close:completed"), 5_000);
       await server.close();
@@ -654,7 +664,13 @@ describe.sequential("Tron Home activations end to end", () => {
         signal,
         stdout: scrub(stdout),
         stderr: scrub(stderr),
-        assertions: { refusalCount, repeatedRefusalCount, malformedUsage: (stderr.match(/Usage: \/home/gu)?.length ?? 0) >= 2 && stderr.includes("provider/id"), statusReturned: stdout.includes("configure-memory") },
+        assertions: {
+          refusalCount, repeatedRefusalCount,
+          malformedUsage: (stderr.match(/Usage: \/home/gu)?.length ?? 0) >= 2 && stderr.includes("provider/id"),
+          statusReturned: stdout.includes("configure-memory"),
+          streamedReplyOnce: stdout.match(/TERMINAL-STREAMED-REPLY/gu)?.length === 1,
+          configuredMemoryDetail: stdout.includes("summarized") || stdout.includes("pump busy:"),
+        },
       };
       await mkdir(join(process.cwd(), "test-results", "terminal-chat-home"), { recursive: true });
       await writeFile(join(process.cwd(), "test-results", "terminal-chat-home", "transcript.json"), `${JSON.stringify(artifact, null, 2)}\n`);
@@ -664,7 +680,9 @@ describe.sequential("Tron Home activations end to end", () => {
       expect(artifact.assertions.repeatedRefusalCount).toBeGreaterThanOrEqual(2);
       expect(artifact.assertions.malformedUsage).toBe(true);
       expect(artifact.assertions.statusReturned).toBe(true);
-      report.cases.push({ case: "terminal-subprocess", exitCode: code, repeatedRefusalCount: artifact.assertions.repeatedRefusalCount, malformedUsage: artifact.assertions.malformedUsage, statusReturned: artifact.assertions.statusReturned });
+      expect(artifact.assertions.streamedReplyOnce).toBe(true);
+      expect(artifact.assertions.configuredMemoryDetail).toBe(true);
+      report.cases.push({ case: "terminal-subprocess", exitCode: code, repeatedRefusalCount: artifact.assertions.repeatedRefusalCount, malformedUsage: artifact.assertions.malformedUsage, statusReturned: artifact.assertions.statusReturned, streamedReplyOnce: artifact.assertions.streamedReplyOnce, configuredMemoryDetail: artifact.assertions.configuredMemoryDetail });
     } finally {
       if (exitTimer) clearTimeout(exitTimer);
       if (terminal.exitCode === null && terminal.signalCode === null) {

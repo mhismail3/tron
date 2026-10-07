@@ -130,7 +130,10 @@ owner.
   missing/disabled designation, unconfigured memory or blocked memory. `activation`
   is the same body-free projection returned by `home.context`. The memory
   projection includes only bounded counters and memory state, never canonical
-  messages or frozen memory-view text. `live` reports whether the session
+  messages or frozen memory-view text. The terminal reports admitted/summarized
+  coverage, unbuilt view parts, pump activity and any degradation reason; an open
+  activation without request sizes is described as awaiting preparation unless a
+  refusal reason is present. `live` reports whether the session
   currently holds a live runtime; `sessionPresent` reports whether it exists at
   all — live, or still a canonical session in the catalog. A Gateway whose first
   catalog cut has not completed reports `sessionPresent: true`, because an

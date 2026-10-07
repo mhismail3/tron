@@ -48,7 +48,8 @@ interface SessionEventEnvelope {
 }
 
 function assistantMessageId(snapshot: SessionSnapshot): string | undefined {
-  return assistantMessage(snapshot)?.id;
+  const message = assistantMessage(snapshot);
+  return message?.presentationId ?? message?.id;
 }
 
 function renderDelta(previous: string, current: string, isNewMessage: boolean): string {
@@ -254,12 +255,19 @@ export function parseHomeModelArgument(argument: string): { provider: string; id
 /** What the memory projection says, in one line: its model, the spend so far,
  * whether its store is open yet and the reason it is blocked. */
 export function describeHomeMemory(memory: HomeMemoryEnvelope): string {
-  if (!memory.configured) return "Home memory is not configured. /home memory <provider/id> configures it.";
+  if (!memory.configured) {
+    return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id> configures it.`;
+  }
   const model = memory.model ? `model ${memory.model.provider}/${memory.model.id}` : "an unrecorded model";
   const spend = memory.spentTokens === undefined ? "" : `, ${memory.spentTokens} tokens spent`;
   const open = memory.open ? "open" : "not open yet (it opens at the first activation)";
   const blocked = memory.blocked ? `, blocked: ${memory.blocked}` : "";
-  return `Home memory: ${model}${spend}, ${open}${blocked}.`;
+  const episodic = memory.episodic;
+  const progress = episodic
+    ? `, ${episodic.coverage.admitted} admitted, ${episodic.coverage.summarized} summarized, ${episodic.view.unbuilt} unbuilt view parts, pump busy: ${episodic.pump.busy}`
+    : "";
+  const reason = memory.reason ? `, degraded: ${memory.reason}` : "";
+  return `Home memory: ${model}${spend}, ${open}${blocked}${progress}${reason}.`;
 }
 
 /** What the request-context projection says: the activation's start, whether it
@@ -269,7 +277,7 @@ export function describeHomeContext(context: HomeContextEnvelope): string {
   const start = context.activationStartEntryId ?? "the start of the conversation";
   const state = context.activationOpen ? "open" : "settled";
   const sizes = context.viewLines === undefined
-    ? "it was refused before it prepared a request"
+    ? context.lastRefusalReason ? "it was refused before it prepared a request" : "it is awaiting request preparation"
     : `${context.viewLines} view lines (${context.viewBytes} bytes), about ${context.effectiveTokens} tokens of a ${context.contextWindow}-token window`;
   const refusal = context.lastRefusalReason
     ? `, last refusal ${context.lastRefusalReason}${context.lastRefusalDetail ? `: ${context.lastRefusalDetail}` : ""}`
