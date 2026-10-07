@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 
@@ -70,12 +71,15 @@ FAKE_JOURNEY = textwrap.dedent(
         os.kill(os.getppid(), signal.SIGINT)
         time.sleep(spec.get("wound_down_after", 1.0))
         note("wound down")
+    if spec.get("trap_sigint"):
+        def wind_down(*_):
+            note("cleanup")
+            sys.exit(130)
+        signal.signal(signal.SIGINT, wind_down)
+    if spec.get("ready_signal"):
+        # The parent test forces timeout only after SIGINT is known to be handled.
+        os.kill(os.getppid(), signal.SIGUSR1)
     if spec.get("sleep"):
-        if spec.get("trap_sigint"):
-            def wind_down(*_):
-                note("cleanup")
-                sys.exit(130)
-            signal.signal(signal.SIGINT, wind_down)
         time.sleep(spec["sleep"])
         note("wound down")
     if spec.get("report", True):
@@ -330,7 +334,19 @@ def git(cwd: Path, *args: str) -> str:
 
 
 class LandFixture(unittest.TestCase):
+    def test_git_fixture_disables_background_maintenance(self):
+        self.assertEqual(git(self.remote.parent, "config", "gc.auto"), "0")
+        self.assertEqual(git(self.remote.parent, "config", "maintenance.auto"), "false")
+
     def setUp(self):
+        saved_git_config = {key: value for key, value in os.environ.items() if key.startswith("GIT_CONFIG_")}
+        for key in tuple(os.environ):
+            if key.startswith("GIT_CONFIG_"):
+                os.environ.pop(key)
+        os.environ.update({"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "gc.auto",
+                           "GIT_CONFIG_VALUE_0": "0", "GIT_CONFIG_KEY_1": "maintenance.auto",
+                           "GIT_CONFIG_VALUE_1": "false"})
+        self.addCleanup(self._restore_git_config, saved_git_config)
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
         self.addCleanup(quiet.__exit__, None, None, None)
@@ -396,6 +412,13 @@ class LandFixture(unittest.TestCase):
         self.addCleanup(self._restore, saved)
         self.sleeps = []
         self.now = 0.0
+
+    @staticmethod
+    def _restore_git_config(saved: dict) -> None:
+        for key in tuple(os.environ):
+            if key.startswith("GIT_CONFIG_"):
+                os.environ.pop(key)
+        os.environ.update(saved)
 
     @staticmethod
     def _restore(saved: dict) -> None:
@@ -987,9 +1010,33 @@ class AcceptanceLandingTests(LandFixture):
 
     def test_a_journey_that_passes_its_bound_is_interrupted_and_winds_down_itself(self):
         self.journey_timeout(PAIR, 1)
-        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "report": False}})
-        with self.assertRaises(acceptance.AcceptanceError) as raised:
-            self.land(acceptance=PAIR)
+        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "ready_signal": True, "report": False}})
+        ready = threading.Event()
+        previous_handler = signal.getsignal(signal.SIGUSR1)
+        signal.signal(signal.SIGUSR1, lambda *_: ready.set())
+        popen = acceptance.subprocess.Popen
+
+        def force_bound_after_handler(*args, **kwargs):
+            process = popen(*args, **kwargs)
+            wait = process.wait
+
+            def wait_until_ready(timeout=None):
+                if timeout == 1:
+                    if not ready.wait(timeout=5):
+                        raise AssertionError("journey did not install its interrupt handler")
+                    raise subprocess.TimeoutExpired(process.args, timeout)
+                return wait(timeout=timeout)
+
+            process.wait = wait_until_ready
+            return process
+
+        try:
+            acceptance.subprocess.Popen = force_bound_after_handler
+            with self.assertRaises(acceptance.AcceptanceError) as raised:
+                self.land(acceptance=PAIR)
+        finally:
+            acceptance.subprocess.Popen = popen
+            signal.signal(signal.SIGUSR1, previous_handler)
         message = str(raised.exception)
         self.assertIn("passed its 1s bound", message)
         self.assertIn("interrupted (exit 130)", message)

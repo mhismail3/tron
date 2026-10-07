@@ -165,7 +165,9 @@ merges and silently drop the work.
 ### Base failure modes
 
 `test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
-repositories, local bare remotes and the fake `gh`.
+repositories, local bare remotes and the fake `gh`. The land fixtures disable
+Git auto-GC and automatic maintenance for every child Git process, so repository
+temporary-directory cleanup does not race detached maintenance.
 
 75. **A stacked claim uses the wrong base.** `verify`, `land` (update, pull
     request, merge, resume and the closing comment), `steward` and `cleanup`
