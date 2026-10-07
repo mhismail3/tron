@@ -1873,7 +1873,7 @@ final class AppModel {
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
         recordSceneTransition(to: .background, flush: true)
-        homeStatus.retireSurface()
+        homeStatus.suspendForBackground()
         sceneAllowsCatalogRefresh = false
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
@@ -4681,35 +4681,36 @@ final class AppModel {
 
     /// The visible Home owner registers only authenticated focused-Gateway
     /// status reads. This is disposable presentation work, never a mutation.
-    func mountHomeStatus(presentationActive: Bool) {
-        guard let profileID = lifecycle.selectedProfileID,
-              let admission = lifecycle.admission,
-              let connectionID = admission.connectionID else {
-            homeStatus.retireSurface()
-            return
-        }
+    func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
+        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator)
+        guard let profileID = lifecycle.selectedProfileID else { return }
+        let connectionID = lifecycle.admission?.connectionID.map(String.init)
         let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
-        homeStatus.mountFallback(
+        homeStatus.configure(
             profileID: profileID,
-            connectionID: String(connectionID),
-            capabilityEnabled: capable,
-            presentationActive: presentationActive
+            connectionID: connectionID,
+            capabilityEnabled: capable
         ) { [weak self] fence in
             guard let self,
                   self.lifecycle.selectedProfileID == fence.profileID,
+                  let admission = self.lifecycle.admission,
+                  let currentConnectionID = admission.connectionID,
+                  String(currentConnectionID) == fence.connectionID,
+                  self.lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true,
                   self.lifecycle.admits(admission) else { throw CancellationError() }
             let value = try await self.lifecycle.client.requestValue(
                 "home.status", JSONValue.object([:]),
-                expectedConnection: GatewayConnectionAdmission(connectionID: admission.connectionID)
+                expectedConnection: GatewayConnectionAdmission(connectionID: currentConnectionID)
             )
             guard self.lifecycle.selectedProfileID == fence.profileID,
-                  self.lifecycle.admits(admission) else { throw CancellationError() }
+                  self.lifecycle.admits(admission),
+                  String(currentConnectionID) == fence.connectionID else { throw CancellationError() }
             return try HomeStatusDTO.decode(value)
         }
     }
 
-    func unmountHomeStatus() {
-        homeStatus.retireSurface()
+    func unmountHomeStatus(surfaceToken: PresentationSurfaceToken) {
+        homeStatus.retireSurface(surfaceToken)
     }
 
     func handle(_ event: GatewayEvent) async {
@@ -4821,7 +4822,7 @@ final class AppModel {
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
             if let sessionID = event.sessionId {
-                Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(sessionID: sessionID, presentationActive: true) }
+                Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(sessionID: sessionID) }
             }
             guard case .sessionSummary(let update) = event.preparation else {
                 // A malformed or newer summary must not silently leave a row's
@@ -4832,7 +4833,7 @@ final class AppModel {
             }
             apply(update)
         case "session.listChanged":
-            Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(presentationActive: true) }
+            Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted() }
             scheduleSessionListRefresh()
         case "auth.prompt":
             providerAuth.handlePrompt(event.payload)
@@ -5447,7 +5448,19 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleInvalidateSessionConnectionOwnership() {
         diagnosticsAreReady = false
+        homeStatus.connectionRetired()
         invalidateSessionConnectionOwnership()
+    }
+
+    func lifecycleRefreshHomeStatus(admission: GatewayLifecycleCoordinator.Admission) {
+        guard admitsLifecycle(admission),
+              let profileID = lifecycle.selectedProfileID,
+              let connectionID = admission.connectionID else { return }
+        homeStatus.connectionAvailable(
+            profileID: profileID,
+            connectionID: String(connectionID),
+            capabilityEnabled: gatewayInfo?.capabilities.contains("home.v1") == true
+        )
     }
 
     func lifecycleBeginReconciliationAggregate(
@@ -5480,6 +5493,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
+        lifecycleRefreshHomeStatus(admission: admission)
         adoptConnectedGatewayIdentity()
         // No revision is bumped for the advertisement: nothing presents it yet,
         // and the profile's dial endpoint did not change.

@@ -1610,6 +1610,70 @@ struct AppModelReconnectTests {
         await client.close()
     }
 
+    @Test("Home status retires on disconnect and reads the replacement connection")
+    func homeStatusRebindsAfterDisconnect() async throws {
+        let suite = "AppModelHomeStatusReconnectTests.\\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profile = GatewayProfile(
+            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let first = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [first, replacement]).factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            profileTokenLookup: { _ in "token" }
+        )
+        let presentation = PresentationActivityCoordinator()
+        let surface = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+        presentation.register(surface, parent: nil)
+        var foregroundTask: Task<Void, Never>?
+
+        do {
+            await first.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await model.connectHostedGateway(profile: profile, token: "token")
+            model.mountHomeStatus(surfaceToken: surface, activityCoordinator: presentation)
+            let firstRead = try await waitForMethod("home.status", on: first)
+            await first.enqueue(successResponse(id: firstRead.id, result: homeStatusResult()))
+            for _ in 0..<100 where model.homeStatus.status == nil { await Task.yield() }
+            #expect(model.homeStatus.status?.phase == .ready)
+
+            await model.enteredBackground().value
+            #expect(model.homeStatus.status == nil)
+            foregroundTask = model.becameActive()
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            for _ in 0..<300 where model.connectionState != .connected { await Task.yield() }
+            #expect(model.connectionState == .connected)
+            let identity = model.knowledgePresentationIdentity
+            #expect(identity.lifecycleGeneration != nil)
+            #expect(identity.connectionID != nil)
+            let replacementRead = try await waitForMethod("home.status", on: replacement)
+            #expect(replacementRead.index >= 1)
+            await replacement.enqueue(successResponse(id: replacementRead.id, result: homeStatusResult()))
+            for _ in 0..<100 where model.homeStatus.status == nil { await Task.yield() }
+            #expect(model.homeStatus.status?.phase == .ready)
+            #expect(model.homeStatus.status?.sessionId == "home-session")
+        } catch {
+            foregroundTask?.cancel()
+            await model.teardown()
+            await client.close()
+            throw error
+        }
+        foregroundTask?.cancel()
+        model.unmountHomeStatus(surfaceToken: surface)
+        await model.teardown()
+        await client.close()
+    }
+
     @Test("recovery warning timer uses its injected clock and never grants Send authority")
     func recoveryWarningTimerAndAuthorityFence() async throws {
         let suite = "GatewayRecoveryWarningTests.\(UUID().uuidString)"
@@ -1923,10 +1987,43 @@ struct AppModelReconnectTests {
         )
     }
 
+    private func homeStatusResult() -> JSONValue {
+        .object([
+            "phase": .string("ready"),
+            "activation": .object(["available": .bool(false)]),
+            "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
+            "recovery": .object(["action": .string("none")]),
+            "available": .bool(true), "enabled": .bool(true), "homeId": .string("home"),
+            "sessionId": .string("home-session"), "generation": .number(1),
+            "live": .bool(false), "sessionPresent": .bool(true),
+            "memory": .object(["configured": .bool(true), "open": .bool(true)]),
+        ])
+    }
+
+    private func waitForMethod(
+        _ method: String,
+        on socket: ScriptedGatewaySocket,
+        afterIndex: Int = 0
+    ) async throws -> (id: String, index: Int) {
+        for _ in 0..<500 {
+            let frames = await socket.sentFrames()
+            for index in afterIndex..<frames.count {
+                guard let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]),
+                      let object = value.objectValue,
+                      object["method"]?.stringValue == method,
+                      let id = object["id"]?.stringValue else { continue }
+                return (id, index)
+            }
+            await Task.yield()
+        }
+        throw GatewayFailure(code: "test_timeout", message: "Expected Gateway method \\(method)", retryable: false, details: nil)
+    }
+
     private func helloFrame(
         runtimeEpoch: String? = nil,
         machineID: String = "machine",
-        gatewayChannel: String = "stable"
+        gatewayChannel: String = "stable",
+        capabilities: [String] = ["sessions.v1"]
     ) -> Data {
         var value: [String: JSONValue] = [
             "type": .string("hello"),
@@ -1936,7 +2033,7 @@ struct AppModelReconnectTests {
             "minProtocolVersion": .number(7),
             "machineId": .string(machineID),
             "machineName": .string("Mac"),
-            "capabilities": .array([.string("sessions.v1")]),
+            "capabilities": .array(capabilities.map(JSONValue.string)),
             "gatewayChannel": .string(gatewayChannel),
         ]
         if let runtimeEpoch { value["runtimeEpoch"] = .string(runtimeEpoch) }

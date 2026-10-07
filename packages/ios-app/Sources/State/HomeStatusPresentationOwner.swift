@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import TronMobileCore
 
 /// Typed subset of the Gateway's complete bounded `home.status` projection.
@@ -35,7 +36,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
             contextWindow = try values.decodeIfPresent(Int.self, forKey: .contextWindow)
             lastRefusalReason = try values.decodeIfPresent(String.self, forKey: .lastRefusalReason)
             lastRefusalDetail = try values.decodeIfPresent(String.self, forKey: .lastRefusalDetail)
-            if available && activationOpen == nil { throw DecodingError.dataCorruptedError(forKey: .activationOpen, in: values, debugDescription: "Available activation must state whether it is open") }
+            if available && activationOpen == nil {
+                throw DecodingError.dataCorruptedError(forKey: .activationOpen, in: values, debugDescription: "Available activation must state whether it is open")
+            }
         }
     }
 
@@ -94,67 +97,213 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
 struct HomeStatusReadFence: Equatable, Sendable {
     let profileID: String
     let connectionID: String
+    let surfaceToken: PresentationSurfaceToken
     fileprivate let readGeneration: UInt64
     fileprivate let surfaceGeneration: UInt64
 }
 
-/// Owns only a disposable Home status projection. The focused profile's caller
-/// supplies its authenticated connection and managed surface activity; exact
-/// generations prevent stale reads from a replaced connection or retired view.
+/// Owns a disposable focused-profile status projection. A read is valid only
+/// while its exact managed surface and authenticated connection are current.
 @MainActor
+@Observable
 final class HomeStatusPresentationOwner {
     static let fallbackInterval: Duration = .seconds(5)
 
     private(set) var status: HomeStatusDTO?
-    private var readGeneration: UInt64 = 0
-    private var surfaceGeneration: UInt64 = 0
-    private var latestFence: HomeStatusReadFence?
-    private var admittedIdentity: (profileID: String, connectionID: String)?
-    private var mountedRead: (profileID: String, connectionID: String, capabilityEnabled: Bool, fetch: @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO)?
-    private var activeReadTask: Task<Void, Never>?
-    private var mountedTask: Task<Void, Never>?
+    @ObservationIgnored private var readGeneration: UInt64 = 0
+    @ObservationIgnored private var surfaceGeneration: UInt64 = 0
+    @ObservationIgnored private var latestFence: HomeStatusReadFence?
+    @ObservationIgnored private(set) var surfaceToken: PresentationSurfaceToken?
+    @ObservationIgnored private weak var activityCoordinator: PresentationActivityCoordinator?
+    @ObservationIgnored private var profileID: String?
+    @ObservationIgnored private var connectionID: String?
+    @ObservationIgnored private var capabilityEnabled = false
+    @ObservationIgnored private var suspended = false
+    @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO)?
+    @ObservationIgnored private var activeReadTask: Task<Void, Never>?
+    @ObservationIgnored private var mountedTask: Task<Void, Never>?
 
-    func beginRead(profileID: String, connectionID: String, capabilityEnabled: Bool, presentationActive: Bool) -> HomeStatusReadFence? {
-        guard capabilityEnabled, presentationActive, !profileID.isEmpty, !connectionID.isEmpty else {
-            invalidateReads(clearStatus: !capabilityEnabled)
+    /// Replacing a mount creates a new authority. A late retirement callback for
+    /// the prior token is intentionally a no-op.
+    func mountSurface(token: PresentationSurfaceToken, coordinator: PresentationActivityCoordinator) {
+        guard token != surfaceToken || activityCoordinator !== coordinator else { return }
+        stopWork(clearStatus: true)
+        surfaceGeneration &+= 1
+        surfaceToken = token
+        activityCoordinator = coordinator
+        profileID = nil
+        connectionID = nil
+        capabilityEnabled = false
+        fetch = nil
+        suspended = false
+    }
+
+    func configure(
+        profileID: String,
+        connectionID: String?,
+        capabilityEnabled: Bool,
+        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
+    ) {
+        let identityChanged = self.profileID != profileID || self.connectionID != connectionID
+        if identityChanged { stopWork(clearStatus: true) }
+        self.profileID = profileID
+        self.connectionID = connectionID
+        self.capabilityEnabled = capabilityEnabled
+        self.fetch = fetch
+        suspended = false
+        guard capabilityEnabled else {
+            stopWork(clearStatus: true)
+            return
+        }
+        startWorkIfActive()
+    }
+
+    /// Lifecycle retirement drops connection-scoped data, but keeps the exact
+    /// visible surface so an authenticated reconnect can install a new admission.
+    func connectionRetired() {
+        connectionID = nil
+        stopWork(clearStatus: true)
+    }
+
+    /// Called only after the lifecycle has admitted a fresh authenticated hello.
+    func connectionAvailable(profileID: String, connectionID: String, capabilityEnabled: Bool) {
+        let identityChanged = self.profileID != profileID || self.connectionID != connectionID
+        if identityChanged { stopWork(clearStatus: true) }
+        self.profileID = profileID
+        self.connectionID = connectionID
+        self.capabilityEnabled = capabilityEnabled
+        suspended = false
+        guard capabilityEnabled else {
+            stopWork(clearStatus: true)
+            return
+        }
+        startWorkIfActive()
+    }
+
+    /// Presentation coordinator changes are re-evaluated at the same owner
+    /// boundary as reads, rather than trusting an activity Boolean captured earlier.
+    func presentationActivityChanged(for token: PresentationSurfaceToken) {
+        guard token == surfaceToken else { return }
+        guard surfaceIsActive(token) else {
+            stopWork(clearStatus: false)
+            return
+        }
+        startWorkIfActive()
+    }
+
+    func invalidateMounted(sessionID: String? = nil) async {
+        guard sessionID == nil || status?.sessionId == sessionID else { return }
+        await refreshMounted()
+    }
+
+    func refreshMounted() async {
+        guard !suspended,
+              capabilityEnabled,
+              let profileID, let connectionID,
+              let token = surfaceToken,
+              let coordinator = activityCoordinator,
+              let fetch,
+              surfaceIsActive(token) else { return }
+        await refresh(
+            profileID: profileID,
+            connectionID: connectionID,
+            capabilityEnabled: capabilityEnabled,
+            token: token,
+            coordinator: coordinator,
+            fetch: fetch
+        )
+    }
+
+    func beginRead(
+        profileID: String,
+        connectionID: String,
+        capabilityEnabled: Bool,
+        token: PresentationSurfaceToken,
+        coordinator: PresentationActivityCoordinator
+    ) -> HomeStatusReadFence? {
+        guard capabilityEnabled,
+              !suspended,
+              token == surfaceToken,
+              coordinator === activityCoordinator,
+              surfaceIsActive(token) else {
+            invalidateRead(clearStatus: !capabilityEnabled)
             return nil
         }
-        if let admittedIdentity,
-           admittedIdentity.profileID != profileID || admittedIdentity.connectionID != connectionID {
-            status = nil
-        }
-        admittedIdentity = (profileID, connectionID)
+        if self.profileID != profileID || self.connectionID != connectionID { status = nil }
+        self.profileID = profileID
+        self.connectionID = connectionID
+        self.capabilityEnabled = true
         readGeneration &+= 1
-        let fence = HomeStatusReadFence(profileID: profileID, connectionID: connectionID, readGeneration: readGeneration, surfaceGeneration: surfaceGeneration)
+        let fence = HomeStatusReadFence(
+            profileID: profileID,
+            connectionID: connectionID,
+            surfaceToken: token,
+            readGeneration: readGeneration,
+            surfaceGeneration: surfaceGeneration
+        )
         latestFence = fence
         return fence
     }
 
     @discardableResult
-    func publish(_ value: HomeStatusDTO, for fence: HomeStatusReadFence, currentProfileID: String, currentConnectionID: String, presentationActive: Bool) -> Bool {
-        guard presentationActive,
-              fence.profileID == currentProfileID,
-              fence.connectionID == currentConnectionID,
+    func publish(_ value: HomeStatusDTO, for fence: HomeStatusReadFence) -> Bool {
+        guard fence.profileID == profileID,
+              fence.connectionID == connectionID,
+              fence.surfaceToken == surfaceToken,
               fence.surfaceGeneration == surfaceGeneration,
-              fence == latestFence else { return false }
+              fence == latestFence,
+              let coordinator = activityCoordinator,
+              PresentationPublicationPolicy.allows(
+                ambient: .covered,
+                coordinator: coordinator,
+                token: fence.surfaceToken
+              ),
+              !suspended else { return false }
         status = value
         return true
     }
 
-    func refresh(
+    func retireSurface(_ token: PresentationSurfaceToken) {
+        guard token == surfaceToken else { return }
+        stopWork(clearStatus: true)
+        surfaceGeneration &+= 1
+        surfaceToken = nil
+        activityCoordinator = nil
+        profileID = nil
+        connectionID = nil
+        capabilityEnabled = false
+        fetch = nil
+        suspended = false
+    }
+
+    /// Backgrounding suspends disposable presentation work but retains the route
+    /// token for foreground reconciliation if SwiftUI keeps that route mounted.
+    func suspendForBackground() {
+        suspended = true
+        stopWork(clearStatus: true)
+    }
+
+    private func refresh(
         profileID: String,
         connectionID: String,
         capabilityEnabled: Bool,
-        presentationActive: Bool,
+        token: PresentationSurfaceToken,
+        coordinator: PresentationActivityCoordinator,
         fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
     ) async {
-        guard let fence = beginRead(profileID: profileID, connectionID: connectionID, capabilityEnabled: capabilityEnabled, presentationActive: presentationActive) else { return }
+        guard let fence = beginRead(
+            profileID: profileID,
+            connectionID: connectionID,
+            capabilityEnabled: capabilityEnabled,
+            token: token,
+            coordinator: coordinator
+        ) else { return }
         activeReadTask?.cancel()
         let task = Task { @MainActor [weak self] in
             do {
                 let value = try await fetch(fence)
                 guard !Task.isCancelled, let self else { return }
-                _ = self.publish(value, for: fence, currentProfileID: profileID, currentConnectionID: connectionID, presentationActive: presentationActive)
+                _ = self.publish(value, for: fence)
             } catch {
                 // Status is disposable; keep its last projection and allow the
                 // next event or mounted fallback to retry.
@@ -165,68 +314,52 @@ final class HomeStatusPresentationOwner {
         if fence == latestFence { activeReadTask = nil }
     }
 
-    func mountFallback(
-        profileID: String,
-        connectionID: String,
-        capabilityEnabled: Bool,
-        presentationActive: Bool,
-        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
-    ) {
+    private func startWorkIfActive() {
+        guard !suspended, capabilityEnabled, let token = surfaceToken,
+              let coordinator = activityCoordinator,
+              coordinator.activity(for: token).allowsPresentationPublication,
+              let profileID, let connectionID, let fetch else { return }
         mountedTask?.cancel()
-        guard capabilityEnabled else {
-            mountedRead = nil
-            admittedIdentity = nil
-            invalidateReads(clearStatus: true)
-            return
-        }
-        guard Self.shouldRefreshForInvalidation(isMounted: true, isForeground: presentationActive) else {
-            mountedRead = nil
-            admittedIdentity = nil
-            invalidateReads(clearStatus: true)
-            return
-        }
-        mountedRead = (profileID, connectionID, capabilityEnabled, fetch)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.invalidateMounted(presentationActive: presentationActive)
-        }
+        Task { @MainActor [weak self] in await self?.refreshMounted() }
         mountedTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 do { try await Task.sleep(for: Self.fallbackInterval) }
                 catch { return }
-                guard !Task.isCancelled else { return }
-                await self.refresh(profileID: profileID, connectionID: connectionID, capabilityEnabled: capabilityEnabled, presentationActive: presentationActive, fetch: fetch)
+                guard !Task.isCancelled,
+                      self.surfaceIsActive(token),
+                      self.profileID == profileID,
+                      self.connectionID == connectionID else { return }
+                await self.refresh(
+                    profileID: profileID,
+                    connectionID: connectionID,
+                    capabilityEnabled: true,
+                    token: token,
+                    coordinator: coordinator,
+                    fetch: fetch
+                )
             }
         }
     }
 
-    /// Session summaries/activity, route entry, and accepted mutation completion
-    /// call this edge-triggered path; it never waits for the fallback cadence.
-    func invalidateMounted(sessionID: String? = nil, presentationActive: Bool) async {
-        guard presentationActive, let mountedRead,
-              sessionID == nil || status?.sessionId == sessionID else { return }
-        await refresh(profileID: mountedRead.profileID, connectionID: mountedRead.connectionID, capabilityEnabled: mountedRead.capabilityEnabled, presentationActive: true, fetch: mountedRead.fetch)
+    private func surfaceIsActive(_ token: PresentationSurfaceToken) -> Bool {
+        guard token == surfaceToken, let coordinator = activityCoordinator else { return false }
+        return PresentationPublicationPolicy.allows(
+            ambient: .covered,
+            coordinator: coordinator,
+            token: token
+        )
     }
 
-    func retireSurface() {
-        surfaceGeneration &+= 1
-        mountedRead = nil
+    private func stopWork(clearStatus: Bool) {
         mountedTask?.cancel()
         mountedTask = nil
         activeReadTask?.cancel()
         activeReadTask = nil
-        admittedIdentity = nil
-        invalidateReads(clearStatus: true)
+        invalidateRead(clearStatus: clearStatus)
     }
 
-    static func shouldRefreshForInvalidation(isMounted: Bool, isForeground: Bool) -> Bool {
-        isMounted && isForeground
-    }
-
-    private func invalidateReads(clearStatus: Bool) {
-        activeReadTask?.cancel()
-        activeReadTask = nil
+    private func invalidateRead(clearStatus: Bool) {
         readGeneration &+= 1
         latestFence = nil
         if clearStatus { status = nil }

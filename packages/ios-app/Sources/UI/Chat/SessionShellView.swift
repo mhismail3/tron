@@ -71,6 +71,7 @@ struct SessionShellProfileRouteOwner {
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @State private var dashboardMode: DashboardMode = .sessions
     @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
@@ -109,6 +110,7 @@ struct SessionShellView: View {
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
     @State private var dashboardPresentationIsActive = false
     @State private var dashboardReconcileTask: Task<Void, Never>?
+    @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -119,9 +121,26 @@ struct SessionShellView: View {
     }
 
     var body: some View {
-        TronPresentationSurface(id: "dashboard") {
+        TronPresentationSurface(
+            id: "dashboard",
+            onMount: { token in
+                homeStatusSurfaceToken = token
+                if let presentationActivityCoordinator {
+                    model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentationActivityCoordinator)
+                }
+            },
+            onRetire: { token in
+                model.unmountHomeStatus(surfaceToken: token)
+                if homeStatusSurfaceToken == token { homeStatusSurfaceToken = nil }
+            }
+        ) {
             TronPresentationActivityReader { activity in
                 dashboardSurface(activity: activity)
+                    .onChange(of: activity.allowsPresentationPublication) { _, _ in
+                        if let homeStatusSurfaceToken {
+                            model.homeStatus.presentationActivityChanged(for: homeStatusSurfaceToken)
+                        }
+                    }
             }
         }
     }
