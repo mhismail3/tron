@@ -560,6 +560,28 @@ settings. AuthBroker serializes OpenAI and Codex legacy OAuth operations because
 both SDK flows use callback port 1455; live sign-in remains a manual acceptance
 gate.
 
+For first-party OpenAI ChatGPT OAuth, new model choices are gated at each Gateway
+`ModelRuntime` by that same OAuth access token's `GET https://api.openai.com/v1/models`
+response. The Gateway retains only `visibility: "list"` entries whose `slug`
+matches a model registered by the pinned SDK, preserving account order. The
+account list is the authority for currently eligible Responses models; bundled
+models it omits (including hidden, retired, or route-incompatible entries) are
+not selectable. Unknown account slugs are ignored because Tron has no registered
+transport metadata for them. Discovery is bounded to five seconds and paginated;
+the first account-backed availability/catalog read waits for this bounded
+request, then fails closed to an empty OpenAI OAuth choice set on failure. Only the previous successful set for the
+exact same token may remain visible after a refresh failure. Cached account sets
+never authorize a different token. The access token is sent only to the fixed
+first-party URL; API-key OpenAI and overridden provider/model endpoints keep their
+existing catalog behavior without discovery. `session.setModel`, new default
+model writes, `provider.list` choice counts, and `model.list.available` use the
+same policy. A Codex provider remains registered and its credential remains
+available to the usage adapter, but its models are not new choices while
+`providerUsageLentTo` identifies `openai`; a sole Codex sign-in is unchanged.
+Historical session model identities are not rewritten. This is account-list
+behavior, not evidence of the current account's exact model membership; the
+maintainer's post-install check verifies live account results.
+
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot
 operation owner then keeps Stop and drain pending without a second work registry.
