@@ -315,6 +315,16 @@ export class HomeOwner {
     });
   }
 
+  async assertPublishedHomeChapter(sessionId: string, expectedPath: string): Promise<void> {
+    await this.recordMutex.run(async () => {
+      const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
+      if (chapter?.state !== "active" || !(await this.options.sessions.hasConversation?.(sessionId, expectedPath))) {
+        this.options.diagnostic?.({ outcome: "chapter-refused", reason: "published-evidence-missing" });
+        throw new GatewayError("conflict", "Active Home chapter lacks durable conversation evidence", true);
+      }
+    });
+  }
+
   async claimReservedChapter(sessionId: string, attemptId: string): Promise<HomeChapter> {
     return this.recordMutex.run(async () => {
       const current = this.record;

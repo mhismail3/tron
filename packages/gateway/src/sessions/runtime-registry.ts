@@ -573,7 +573,6 @@ export class RuntimeRegistry {
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
-  private readonly reservedHomeOwners = new Map<string, { slot: RuntimeSlot; attemptId: string; expectedPath: string }>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
@@ -895,21 +894,29 @@ export class RuntimeRegistry {
    * dispatching their own input, so joining never consumes or replays a command.
    */
   async materializeReservedHome(sessionId: string): Promise<RuntimeSlot> {
+    let existingSlot: RuntimeSlot | undefined;
     let selected!: Promise<RuntimeSlot>;
     await this.mutex.run(() => {
-      const owner = this.reservedHomeOwners.get(sessionId);
-      if (owner) {
-        selected = Promise.resolve(owner.slot);
-        return;
-      }
+      existingSlot = this.slots.get(sessionId);
+      if (existingSlot) return;
       const existing = this.homeMaterializations.get(sessionId);
-      if (existing) {
-        selected = existing;
-      } else {
+      if (existing) selected = existing;
+      else {
         selected = Promise.resolve().then(() => this.createReservedHomeRuntime(sessionId));
         this.homeMaterializations.set(sessionId, selected);
       }
     });
+    if (existingSlot) {
+      const reservation = this.home.reservedChapter(sessionId);
+      if (reservation?.state === "materializing" && reservation.attemptId && reservation.expectedPath && reservation.expectedPath === existingSlot.sessionFile) {
+        await this.home.assertReservedChapterAttempt(sessionId, reservation.attemptId, reservation.expectedPath);
+      } else {
+        const path = existingSlot.sessionFile;
+        if (!path) throw new GatewayError("conflict", "Live Home chapter has no canonical path", true);
+        await this.home.assertPublishedHomeChapter(sessionId, path);
+      }
+      return existingSlot;
+    }
     try {
       return await selected;
     } finally {
@@ -920,12 +927,15 @@ export class RuntimeRegistry {
   }
 
   async assertReservedHomeAttempt(sessionId: string): Promise<void> {
-    const owner = await this.mutex.run(() => this.reservedHomeOwners.get(sessionId));
-    if (!owner) throw new GatewayError("conflict", "No live Home reservation owner exists", true);
-    await this.home.assertReservedChapterAttempt(sessionId, owner.attemptId, owner.expectedPath);
-    if (owner.slot.isDisposed || owner.slot.sessionFile !== owner.expectedPath) {
-      throw new GatewayError("conflict", "The live Home reservation runtime no longer owns its recorded path", true);
+    const slot = await this.mutex.run(() => this.slots.get(sessionId));
+    if (!slot || slot.isDisposed || !slot.sessionFile) throw new GatewayError("conflict", "No live Home reservation runtime exists", true);
+    const chapter = this.home.reservedChapter(sessionId);
+    if (chapter?.state === "materializing" && chapter.attemptId && chapter.expectedPath) {
+      if (slot.sessionFile !== chapter.expectedPath) throw new GatewayError("conflict", "Home runtime path differs from its reservation", true);
+      await this.home.assertReservedChapterAttempt(sessionId, chapter.attemptId, chapter.expectedPath);
+      return;
     }
+    await this.home.assertPublishedHomeChapter(sessionId, slot.sessionFile);
   }
 
   private async createReservedHomeRuntime(sessionId: string): Promise<RuntimeSlot> {
@@ -985,7 +995,6 @@ export class RuntimeRegistry {
         if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
-        this.reservedHomeOwners.set(sessionId, { slot: slot!, attemptId, expectedPath });
         this.publishRuntime(sessionId, slot!, transcriptBytes, "create");
         this.invalidateCatalogAdmission();
         void this.sessionCatalog.refresh(slot!.persistedSessionFile);
