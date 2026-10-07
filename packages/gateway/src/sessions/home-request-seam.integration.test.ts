@@ -53,6 +53,7 @@ import { TrustService } from "../admin/trust-service.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
+import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason } from "../home/home-request-policy.js";
 import * as tronModules from "../extensions/tron-modules.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -278,14 +279,20 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.faux.setResponses([item.response("canonical baseline")]);
     await item.slot.prompt("canonical baseline input");
     await waitUntil(() => !item.slot.isBusy);
-    let sealed = false;
-    const owner = item.registry.homeOwner() as unknown as {
-      chapterStateFor: (sessionId: string) => { sessionId: string; sealed: boolean };
-    };
-    owner.chapterStateFor = (sessionId) => ({ sessionId, sealed });
     await item.registry.homeOwner().disable();
+    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        ...current.chapters.map(chapter => chapter.sessionId === item.slot.id
+          ? { ...chapter, state: "sealed" as const, sealedAt: new Date().toISOString() }
+          : chapter),
+        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
     expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
-    sealed = true;
+    expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toEqual({ sessionId: item.slot.id, sealed: true });
     const entries = item.session.sessionManager.getEntries();
     const leaf = item.session.sessionManager.getLeafId();
     const bytes = await item.jsonl();
