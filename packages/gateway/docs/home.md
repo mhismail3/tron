@@ -122,12 +122,19 @@ session's change and does not touch the record.
 `home.v1` is advertised in `hello`/`system.info` when the Gateway has a Home
 owner.
 
-- `home.status` is a read with no inference: `{ available, reason?, enabled,
-  homeId?, sessionId?, generation?, model?, live, sessionPresent }`. `live`
-  reports whether the session currently holds a live runtime; `sessionPresent`
-  reports whether it exists at all — live, or still a canonical session in the
-  catalog. A Gateway whose first catalog cut has not completed reports
-  `sessionPresent: true`, because an unread catalog cannot prove absence.
+- `home.status` is one bounded read that composes the record, memory status and
+  `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
+  enabled, homeId?, sessionId?, generation?, model?, live, sessionPresent,
+  memory }`. `phase` and the recovery action are derived on each read; they are
+  not additional lifecycle state. Readiness gaps identify an unavailable record,
+  missing/disabled designation, unconfigured memory or blocked memory. `activation`
+  is the same body-free projection returned by `home.context`. The memory
+  projection includes only bounded counters and memory state, never canonical
+  messages or frozen memory-view text. `live` reports whether the session
+  currently holds a live runtime; `sessionPresent` reports whether it exists at
+  all — live, or still a canonical session in the catalog. A Gateway whose first
+  catalog cut has not completed reports `sessionPresent: true`, because an
+  unread catalog cannot prove absence.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,

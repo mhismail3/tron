@@ -5,7 +5,7 @@ import { afterEach } from "vitest";
 import {
   configureHomeMemory, connectResilient, designateHome, describeHomeContext, describeHomeMemory,
   describeHomeStatus, disableHome, homeContextCommand, homeStatusCommand, listSessions,
-  parseHomeCommand, parseHomeModelArgument, resumeHomeMemory, runHomeCommand,
+  assistantText, parseHomeCommand, parseHomeModelArgument, resumeHomeMemory, runHomeCommand, runHomeInput,
   synchronizeTerminalSession,
 } from "./terminal-chat.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -165,19 +165,33 @@ describe("terminal chat Home commands", () => {
     expect(() => parseHomeCommand("/home memory anthropic")).toThrow(/provider\/id/);
   });
 
-  it("reads home.status and reports what the Gateway returned", async () => {
-    const request = vi.fn(async () => ({ available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true }));
+  it("renders the typed status phase, activation, readiness, memory and recovery", async () => {
+    const status = {
+      available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1,
+      live: true, sessionPresent: true,
+      phase: "blocked" as const,
+      activation: { available: true as const, activationStartEntryId: "entry-1", activationOpen: false, lastRefusalReason: "memory-blocked" },
+      readiness: { ready: false, gaps: ["memory-blocked"] },
+      memory: { configured: true, open: true, blocked: "permanent-failure" },
+      recovery: { action: "resume-memory" as const, reason: "permanent-failure" },
+    };
+    const request = vi.fn(async () => status);
     const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
 
     const described = await homeStatusCommand(client);
     expect(request).toHaveBeenCalledExactlyOnceWith("home.status", {});
     expect(described).toContain("session");
+    expect(described).toContain("blocked");
+    expect(described).toContain("entry-1");
+    expect(described).toContain("permanent-failure");
+    expect(described).toContain("resume-memory");
 
     // Each state is distinguishable from the projection alone.
-    expect(describeHomeStatus({ available: false, reason: "unreadable", enabled: false, live: false, sessionPresent: false }))
+    const base = { activation: { available: false } as const, readiness: { ready: false, gaps: [] }, recovery: { action: "none" as const }, memory: { configured: false, open: false } };
+    expect(describeHomeStatus({ ...base, phase: "unavailable", available: false, reason: "unreadable", enabled: false, live: false, sessionPresent: false }))
       .toContain("unreadable");
-    expect(describeHomeStatus({ available: true, enabled: false, live: false, sessionPresent: false }))
-      .not.toEqual(describeHomeStatus({ available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true, sessionPresent: true }));
+    expect(describeHomeStatus({ ...base, phase: "undesignated", available: true, enabled: false, live: false, sessionPresent: false }))
+      .not.toEqual(describeHomeStatus({ ...base, phase: "ready", available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true, sessionPresent: true }));
   });
 
   it("sends the two mutations with a command id and reports the new generation", async () => {
@@ -257,6 +271,25 @@ describe("terminal chat Home commands", () => {
     expect(describeHomeContext({ available: true, activationStartEntryId: null, activationOpen: true, viewLines: 0, viewBytes: 0, effectiveTokens: 0, contextWindow: 0 }))
       .toContain("open");
     expect(describeHomeContext({ available: false })).toContain("no activation");
+  });
+
+  it("keeps a malformed command inside the per-command error boundary", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await expect(runHomeInput({ request: vi.fn() } as unknown as Pick<GatewayProtocolClient, "request">, "/home memory anthropic"))
+        .resolves.toBe(true);
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining("Usage: /home"));
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining("provider/id"));
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("renders assistant refusal text when the canonical message has no content", () => {
+    const snapshot = {
+      transcript: [{ kind: "message", role: "assistant", content: [], errorMessage: "Home memory is not configured" }],
+    } as unknown as import("../protocol/types.js").SessionSnapshot;
+    expect(assistantText(snapshot)).toBe("Home memory is not configured");
   });
 
   it("prints usage for a bad argument and reports a failed command without ending the chat", async () => {

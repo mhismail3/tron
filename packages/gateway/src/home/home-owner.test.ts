@@ -336,6 +336,11 @@ describe("Tron Home record", () => {
     expect(owner.profileFor("session-1")).toBe("home");
     const status = await owner.status();
     expect(status.memory).toEqual({ configured: false, open: false });
+    expect(status).toMatchObject({
+      phase: "blocked", activation: { available: false },
+      readiness: { ready: false, gaps: ["memory-not-configured"] },
+      recovery: { action: "configure-memory" },
+    });
     // The preserved record is never rewritten by a read: only the lifecycle
     // mutations do that.
     expect(await readFile(h.recordPath, "utf8")).toBe(bytes);
