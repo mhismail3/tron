@@ -293,15 +293,38 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     });
     expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
     expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toEqual({ sessionId: item.slot.id, sealed: true });
-    const entries = item.session.sessionManager.getEntries();
-    const leaf = item.session.sessionManager.getLeafId();
-    const bytes = await item.jsonl();
-    await expect(item.slot.setThinking("low")).rejects.toMatchObject({
+    const oldBytes = await item.jsonl();
+    await item.registry.dispose();
+
+    const coldModelRuntime = await ModelRuntime.create({ authPath: join(item.root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    coldModelRuntime.registerNativeProvider(item.faux.provider);
+    const coldRegistry = new RuntimeRegistry({
+      agentDir: item.agentDir,
+      tronHome: item.tronHome,
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => coldModelRuntime,
+      trust: new TrustService(item.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      homeMemorySummarizer: () => ({ summarizer: async () => "summary" }),
+    });
+    disposals.push(() => coldRegistry.dispose());
+    await coldRegistry.initialize();
+    await coldRegistry.recoverCanonicalAttention();
+    const coldSlot = await coldRegistry.acquire(item.slot.id);
+    const coldSession = (coldSlot as unknown as { runtime: { session: AgentSession } }).runtime.session;
+    expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    const entries = coldSession.sessionManager.getEntries();
+    const leaf = coldSession.sessionManager.getLeafId();
+    const bytes = await readFile(coldSlot.sessionFile!, "utf8");
+    await expect(coldSlot.setThinking("low")).rejects.toMatchObject({
       code: "conflict", details: { reason: "sealed-chapter", sessionId: item.slot.id },
     });
-    expect(item.session.sessionManager.getEntries()).toEqual(entries);
-    expect(item.session.sessionManager.getLeafId()).toBe(leaf);
-    expect(await item.jsonl()).toBe(bytes);
+    expect(coldSession.sessionManager.getEntries()).toEqual(entries);
+    expect(coldSession.sessionManager.getLeafId()).toBe(leaf);
+    expect(await readFile(coldSlot.sessionFile!, "utf8")).toBe(bytes);
+    expect(bytes).toBe(oldBytes);
     item.record("disabled-sealed-chapter", { profile: "ordinary", refused: true, bytesUnchanged: true });
   });
 
