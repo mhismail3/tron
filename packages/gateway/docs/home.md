@@ -28,7 +28,11 @@ when Home is disabled. The Registry materializer claims one attempt per reserved
 chapter, scans every candidate before adoption or creation, and durably records
 the exact SDK path and attempt ID before the caller can receive the runtime.
 Unreadable, malformed, torn, duplicate, symlinked, or path-mismatched evidence
-blocks recovery without changing canonical bytes.
+blocks recovery without changing canonical bytes. Gateway JSONL and HTML exports
+are noncanonical destination writes owned by RuntimeSlot's existing temporary-
+artifact export boundary: it snapshots the canonical source into a fresh temporary
+directory, then registers that artifact. Home does not expose arbitrary SDK export
+destinations, and export leaves the chapter path unchanged.
 
 `home.open` returns Home's logical route and current binding. `home.prompt`
 persists an idempotency receipt containing the Home identity, binding revision,

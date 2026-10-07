@@ -318,6 +318,32 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
 }
 
 describe("Tron Home activations end to end", () => {
+  it("exports Home through a temporary artifact without targeting its chapter file", async () => {
+    const f = await fixture("export-destination");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-home-export-destination");
+    f.faux.setResponses([fauxAssistantMessage("Home export source")]);
+    await slot.prompt("create a canonical Home chapter entry");
+    await waitUntil(() => !slot.isBusy);
+    const chapterPath = slot.sessionFile!;
+    const before = await readFile(chapterPath);
+    await f.registry.initializeBlobStorage();
+
+    const artifact = await slot.export("jsonl");
+    const lease = await f.registry.acquireBlob(artifact.blobId);
+    let exported = Buffer.alloc(0);
+    try {
+      for await (const chunk of lease.stream) exported = Buffer.concat([exported, Buffer.from(chunk)]);
+    } finally {
+      await lease.release();
+    }
+
+    expect(artifact.name).toMatch(/\.jsonl$/);
+    expect(exported).toEqual(before);
+    expect(await readFile(chapterPath)).toEqual(before);
+    report.cases.push({ case: "home-export-destination", sourceUnchanged: true, destinationIsChapter: false });
+  });
+
   it.each([
     ["canonical bytes", 24 * 1_024 * 1_024 + 1, 3],
     ["canonical entries", 0, 50_001],
