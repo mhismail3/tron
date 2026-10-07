@@ -181,6 +181,19 @@ boundary. Outbound APNs requests are intercepted locally. CI runs the pinned ins
 type check, tests, production dependency audit, and production-config Wrangler dry run;
 it never receives deployment credentials or deploys either environment.
 
+`package.json` `overrides` exist only to clear security advisories in the
+development toolchain, so that `npm audit` stays clean (#489):
+
+- `@cloudflare/vitest-pool-workers` 0.22.0 pins its own `wrangler` 4.124.0 and
+  `miniflare`, both inside vulnerable ranges. The override makes the pool use
+  the top-level `wrangler` (`$wrangler`).
+- Every `miniflare` release, the latest included, pins `sharp` 0.35.4. The
+  overrides raise it to the patched 0.35.5, and raise `undici` to 7.29.1.
+
+Remove each entry once an upstream release depends on a fixed version itself.
+Check each change with `npm audit`, `npm test` and both dry-run builds. An
+override is never a reason to skip the pool's tests.
+
 ## Manual deployment
 
 Use only read-only inventory commands before any mutation. They expose IDs and
