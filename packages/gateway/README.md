@@ -1441,7 +1441,15 @@ that created their own process groups. Gateway does not acknowledge Stop until t
 foreground operation and every owned process settle; an unsuccessful postcondition returns
 an error rather than `{ aborted: true }`. Runtime replacement also drains the outgoing
 process owner before installing its successor. Extension-managed detached subagents never
-enter that owner and are not cancelled by foreground Stop.
+enter that owner and are not cancelled by foreground Stop. The same owner enforces the
+tool's `timeout` (seconds, validated as Pi validates it): on expiry it terminates the owned
+tree the same way, and the call fails with Pi's "Command timed out after N seconds" and the
+output written so far. If the shell has already exited, its process group is still killed.
+After the shell exits, a call keeps reading output for as long as descendants write to the
+inherited pipe, as Pi does; once a timeout or Stop has asked for termination, that output can
+extend the call by at most two seconds, so a descendant that escaped the group cannot hold
+it open. Pi's tool only passes the timeout to the operations it runs on, so operations that
+ignore it leave every command unbounded (#499).
 Stop is scoped to one invocation, not to an extension workflow. A stopped run's canonical
 assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
 continuations can distinguish a user stop from a completed run and decide whether to
