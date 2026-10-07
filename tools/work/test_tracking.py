@@ -32,16 +32,30 @@ import fcntl, json, os, sys, time
 args=sys.argv[1:]
 state_path=os.environ['TRACKING_STATE']
 trace_path=os.environ['TRACKING_TRACE']
-try: state=json.load(open(state_path))
-except FileNotFoundError: state={'number':101,'item':False,'fields':{},'labels':[],'writes':[],'updates':0,'subs':[],'blockers':[]}
-with open(trace_path,'a') as f: f.write(json.dumps(args)+'\n')
-def save(): json.dump(state,open(state_path,'w'))
-def update_state(change):
- lock=os.open(state_path+'.lock',os.O_CREAT|os.O_RDWR,0o600); fcntl.flock(lock,fcntl.LOCK_EX)
+def default_state():
+ return {'number':101,'item':False,'fields':{},'labels':[],'writes':[],'updates':0,'subs':[],'blockers':[]}
+# Each fake-gh invocation is a process; protect both the initial snapshot and
+# truncate/write window. Callers release this lock before any test barrier.
+def locked_state(mode, change=None):
+ lock=os.open(state_path+'.lock',os.O_CREAT|os.O_RDWR,0o600); fcntl.flock(lock,mode)
  try:
-  current=json.load(open(state_path)); change(current); json.dump(current,open(state_path,'w'))
+  try: current=json.load(open(state_path))
+  except FileNotFoundError: current=default_state()
+  if change:
+   change(current)
+   with open(state_path,'w') as stream: json.dump(current,stream)
+  return current
  finally:
   fcntl.flock(lock,fcntl.LOCK_UN); os.close(lock)
+def read_state(): return locked_state(fcntl.LOCK_SH)
+def update_state(change): return locked_state(fcntl.LOCK_EX,change)
+state=read_state()
+with open(trace_path,'a') as f: f.write(json.dumps(args)+'\n')
+def save():
+ snapshot=json.loads(json.dumps(state))
+ def replace(current):
+  current.clear(); current.update(snapshot)
+ update_state(replace)
 def wait_for(path):
  deadline=time.time()+10
  while not os.path.exists(path):
@@ -74,8 +88,7 @@ if args and args[0]=='api' and args[1]!='graphql':
    if method=='PATCH': current['labels']=body.get('labels',current['labels'])
    else: current['labels']=list(dict.fromkeys(current['labels']+body.get('labels',[])))
    current['writes'].append({'method':method,'path':path,'body':body})
-  update_state(change)
-  latest=json.load(open(state_path))
+  latest=update_state(change)
   if worker=='a' and barrier: open(os.path.join(barrier,'a-written'),'w').close()
   output({'number':101,'labels':[{'name':x} for x in latest['labels']]})
  if '/issues/' in path and method=='DELETE' and '/labels/' in path:
@@ -251,7 +264,13 @@ class TypedTrackingCommandTests(unittest.TestCase):
                     process.communicate()
             raise
         self.assertEqual([process.returncode for process in processes], [0, 0], outputs)
-        self.assertTrue({'needs-decision', 'regression'} <= set(self.state_json()['labels']))
+        remote = self.state_json()
+        labels = set(remote['labels'])
+        calls = [json.loads(line) for line in self.trace.read_text(encoding='utf-8').splitlines()]
+        label_writes = [write for write in remote['writes']
+                        if write.get('path', '').endswith('/labels') or write.get('method') == 'PATCH']
+        self.assertTrue({'needs-decision', 'regression'} <= labels,
+                        f"remote labels={sorted(labels)}; label writes={label_writes}; fake-gh calls={calls}")
 
     def test_live_project_options_are_preflighted_before_any_field_mutation(self):
         created = self.cli('issue', 'create', '--title', 'Option drift', '--body-file', str(self.body),
