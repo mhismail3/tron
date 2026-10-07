@@ -102,7 +102,11 @@ describe("Tron Home record", () => {
     await writeFile(f.recordPath, corrupt, { mode: 0o600 });
     await f.owner.initialize();
 
-    expect(await f.owner.status()).toMatchObject({ available: false, enabled: false, live: false, sessionPresent: false });
+    expect(await f.owner.status()).toMatchObject({
+      available: false, enabled: false, live: false, sessionPresent: false,
+      phase: "unavailable", readiness: { ready: false, gaps: ["record-unavailable"] },
+      recovery: { action: "inspect-record" },
+    });
     expect((await f.owner.status()).reason).toBeTypeOf("string");
     await expect(f.owner.designate({}, defaultModel)).rejects.toMatchObject({ code: "conflict", retryable: false });
     expect(await readFile(f.recordPath, "utf8")).toBe(corrupt);
@@ -116,6 +120,8 @@ describe("Tron Home record", () => {
     await control.owner.initialize();
     expect(await control.owner.status()).toMatchObject({
       available: true, enabled: true, homeId: "home-1", generation: 2, sessionPresent: true, live: false,
+      phase: "blocked", readiness: { ready: false, gaps: ["memory-not-configured"] },
+      recovery: { action: "configure-memory" },
     });
     expect(control.owner.profileFor("session-1")).toBe("home");
     expect(control.owner.profileFor("session-2")).toBe("unnamed");
@@ -129,7 +135,10 @@ describe("Tron Home record", () => {
     await writeFile(f.recordPath, future, { mode: 0o600 });
     await f.owner.initialize();
 
-    expect(await f.owner.status()).toMatchObject({ available: false, enabled: false });
+    expect(await f.owner.status()).toMatchObject({
+      available: false, enabled: false, phase: "unavailable",
+      readiness: { ready: false, gaps: ["record-unavailable"] }, recovery: { action: "inspect-record" },
+    });
     await expect(f.owner.disable()).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(f.recordPath, "utf8")).toBe(future);
   });
@@ -216,7 +225,10 @@ describe("Tron Home record", () => {
 
     const disabled = await f.owner.disable();
     expect(disabled).toEqual({ ...first, generation: first.generation + 1 });
-    expect(await f.owner.status()).toMatchObject({ enabled: false, generation: 2, sessionId: first.sessionId });
+    expect(await f.owner.status()).toMatchObject({
+      enabled: false, generation: 2, sessionId: first.sessionId, phase: "disabled",
+      readiness: { ready: false, gaps: ["disabled", "memory-not-configured"] }, recovery: { action: "designate" },
+    });
 
     const reenabled = await f.owner.designate({ model: MODEL }, defaultModel);
     expect(reenabled).toEqual({ ...first, generation: 3 });
@@ -232,11 +244,18 @@ describe("Tron Home record", () => {
     const first = await f.owner.designate({ model: MODEL }, defaultModel);
     f.present.delete(first.sessionId);
     f.live.delete(first.sessionId);
+    expect(await f.owner.status()).toMatchObject({
+      phase: "missing-session", readiness: { ready: false, gaps: ["session-missing", "memory-not-configured"] },
+      recovery: { action: "designate", reason: "Home session is missing" },
+    });
 
     const second = await f.owner.designate({ model: MODEL }, defaultModel);
     expect(second).toEqual({ homeId: first.homeId, sessionId: "session-2", generation: 2 });
     expect(f.created).toEqual([first.sessionId, "session-2"]);
-    expect(await f.owner.status()).toMatchObject({ enabled: true, sessionId: "session-2", generation: 2 });
+    expect(await f.owner.status()).toMatchObject({
+      enabled: true, sessionId: "session-2", generation: 2, phase: "blocked",
+      readiness: { ready: false, gaps: ["memory-not-configured"] }, recovery: { action: "configure-memory" },
+    });
 
     // The disabled case is the same: the record is kept, the session is new.
     const third = await harness();
@@ -259,7 +278,11 @@ describe("Tron Home record", () => {
     const disabled = await f.owner.disable();
     expect(disabled).toEqual({ ...first, generation: 2 });
     expect(f.replaced).toEqual([]);
-    expect(await f.owner.status()).toMatchObject({ enabled: false, sessionPresent: false });
+    expect(await f.owner.status()).toMatchObject({
+      enabled: false, sessionPresent: false, phase: "disabled",
+      readiness: { ready: false, gaps: ["disabled", "session-missing", "memory-not-configured"] },
+      recovery: { action: "designate", reason: "Home session is missing" },
+    });
   });
 
   it("re-enables on the recorded model when the request names none", async () => {
@@ -301,6 +324,10 @@ describe("Tron Home record", () => {
   it("refuses disable without a record instead of creating one", async () => {
     // Failure mode 9.
     const f = await harness();
+    expect(await f.owner.status()).toMatchObject({
+      phase: "undesignated", readiness: { ready: false, gaps: ["not-designated"] },
+      activation: { available: false }, recovery: { action: "designate" },
+    });
     await expect(f.owner.disable()).rejects.toMatchObject({ code: "not_found" });
     await expect(readFile(f.recordPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(f.created).toEqual([]);
@@ -336,6 +363,11 @@ describe("Tron Home record", () => {
     expect(owner.profileFor("session-1")).toBe("home");
     const status = await owner.status();
     expect(status.memory).toEqual({ configured: false, open: false });
+    expect(status).toMatchObject({
+      phase: "blocked", activation: { available: false },
+      readiness: { ready: false, gaps: ["memory-not-configured"] },
+      recovery: { action: "configure-memory" },
+    });
     // The preserved record is never rewritten by a read: only the lifecycle
     // mutations do that.
     expect(await readFile(h.recordPath, "utf8")).toBe(bytes);

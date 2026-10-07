@@ -96,7 +96,7 @@ sends zero warm requests, while an ordinary session in the same Gateway and on
 the same model does warm.
 
 MCP is excluded structurally — no MCP extension is loaded for Home — rather than
-by omission from the allowlist, because from SDK 1.0.0 an allowlist that names no
+by omission from the allowlist, because from SDK 1.0.4 an allowlist that names no
 `mcp__*` tool keeps MCP tools registered.
 
 Compaction is disabled through the constructor option of the existing
@@ -122,12 +122,22 @@ session's change and does not touch the record.
 `home.v1` is advertised in `hello`/`system.info` when the Gateway has a Home
 owner.
 
-- `home.status` is a read with no inference: `{ available, reason?, enabled,
-  homeId?, sessionId?, generation?, model?, live, sessionPresent }`. `live`
-  reports whether the session currently holds a live runtime; `sessionPresent`
-  reports whether it exists at all — live, or still a canonical session in the
-  catalog. A Gateway whose first catalog cut has not completed reports
-  `sessionPresent: true`, because an unread catalog cannot prove absence.
+- `home.status` is one bounded read that composes the record, memory status and
+  `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
+  enabled, homeId?, sessionId?, generation?, model?, live, sessionPresent,
+  memory }`. `phase` and the recovery action are derived on each read; they are
+  not additional lifecycle state. Readiness gaps identify an unavailable record,
+  missing/disabled designation, unconfigured memory or blocked memory. `activation`
+  is the same body-free projection returned by `home.context`. The memory
+  projection includes only bounded counters and memory state, never canonical
+  messages or frozen memory-view text. The terminal reports admitted/summarized
+  coverage, unbuilt view parts, pump activity and any degradation reason; an open
+  activation without request sizes is described as awaiting preparation unless a
+  refusal reason is present. `live` reports whether the session
+  currently holds a live runtime; `sessionPresent` reports whether it exists at
+  all — live, or still a canonical session in the catalog. A Gateway whose first
+  catalog cut has not completed reports `sessionPresent: true`, because an
+  unread catalog cannot prove absence.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
@@ -165,11 +175,13 @@ rebuild: the next runtime creation reads the record.
 `tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the session-based
 terminal client, and today it is the only surface that can designate Home,
 configure its memory and recover it. Its `/home` line is resolved without
-touching the Gateway, so a bad argument is answered before any RPC:
+touching the Gateway, so a bad argument is answered before any RPC. Malformed
+arguments are caught within the command loop, and assistant refusals are rendered
+from the canonical message's `errorMessage`, even when it has no content text:
 
 | command | what it does |
 | --- | --- |
-| `/home`, `/home status` | `home.status`, printed as the bounded projection |
+| `/home`, `/home status` | `home.status`, printed with phase, activation, readiness gaps, memory and recovery action |
 | `/home designate [provider/id]` | `home.designate`; without a model the Gateway's default is used |
 | `/home disable` | `home.disable` |
 | `/home memory <provider/id>` | `home.configureMemory`, then the memory projection it returns |
@@ -241,6 +253,12 @@ and the refusal is a canonical assistant error entry the user can read):
 | `prepareRequest` | outermost | cuts the request into system messages + memory view + the activation's own messages |
 | `transformContext` | outermost | refuses unless the activation's non-system messages survived the SDK's context stages unchanged, then records the single-use digest expectation |
 | `streamFunction` | innermost | refuses unless the outgoing request carries the activation nonce exactly once with the recorded digest |
+
+The digest expectation uses that agent's own settings-aware message converter,
+the same one Pi invokes in its agent loop. Thus `images.blockImages` replaces
+images with Pi's disabled-image placeholder without triggering a false refusal,
+including when the setting changes between turns. Non-system context mutation
+and subsequent outgoing message mutation still fail closed.
 
 Only a runtime whose profile is Home's gets them. A fork of the Home session is a
 different session id, hence an ordinary session with no seam and no activation.

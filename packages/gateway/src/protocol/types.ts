@@ -1033,6 +1033,12 @@ export const HOME_CAPABILITY = "home.v1";
  * `live` is whether the session holds a runtime right now; `sessionPresent` is
  * whether it exists at all, live or still on disk. */
 export interface HomeStatus {
+  /** Derived from the durable designation, runtime presence, memory and current/last activation. */
+  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "blocked" | "active" | "ready";
+  /** Current or last activation evidence; never includes message or memory-view bodies. */
+  activation: HomeContextProjection;
+  readiness: { ready: boolean; gaps: string[] };
+  recovery: { action: "inspect-record" | "designate" | "configure-memory" | "resume-memory" | "none"; reason?: string };
   available: boolean;
   reason?: string;
   enabled: boolean;

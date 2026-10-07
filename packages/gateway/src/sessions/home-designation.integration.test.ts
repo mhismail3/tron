@@ -265,6 +265,9 @@ describe.sequential("Tron Home designation", () => {
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: false, live: false, sessionPresent: false,
       memory: { configured: false, open: false },
+      // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
+      phase: "undesignated", activation: { available: false },
+      readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
     });
 
     // The default-model branch: no model named means this Gateway's default.
@@ -294,9 +297,11 @@ describe.sequential("Tron Home designation", () => {
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
-      // Home has no memory defaults (decision D4): until `home.configureMemory`,
-      // the projection says so and every activation refuses.
+      // Home has no memory defaults: until `home.configureMemory`, the
+      // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false },
+      phase: "blocked", activation: { available: false },
+      readiness: { ready: false, gaps: ["memory-not-configured"] }, recovery: { action: "configure-memory" },
     });
 
     // Idempotent, and a replayed command id returns the same result.
