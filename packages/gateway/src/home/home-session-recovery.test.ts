@@ -72,4 +72,19 @@ describe("reserved Home session recovery scan", () => {
     await expect(scanReservedHomeSession({ directory: f.directory, expectedPath: f.expectedPath, sessionId: "reserved" }))
       .resolves.toMatchObject({ action: "blocked" });
   });
+
+  // Failure-first baseline for #547 step 4. Keep skipped until the strict
+  // pre-open implementation validates supported canonical entry schemas.
+  it.skip.each([
+    ["an empty JSON object", "{}"],
+    ["a message without a canonical entry type", JSON.stringify({ type: "message" })],
+    ["an unsupported canonical entry type", JSON.stringify({ type: "future-entry-v99", id: "x" })],
+  ])("blocks a complete file whose transcript contains %s", async (_label, entry) => {
+    const f = await fixture();
+    const bytes = `${valid("reserved")}${entry}\n`;
+    await writeFile(f.expectedPath, bytes);
+    await expect(scanReservedHomeSession({ directory: f.directory, expectedPath: f.expectedPath, sessionId: "reserved" }))
+      .resolves.toMatchObject({ action: "blocked" });
+    await expect((await import("node:fs/promises")).readFile(f.expectedPath, "utf8")).resolves.toBe(bytes);
+  });
 });
