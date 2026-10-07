@@ -10,8 +10,9 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
   EpisodicMemoryError,
-  type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
+  type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer, type EpisodicNodeRecord, type EpisodicInvalidationRecord,
 } from "./episodic-contract.js";
+import { decodeContextRuns } from "./episodic-tree.js";
 import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
 
 /*
@@ -209,6 +210,92 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 }
 
 describe("episodic memory crash recovery", () => {
+  it("completes an interrupted chunked invalidation before serving memory", async () => {
+    const fx = await fixture("chunk-boundary", 1050);
+    const memory = await openMemory(fx);
+    await memory.entriesCommitted(fx.sessionId);
+    const owner = memory as unknown as {
+      invalidate: (indices: number[]) => Promise<void>;
+      store: { appendNode: (record: EpisodicNodeRecord | EpisodicInvalidationRecord) => Promise<void> };
+    };
+    const append = owner.store.appendNode.bind(owner.store);
+    let chunks = 0;
+    owner.store.appendNode = async record => {
+      if ("nodes" in record && ++chunks === 2) throw new Error("test crash at chunk boundary");
+      await append(record);
+    };
+    try {
+      await expect(owner.invalidate([0])).rejects.toThrow("test crash");
+      expect(chunks).toBe(2);
+    } finally {
+      owner.store.appendNode = append;
+      await memory.dispose();
+    }
+    const beforeLog = await readRecords(fx.nodesPath);
+    const before = liveNodes(beforeLog);
+    expect(before.size).toBeGreaterThan(0);
+    expect([...before.values()].some(node =>
+      decodeContextRuns((node as unknown as EpisodicNodeRecord).contextRuns).some(dependency => !before.has(dependency)),
+    )).toBe(true);
+    let calls = 0;
+    const reopened = await openMemory(fx, async request => { calls++; return stubSummarizer(request); });
+    try {
+      const live = assertConsistentStore(await readRecords(fx.nodesPath), 2100);
+      for (const node of live.values()) {
+        for (const dependency of decodeContextRuns((node as unknown as EpisodicNodeRecord).contextRuns)) {
+          expect(live.has(dependency), `surviving context references revoked ${dependency}`).toBe(true);
+        }
+      }
+      expect(calls).toBe(0);
+    } finally { await reopened.dispose(); }
+    const repaired = await readFile(fx.nodesPath, "utf8");
+    const again = await openMemory(fx);
+    await again.dispose();
+    expect(await readFile(fx.nodesPath, "utf8")).toBe(repaired);
+  }, 180_000);
+
+  it("serializes durable parent publication with child invalidation", async () => {
+    const fx = await fixture("publication-race", 1);
+    const memory = await openMemory(fx);
+    const owner = memory as unknown as {
+      pump: () => Promise<void>;
+      buildNode: (level: number, index: number) => Promise<void>;
+      invalidate: (indices: number[]) => Promise<void>;
+      store: { appendNode: (record: EpisodicNodeRecord | EpisodicInvalidationRecord) => Promise<void> };
+    };
+    owner.pump = async () => {};
+    await memory.entriesCommitted(fx.sessionId);
+    await owner.buildNode(0, 0);
+    await owner.buildNode(0, 1);
+    const append = owner.store.appendNode.bind(owner.store);
+    let entered!: () => void;
+    const inside = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    owner.store.appendNode = async record => {
+      await append(record);
+      if (!("nodes" in record) && record.level === 1) { entered(); await held; }
+    };
+    const build = owner.buildNode(1, 0);
+    try {
+      await inside;
+      const invalidation = owner.invalidate([0]);
+      release();
+      await Promise.all([build, invalidation]);
+    } finally {
+      release();
+      await build;
+      owner.store.appendNode = append;
+      await memory.dispose();
+    }
+    // Inspect before open: recovery must not mask a broken publication boundary.
+    const live = liveNodes(await readRecords(fx.nodesPath));
+    const reopened = await openMemory(fx);
+    await reopened.dispose();
+    expect(live.has("0+2")).toBe(false);
+    assertConsistentStore(await readRecords(fx.nodesPath), 2);
+  }, 120_000);
+
   it("refuses a waiter instead of stranding it when the pump dies unexpectedly", async () => {
     // The pump classifies every failure it can name, but an unexpected one (a
     // store write the filesystem refuses, say) escapes it. Without the owner's
