@@ -1060,8 +1060,10 @@ Project state and records every call. The live E2E covers GitHub itself.
     unclosed comments/fences and fence trailers that are not valid closers),
     reordered/nested/fenced headings, duplicate wrapper headings and a
     user-supplied Verification heading before publication. It checks adopted
-    open and merged PR bodies as well. Non-empty fenced evidence—including
-    heading-shaped literal output—and balanced harmless comments remain valid.
+    open and merged PR bodies as well. ATX headings and fence delimiters accept
+    valid zero-to-three-space indentation only; four-space and tab-indented code
+    is never structural. Non-empty fenced evidence—including heading-shaped
+    literal output—and balanced harmless comments remain valid.
     Valid non-bug summaries remain unchanged;
     stewarding and merged-resume paths preserve the generated Verification and
     Maintainer validation sections.

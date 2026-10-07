@@ -266,7 +266,7 @@ def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool, bool]:
     fence: Optional[Tuple[str, int]] = None
     in_comment = False
     for line in text.replace("\r\n", "\n").splitlines():
-        fence_match = re.match(r"(`{3,}|~{3,})", line.lstrip())
+        fence_match = re.match(r" {0,3}(`{3,}|~{3,})", line)
         if not in_comment and fence_match:
             marker = fence_match.group(1)
             if fence is None:
@@ -274,7 +274,7 @@ def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool, bool]:
                 visible.append("")
                 code_lines.append(False)
                 continue
-            remainder = line.lstrip()[len(marker):]
+            remainder = line[fence_match.end():]
             if marker[0] == fence[0] and len(marker) >= fence[1] and not remainder.strip():
                 fence = None
                 visible.append("")
@@ -324,7 +324,7 @@ def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool, boo
     for index, line in enumerate(lines):
         if code_lines[index]:
             continue
-        match = re.fullmatch(r"(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*", line)
+        match = re.fullmatch(r" {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*", line)
         if match:
             headings.append((match.group(2).strip(), len(match.group(1)), index))
     return headings, balanced_fence, balanced_comment
@@ -332,7 +332,7 @@ def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool, boo
 
 def _has_meaningful_content(lines: List[Tuple[str, bool]]) -> bool:
     for line, is_code in lines:
-        if not is_code and re.match(r"^[ \t]*#{1,6}[ \t]+", line):
+        if not is_code and re.match(r"^ {0,3}#{1,6}[ \t]+", line):
             continue
         # Blank lines, Markdown delimiters, and empty list/table scaffolding are not evidence.
         payload = re.sub(r"[\s#>*_~`|!()\[\]{}+\-]", "", line)

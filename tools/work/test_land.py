@@ -672,6 +672,25 @@ class TypeSpecificPullBodyTests(LandFixture):
     def test_fence_trailer_text_is_not_a_closing_delimiter(self):
         self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n```md\n```not-a-closing-fence\n")
 
+    def test_four_space_and_tab_fence_markers_are_code_not_closers(self):
+        self.assert_rejected_without_publication(
+            "## Repro\n\n```text\nfailure\n    ```\n\n## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        self.assert_rejected_without_publication(
+            "## Repro\n\n```text\nfailure\n\t```\n\n## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+
+    def test_four_space_or_tab_indented_headings_do_not_count(self):
+        self.assert_rejected_without_publication(
+            "## Repro\n\nShown.\n\n    ## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        self.assert_rejected_without_publication(
+            "## Repro\n\nShown.\n\n\t## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+
+    def test_one_to_three_space_headings_and_fences_are_valid(self):
+        summary = (" ## Repro\n\n ```text\nfailure output\n ```\n\n"
+                   "  ## Cause\n\n  ```text\nThe parser boundary was wrong.\n  ```\n\n"
+                   "   ## Fix\n\n   ```text\nThe boundary was corrected.\n   ```\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
     def test_heading_shaped_code_output_counts_as_meaningful_evidence(self):
         summary = ("## Repro\n\n```text\n# Actual failing output\n```\n\n"
                    "## Cause\n\nThe cause is known.\n\n## Fix\n\nThe fix is applied.\n")
@@ -704,11 +723,13 @@ class TypeSpecificPullBodyTests(LandFixture):
         self.assertIn("Adds the widget.", self.state()["pulls"][0]["body"])
 
     def test_adopting_valid_bug_pr_ignores_verification_example_in_fenced_code(self):
-        body = ("Closes #7\n\n## Summary\n\n" + self.BUG_SUMMARY
-                + "\n```md\n## Verification\n```\n\n## Verification\n\nGenerated.\n")
+        summary = (" ## Repro\n\n   ```text\nfailure\n   ```\n\n  ## Cause\n\nKnown.\n\n"
+                   "   ## Fix\n\nDone.\n\n   ```md\n## Verification\n   ```\n")
+        body = ("Closes #7\n\n## Summary\n\n" + summary
+                + "\n## Verification\n\nGenerated.\n")
         result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False, existing_body=body)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        self.assertIn("```md\n## Verification\n```", self.state()["pulls"][0]["body"])
+        self.assertIn("   ```md\n## Verification\n   ```", self.state()["pulls"][0]["body"])
 
     def test_adopting_open_bug_pr_with_confusing_verification_heading_is_refused(self):
         malformed_body = ("Closes #7\n\n## Summary\n\n" + self.BUG_SUMMARY
@@ -729,8 +750,9 @@ class TypeSpecificPullBodyTests(LandFixture):
         self.assertEqual(self.writes(before), [])
 
     def test_merged_bug_resume_preserves_fenced_headings_and_maintainer_handoff(self):
-        summary = (self.BUG_SUMMARY + "\n```md\n\n## Verification\n\n## Maintainer validation\n\n"
-                   "Not the handoff.\n```\n")
+        summary = (" ## Repro\n\n   ```text\n# Output\n   ```\n\n  ## Cause\n\nKnown.\n\n"
+                   "   ## Fix\n\nDone.\n\n   ```md\n\n## Verification\n\n## Maintainer validation\n\n"
+                   "Not the handoff.\n   ```\n")
         body = ("Refs #7\n\n## Summary\n\n" + summary + "\n## Verification\n\nGenerated receipt.\n"
                 "\n## Maintainer validation\n\nIrreducible: physical device\n\nRun the stated check.\n")
         result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False,
@@ -1721,7 +1743,8 @@ class StackedStewardTests(StackedFixture):
         issues = self.state()["issues"]
         issues[str(NUMBER)]["labels"] = ["task", "kind:bug"]
         pulls = self.state()["pulls"]
-        summary = ("## Repro\n\n```text\nfailed case\n```\n\n## Cause\n\nCause.\n\n## Fix\n\nFix.\n")
+        summary = (" ## Repro\n\n   ```text\nfailed case\n   ```\n\n  ## Cause\n\nCause.\n\n"
+                   "   ## Fix\n\nFix.\n")
         pulls[0]["body"] = ("Refs #7\n\n## Summary\n\n" + summary
                              + "\n## Verification\n\nGenerated.\n\n## Maintainer validation\n\n"
                              "Irreducible: physical device\n\nRun the check.\n")
