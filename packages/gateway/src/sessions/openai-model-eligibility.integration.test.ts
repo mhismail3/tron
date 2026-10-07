@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type AddressInfo, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -11,14 +12,12 @@ class SessionCredentials implements CredentialStore {
   async read(providerId: string): Promise<Credential | undefined> {
     if (providerId === "openai") return { type: "oauth", access: "session-openai-token", refresh: "refresh", expires: Date.now() + 3_600_000 };
     if (providerId === "openai-codex") return { type: "oauth", access: "session-codex-token", refresh: "refresh", expires: Date.now() + 3_600_000 };
-    if (providerId === "anthropic") return { type: "api_key", key: "session-anthropic-key" };
     return undefined;
   }
   async list(): Promise<readonly CredentialInfo[]> {
     return [
       { providerId: "openai", type: "oauth" },
       { providerId: "openai-codex", type: "oauth" },
-      { providerId: "anthropic", type: "api_key" },
     ];
   }
   async modify(_providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>) {
@@ -30,9 +29,12 @@ class SessionCredentials implements CredentialStore {
 describe("new-session OpenAI default admission", () => {
   let root = "";
   let registry: RuntimeRegistry | undefined;
+  let server: Server | undefined;
   afterEach(async () => {
     await registry?.dispose();
     registry = undefined;
+    if (server) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));
+    server = undefined;
     vi.unstubAllGlobals();
     if (root) await rm(root, { recursive: true, force: true });
     root = "";
@@ -77,7 +79,19 @@ describe("new-session OpenAI default admission", () => {
     const settingsPath = join(agentDir, "settings.json");
     const savedSettings = JSON.stringify({ defaultProvider: "openai-codex", defaultModel: "gpt-5.6-sol" });
     await writeFile(settingsPath, savedSettings);
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("unexpected live fetch in the initial snapshot test"); }));
+    server = createServer((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ models: [{ slug: "gpt-5.5", visibility: "list" }], has_more: false }));
+    });
+    await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/models`;
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new URL(String(input));
+      const target = new URL(endpoint);
+      target.search = request.search;
+      return originalFetch(target, init);
+    });
 
     registry = new RuntimeRegistry({
       agentDir,
@@ -92,8 +106,7 @@ describe("new-session OpenAI default admission", () => {
     await registry.initialize();
     const slot = await registry.create(cwd);
     const model = slot.snapshot().model;
-    expect(model.provider).not.toBe("openai-codex");
-    expect(model.provider).not.toBe("openai");
+    expect(model).toEqual({ provider: "openai", id: "gpt-5.5" });
     expect(slot.modelRuntime.getAvailableSnapshot().some(available => available.provider === model.provider && available.id === model.id)).toBe(true);
     expect(await readFile(settingsPath, "utf8")).toBe(savedSettings);
   });
