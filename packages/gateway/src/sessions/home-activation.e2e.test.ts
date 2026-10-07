@@ -404,23 +404,24 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([fauxAssistantMessage("recovered successor reply")]);
     await oldSlot.prompt("BEFORE-ROLLOVER-FACT: the lighthouse is blue");
     await waitUntil(() => !oldSlot.isBusy);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      chapterQuiescent(sessionId: string): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    await owner.chapterQuiescent(oldSlot.id);
     const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
-    const reservedId = "reserved-crash-successor";
+    const reservedId = current.chapters.at(-1)!.sessionId;
+    expect(current.chapters.at(-1)).toMatchObject({ state: "reserved", ordinal: 2 });
     await f.registry.dispose();
     const registeredIndex = registries.indexOf(f.registry);
     if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
-    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), `${JSON.stringify({
-      ...current,
-      chapters: [
-        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString(), sizeAtSeal: 24 * 1_024 * 1_024, entriesAtSeal: 2 },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
-      ],
-    })}\n`);
     openRegistry(f);
     await f.registry.initialize();
     const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
     await waitUntil(() => catalogCut(), 20_000);
-    await f.registry.catalog("all");
+    const recoveredCatalog = await f.registry.catalog("all");
+    expect(recoveredCatalog.sessions.map(session => session.id)).toContain(oldSlot.id);
 
     const opened = await f.service.invoke(client, "home.open", {}) as unknown as {
       homeId: string; bindingRevision: number; sessionId: string;
@@ -431,11 +432,10 @@ describe("Tron Home activations end to end", () => {
     const accepted = await f.service.invoke(client, "home.prompt", {
       commandId: "e2e-home-prompt-after-reservation", text: "AFTER-ROLLOVER-FACT: the bell rings twice",
     }) as unknown as { sessionId: string; operationId: string };
-    let latestStatus: HomeStatus | undefined;
     await waitUntil(async () => {
-      latestStatus = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-      return latestStatus.sessionId === reservedId && (latestStatus.phase === "active" || latestStatus.phase === "ready");
-    }, 30_000).catch(error => { throw new Error(`${String(error)}; status=${JSON.stringify(latestStatus)}`); });
+      const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+      return status.sessionId === reservedId && (status.phase === "active" || status.phase === "ready");
+    }, 30_000);
     expect(accepted.sessionId).toBe(reservedId);
     expect(accepted.operationId).toBeTypeOf("string");
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
@@ -477,23 +477,24 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, beforeRequests)("before chapter response")]);
     await oldSlot.prompt("CONTINUITY-FACT: the brass key is under the red bowl");
     await waitUntil(() => !oldSlot.isBusy);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      chapterQuiescent(sessionId: string): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    await owner.chapterQuiescent(oldSlot.id);
     const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
-    const reservedId = "memory-chapter-successor";
+    const reservedId = current.chapters.at(-1)!.sessionId;
+    expect(current.chapters.at(-1)).toMatchObject({ state: "reserved", ordinal: 2 });
     await f.registry.dispose();
     const registeredIndex = registries.indexOf(f.registry);
     if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
-    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), `${JSON.stringify({
-      ...current,
-      chapters: [
-        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString(), sizeAtSeal: 24 * 1_024 * 1_024, entriesAtSeal: 2 },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
-      ],
-    })}\n`);
     openRegistry(f);
     await f.registry.initialize();
     const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
     await waitUntil(() => catalogCut(), 20_000);
-    await f.registry.catalog("all");
+    const recoveredCatalog = await f.registry.catalog("all");
+    expect(recoveredCatalog.sessions.map(session => session.id)).toContain(oldSlot.id);
     const afterRequests: CapturedRequest[] = [];
     f.faux.setResponses([responsesOf(f, afterRequests)("after chapter response")]);
     await f.service.invoke(client, "home.prompt", {
