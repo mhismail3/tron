@@ -37,6 +37,19 @@ canonical installation workspace identity that distinguishes sessions which
 may be Home's, including installations reached through a symlink. Sessions in
 ordinary project directories remain unaffected.
 
+## Task authorization foundation
+
+`HomeTaskAuthorization` owns the authorization rules separately from execution:
+the initial standing scope covers any currently trusted project, and trust is
+resolved again at admission. A request outside an active scope requires a
+one-use grant recorded separately from the human decision. The grant binds the
+intent revision and digest, canonical trusted target, worker profile, policy
+revision, expiry, and restore epoch; admission atomically consumes it. Revoked,
+expired, spent, mismatched, or stale-epoch grants do not authorize work. The
+restore authority supplies the epoch; this owner does not infer restore from
+ordinary startup. This owner is not wired to task dispatch in this slice, and
+there is no user-facing task authorization control yet.
+
 ## The neutral working directory
 
 `<tronHome>/gateway/home/workspace` is created 0700 on the first designation and
