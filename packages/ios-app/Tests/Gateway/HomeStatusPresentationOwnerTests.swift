@@ -72,6 +72,24 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         XCTAssertFalse(HomeStatusPresentationOwner.shouldRefreshForInvalidation(isMounted: true, isForeground: false))
     }
 
+    func testMountedFallbackRefreshesAtFiveSecondCadence() async throws {
+        let owner = HomeStatusPresentationOwner()
+        let initial = expectation(description: "mounted initial refresh")
+        let fallback = expectation(description: "five-second mounted fallback")
+        var fetchCount = 0
+        owner.mountFallback(profileID: "p", connectionID: "c", capabilityEnabled: true, presentationActive: true) { _ in
+            fetchCount += 1
+            if fetchCount == 1 { initial.fulfill() }
+            if fetchCount == 2 { fallback.fulfill() }
+            return try HomeStatusDTO.decode(JSONValue.parse(Data(self.validStatus.utf8)))
+        }
+        await fulfillment(of: [initial], timeout: 1)
+        try await Task.sleep(for: .milliseconds(4_800))
+        XCTAssertEqual(fetchCount, 1)
+        await fulfillment(of: [fallback], timeout: 1.5)
+        owner.retireSurface()
+    }
+
     func testMountedStatusRefreshesImmediatelyOnInvalidation() async throws {
         let owner = HomeStatusPresentationOwner()
         let initial = expectation(description: "mounted initial refresh")
