@@ -1072,8 +1072,8 @@ struct GatewayMaintenanceAction: Identifiable {
 }
 
 /// The server sheet's maintenance actions: the lifecycle actions share one
-/// accent in a two-column grid, and the irreversible pairing action stands alone
-/// below them in the error accent.
+/// accent in paired columns; a lone trailing action uses the full row width.
+/// The irreversible pairing action stands alone below them in the error accent.
 struct GatewayMaintenanceActions: View {
     let lifecycle: [GatewayMaintenanceAction]
     let destructive: GatewayMaintenanceAction
@@ -1088,7 +1088,6 @@ struct GatewayMaintenanceActions: View {
                     ForEach(row) { action in
                         button(action, accent: accent)
                     }
-                    if row.count == 1 { Spacer(minLength: 0) }
                 }
             }
             button(destructive, accent: .tronError)
