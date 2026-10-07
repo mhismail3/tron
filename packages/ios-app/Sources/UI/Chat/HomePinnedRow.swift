@@ -28,16 +28,21 @@ enum HomePinnedRowPolicy {
 struct HomePinnedRow: View {
     let status: HomeStatusDTO?
     let isDesignating: Bool
+    var hasUnresolvedCommand = false
 
     private var action: HomePinnedRowAction { HomePinnedRowPolicy.action(for: status) }
     private var detail: String {
-        if isDesignating { return "Setting up Home…" }
+        if isDesignating { return hasUnresolvedCommand ? "Checking Home change…" : "Setting up Home…" }
+        if hasUnresolvedCommand { return "Home change pending · Tap to check" }
         guard let status else { return "Loading Home status…" }
         switch status.phase {
         case .undesignated: return "Set up your Home session"
         case .disabled: return "Disabled · Tap to re-enable"
         case .missingSession: return "Session missing · Tap to restore"
-        case .blocked: return "Home session · Open chat"
+        case .blocked:
+            let explanation = status.memory.blocked ?? status.memory.reason
+                ?? status.recovery.reason ?? status.readiness.gaps.first
+            return explanation.map { "Blocked · \($0)" } ?? "Blocked · Open chat to inspect"
         case .active: return "Active"
         case .ready: return "Ready"
         case .unavailable: return status.reason ?? "Home is unavailable"
@@ -45,10 +50,16 @@ struct HomePinnedRow: View {
     }
 
     private var trailing: String {
-        if isDesignating { return "Setting up" }
+        if isDesignating { return hasUnresolvedCommand ? "Checking" : "Setting up" }
+        if hasUnresolvedCommand { return "Check status" }
         switch action {
         case .designate: return "Set up"
-        case .open: return status?.phase == .active ? "Active" : "Ready"
+        case .open:
+            switch status?.phase {
+            case .active: return "Active"
+            case .blocked: return "Blocked"
+            default: return "Ready"
+            }
         case .unavailable: return status == nil ? "Loading" : "Unavailable"
         }
     }

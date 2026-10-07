@@ -429,15 +429,22 @@ struct SessionShellView: View {
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .navigationDestination(item: $presentedSession) { route in
-            ChatView(
-                sessionID: route.sessionID,
-                initialEditorText: route.editorText,
-                initialModel: route.initialModel,
-                initialHistoryEntryID: route.initialHistoryEntryID,
-                initialSearchResult: route.initialSearchResult,
-                onForkCreated: present,
-                performanceSignposts: model.performanceSignposts
-            )
+            TronPresentationActivityReader { activity in
+                ChatView(
+                    sessionID: route.sessionID,
+                    initialEditorText: route.editorText,
+                    initialModel: route.initialModel,
+                    initialHistoryEntryID: route.initialHistoryEntryID,
+                    initialSearchResult: route.initialSearchResult,
+                    onForkCreated: present,
+                    performanceSignposts: model.performanceSignposts
+                )
+                .onChange(of: activity.allowsPresentationPublication) { _, _ in
+                    guard mountedHomeChatRouteID == route.id,
+                          let token = mountedSessionRouteToken else { return }
+                    model.homeStatus.presentationActivityChanged(for: token)
+                }
+            }
             .toolbar(.visible, for: .navigationBar)
             .id(route.id)
             .tronPresentationSurface(
@@ -1064,6 +1071,7 @@ struct SessionShellView: View {
                   let profileID = model.profiles.selected?.id else { return }
             openingSessionID = "home:\(profileID)"
             let navigationIntent = navigationOwner.begin()
+            let presentationToken = homeStatusSurfaceToken
             let action = HomePinnedRowPolicy.action(for: model.homeStatus.status)
             Task {
                 defer { openingSessionID = nil }
@@ -1086,11 +1094,19 @@ struct SessionShellView: View {
                 } catch is CancellationError {
                     return
                 } catch {
+                    guard navigationOwner.admit(navigationIntent),
+                          model.profiles.selected?.id == profileID,
+                          presentationToken != nil,
+                          homeStatusSurfaceToken == presentationToken else { return }
                     model.presentError(error)
                 }
             }
         } label: {
-            HomePinnedRow(status: model.homeStatus.status, isDesignating: model.homeDesignation.isDesignating)
+            HomePinnedRow(
+                status: model.homeStatus.status,
+                isDesignating: model.homeDesignation.isDesignating,
+                hasUnresolvedCommand: model.homeDesignation.hasUnresolvedCommand
+            )
         }
         .buttonStyle(.plain)
         .disabled(HomePinnedRowPolicy.action(for: model.homeStatus.status) == .unavailable || model.homeDesignation.isDesignating)

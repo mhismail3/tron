@@ -90,6 +90,73 @@ struct HostedChatDisplayFixture: View {
 
 @MainActor
 struct HostedHomeDashboardFixture: View {
+    @State private var model: AppModel
+    @State private var ready = false
+    @State private var error: String?
+    @State private var homeStatusCount = 0
+    private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
+    private let gateway: HostedHomeShellGateway
+    private let homeActivity = PresentationActivityCoordinator()
+
+    init() {
+        let arguments = ProcessInfo.processInfo.arguments
+        let capabilityEnabled = !arguments.contains("-home-capability-absent")
+        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled)
+        self.gateway = gateway
+        let store = AutomationFixtureProfileStore()
+        let profiles = GatewayProfileStore(metadata: store, tokens: store)
+        try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
+        try! profiles.save(GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: "other-machine"), token: "other-fixture-token", selecting: false)
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedHomeShellSocket(gateway: gateway) })
+        _model = State(initialValue: AppModel(client: client, profiles: profiles,
+            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture"))))
+    }
+
+    var body: some View {
+        Group {
+            if ready {
+                SessionShellView()
+                    .environment(model)
+                    .environment(\.tronPresentationActivityCoordinator, homeActivity)
+                    .tronPresentation()
+                    .tronSettingsLayout()
+                    .overlay(alignment: .top) {
+                        VStack {
+                            Text("home-status-count:\(homeStatusCount)")
+                                .accessibilityIdentifier("fixture.home-status-count")
+                            Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.isCapabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
+                                .accessibilityIdentifier("fixture.home-diagnostics")
+                        }
+                        .font(.system(size: 1)).opacity(0.01)
+                    }
+            } else if let error {
+                Text(error)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            do {
+                try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                model.sessions = [SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace",
+                    parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+                    messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1,
+                    gatewayProfileID: profile.id, gatewayProfileLabel: profile.label)]
+                ready = true
+            } catch { self.error = error.localizedDescription }
+        }
+        .task(id: ready) {
+            guard ready else { return }
+            while !Task.isCancelled {
+                homeStatusCount = await gateway.statusCount()
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
+        }
+    }
+}
+
+@MainActor
+struct HostedHomeRowAppearanceFixture: View {
     @State private var status: HomeStatusDTO?
     @State private var isDesignating = false
     @State private var route: String?
@@ -104,7 +171,8 @@ struct HostedHomeDashboardFixture: View {
         accessibilityType = arguments.contains("-home-accessibility-type")
         let phase: HomeStatusDTO.Phase = arguments.contains("-home-disabled") ? .disabled
             : arguments.contains("-home-missing-session") ? .missingSession
-            : arguments.contains("-home-undesignated") ? .undesignated : .ready
+            : arguments.contains("-home-undesignated") ? .undesignated
+            : arguments.contains("-home-blocked") ? .blocked : .ready
         _status = State(initialValue: Self.status(phase: phase))
     }
 
@@ -180,6 +248,101 @@ struct HostedHomeDashboardFixture: View {
         value["generation"] = .number(1)
         return try? HomeStatusDTO.decode(.object(value))
     }
+}
+
+private actor HostedHomeShellGateway {
+    private let capabilityEnabled: Bool
+    private var designated = false
+    private var homeStatusCount = 0
+    init(capabilityEnabled: Bool) { self.capabilityEnabled = capabilityEnabled }
+    func statusCount() -> Int { homeStatusCount }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] : ["sessions.v1"] }
+
+    func handle(_ method: String, _ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
+        switch method {
+        case "session.list":
+            let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
+                createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
+                firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
+            return (.object(["sessions": .array([try! JSONValue.encode(row)]), "nextCursor": .null,
+                "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
+        case "home.status":
+            homeStatusCount += 1
+            return (homeStatus(), nil)
+        case "home.designate":
+            designated = true
+            return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
+        case "session.open":
+            let sessionID = params["sessionId"]?.stringValue ?? "home-session"
+            let snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
+                phase: .idle, name: sessionID == "home-session" ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
+                parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
+                stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
+                    tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
+                queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: nil,
+                transcriptTotal: nil, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
+                extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "fixture", revision: 1, capabilities: [], diagnostics: [],
+                    semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
+                    surfaces: [], pendingInteractions: []), diagnostics: [])
+            return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
+                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
+        case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
+        case "session.close": return (.object(["closed": .bool(true)]), nil)
+        case "session.commands": return (.object(["commands": .array([])]), nil)
+        case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
+        default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
+        }
+    }
+
+    private func homeStatus() -> JSONValue {
+        .object(["phase": .string(designated ? "ready" : "undesignated"),
+            "activation": .object(["available": .bool(false)]),
+            "readiness": .object(["ready": .bool(designated), "gaps": .array([])]),
+            "recovery": .object(["action": .string(designated ? "none" : "designate")]),
+            "available": .bool(true), "enabled": .bool(designated),
+            "homeId": designated ? .string("home-fixture") : .null,
+            "sessionId": designated ? .string("home-session") : .null,
+            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(designated),
+            "memory": .object(["configured": .bool(false), "open": .bool(false)])])
+    }
+}
+
+private actor HostedHomeShellSocket: GatewaySocketConnection {
+    private let gateway: HostedHomeShellGateway
+    private var inbound: [Data]
+    private var receivers: [CheckedContinuation<Data, Error>] = []
+    private var closed = false
+    init(gateway: HostedHomeShellGateway) {
+        self.gateway = gateway
+        inbound = []
+        Task {
+            let caps = await gateway.capabilities()
+            let data = try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("hello"), "gatewayVersion": .string("fixture"),
+                "piVersion": .string("fixture"), "protocolVersion": .number(7), "minProtocolVersion": .number(7),
+                "machineId": .string("home-shell-fixture"), "machineName": .string("Home fixture"),
+                "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
+            await deliver(data)
+        }
+    }
+    func send(_ data: Data) async throws {
+        guard !closed else { throw CancellationError() }
+        let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
+        guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
+              let method = frame["method"]?.stringValue else { return }
+        let result = await gateway.handle(method, frame["params"]?.objectValue ?? [:])
+        var response: [String: JSONValue] = ["type": .string("response"), "id": .string(id), "ok": .bool(result.1 == nil)]
+        if let body = result.0 { response["result"] = body }
+        if let failure = result.1 { response["error"] = failure }
+        await deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
+    }
+    func ping() async throws { if closed { throw CancellationError() } }
+    func receive() async throws -> Data {
+        guard !closed else { throw CancellationError() }
+        if !inbound.isEmpty { return inbound.removeFirst() }
+        return try await withCheckedThrowingContinuation { receivers.append($0) }
+    }
+    func close() async { closed = true; let pending = receivers; receivers.removeAll(); pending.forEach { $0.resume(throwing: CancellationError()) } }
+    private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
 }
 
 private actor HostedChatDisplaySocket: GatewaySocketConnection {

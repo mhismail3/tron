@@ -1798,55 +1798,80 @@ struct AppModelReconnectTests {
         }
     }
 
-    @Test("background interruption never replays an accepted Home designation")
-    func homeDesignationInterruptionDoesNotReplay() async throws {
-        let first = ScriptedGatewaySocket()
-        let replacement = ScriptedGatewaySocket()
-        try await withFixture(sockets: [first, replacement], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+    @Test("Home designation missing and pending receipts retain one command until completion")
+    func homeDesignationReceiptOwnership() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
             let profile = try #require(fixture.model.profiles.selected)
             let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
-            try await first.waitUntilSent(count: 1)
-            await first.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
             try await connecting.value
             let presentation = PresentationActivityCoordinator()
             let token = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
             presentation.register(token, parent: nil)
             fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
-            let initialStatus = try await waitForMethod("home.status", on: first)
-            await first.enqueue(successResponse(id: initialStatus.id, result: homeUndesignatedResult()))
+            let initialStatus = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: initialStatus.id, result: homeUndesignatedResult()))
             for _ in 0..<100 where fixture.model.homeStatus.status == nil { await Task.yield() }
 
             let designation = Task { try await fixture.model.designateHomeAndRefreshStatus() }
-            let mutation = try await waitForMethod("home.designate", on: first, afterIndex: initialStatus.index + 1)
-            await first.enqueue(successResponse(id: mutation.id, result: .object([
-                "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
+            let mutation = try await waitForMethod("home.designate", on: socket, afterIndex: initialStatus.index + 1)
+            let mutationFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[mutation.index])
+            let commandID = try #require(mutationFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(mutation.id), "ok": .bool(false),
+                "error": .object(["code": .string("timeout"), "message": .string("reply interrupted"), "retryable": .bool(true)]),
             ])))
-            _ = try await waitForMethod("home.status", on: first, afterIndex: mutation.index + 1)
-            await fixture.model.enteredBackground().value
+
             do {
                 _ = try await designation.value
-                Issue.record("background interruption unexpectedly produced a session route")
-            } catch is CancellationError {
-                // Retirement may cancel the disposable status refresh.
+                Issue.record("uncertain response unexpectedly returned a route")
             } catch let failure as GatewayFailure {
-                #expect(failure.code == "disconnected")
+                #expect(failure.code == "outcome_unknown")
             }
+            #expect(fixture.model.homeDesignation.hasUnresolvedCommand)
 
-            let foreground = fixture.model.becameActive()
-            try await replacement.waitUntilSent(count: 1)
-            await replacement.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
-            for _ in 0..<300 where fixture.model.connectionState != .connected { await Task.yield() }
-            let reread = try await waitForMethod("home.status", on: replacement)
-            await replacement.enqueue(successResponse(id: reread.id, result: homeStatusResult()))
-            for _ in 0..<100 where fixture.model.homeStatus.status?.phase != .ready { await Task.yield() }
-            let oldFrames = await first.sentFrames()
-            let newFrames = await replacement.sentFrames()
-            let allMethods = try (oldFrames + newFrames).compactMap { frame in
-                try JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue
+            let missingResolution = Task { try await fixture.model.designateHomeAndRefreshStatus() }
+            let missing = try await waitForMethod("command.status", on: socket, afterIndex: mutation.index + 1)
+            let missingFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[missing.index])
+            #expect(missingFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            await socket.enqueue(successResponse(id: missing.id, result: .object(["status": .string("missing")])))
+            do {
+                _ = try await missingResolution.value
+                Issue.record("missing receipt unexpectedly returned a route")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
             }
-            #expect(allMethods.filter { $0 == "home.designate" }.count == 1)
-            #expect(fixture.model.homeStatus.status?.sessionId == "home-session")
-            foreground?.cancel()
+            #expect(fixture.model.homeDesignation.hasUnresolvedCommand)
+
+            let pendingResolution = Task { try await fixture.model.designateHomeAndRefreshStatus() }
+            let pending = try await waitForMethod("command.status", on: socket, afterIndex: missing.index + 1)
+            let pendingFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[pending.index])
+            #expect(pendingFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            await socket.enqueue(successResponse(id: pending.id, result: .object(["status": .string("pending")])))
+            do {
+                _ = try await pendingResolution.value
+                Issue.record("pending receipt unexpectedly returned a route")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+            }
+            #expect(fixture.model.homeDesignation.hasUnresolvedCommand)
+
+            let completedResolution = Task { try await fixture.model.designateHomeAndRefreshStatus() }
+            let completed = try await waitForMethod("command.status", on: socket, afterIndex: pending.index + 1)
+            let completedFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[completed.index])
+            #expect(completedFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            let receipt: JSONValue = .object(["homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1)])
+            await socket.enqueue(successResponse(id: completed.id, result: .object(["status": .string("completed"), "result": receipt])))
+            let refreshed = try await waitForMethod("home.status", on: socket, afterIndex: completed.index + 1)
+            await socket.enqueue(successResponse(id: refreshed.id, result: homeStatusResult()))
+            #expect(try await completedResolution.value.sessionId == "home-session")
+            #expect(!fixture.model.homeDesignation.hasUnresolvedCommand)
+
+            let frames = try await socket.sentFrames().map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+            #expect(frames.filter { $0.objectValue?["method"]?.stringValue == "home.designate" }.count == 1)
+            #expect(frames.filter { $0.objectValue?["method"]?.stringValue == "command.status" }.count == 3)
             fixture.model.unmountHomeStatus(surfaceToken: token)
         }
     }

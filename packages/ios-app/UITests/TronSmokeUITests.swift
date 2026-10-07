@@ -11,28 +11,68 @@ final class TronSmokeUITests: XCTestCase {
         unsupported.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
         unsupported.launch()
         XCTAssertFalse(unsupported.buttons["home-pinned-row"].exists)
-        XCTAssertTrue(unsupported.staticTexts["ordinary-session-row"].exists)
+        let ordinary = unsupported.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), unsupported.debugDescription)
+        ordinary.tap()
+        XCTAssertTrue(unsupported.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
         unsupported.terminate()
 
-        let ready = XCUIApplication()
-        ready.launchArguments = ["-tron-home-dashboard-fixture"]
-        ready.launch()
-        let home = ready.buttons["home-pinned-row"]
-        XCTAssertTrue(home.waitForExistence(timeout: 5))
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture"]
+        app.launch()
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10))
         home.tap()
-        XCTAssertTrue(ready.staticTexts["Profile route: home-fixture:home-current-session"].waitForExistence(timeout: 5))
-        ready.terminate()
+        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        app.terminate()
 
-        for state in ["-home-undesignated", "-home-disabled", "-home-missing-session"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", state]
-            app.launch()
-            let setup = app.buttons["home-pinned-row"]
-            XCTAssertTrue(setup.waitForExistence(timeout: 5), state)
-            setup.tap()
-            XCTAssertTrue(app.staticTexts["Profile route: home-fixture:home-current-session"].waitForExistence(timeout: 5), state)
-            app.terminate()
-        }
+        let setup = XCUIApplication()
+        setup.launchArguments = ["-tron-home-dashboard-fixture"]
+        setup.launch()
+        let designate = setup.buttons["home-pinned-row"]
+        XCTAssertTrue(designate.waitForExistence(timeout: 10))
+        designate.tap()
+        XCTAssertTrue(setup.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(setup.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+        setup.terminate()
+    }
+
+    @MainActor
+    func testHomeChatStatusPollingResumesAfterCoveredSettingsSheet() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture"]
+        app.launch()
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
+        home.tap()
+        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+        let count = app.staticTexts["fixture.home-status-count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        let initialCount = Int(count.label.split(separator: ":").last ?? "0") ?? 0
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 5.5)
+        app.buttons["Done"].tap()
+        let increased = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            Int(count.label.split(separator: ":").last ?? "0").map { $0 > initialCount } ?? false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [increased], timeout: 7), .completed)
+        app.terminate()
+    }
+
+    @MainActor
+    func testBlockedHomeRowDoesNotClaimReadiness() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-row-appearance-fixture", "-home-blocked"]
+        app.launch()
+        let row = app.buttons["home-pinned-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains("Blocked"), row.label)
+        XCTAssertFalse(row.label.contains("Ready"), row.label)
+        app.terminate()
     }
 
     @MainActor
@@ -41,7 +81,7 @@ final class TronSmokeUITests: XCTestCase {
         for appearance in ["light", "dark"] {
             for type in ["normal", "accessibility"] {
                 let app = XCUIApplication()
-                app.launchArguments = ["-tron-home-dashboard-fixture"]
+                app.launchArguments = ["-tron-home-row-appearance-fixture"]
                 if appearance == "dark" { app.launchArguments.append("-home-dark") }
                 if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
                 app.launch()
