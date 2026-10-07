@@ -377,6 +377,14 @@ and everything merged above them. Measured at the moment of the edit:
 | 201 messages (view budget 4 KB, e2e) | index 6 | 585 | 129 |
 | 1,000 messages (view budget 8 KB, scale) | index 1 | 1,994 | 1,993 |
 
+`episodic-memory-reclamation.scale.test.ts` also checks that source edits do
+not leave their unique 64 KiB text payloads reachable as history grows. The
+scale test measures only the K=1 and K=30 endpoints: it streams V8 heap snapshots,
+records string-node name indexes and self sizes, then resolves just edit-prefixed
+strings from the later string table. It checks the reachable payload count and
+bytes, independent of unrelated process-wide allocations. Peak allocation and
+legacy catalog replay remain separate heap measurements.
+
 The second row is the honest worst case: an edit at the start of a long history
 invalidates essentially the whole tree. The e2e test also proves the invalidated
 set is *exactly* the predicted one (computed from the durable records, chunks

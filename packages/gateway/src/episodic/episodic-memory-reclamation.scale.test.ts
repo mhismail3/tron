@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { setFlagsFromString } from "node:v8";
+import { getHeapSnapshot, setFlagsFromString } from "node:v8";
 import { afterEach, describe, expect, it } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -34,6 +34,136 @@ async function namespaceBytes(path: string): Promise<number> {
   };
   await visit(path);
   return total;
+}
+
+async function retainedEditPayloads(): Promise<{ count: number; bytes: number }> {
+  const stream = getHeapSnapshot();
+  const decoder = new TextDecoder();
+  const stringNodeBytes = new Map<number, number>();
+  const candidateIndexes = new Set<number>();
+  const retainedEditIds = new Set<string>();
+  let typeField = -1;
+  let nameField = -1;
+  let selfSizeField = -1;
+  let nodeFieldCount = 0;
+  let stringType = -1;
+  let nodeOffset = 0;
+  let currentType = -1;
+  let currentName = -1;
+  let totalBytes = 0;
+  const stack: Array<{ kind: "object" | "array"; context: string; key?: string; index: number; expectingKey: boolean }> = [];
+  let inString = false;
+  let escaped = false;
+  let keepString = false;
+  let token = "";
+  const complete = (frame: (typeof stack)[number]): void => {
+    if (frame.kind === "array") frame.index += 1;
+    else { frame.key = undefined; frame.expectingKey = true; }
+  };
+  const consumeScalar = (kind: "string" | "number", raw: string): void => {
+    const frame = stack.at(-1);
+    if (!frame) return;
+    if (kind === "string" && frame.kind === "object" && frame.expectingKey) {
+      if (frame.context !== "skip") frame.key = JSON.parse(raw) as string;
+      frame.expectingKey = false;
+      return;
+    }
+    if (frame.context === "node_fields" && kind === "string") {
+      const field = JSON.parse(raw) as string;
+      if (field === "type") typeField = frame.index;
+      if (field === "name") nameField = frame.index;
+      if (field === "self_size") selfSizeField = frame.index;
+      nodeFieldCount = frame.index + 1;
+    } else if (frame.context === "node_types_inner" && kind === "string" && JSON.parse(raw) === "string") {
+      stringType = frame.index;
+    } else if (frame.context === "nodes" && kind === "number") {
+      const field = nodeOffset % nodeFieldCount;
+      if (field === typeField) currentType = Number(raw);
+      else if (field === nameField) currentName = Number(raw);
+      else if (field === selfSizeField && currentType === stringType) {
+        candidateIndexes.add(currentName);
+        stringNodeBytes.set(currentName, (stringNodeBytes.get(currentName) ?? 0) + Number(raw));
+      }
+      nodeOffset += 1;
+    } else if (frame.context === "strings" && kind === "string" && candidateIndexes.has(frame.index)) {
+      const value = JSON.parse(raw) as string;
+      if (/^edit-\d{2} /u.test(value)) {
+        const id = value.slice(0, 7);
+        retainedEditIds.add(id);
+        totalBytes += stringNodeBytes.get(frame.index) ?? 0;
+      }
+    }
+    complete(frame);
+  };
+  const childContext = (parent: (typeof stack)[number] | undefined): string => {
+    if (!parent) return "root";
+    if (parent.kind === "array") {
+      if (parent.context === "node_types_outer") return parent.index === 0 ? "node_types_inner" : "skip";
+      return "skip";
+    }
+    if (parent.context === "root") return parent.key === "snapshot" ? "snapshot" : parent.key === "nodes" ? "nodes" : parent.key === "strings" ? "strings" : "skip";
+    if (parent.context === "snapshot" && parent.key === "meta") return "meta";
+    if (parent.context === "meta" && parent.key === "node_fields") return "node_fields";
+    if (parent.context === "meta" && parent.key === "node_types") return "node_types_outer";
+    return "skip";
+  };
+  const punctuation = new Set(["{", "}", "[", "]", ":", ","]);
+  const emitString = (): void => {
+    if (keepString) consumeScalar("string", token);
+    else {
+      const frame = stack.at(-1);
+      if (frame && frame.kind === "object" && frame.expectingKey) consumeScalar("string", '""');
+      else if (frame) complete(frame);
+    }
+    token = "";
+    inString = false;
+  };
+  try {
+    for await (const chunk of stream) {
+      const text = decoder.decode(chunk, { stream: true });
+      for (let index = 0; index < text.length; index += 1) {
+        const char = text[index]!;
+        if (inString) {
+          if (keepString) token += char;
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === '"') emitString();
+          continue;
+        }
+        if (char === '"') {
+          inString = true;
+          const frame = stack.at(-1);
+          keepString = Boolean(frame && ((frame.kind === "object" && frame.expectingKey && frame.context !== "skip")
+            || (frame.kind === "array" && (frame.context === "node_fields" || frame.context === "node_types_inner"
+              || (frame.context === "strings" && candidateIndexes.has(frame.index))))));
+          token = keepString ? '"' : "";
+          continue;
+        }
+        if (punctuation.has(char!)) {
+          if (char === "{" || char === "[") {
+            const parent = stack.at(-1);
+            stack.push({ kind: char === "{" ? "object" : "array", context: childContext(parent), index: 0, expectingKey: char === "{" });
+          } else if (char === "}" || char === "]") {
+            stack.pop();
+            const parent = stack.at(-1);
+            if (parent) complete(parent);
+          }
+          continue;
+        }
+        if (/\s/u.test(char!)) continue;
+        const frame = stack.at(-1);
+        const relevantNumber = frame?.kind === "array" && frame.context === "nodes";
+        if (relevantNumber) token += char;
+        if (index + 1 < text.length && /[\s,\]}]/u.test(text[index + 1]!)) {
+          if (relevantNumber) consumeScalar("number", token);
+          token = "";
+        }
+      }
+    }
+  } finally {
+    stream.destroy();
+  }
+  return { count: retainedEditIds.size, bytes: totalBytes };
 }
 
 describe("episodic memory reclamation scale", () => {
@@ -140,7 +270,7 @@ describe("episodic memory reclamation scale", () => {
     console.log(`episodic open heap N=100 K=1,10,50: ${JSON.stringify(measurements)}`);
   }, 180_000);
 
-  it("bounds legacy replay peak and retained source heap as history grows", async () => {
+  it("bounds legacy replay peak and retained source payloads as history grows", async () => {
     setFlagsFromString("--expose_gc");
     const collect = runInNewContext("gc") as () => void;
     const replayMeasurements: Array<{ revisions: number; logBytes: number; peakDelta: number; retainedDelta: number }> = [];
@@ -198,7 +328,7 @@ describe("episodic memory reclamation scale", () => {
     expect(Math.max(...replayMeasurements.map(item => item.retainedDelta)) - Math.min(...replayMeasurements.map(item => item.retainedDelta))).toBeLessThan(8 * 1024 * 1024);
     console.log(`episodic legacy replay heap N=1 K=100,5000,75000: ${JSON.stringify(replayMeasurements)}`);
 
-    const sourceMeasurements: Array<{ edits: number; peakDelta: number; retainedDelta: number }> = [];
+    const sourceMeasurements: Array<{ edits: number; baseline: number; peakDelta: number; retainedPayloads: number; retainedPayloadBytes: number }> = [];
     const liveNodeCounts: number[] = [];
     for (const edits of [1, 10, 30]) {
       const root = await mkdtemp(join(tmpdir(), "tron-episodic-source-heap-"));
@@ -256,12 +386,20 @@ describe("episodic memory reclamation scale", () => {
       expect(consumed).toBe(edits);
       liveNodeCounts.push(memory.status().nodes.total);
       peak = Math.max(peak, process.memoryUsage().heapUsed);
-      for (let pass = 0; pass < 3; pass += 1) { collect(); await new Promise<void>(resolve => setImmediate(resolve)); }
-      sourceMeasurements.push({ edits, peakDelta: peak - baseline, retainedDelta: process.memoryUsage().heapUsed - baseline });
+      if (edits === 1 || edits === 30) {
+        const retained = await retainedEditPayloads();
+        sourceMeasurements.push({ edits, baseline, peakDelta: peak - baseline, retainedPayloads: retained.count, retainedPayloadBytes: retained.bytes });
+      }
       await memory.dispose();
     }
     expect(new Set(liveNodeCounts).size).toBe(1);
-    expect(Math.max(...sourceMeasurements.map(item => item.retainedDelta)) - Math.min(...sourceMeasurements.map(item => item.retainedDelta))).toBeLessThan(1_500_000);
-    console.log(`episodic owner source heap N=20 K=1,10,30: ${JSON.stringify(sourceMeasurements)}`);
+    console.log(`episodic owner source payloads N=20 K=1,30: ${JSON.stringify(sourceMeasurements)}`);
+    const baseline = sourceMeasurements[0]!;
+    // K=1 establishes one live payload; V8 stores this 64 KiB UTF-16 text in about 128 KiB of self size.
+    expect(baseline.retainedPayloads).toBeGreaterThan(0);
+    expect(baseline.retainedPayloadBytes).toBeGreaterThan(0);
+    const payloadAllowance = Math.ceil(baseline.retainedPayloadBytes / (64 * 1024));
+    expect(sourceMeasurements.at(-1)!.retainedPayloads).toBeLessThanOrEqual(baseline.retainedPayloads);
+    expect(sourceMeasurements.at(-1)!.retainedPayloadBytes).toBeLessThanOrEqual(payloadAllowance * 64 * 1024);
   }, 300_000);
 });
