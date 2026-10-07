@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { COMPACTOR_MAX_TOKENS, compactorRequest, createModelRuntimeSummarizer, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
@@ -43,10 +43,17 @@ async function endpoint(reply: () => Reply) {
 
 const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-reasoning-model/report.json");
-const report = { generatedAt: new Date().toISOString(), cases: [
-  "reasoning effort is minimized for supported and unsupported models",
-  "reasoning-only output blocks with an explicit reason",
+type CaseReport = { name: string; status: "not-run" | "passed" | "failed"; observations?: Record<string, string | number | null> };
+const report: { generatedAt: string; cases: CaseReport[] } = { generatedAt: new Date().toISOString(), cases: [
+  { name: "reasoning effort is minimized for supported and unsupported models", status: "not-run" },
+  { name: "reasoning-only output blocks with an explicit reason", status: "not-run" },
 ] };
+function trackCase(index: number): void {
+  onTestFinished(({ task }) => {
+    const state = task.result?.state;
+    report.cases[index]!.status = state === "pass" ? "passed" : state === "fail" ? "failed" : "not-run";
+  });
+}
 afterAll(async () => {
   await mkdir(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model"), { recursive: true });
   await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
@@ -85,6 +92,7 @@ describe("the episodic summarizer on a reasoning model", () => {
   // least; no reasoning parameter for a plain model; a ceiling with room for any
   // reasoning plus the line.
   it("asks each model for the least reasoning it supports, and a plain model for none", async () => {
+    trackCase(0);
     const f = await fixture(() => "line");
     const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "<chat>\nuser: earlier\n</chat>", "Compress this message.",
       new AbortController().signal, "tron-episodic:test");
@@ -97,14 +105,20 @@ describe("the episodic summarizer on a reasoning model", () => {
     expect(reasonerBody!.reasoning_effort).toBe("none");
     expect(alwaysBody!.reasoning_effort).toBe("low");
     expect(plainBody!.reasoning_effort).toBeUndefined();
-    for (const body of [reasonerBody!, alwaysBody!, plainBody!]) {
-      expect(body.max_completion_tokens ?? body.max_tokens).toBe(COMPACTOR_MAX_TOKENS);
-    }
+    const tokenLimits = [reasonerBody!, alwaysBody!, plainBody!].map(body => Number(body.max_completion_tokens ?? body.max_tokens));
+    report.cases[0]!.observations = {
+      reasoningEffort: String(reasonerBody!.reasoning_effort),
+      alwaysReasoningEffort: String(alwaysBody!.reasoning_effort),
+      plainReasoningEffort: plainBody!.reasoning_effort == null ? null : String(plainBody!.reasoning_effort),
+      tokenLimit: tokenLimits[0]!,
+    };
+    for (const tokenLimit of tokenLimits) expect(tokenLimit).toBe(COMPACTOR_MAX_TOKENS);
     expect(COMPACTOR_MAX_TOKENS).toBeGreaterThanOrEqual(8_192);
   });
 
   // B3: a reply that spent its whole ceiling on reasoning blocks with a reason that says so.
   it("blocks with an explicit reason when the whole output went to reasoning", async () => {
+    trackCase(1);
     const f = await fixture(() => "reasoning-only");
     const cwd = join(f.root, "project");
     const sessionDir = join(f.root, "sessions");
@@ -122,6 +136,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     cleanups.push(async () => { await memory.dispose(); });
     await memory.entriesCommitted(manager.getSessionId());
     await waitFor(() => memory.status().blocked !== null, "the memory to block");
+    report.cases[1]!.observations = { blockedReason: memory.status().blocked?.reason ?? null };
     expect(memory.status().blocked).toMatchObject({ reason: "permanent-failure" });
     expect(memory.status().blocked!.detail).toMatch(/reasoning/u);
     expect(f.bodies[0]!.reasoning_effort).toBe("low");

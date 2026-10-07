@@ -76,8 +76,10 @@ describe("episodic memory scale", () => {
       setImmediate(countTurn);
       const folding = foldViewSliced(messages, 128_000, bytesOf, key => built.has(key)).finally(() => { done = true; });
       const parts = await folding;
+      const refoldMs = performance.now() - started;
+      const refoldWorstSliceMs = worstSlice;
       const reference = foldView(messages, 128_000, bytesOf, key => built.has(key));
-      report.refold.push({ messages, ms: performance.now() - started, parts: parts.length, worstSliceMs: worstSlice, sliceMessages: 2_000 });
+      report.refold.push({ messages, ms: refoldMs, parts: parts.length, worstSliceMs: refoldWorstSliceMs, sliceMessages: 2_000 });
       expect(parts).toEqual(reference);
       expect(eventLoopTurns).toBeGreaterThan(1);
     }
