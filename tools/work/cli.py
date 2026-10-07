@@ -15,6 +15,7 @@ import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import cleanup  # noqa: E402
 import comments  # noqa: E402
+import tracking  # noqa: E402
 import dashboard  # noqa: E402
 import issues  # noqa: E402
 import land  # noqa: E402
@@ -53,6 +54,33 @@ def main(argv: list) -> int:
     comment = commands.add_parser("comment", help="post a privacy-checked public issue comment through the audited GitHub boundary")
     comment.add_argument("issue", type=int, help="positive issue number")
     comment.add_argument("--body-file", required=True, type=Path, help="Markdown file to post; payloads are not logged")
+    issue = commands.add_parser("issue", help="typed issue filing, classification and relationship mutations")
+    issue_commands = issue.add_subparsers(dest="issue_command", required=True)
+    create_issue = issue_commands.add_parser("create", help="file a task or epic with declared labels")
+    create_issue.add_argument("--title", required=True)
+    create_issue.add_argument("--body-file", required=True, type=Path)
+    create_issue.add_argument("--type", choices=("task", "epic"), default="task")
+    create_issue.add_argument("--kind")
+    create_issue.add_argument("--visibility")
+    create_issue.add_argument("--area")
+    labels_issue = issue_commands.add_parser("labels", help="add/remove only labels declared by the repository")
+    labels_issue.add_argument("issue", type=int)
+    labels_issue.add_argument("--add", action="append", default=[])
+    labels_issue.add_argument("--remove", action="append", default=[])
+    parent_issue = issue_commands.add_parser("parent", help="link a task under an epic")
+    parent_issue.add_argument("issue", type=int)
+    parent_issue.add_argument("--epic", required=True, type=int)
+    blocker_issue = issue_commands.add_parser("block", help="add a native blocked-by relationship")
+    blocker_issue.add_argument("issue", type=int)
+    blocker_issue.add_argument("--blocked-by", required=True, type=int)
+    project = commands.add_parser("project", help="typed work-Project membership and classification mutations")
+    project_commands = project.add_subparsers(dest="project_command", required=True)
+    project_add = project_commands.add_parser("add", help="add an issue to the configured work Project")
+    project_add.add_argument("issue", type=int)
+    project_set = project_commands.add_parser("set", help="assign an unclaimed work status and/or priority")
+    project_set.add_argument("issue", type=int)
+    project_set.add_argument("--status", choices=("Proposed", "Ready", "Needs you", "Blocked"))
+    project_set.add_argument("--priority", choices=("P0", "P1", "P2", "P3"))
     corpus = commands.add_parser("issues", help="print every open issue as a bounded JSON corpus for related-issue checks")
     corpus.add_argument("--closed", action="store_true", help="also include recently updated closed issues")
     corpus.add_argument("--closed-limit", type=int, default=200, metavar="N",
@@ -98,6 +126,29 @@ def main(argv: list) -> int:
             return issues.run(Gh(root), config, args.closed_limit if args.closed else 0)
         if args.command == "comment":
             return comments.post(Gh(root), root, config, args.issue, args.body_file)
+        if args.command == "issue":
+            gh = Gh(root)
+            if args.issue_command == "create":
+                tracking.create_issue(gh, root, config, args.title, args.body_file,
+                                     args.type, args.kind, args.visibility, args.area)
+                return 0
+            if args.issue_command == "labels":
+                tracking.set_labels(gh, config, args.issue, args.add, args.remove)
+                return 0
+            if args.issue_command == "parent":
+                tracking.add_parent(gh, root, config, args.issue, args.epic)
+                return 0
+            if args.issue_command == "block":
+                tracking.add_blocker(gh, root, config, args.issue, args.blocked_by)
+                return 0
+        if args.command == "project":
+            gh = Gh(root)
+            if args.project_command == "add":
+                tracking.add_project_item(gh, root, config, args.issue)
+                return 0
+            if args.project_command == "set":
+                tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
+                return 0
         if args.command == "land":
             return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
                              args.needs_user_validation, args.irreducible, args.acceptance,
@@ -107,7 +158,8 @@ def main(argv: list) -> int:
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError, issues.IssuesError,
-            land.LandError, acceptance.AcceptanceError, warm.WarmError, cleanup.CleanupError, FileNotFoundError,
+            land.LandError, acceptance.AcceptanceError, warm.WarmError, cleanup.CleanupError,
+            tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1

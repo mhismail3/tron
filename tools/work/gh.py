@@ -50,6 +50,10 @@ def _audit_directory(cwd: Path) -> Path:
 
 
 def _write_kind(args: tuple[str, ...]) -> Optional[str]:
+    if len(args) >= 2 and args[:2] == ("issue", "close") and "--comment" in args:
+        # gh combines comment creation and closure; one sub-write may commit
+        # even when the combined command reports a later failure.
+        return "issue.close.compound"
     if len(args) >= 2 and args[0] in {"issue", "pr", "project", "label", "release", "repo"}:
         verbs = {
             "issue": {"comment", "edit", "close", "reopen", "create", "delete"},
@@ -72,9 +76,13 @@ def _write_kind(args: tuple[str, ...]) -> Optional[str]:
     return None
 
 
-def _failed_status(completed: subprocess.CompletedProcess) -> str:
-    # A CLI response that explicitly rejects a request is a known failure.
-    # Transport errors and otherwise opaque failures may follow a server commit.
+def _failed_status(completed: subprocess.CompletedProcess, operation: str) -> str:
+    # Compound CLI calls (notably issue close --comment) can commit one
+    # mutation before another is rejected, so their failure is never certain.
+    if ".compound" in operation:
+        return "uncertain"
+    # A single request explicitly rejected with HTTP 4xx is a known failure.
+    # Transport and opaque errors may follow a server commit.
     text = (completed.stderr or "") + "\n" + (completed.stdout or "")
     if re.search(r"\bHTTP\s+4\d\d\b|\bGraphQL:.*(?:validation|syntax|not authorized|forbidden)", text, re.I):
         return "failed"
@@ -194,7 +202,7 @@ class Gh:
                 self._finish_write(record_id, "uncertain")
             raise
         if record_id:
-            status = "succeeded" if completed.returncode == 0 else _failed_status(completed)
+            status = "succeeded" if completed.returncode == 0 else _failed_status(completed, operation)
             try:
                 self._finish_write(record_id, status)
             except BaseException as error:

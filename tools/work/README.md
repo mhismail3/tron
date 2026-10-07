@@ -38,15 +38,17 @@ alternate `gh` writer. It is deliberately not a generic `work gh` passthrough.
 The append-only JSONL audit lives in the repository's private Git common
 metadata at `work/github-writes.jsonl`, shared safely by linked worktrees. A
 separate lock file serializes each append across threads and processes. Each
-mutation has a stable random ID, timestamp, operation class and an `attempted`
+mutation has a stable random ID, timestamp, operation class and an `attempt`
 record followed by `succeeded`, `failed` or `uncertain`; an interrupted command
-therefore remains visibly attempted, never silently successful. Explicit HTTP
-4xx rejections are failed; transport/opaque errors are uncertain because the
-server may have committed before the client lost its response. No request body,
-credential, CLI arguments, response body, or issue text enters the audit. Files
-are owner-only, symlinks are refused, and history is capped at 16 MiB. Capacity
-is reserved for terminal outcomes before a mutation starts; a full, malformed,
-or unwritable audit refuses the GitHub mutation instead of dropping history.
+therefore remains visibly attempted, never silently successful. A single
+request rejected with HTTP 4xx is failed. Compound CLI operations that can
+commit a sub-write before a later rejection (including `issue close --comment`)
+are uncertain on any command failure; transport/opaque errors are also
+uncertain. No request body, credential, CLI arguments, response body, or issue
+text enters the audit. Files are owner-only, symlinks are refused, and history
+is capped at 16 MiB. Capacity is reserved for terminal outcomes before a
+mutation starts; a full, malformed, or unwritable audit refuses the GitHub
+mutation instead of dropping history.
 
 `scripts/tron work comment <issue> --body-file <markdown>` is the typed command
 for public progress/evidence comments. It bounds and privacy-checks the body
@@ -60,8 +62,12 @@ such as `work issues` remain reads and do not appear in the audit.
 It checks that reads are not audited, every CLI/REST/GraphQL mutation has
 attempt and outcome records, concurrent writers produce complete records,
 privacy refusal prevents a public write, rejected and ambiguous/partial errors
-remain distinct, payloads are absent, and a full audit fails closed. This
-stand-in does not prove remote GitHub availability or server-side behavior.
+remain distinct, payloads are absent, well-formed full and reservation-bearing
+audits refuse writes, and admitted records stay within the bound. A compound
+fixture commits a comment-like side effect before returning HTTP 422 and proves
+its result is `uncertain`, not `failed`. Malformed audit refusal is a separate
+case. The stand-in does not prove remote GitHub availability or server-side
+behavior.
 
 ## `bootstrap`
 
@@ -730,6 +736,32 @@ lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
     bytes is refused with nothing on stdout, never cut off mid-JSON.
 52. **Success output is not pure JSON.** On success stderr is empty and stdout
     holds only the bounded corpus.
+
+## `issue` and `project` mutations
+
+Use these typed commands instead of direct `gh` writes:
+
+- `issue create --title <title> --body-file <md> --kind kind:* --visibility visibility:* --area area:* [--type task|epic]` files a task with its declared taxonomy labels and `needs-triage`. An epic receives only the `epic` and `needs-triage` labels. Titles and bodies are bounded and scrubbed before creation. A newly filed issue is not implicitly approved or added to the Project.
+- `issue labels <issue> [--add <declared-label>] [--remove <label>]` changes classifications and triage labels. New labels must be declared. Issue-type labels are fixed at creation; non-epics must retain exactly one declared kind, visibility and area label. A stale undeclared label may be removed.
+- `project add <issue>` adds the issue idempotently to the configured repository-linked work Project.
+- `project set <issue> [--status Proposed|Ready|Needs you|Blocked] [--priority P0|P1|P2|P3]` assigns only unclaimed statuses. `start` owns In progress, `land` owns In review and Done. Ready is only for maintainer-approved work inside approved scope after blockers close. Partial two-field updates report exactly which field succeeded; rerunning is safe.
+- `issue parent <task> --epic <epic>` creates the native parent/sub-issue relationship after validating the labels. `issue block <issue> --blocked-by <blocker>` creates GitHub's native blocked-by relation. Both are idempotent.
+
+A new task normally follows this sequence: `issue create`, `project add`,
+`project set --status Proposed --priority P2`, and optional `issue parent` /
+`issue block`. Promotion to Ready is a separate, explicitly approved action.
+Triage changes the complete label classification in one `issue labels` call,
+then assigns Status/Priority with `project set`, and links the issue if needed.
+For a maintainer decision, add `needs-decision`, set Needs you and post the
+scrubbed question with `work comment`. Each GitHub mutation is individually
+audited; multi-request commands explain completed fields on partial failure.
+No generic argument passthrough is provided.
+
+`test_tracking.py` uses the real CLI boundary with an executable GitHub stand-in
+to exercise issue filing, taxonomy authorization, label updates, Project add and
+field selection, parent/blocker links, audit completeness and a partially
+completed Project update. The stand-in does not substitute for live API/schema
+validation.
 
 ## `comment`
 

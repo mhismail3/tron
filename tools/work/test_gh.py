@@ -40,6 +40,9 @@ class AuditBoundaryTests(unittest.TestCase):
             " print('HTTP 422 rejected', file=sys.stderr); sys.exit(1)\n"
             "if os.environ.get('FAKE_MODE') == 'ambiguous':\n"
             " print('connection reset after response', file=sys.stderr); sys.exit(1)\n"
+            "if os.environ.get('FAKE_MODE') == 'compound':\n"
+            " open(os.environ['FAKE_REMOTE_STATE'], 'a').write('comment committed\\n')\n"
+            " print('HTTP 422 rejected issue close', file=sys.stderr); sys.exit(1)\n"
             "if args[:3] == ['api','graphql','--input']:\n"
             " body=json.load(sys.stdin); print(json.dumps({'data': {'ok': True}}))\n"
             "elif args[:2] == ['issue','comment']:\n"
@@ -53,8 +56,12 @@ class AuditBoundaryTests(unittest.TestCase):
         self.fake.chmod(0o755)
         self.bodies = self.root / "bodies.txt"
         self.env = dict(os.environ, WORK_GH=str(self.fake), FAKE_CALLS=str(self.calls),
-                        FAKE_BODIES=str(self.bodies))
-        self.old_env = {key: os.environ.get(key) for key in ('WORK_GH', 'FAKE_CALLS', 'FAKE_MODE')}
+                        FAKE_BODIES=str(self.bodies), PI_SESSION_ID='test-session', WORK_SESSION_ID='')
+        self.old_env = {key: os.environ.get(key) for key in
+                        ('WORK_GH', 'FAKE_CALLS', 'FAKE_MODE', 'FAKE_BODIES', 'FAKE_REMOTE_STATE',
+                         'PI_SESSION_ID', 'WORK_SESSION_ID')}
+        os.environ.pop('WORK_SESSION_ID', None)
+        os.environ['PI_SESSION_ID'] = 'test-session'
         os.environ.update(self.env)
 
     def tearDown(self):
@@ -87,13 +94,20 @@ class AuditBoundaryTests(unittest.TestCase):
         gh = Gh(self.root)
         os.environ['FAKE_MODE'] = 'fail'
         with self.assertRaises(GhError):
-            gh.run('issue', 'close', '8', '--comment', 'secret')
+            gh.run('issue', 'edit', '8', '--title', 'secret')
         os.environ['FAKE_MODE'] = 'ambiguous'
         with self.assertRaises(GhError):
             gh.run('pr', 'merge', '9', '--squash')
+        os.environ['FAKE_MODE'] = 'compound'
+        state = self.root / 'remote-state'
+        os.environ['FAKE_REMOTE_STATE'] = str(state)
+        with self.assertRaises(GhError):
+            gh.run('issue', 'close', '8', '--comment', 'comment may have committed')
         statuses = [r['status'] for r in self.records() if r['event'] == 'result']
-        self.assertEqual(statuses, ['failed', 'uncertain'])
+        self.assertEqual(statuses, ['failed', 'uncertain', 'uncertain'])
+        self.assertEqual(state.read_text(), 'comment committed\n')
         self.assertNotIn('secret', json.dumps(self.records()))
+        self.assertNotIn('comment may have committed', json.dumps(self.records()))
 
     def test_concurrent_mutations_produce_complete_records(self):
         gh = Gh(self.root)
@@ -115,6 +129,7 @@ class AuditBoundaryTests(unittest.TestCase):
         results = {r['id'] for r in rows if r['event'] == 'result'}
         self.assertEqual(attempts, results)
         self.assertEqual(len(self.calls.read_text().splitlines()), 32)
+        self.assertLessEqual(Gh.audit_path(self.root).stat().st_size, 16 * 1024 * 1024)
 
     def test_typed_comment_command_refuses_private_text_before_github_and_audits_public_text(self):
         root = self.root / 'command-root'
@@ -135,6 +150,15 @@ class AuditBoundaryTests(unittest.TestCase):
             cwd=root, env=self.env, capture_output=True, text=True,
         )
         self.assertEqual(good.returncode, 0, good.stderr)
+        no_session_env = dict(self.env)
+        no_session_env.pop('WORK_SESSION_ID', None)
+        no_session_env.pop('PI_SESSION_ID', None)
+        missing_session = subprocess.run(
+            [sys.executable, str(HERE / 'cli.py'), 'comment', '42', '--body-file', str(body_file)],
+            cwd=root, env=no_session_env, capture_output=True, text=True,
+        )
+        self.assertNotEqual(missing_session.returncode, 0)
+        self.assertIn('session ID', missing_session.stderr)
         body_file.write_text('reproduced BLOCKED_TOKEN')
         refused = subprocess.run(
             [sys.executable, str(HERE / 'cli.py'), 'comment', '42', '--body-file', str(body_file)],
@@ -153,12 +177,31 @@ class AuditBoundaryTests(unittest.TestCase):
         from gh import AUDIT_MAX_BYTES
         path = Gh.audit_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b'x' * AUDIT_MAX_BYTES)
+        record = json.dumps({'id': 'done', 'event': 'result', 'status': 'succeeded'}).encode()
+        path.write_bytes(record + b' ' * (AUDIT_MAX_BYTES - len(record) - 1) + b'\n')
         before = self.calls.read_text() if self.calls.exists() else ''
         with self.assertRaises(GhError):
             Gh(self.root).run('issue', 'close', '10')
         self.assertEqual(self.calls.read_text() if self.calls.exists() else '', before)
         self.assertEqual(path.stat().st_size, AUDIT_MAX_BYTES)
+
+    def test_outstanding_attempt_reservation_and_malformed_audit_both_fail_closed(self):
+        from gh import AUDIT_MAX_BYTES
+        path = Gh.audit_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pending = json.dumps({'id': 'unfinished', 'event': 'attempt', 'status': 'attempted'}).encode()
+        candidate = json.dumps({'id': '0' * 32, 'at': 1234567890123456789, 'event': 'attempt',
+                                'operation': 'issue.close', 'status': 'attempted'}, separators=(',', ':')).encode() + b'\n'
+        current_size = AUDIT_MAX_BYTES - len(candidate) - 128 - 32
+        path.write_bytes(pending + b' ' * (current_size - len(pending) - 1) + b'\n')
+        before = self.calls.read_text() if self.calls.exists() else ''
+        with self.assertRaises(GhError):
+            Gh(self.root).run('issue', 'close', '11')
+        self.assertEqual(self.calls.read_text() if self.calls.exists() else '', before)
+        path.write_bytes(b'x' * AUDIT_MAX_BYTES)
+        with self.assertRaises(GhError):
+            Gh(self.root).run('issue', 'close', '12')
+        self.assertEqual(self.calls.read_text() if self.calls.exists() else '', before)
 
 
 if __name__ == '__main__':
