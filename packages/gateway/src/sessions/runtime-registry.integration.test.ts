@@ -7532,9 +7532,9 @@ export default function (pi) {
       await attentionBarrier;
       return originalComplete(...args);
     });
-    // This lifecycle-only map has no public projection. Inspect the existing
-    // private state rather than adding a production accessor for the regression.
-    const slotInternals = slot as unknown as { observedCompletionsByOperation: Map<string, string> };
+    // This lifecycle-only record has no public projection. Inspect private
+    // state rather than adding a production accessor for the regression.
+    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
 
     const initial = slot.prompt("initial");
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");
@@ -7549,9 +7549,9 @@ export default function (pi) {
     releaseAttention();
     await waitFor(() => !slot.isBusy, "both operations to settle");
 
-    expect(slotInternals.observedCompletionsByOperation.has(initialOperationId!)).toBe(false);
-    expect(slotInternals.observedCompletionsByOperation.has(queued.operationId)).toBe(false);
-    expect(slotInternals.observedCompletionsByOperation.size).toBe(0);
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
+    expect(slotInternals.operationObservations.has(queued.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.size).toBe(0);
   });
 
   it("settles a reply before the queued follow-up runs so steering remains admissible", async () => {
