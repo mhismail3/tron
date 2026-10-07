@@ -768,13 +768,27 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       pi.on("context", () => { contextCalls += 1; });
     } });
     const stream = item.session.agent.streamFunction;
+    let releaseProvider: (() => void) | undefined;
+    const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
     let replay: Promise<string> | undefined;
     item.session.agent.streamFunction = (...args) => {
       const result = stream(...args);
-      replay = Promise.resolve(stream(...args)).then((value) => value.result()).then((message) => message.errorMessage ?? "accepted", String);
+      const providerCallsBefore = item.faux.state.callCount;
+      // Let the first lazy stream pass Home's innermost guard and enter the
+      // provider, then replay while its response is parked and this activation
+      // is still live. Otherwise lazy-stream start order or settlement could
+      // make the replay win the race or observe no activation.
+      replay = waitUntil(() => item.faux.state.callCount > providerCallsBefore)
+        .then(() => stream(...args))
+        .then((value) => value.result())
+        .then((message) => message.errorMessage ?? "accepted", String)
+        .finally(() => releaseProvider?.());
       return result;
     };
-    item.faux.setResponses([item.response("real stream response")]);
+    item.faux.setResponses([async (context) => {
+      await providerGate;
+      return item.response("real stream response")(context);
+    }]);
     await item.slot.prompt("C17 input");
     await waitUntil(() => !item.slot.isBusy);
     const row = { contextCalls, replay: await replay, calls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
@@ -786,16 +800,17 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(await item.jsonl()).toContain("real stream response");
   }, 30_000);
 
-  it("MCP is structurally absent: Pi 1.0.4 non-MCP allowlists do not exclude MCP", async () => {
+  it("Home structurally omits MCP because Pi 1.0.4 non-MCP allowlists do not exclude it", async () => {
     const item = await open("mcp", { home: true, memory: true });
     const ordinary = await item.extra("ordinary-mcp");
     const homeExtensions = item.session.resourceLoader.getExtensions().extensions.map((extension) => extension.path);
     const context = await ordinary.slot.context() as unknown as { extensions: Array<{ name: string }> };
     const ordinaryExtensions = context.extensions.map((extension) => extension.name);
+    // Test the runtime registration boundary: an empty mcp__ tool set would be
+    // inconclusive when the ordinary runtime has no configured MCP server.
     item.record("MCP", { homeExtensions, ordinaryExtensions });
     expect(ordinaryExtensions).toContain("builtin:mcp");
     expect(homeExtensions).not.toContain("builtin:mcp");
-    expect(item.session.getAllTools().filter((tool) => tool.name.startsWith("mcp__"))).toEqual([]);
   }, 30_000);
 
   it("D3 assistant tool call is durable before the SDK executes the tool", async () => {
