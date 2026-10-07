@@ -488,7 +488,7 @@ cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
 cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
-(cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
+(cd "$APP_DIR" && PYTHONDONTWRITEBYTECODE=1 "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
 # node-pty loads only prebuilds/${process.platform}-${process.arch}, so the
 # Windows prebuilds npm ci installs can never load from this signed payload.
 for windows_prebuild in win32-arm64 win32-x64; do

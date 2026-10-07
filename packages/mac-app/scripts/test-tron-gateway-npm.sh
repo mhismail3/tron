@@ -6,10 +6,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 NODE_ROOT="${TRON_NODE_ROOT:-}"
 if [[ -z "$NODE_ROOT" ]]; then
-    NODE_EXECUTABLE="$(command -v node 2>/dev/null || true)"
-    [[ -n "$NODE_EXECUTABLE" ]] || { echo "pinned Node is unavailable" >&2; exit 2; }
-    NODE_EXECUTABLE="$(realpath "$NODE_EXECUTABLE")"
-    NODE_ROOT="$(cd "$(dirname "$NODE_EXECUTABLE")/.." && pwd -P)"
+    "$REPO_ROOT/scripts/install-ci-tools.sh" node
+    case "$(uname -m)" in arm64|aarch64) NODE_ARCH=arm64 ;; x86_64) NODE_ARCH=x64 ;; *) echo "unsupported Node architecture: $(uname -m)" >&2; exit 2 ;; esac
+    NODE_ROOT="$REPO_ROOT/.ci-tools/node-v$(<"$REPO_ROOT/.node-version")-$NODE_ARCH"
 fi
 EXPECTED_NODE_VERSION="$(<"$REPO_ROOT/.node-version")"
 [[ -x "$NODE_ROOT/bin/node" \
