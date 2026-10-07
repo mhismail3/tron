@@ -1517,9 +1517,6 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
     runtimeSourceManifest = await validatePayload(runtimeSourceRoot, {}, true);
   }
   const useInstalledRuntime = runtimeSourceManifest?.nodeVersion === sourceManifest.nodeVersion;
-  const runtimeSourceFingerprint = useInstalledRuntime
-    ? await payloadSubtreeFingerprint(runtimeSourceRoot, "runtime")
-    : undefined;
   const targetVersion = version ?? sourceManifest.version;
   if (!validComponent(targetVersion, 128)) throw new Error("invalid payload version");
   const target = join(paths.versionsRoot, targetVersion);
@@ -1551,16 +1548,26 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
         if (error?.code !== "ENOENT") throw error;
       }
     }
+    const runtimeSnapshot = useInstalledRuntime
+      ? join(paths.versionsRoot, `.staging-runtime-${process.pid}-${randomUUID()}`)
+      : undefined;
+    if (runtimeSnapshot) {
+      await copyValidatedPayloadBase({ root: runtimeSourceRoot, manifest: runtimeSourceManifest }, runtimeSnapshot);
+    }
+    const runtimeSnapshotRoot = runtimeSnapshot ?? runtimeSourceRoot;
     const temporary = join(paths.versionsRoot, `.staging-${targetVersion}-${process.pid}-${randomUUID()}`);
-    await rm(temporary, { recursive: true, force: true });
     try {
+      const runtimeSourceFingerprint = useInstalledRuntime
+        ? await payloadSubtreeFingerprint(runtimeSnapshotRoot, "runtime")
+        : undefined;
+      await rm(temporary, { recursive: true, force: true });
       await copyPayloadTree(sourceRoot, temporary);
       await makeMutable(temporary);
       const copiedFingerprint = await payloadFingerprint(temporary);
       if (copiedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload changed during copy");
       if (useInstalledRuntime) {
         await rm(join(temporary, "runtime"), { recursive: true, force: true });
-        await copyPayloadTree(join(runtimeSourceRoot, "runtime"), join(temporary, "runtime"));
+        await copyPayloadTree(join(runtimeSnapshotRoot, "runtime"), join(temporary, "runtime"));
         const copiedRuntimeFingerprint = await payloadSubtreeFingerprint(temporary, "runtime");
         if (copiedRuntimeFingerprint !== runtimeSourceFingerprint) throw new Error("installed runtime changed during dev staging");
       }
@@ -1600,6 +1607,11 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       await makeMutable(temporary).catch(() => {});
       await rm(temporary, { recursive: true, force: true });
       throw error;
+    } finally {
+      if (runtimeSnapshot) {
+        await makeMutable(runtimeSnapshot).catch(() => {});
+        await rm(runtimeSnapshot, { recursive: true, force: true });
+      }
     }
   });
 }
@@ -2344,15 +2356,26 @@ export async function resolveSourcePayloadBase(paths, config, environment = proc
 }
 
 export async function copyValidatedPayloadBase(base, destination, copyPayload = copyPayloadTree) {
-  await copyPayload(base.root, destination);
-  // Fallback roots may be operator-prepared mutable projections. Verify the
-  // copied snapshot against the exact manifest observed during admission before
-  // making or replacing any candidate files.
-  await validatePayload(destination, {
-    channel: base.manifest.channel,
-    version: base.manifest.version,
-    payloadFingerprint: base.manifest.payloadFingerprint,
-  }, true);
+  try {
+    await lstat(destination);
+    throw new Error(`payload copy destination already exists: ${destination}`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  try {
+    await copyPayload(base.root, destination);
+    // Mutable source roots must match the exact manifest observed at admission
+    // before any copied bytes can become a runtime or candidate payload.
+    await validatePayload(destination, {
+      channel: base.manifest.channel,
+      version: base.manifest.version,
+      payloadFingerprint: base.manifest.payloadFingerprint,
+    }, true);
+  } catch (error) {
+    await makeMutable(destination).catch(() => {});
+    await rm(destination, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 async function stageConfiguredArtifact(paths, config, requestedVersion) {

@@ -605,22 +605,27 @@ test("payload clone copy preserves fingerprints and relative symlinks and refuse
     assert.equal(await readlink(join(destination, "app", "node_modules", ".bin", "pi")), await readlink(sourceLink));
     assert.equal(await payloadFingerprint(destination), sourceFingerprint);
     await assert.rejects(copyValidatedPayloadBase({ root: payload, manifest }, destination), /destination already exists/);
+    assert.equal(await payloadFingerprint(destination), sourceFingerprint);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("source runtime base copy rejects a projection changed after admission", async () => {
+test("validated runtime snapshot rejects source mutation after admission and removes its private copy", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-source-runtime-base-race-"));
   try {
     const payload = await makePreflightFixture(join(root, "fixture"));
     const manifest = await validatePayload(payload, {}, true);
-    const destination = join(root, "copied");
+    const destination = join(root, "private-runtime-snapshot");
     await assert.rejects(
       copyValidatedPayloadBase({ root: payload, manifest }, destination, async (source, target) => {
+        const runtimeBinary = join(source, "runtime", "node-arm64");
+        const bytes = await readFile(runtimeBinary);
+        bytes[0] ^= 1;
+        await writeFile(runtimeBinary, bytes);
         await cp(source, target, { recursive: true, verbatimSymlinks: true });
-        await writeFile(join(target, "app", "dist", "index.js"), `${"z".repeat(1_024)}\n`);
       }),
       /fingerprint does not match/,
     );
+    await assert.rejects(lstat(destination), { code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
