@@ -1219,8 +1219,12 @@ directly; it never depends on RPC to the failed Gateway.
 Debug handoff is exposed as Debug
 origin only when its bounded provenance (candidate version/fingerprint, tested Debug fingerprint,
 source revision, tested runtime epoch, and candidate runtime epoch) matches the verified Stable
-candidate manifest. Generic automatic/source updates never infer a Debug-origin candidate from
-state; promotion must pin its exact candidate version and fingerprint.
+candidate manifest. Handoff requires byte-exact equality of the Node version and complete
+`runtime/` subtree with installed Stable. Debug staging therefore uses the installed app's
+validated signed runtime when its Node version matches the candidate; if versions differ, it
+retains the official runtime and handoff refuses with the manual signed-app replacement
+instruction. Generic automatic/source updates never infer a Debug-origin
+candidate from state; promotion must pin its exact candidate version and fingerprint.
 `gateway.update.config.status` and `gateway.update.status` are bounded projections; the latter
 includes build/staging/draining/promotion/rollback/failure progress. Generated update diagnostics
 are normalized to one line and capped at 2 KiB of UTF-8 before persistence; historical diagnostic

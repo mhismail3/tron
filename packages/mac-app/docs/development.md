@@ -679,8 +679,12 @@ that owned orphan through `stopping` → `stopped`; a listener without that exac
 identity remains foreign and is never killed.
 
 The handoff proves the selected Debug fingerprint/revision/epoch before and
-after copying, rejects runtime drift that requires a manual `Tron.app` update,
-and never changes Stable `current.json` or restarts 9847. The confirmed iOS
+after copying, and compares the Node version plus the complete `runtime/` subtree
+byte-for-byte with installed Stable. Debug staging validates the installed app's
+bundled Gateway and uses its signed runtime only when its Node version matches
+the candidate. Otherwise it keeps the official runtime, so changed runtime bytes
+or version refuse handoff and require a manual signed `Tron.app` update. The handoff never changes Stable `current.json`
+or restarts 9847. The confirmed iOS
 **Promote Debug Gateway to Stable** action pins both candidate version and
 fingerprint and invokes the existing asynchronous Stable deployment core.
 

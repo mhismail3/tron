@@ -170,9 +170,13 @@ maintainer may run `scripts/tron dev handoff --tailscale`; it performs authentic
 pre/post identity checks and copies the exact payload into Stable as an inactive
 candidate only after pre/post authenticated identity proof. Stable is always a
 known commit: handoff refuses the selected candidate unless its runtime epoch's
-source record says it was built from a clean tree. A dirty candidate and one
-whose dirtiness is unknown (no record, or a record written before dirtiness was
-recorded) both fail closed; commit any changes, run `scripts/tron dev restart`,
+source record says it was built from a clean tree. It also refuses a changed
+Node version or runtime contents. When the installed app's validated runtime has
+the candidate's Node version, Debug staging uses that exact signed runtime; a
+different Node version keeps the official candidate runtime and handoff refuses
+with the manual signed-app instruction. A dirty candidate and one whose dirtiness is
+unknown (no record, or a record written before dirtiness was recorded) both fail
+closed; commit any changes, run `scripts/tron dev restart`,
 and hand off the resulting clean candidate. The copy pins the admitted version
 and fingerprint under the Debug payload lock, so a Debug apply or rollback that
 changes the selection after admission is refused rather than copied. Promotion still
