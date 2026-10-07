@@ -187,8 +187,12 @@ development toolchain, so that `npm audit` stays clean (#489):
 - `@cloudflare/vitest-pool-workers` 0.22.0 pins its own `wrangler` 4.124.0 and
   `miniflare`, both inside vulnerable ranges. The override makes the pool use
   the top-level `wrangler` (`$wrangler`).
-- Every `miniflare` release, the latest included, pins `sharp` 0.35.4. The
-  overrides raise it to the patched 0.35.5, and raise `undici` to 7.29.1.
+- The `miniflare` override must equal the exact `miniflare` version the
+  top-level `wrangler` pins (5.20261006.0-alpha for wrangler 4.148.0). It moves
+  with every `wrangler` bump; otherwise the new `wrangler` would run on an older
+  `miniflare`/`workerd`.
+- The current `miniflare` (5.20261006.0-alpha) pins `sharp` 0.35.4. The
+  override raises it to the patched 0.35.5.
 
 Remove each entry once an upstream release depends on a fixed version itself.
 Check each change with `npm audit`, `npm test` and both dry-run builds. An
