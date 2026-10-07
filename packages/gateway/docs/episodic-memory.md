@@ -36,13 +36,18 @@ it the commits the runtime reports, and sends each activation the view it render
   When the file only grew, it reads from the offset and extends the branch it
   already knows; it falls back to a whole-file read when the identity changed,
   the file shrank, the line before the offset no longer matches, or the new
-  entries do not chain onto that branch. This is an append-only contract: Pi
-  owns the session file and appends entries; an external same-length in-place
-  rewrite outside the checked 8 KiB prefix window is not detected. We do not
-  hash the retained prefix on each read: that would add O(session size) I/O and
-  hashing to each incremental commit (50 MB per read for a 50 MB session) to
-  defend against an external edit Pi does not perform. A whole-file read is
-  bounded per line and never repairs or migrates the file.
+  entries do not chain onto that branch. An unchanged-source shortcut is allowed
+  only for a proven incremental no-change read; a whole-file rebuild reconciles
+  projected messages before it persists a refreshed cursor and complete-prefix
+  digest. Incremental reads do not hash the retained prefix: they verify the
+  file identity and the last complete line in an 8 KiB window, then hash only new
+  complete lines. Thus a same-length rewrite outside that window can remain
+  undetected on an otherwise-valid incremental read. A full rebuild reconciles
+  the projection and persists a digest of the bytes it read; it does not reject
+  the refresh merely because the old digest differs. A transient cut lookup
+  hashes the complete ingested prefix before and after reconstruction and refuses
+  a mismatch. The session file remains append-only under its owner; the reader
+  neither repairs nor migrates it, and whole-file reads are bounded per line.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
@@ -56,7 +61,9 @@ it the commits the runtime reports, and sends each activation the view it render
 
 The owner never subscribes to a session and never opens it with
 `SessionManager`. It reads the file itself, which is what makes "never repair or
-migrate a canonical file" a property it can hold.
+migrate a canonical file" a property it can hold. A transient cut lookup streams
+and hashes the complete ingested prefix before and after reconstructing the
+branch; if any earlier source byte changed in place, the cut is refused.
 
 ## Storage
 
@@ -67,9 +74,11 @@ lazily on the first write, owner-only files, secure bounded reads):
 ```text
 state/episodic/<sourceSessionId>/
   initialized.json   # namespace-local version marker
-  catalog.jsonl      # append-only projected messages
-  nodes.jsonl        # append-only node records and invalidation chunks
-  state.json         # source cursor, generation, blocked state
+  catalog.jsonl      # bounded post-checkpoint projected-message tail
+  nodes.jsonl        # bounded post-checkpoint node/invalidation tail
+  state.json         # authoritative source cursor, generation, blocked state
+  checkpoint.current.json # committed watermark and immutable checkpoint directory
+  checkpoint-*/      # live catalog/node JSONL plus the captured state
 ```
 
 - Every record is written with one append and fsynced **before** it is used
@@ -78,10 +87,20 @@ state/episodic/<sourceSessionId>/
   cannot be lost with the records already acknowledged inside it.
 - Files are opened `O_NOFOLLOW`, verified to be owner-only regular files, and
   checked against a `lstat` dev/ino so a replaced path cannot be written.
-- The catalog and node log are append-only. The latest record for a message
-  index, and for a node address, wins; `revision` is a store-wide monotonic
-  sequence that orders them. Appends are chained, so the durable order is the
-  order the owner asked for and the in-memory publication order matches it.
+- Catalog and node records are append-only between checkpoints. The latest
+  record for a message index, and for a node address, wins; `revision` orders
+  records. A checkpoint streams the current live projections to bounded-line
+  JSONL in an owner-only staging directory, syncs the files and directory, then
+  renames it to an immutable directory and publishes `checkpoint.current.json`.
+  The pointer watermark identifies records represented by that checkpoint.
+  Reads validate the checkpoint and every log record, then apply only tail
+  records above the watermark. Persisted-state status reads validate only the
+  authoritative state and do not replay or repair logs; neither they nor
+  `read()` reclaim checkpoint artifacts. Abandoned staging/checkpoint cleanup
+  runs only in the single-opener path after it reserves the session. `state.json` remains the sole state authority;
+  the checkpoint copy records the captured cut and is shape-validated, but is
+  not compared with later `state.json` updates. Superseded checkpoint data is
+  reclaimed only after pointer publication.
 - A **torn trailing line** is a write that never became durable. It is
   discarded and the file is truncated to its last complete record, because
   leaving it would let the next append concatenate onto it. The bytes discarded
@@ -103,6 +122,17 @@ state/episodic/<sourceSessionId>/
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
   budget; #420 owns restore).
+- Every open of an existing store folds replayed tails and repairs forward into
+  a checkpoint before returning. While running, the owner maintains a serialized
+  byte estimate as live records are inserted, replaced, or invalidated; it
+  checkpoints when log bytes exceed that estimate by the internal
+  superseded-record margin or cross the internal byte trigger. A small log that
+  cannot meet the superseded-record margin is rejected before visiting live
+  records, so ordinary small appends do not serialize or rewrite the whole store. Large invalidations contribute to the same log threshold. Once the
+  pointer is durable, append logs are replaced by empty owner-only files and
+  superseded checkpoint directories and recognized interrupted temp files are
+  removed. Legacy JSONL logs seed this same checkpoint representation; no schema
+  migration or canonical history mutation is performed.
 - The version is `EPISODIC_STORE_VERSION` (1). There is no migration path: a
   store this owner cannot read is refused rather than guessed at.
 
@@ -261,12 +291,11 @@ projection is never stale.
    revision expands the affected parts and refits the live view instead
    (departure 4). Measured by `episodic-memory.scale.test.ts`: 10,000 messages in
    0.20 s and 100,000 in 2.5 s (every node built; the same shape as a real
-   memory), with the worst synchronous slice 6.3 ms. That is why there is
-   deliberately **no persisted view checkpoint**: a fold that costs seconds must
-   not run per commit, and the live view is maintained incrementally instead. A
-   restart therefore refolds the view and may produce a slightly coarser one than
-   the process was maintaining; the recipe's own load path does the same, and the
-   cost is one cache miss, not correctness.
+   memory), with the worst synchronous slice 6.3 ms. The persisted store
+   checkpoint bounds replay of catalog and node history; it does not persist the
+   derived presentation view. The live view is maintained incrementally, and a
+   restart refolds it from the checkpointed live nodes. The recipe's own load
+   path does the same, and the cost is one cache miss, not correctness.
 4. **A revoked merged part is expanded in the view.** Only level-0 parts may be
    unbuilt (gist §6), so a part whose node was invalidated is replaced by the two
    lines under it, recursively down to the leaves, and `fit` merges them again as
