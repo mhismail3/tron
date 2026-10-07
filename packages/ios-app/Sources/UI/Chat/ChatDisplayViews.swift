@@ -1610,7 +1610,7 @@ struct DisplaySheet: View {
                 let content = DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if isVideo {
-                    content.tronTopBlurSurface()
+                    content
                 } else {
                     content.tronDocumentTopBlurSurface()
                 }

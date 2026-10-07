@@ -182,9 +182,11 @@ private actor ReadonlyAttachmentGateway {
             for row in 0..<64 {
                 for column in 0..<64 {
                     let offset = row * stride + column * 4
-                    base[offset] = 224
-                    base[offset + 1] = 220
-                    base[offset + 2] = 32
+                    // A hard vertical edge makes the hosted screenshot sensitive to blur.
+                    let isLeftBand = column < 32
+                    base[offset] = isLeftBand ? 224 : 32
+                    base[offset + 1] = isLeftBand ? 220 : 48
+                    base[offset + 2] = isLeftBand ? 32 : 224
                     base[offset + 3] = 255
                 }
             }

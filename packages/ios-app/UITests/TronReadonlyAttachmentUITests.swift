@@ -87,7 +87,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.40, "\(scenario): playback leaves the sheet at medium")
             RunLoop.current.run(until: Date().addingTimeInterval(5.5))
             keepScreenshot(app, "520-video-medium-playing-\(scenario)")
-            assertGeneratedVideoFrame(in: app, player: sheetPlayer, scenario: scenario)
+            assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
 
             sheetPlayer.tap()
             let playPause = app.buttons["Play/Pause"]
@@ -113,7 +113,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             if largePlayPause.label == "Play" { largePlayPause.tap() }
             RunLoop.current.run(until: Date().addingTimeInterval(5.5))
             keepScreenshot(app, "520-video-large-\(scenario)")
-            assertGeneratedVideoFrame(in: app, player: sheetPlayer, scenario: scenario)
+            assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
         }
     }
 
@@ -237,7 +237,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let condition = value.map { NSPredicate(format: predicate, $0) } ?? NSPredicate(format: predicate)
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: condition, object: element)], timeout: 10) == .completed
     }
-    @MainActor private func assertGeneratedVideoFrame(
+    @MainActor private func assertGeneratedVideoEdge(
         in app: XCUIApplication,
         player: XCUIElement,
         scenario: String,
@@ -250,38 +250,38 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
         let viewport = player.frame
         let fittedSide = min(viewport.width, viewport.height)
+        let fittedOrigin = CGPoint(
+            x: viewport.minX + (viewport.width - fittedSide) / 2,
+            y: viewport.minY + (viewport.height - fittedSide) / 2
+        )
         let screenFrame = app.frame
-        let point = CGPoint(x: viewport.midX + fittedSide * 0.18, y: viewport.midY + fittedSide * 0.18)
-        let x = Int((point.x - screenFrame.minX) * CGFloat(image.width) / screenFrame.width)
-        let y = Int((point.y - screenFrame.minY) * CGFloat(image.height) / screenFrame.height)
-        guard x >= 0, x < image.width, y >= 0, y < image.height,
-              let pixel = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else {
-            XCTFail("\(scenario): video sample point is outside the captured viewport", file: file, line: line)
+        let yPoint = fittedOrigin.y + fittedSide * 0.05
+        let sample = { (xPoint: CGFloat) -> (Int, Int, Int)? in
+            let x = Int((xPoint - screenFrame.minX) * CGFloat(image.width) / screenFrame.width)
+            let y = Int((yPoint - screenFrame.minY) * CGFloat(image.height) / screenFrame.height)
+            guard x >= 0, x < image.width, y >= 0, y < image.height,
+                  let pixel = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else { return nil }
+            var rgba = [UInt8](repeating: 0, count: 4)
+            let color = rgba.withUnsafeMutableBytes { buffer -> (Int, Int, Int)? in
+                guard let context = CGContext(
+                    data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+                ) else { return nil }
+                context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                return (Int(buffer[0]), Int(buffer[1]), Int(buffer[2]))
+            }
+            return color
+        }
+        // The generated clip is cyan on the left and magenta on the right. The
+        // matched pair sits in the top band, where title-blur underlap occurred.
+        let delta = max(fittedSide * 0.01, 1)
+        guard let left = sample(viewport.midX - delta), let right = sample(viewport.midX + delta) else {
+            XCTFail("\(scenario): video edge samples are outside the captured viewport", file: file, line: line)
             return
         }
-        var rgba = [UInt8](repeating: 0, count: 4)
-        let color = rgba.withUnsafeMutableBytes { buffer -> (UInt8, UInt8, UInt8)? in
-            guard let context = CGContext(
-                data: buffer.baseAddress,
-                width: 1,
-                height: 1,
-                bitsPerComponent: 8,
-                bytesPerRow: 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
-            ) else { return nil }
-            context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-            return (buffer[0], buffer[1], buffer[2])
-        }
-        guard let (red, green, blue) = color else {
-            XCTFail("\(scenario): screenshot pixel could not be sampled", file: file, line: line)
-            return
-        }
-        XCTAssertLessThan(red, 145, "\(scenario): generated cyan frame should retain its distinct red channel, got RGB(\(red), \(green), \(blue))", file: file, line: line)
-        XCTAssertGreaterThan(green, 165, "\(scenario): generated video frame must retain its green channel, got RGB(\(red), \(green), \(blue))", file: file, line: line)
-        XCTAssertGreaterThan(blue, 165, "\(scenario): generated video frame must retain its blue channel, got RGB(\(red), \(green), \(blue))", file: file, line: line)
-        XCTAssertGreaterThan(green, red + 45, "\(scenario): screenshot must contain the decoded cyan video, not a grayscale/blurred placeholder", file: file, line: line)
-        XCTAssertGreaterThan(blue, red + 45, "\(scenario): screenshot must contain the decoded cyan video, not a grayscale/blurred placeholder", file: file, line: line)
+        let contrast = abs(left.0 - right.0) + abs(left.1 - right.1) + abs(left.2 - right.2)
+        XCTAssertGreaterThan(contrast, 180, "\(scenario): the distinct video edge must remain visible; RGB samples \(left) and \(right) differ by only \(contrast)", file: file, line: line)
     }
 
     @MainActor private func keepEvidence(_ app: XCUIApplication, name: String) {

@@ -1492,13 +1492,16 @@ and VoiceOver access, Dynamic Type, identity, focus, and native layout. Approved
 pattern changes update the shared component and this owning contract together.
 
 Document-style sheets use the shared `TronDocumentSheet` for the standard
-`TronSheetTitle`/Done chrome, top blur, hidden drag indicator, and `tronPresentation`
-configuration. Its default detents remain unchanged; a caller may explicitly
-provide an initial detent, in which case the shared owner keeps the other
-configured detents available for native dragging. Video display sheets use this
-to open at medium with large available. Their player starts below the title's
-custom top blur rather than underlapping it, so the aspect-fit viewport and
-controls remain visible and usable without auto-expanding the sheet.
+`TronSheetTitle`/Done chrome, top-blur configuration, hidden drag indicator, and
+`tronPresentation` configuration. The blur modifier sets an environment value;
+the concrete content surface owns any custom blur overlay. Default detents remain
+unchanged; a caller may explicitly provide an initial detent, in which case the
+shared owner keeps the other configured detents available for native dragging.
+Video display sheets open at medium with large available and use native safe-area
+placement without a content-level custom blur surface. Playback at medium and
+expansion to large are covered by hosted UI tests. Paused-control icon rendering
+at medium is unverified and tracked in #563; this contract does not claim the
+controls are visibly usable at medium.
 
 `TronPresentation.swift` is the app-wide presentation boundary. The app root
 installs the selected type family and emerald interaction tint; every app-owned
