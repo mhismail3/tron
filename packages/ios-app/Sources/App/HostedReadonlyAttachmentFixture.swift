@@ -1,4 +1,6 @@
 #if HOSTED_TEST
+import AVFoundation
+import CoreVideo
 import SwiftUI
 import TronMobileCore
 
@@ -36,6 +38,9 @@ struct HostedReadonlyAttachmentFixture: View {
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "readonly-preview-fixture")),
             chatMediaFetch: { identity in await gateway.fetch(identity) }
         ))
+        _model.wrappedValue.hostedDisplayArtifactFile = { id, sessionID, profileID, maximumBytes, expectedBytes in
+            try await gateway.stageDisplayArtifact(id: id, maximumBytes: maximumBytes, expectedBytes: expectedBytes)
+        }
     }
 
     var body: some View {
@@ -55,7 +60,7 @@ struct HostedReadonlyAttachmentFixture: View {
         }
         .environment(model)
         .tronPresentation()
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(scenario.contains("-light") ? .light : .dark)
         .background(ReadonlyPreviewNativeRecorder { value in
             if value.contains("height:640") || value == "file retired:true" { poisonPublished = true }
             if native != value { native = value }
@@ -85,7 +90,11 @@ struct HostedReadonlyAttachmentFixture: View {
         }
         .task { for await value in gateway.updates() { counters = value } }
         .task {
-            do { try await model.connectHostedGateway(profile: profile, token: "fixture-only-token"); ready = true }
+            do {
+                if scenario.contains("display-video") { try await gateway.prepareVideo() }
+                try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")
+                ready = true
+            }
             catch { counters = "fixture-error:\(error.localizedDescription)" }
         }
     }
@@ -93,6 +102,7 @@ struct HostedReadonlyAttachmentFixture: View {
 
 private actor ReadonlyAttachmentGateway {
     private let scenario: String
+    private var videoArtifactID: String?
     private var opens = 0
     private var fetches = 0
     private var released = 0
@@ -104,7 +114,8 @@ private actor ReadonlyAttachmentGateway {
     private let image: Data
     private let poison: Data
     private let file: Data
-    private let displayRows: [TranscriptItem]
+    private var displayRows: [TranscriptItem] = []
+    private var videoData: Data?
 
     @MainActor init(scenario: String) {
         self.scenario = scenario
@@ -118,8 +129,20 @@ private actor ReadonlyAttachmentGateway {
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "text"; artifact["name"] = "readonly.txt"; artifact["mimeType"] = "text/plain"
             display["artifact"] = artifact; rows[1]["display"] = display
+        } else if scenario.contains("display-video") {
+            var display = rows[1]["display"] as! [String: Any]
+            display["kind"] = "video"
+            display["title"] = "Inline video fixture"
+            display["altText"] = "A small hosted video fixture."
+            display["eligibleSurfaces"] = ["sheet", "inline", "floating"]
+            display["presentation"] = ["requestedSurface": "inline", "inlineTapAction": "sheet"]
+            var artifact = display["artifact"] as! [String: Any]
+            artifact["kind"] = "video"; artifact["name"] = "fixture.mp4"; artifact["mimeType"] = "video/mp4"
+            display["artifact"] = artifact; rows[1]["display"] = display
         }
-        displayRows = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
+        if !scenario.contains("display-video") {
+            displayRows = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
+        }
         image = Self.image(height: 320)
         poison = Self.image(height: 640)
         file = Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
@@ -136,7 +159,72 @@ private actor ReadonlyAttachmentGateway {
     }
     private func add(_ continuation: AsyncStream<String>.Continuation) { continuations.append(continuation); publish() }
     private func publish() { continuations.forEach { $0.yield("opens:\(opens) fetches:\(fetches) released:\(released) held:\(held)") } }
+    @MainActor private static func writeVideo(to url: URL) async throws {
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+            kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64,
+        ])
+        writer.add(input)
+        guard writer.startWriting() else { throw writer.error ?? URLError(.cannotCreateFile) }
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<30 {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            var buffer: CVPixelBuffer?
+            guard CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32ARGB, nil, &buffer) == kCVReturnSuccess,
+                  let pixel = buffer else { throw URLError(.cannotCreateFile) }
+            CVPixelBufferLockBaseAddress(pixel, [])
+            memset(CVPixelBufferGetBaseAddress(pixel), frame.isMultiple(of: 2) ? 0x40 : 0xC0, CVPixelBufferGetDataSize(pixel))
+            CVPixelBufferUnlockBaseAddress(pixel, [])
+            guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 10)) else {
+                throw writer.error ?? URLError(.cannotCreateFile)
+            }
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed else { throw writer.error ?? URLError(.cannotCreateFile) }
+    }
     func releaseHeldFetch() { heldFetch?.resume(); heldFetch = nil }
+    func prepareVideo() async throws {
+        guard videoData == nil else { return }
+        let file = FileManager.default.temporaryDirectory.appending(path: "readonly-display-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try await Self.writeVideo(to: file)
+        let bytes = try Data(contentsOf: file)
+        videoData = bytes
+
+        let fixtureData = await MainActor.run { HostedChatDisplayFixture.imageTranscriptData }
+        var rows = try JSONSerialization.jsonObject(with: fixtureData) as! [[String: Any]]
+        var display = rows[1]["display"] as! [String: Any]
+        display["kind"] = "video"
+        display["title"] = "Inline video fixture"
+        display["caption"] = "A short generated MP4 for the hosted display sheet journey."
+        display["altText"] = "A small hosted video fixture."
+        display["fallbackText"] = "A small hosted video fixture."
+        display["eligibleSurfaces"] = ["sheet", "inline", "floating"]
+        display["presentation"] = ["requestedSurface": "inline", "inlineTapAction": "sheet"]
+        var artifact = display["artifact"] as! [String: Any]
+        artifact["kind"] = "video"
+        artifact["name"] = "fixture.mp4"
+        artifact["mimeType"] = "video/mp4"
+        artifact["size"] = bytes.count
+        display["artifact"] = artifact
+        videoArtifactID = artifact["id"] as? String
+        rows[1]["display"] = display
+        displayRows = try JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
+    }
+    func stageDisplayArtifact(id: String, maximumBytes: Int, expectedBytes: Int64) throws -> URL {
+        guard id == videoArtifactID, let videoData,
+              videoData.count <= maximumBytes, Int64(videoData.count) == expectedBytes else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        let destination = FileManager.default.temporaryDirectory.appending(path: "readonly-display-stage-\(UUID().uuidString)")
+        do { try videoData.write(to: destination); return destination }
+        catch { try? FileManager.default.removeItem(at: destination); throw error }
+    }
     func fetch(_ identity: ChatMediaIdentity) async -> ChatMediaPayload {
         fetches += 1
         let isFile = identity.blobID == "readonly-file" || scenario.contains("display-file")

@@ -52,6 +52,63 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepEvidence(app, name: "348-readonly-display-image-after")
     }
 
+    @MainActor func testVideoDisplaySheetOpensAtMediumPlaysAndExpandsToLarge() {
+        continueAfterFailure = false
+        for scenario in ["display-video", "display-video-light", "display-video-accessibility", "display-video-light-accessibility"] {
+            let app = launch(scenario); defer { app.terminate() }
+            let transcriptPlayer = app.otherElements["display.video.player"]
+            XCTAssertTrue(transcriptPlayer.waitForExistence(timeout: 15), "\(scenario): transcript video is mounted")
+            let expand = app.buttons["Open Inline video fixture in sheet"]
+            XCTAssertTrue(expand.waitForExistence(timeout: 10)); expand.tap()
+            let done = app.buttons["Done"]
+            XCTAssertTrue(done.waitForExistence(timeout: 10), "\(scenario): shared document sheet chrome is installed")
+            let sheetPlayer = app.otherElements["display.video.sheet.player"]
+            XCTAssertTrue(sheetPlayer.waitForExistence(timeout: 10), "\(scenario): video player is visible in the sheet")
+            let mediumTop = done.frame.minY
+            XCTAssertGreaterThan(mediumTop, app.windows.firstMatch.frame.height * 0.40, "\(scenario): sheet begins at medium")
+            let mediumPlayerFrame = sheetPlayer.frame
+            XCTAssertGreaterThanOrEqual(mediumPlayerFrame.height, 220, "\(scenario): the player has its bounded viewport at medium")
+            XCTAssertLessThanOrEqual(mediumPlayerFrame.maxY, app.windows.firstMatch.frame.maxY, "\(scenario): player remains inside the medium sheet")
+            XCTAssertTrue(sheetPlayer.isHittable, "\(scenario): player controls can receive interaction at medium")
+
+            let clocks = app.staticTexts.matching(identifier: "display.video.sheet.playback-time")
+            XCTAssertTrue(clocks.firstMatch.waitForExistence(timeout: 10))
+            let clock = clocks.element(boundBy: clocks.count - 1)
+            let initialTime = Double(clock.label) ?? 0
+            sheetPlayer.tap()
+            var advanced = false
+            for _ in 0..<30 {
+                if (Double(clock.label) ?? initialTime) > initialTime + 0.2 { advanced = true; break }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            XCTAssertTrue(advanced, "\(scenario): playback advances without enlarging the sheet")
+            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.40, "\(scenario): playback leaves the sheet at medium")
+            keepScreenshot(app, "520-video-medium-\(scenario)")
+
+            app.swipeUp()
+            let expanded = NSPredicate { element, _ in
+                guard let button = element as? XCUIElement else { return false }
+                return button.frame.minY < mediumTop - 100
+            }
+            expectation(for: expanded, evaluatedWith: done)
+            waitForExpectations(timeout: 8)
+            keepScreenshot(app, "520-video-large-\(scenario)")
+            XCTAssertTrue(sheetPlayer.exists && sheetPlayer.isHittable, "\(scenario): player survives the large detent")
+            XCTAssertGreaterThan(sheetPlayer.frame.height, mediumPlayerFrame.height + 100, "\(scenario): the player re-lays out with the expanded detent")
+        }
+    }
+
+    @MainActor func testDocumentDisplaySheetKeepsExistingLargeDetent() {
+        continueAfterFailure = false
+        let app = launch("display-file"); defer { app.terminate() }
+        let display = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Readonly display file'" )).firstMatch
+        XCTAssertTrue(display.waitForExistence(timeout: 15)); display.tap()
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        keepScreenshot(app, "520-document-sheet-large-negative-control")
+        XCTAssertLessThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35, "Document display retains its existing large-only detent")
+    }
+
     @MainActor func testDownloadedDisplayFileRouteAndReaderSurviveReconnect() {
         continueAfterFailure = false
         let app = launch("display-file"); defer { app.terminate() }
@@ -141,6 +198,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if scenario.contains("accessibility") {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         app.launch(); return app
     }
     @MainActor private func openImage(_ app: XCUIApplication) -> XCUIElement {

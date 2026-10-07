@@ -864,7 +864,7 @@ struct DisplayArtifactContent: View {
             case .html:
                 DisplayHTMLArtifactView(sessionID: sessionID, display: display)
             case .video, .audio:
-                DisplayVideoArtifactView(sessionID: sessionID, display: display)
+                DisplayVideoArtifactView(sessionID: sessionID, display: display, context: context)
             case .browserLive, .nativeLive:
                 LiveDisplayView(
                     sessionID: sessionID,
@@ -1267,6 +1267,7 @@ struct StaticDisplayWebView: UIViewRepresentable {
 private struct DisplayVideoArtifactView: View {
     let sessionID: String?
     let display: DisplayProjection
+    let context: DisplayRenderContext
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var playback = DisplayVideoPlayback()
@@ -1275,6 +1276,7 @@ private struct DisplayVideoArtifactView: View {
         Group {
             if let player = playback.player {
                 VideoPlayer(player: player)
+                    .accessibilityIdentifier(context == .sheet ? "display.video.sheet.player" : "display.video.player")
                     .frame(minHeight: 220)
             } else if playback.failed || mediaIdentity == nil {
                 DisplayUnavailableView(text: display.fallbackText)
@@ -1313,6 +1315,18 @@ private struct DisplayVideoArtifactView: View {
             if !activity.allowsPresentationPublication { playback.stop() }
         }
         .onDisappear { playback.stop() }
+        #if HOSTED_TEST
+        .overlay(alignment: .topLeading) {
+            TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                Text(String(format: "%.2f", playback.player?.currentTime().seconds ?? 0))
+                    .font(.system(size: 1))
+                    .accessibilityIdentifier(context == .sheet ? "display.video.sheet.playback-time" : "display.video.playback-time")
+            }
+            .frame(width: 1, height: 1)
+            .opacity(0)
+            .allowsHitTesting(false)
+        }
+        #endif
     }
 
     private var mediaIdentity: ChatMediaIdentity? {
@@ -1587,7 +1601,12 @@ struct DisplaySheet: View {
             )
             .accessibilityLabel(route.display.altText)
         } else {
-            TronDocumentSheet(title: route.display.title) {
+            let isVideo = route.display.kind == .video
+            TronDocumentSheet(
+                title: route.display.title,
+                detents: isVideo ? [.medium, .large] : [.large],
+                initialDetent: isVideo ? .medium : nil
+            ) {
                 DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .tronDocumentTopBlurSurface()
