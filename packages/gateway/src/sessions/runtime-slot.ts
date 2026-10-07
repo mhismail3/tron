@@ -36,6 +36,8 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -411,6 +413,7 @@ export interface RuntimeSlotDependencies {
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
+  openAIModelEligibility: OpenAIModelEligibility;
   trust: TrustService;
   blobs: BlobStore;
   exports: BlobStore;
@@ -528,6 +531,7 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
+  private detachOpenAIEligibility: (() => void) | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
@@ -971,8 +975,15 @@ export class RuntimeSlot {
     interrupted: boolean,
   ): Promise<RuntimeSlot> {
     const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted);
-    await slot.initialize();
-    return slot;
+    try {
+      await slot.initialize();
+      return slot;
+    } catch (error) {
+      slot.detachOpenAIEligibility?.();
+      slot.detachOpenAIEligibility = undefined;
+      await slot.runtime?.dispose().catch(() => {});
+      throw error;
+    }
   }
 
   get id(): string {
@@ -1541,6 +1552,9 @@ export class RuntimeSlot {
       // leak project providers between concurrent Tron sessions. Credentials and
       // model files remain canonical through their shared file paths.
       const modelRuntime = await this.dependencies.createModelRuntime();
+      const detachOpenAIEligibility = this.dependencies.openAIModelEligibility.attachRuntime(modelRuntime);
+      this.detachOpenAIEligibility?.();
+      this.detachOpenAIEligibility = detachOpenAIEligibility;
       let contextPolicy: SessionContextWindowPolicy | undefined;
       let compactionPolicy: CompactionOperationPolicy | undefined;
       this.resourceReloadOptions = {
@@ -1604,11 +1618,33 @@ export class RuntimeSlot {
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
+      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
+      let initialModel: Model<never> | undefined;
+      if (sessionManager.getEntryCount() === 0) {
+        const eligibility = openAIModelEligibility(modelRuntime);
+        await eligibility?.refresh();
+        const defaultProvider = services.settingsManager.getDefaultProvider();
+        const defaultModelId = services.settingsManager.getDefaultModel();
+        if ((defaultProvider === "openai" || defaultProvider === "openai-codex") && defaultModelId) {
+          const savedDefault = modelRuntime.getModel(defaultProvider, defaultModelId);
+          if (savedDefault && eligibility) {
+            const available = await modelRuntime.getAvailable();
+            if (!eligibility.isEligibleInRuntime(modelRuntime, savedDefault.provider, savedDefault.id)) {
+              // Pi reads a saved default directly, independently of its filtered
+              // available-model snapshot. Only brand-new sessions may replace
+              // that stale preference; existing transcript identities stay intact.
+              const fallback = available[0];
+              if (!fallback) throw new GatewayError("invalid_request", "Your saved default model is no longer available and no eligible model was found; choose a model or check your provider sign-in.");
+              initialModel = fallback as Model<never>;
+            }
+          }
+        }
+      }
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
+        ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
@@ -8144,7 +8180,11 @@ export class RuntimeSlot {
           this.publishSnapshot();
           const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
           const startedMonotonicMs = performance.now();
-          const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId });
+          const result = await this.runtime.session.executeBash(command, undefined, {
+            excludeFromContext,
+            id: operationId,
+            operations: this.directBashProcesses!.shellOperations(),
+          });
           const completedAt = new Date().toISOString();
           const bashEntries = this.sessionManager.getBranch().filter((entry) =>
             !previousEntryIDs.has(entry.id)
@@ -8835,6 +8875,8 @@ export class RuntimeSlot {
 
   private async disposeRuntime(): Promise<void> {
     this.operationObservations.clear();
+    this.detachOpenAIEligibility?.();
+    this.detachOpenAIEligibility = undefined;
     this.dependencies.browserLiveViews?.retireSession(this.id);
     this.unregisterExtensionExpiry();
     this.unregisterProcessExpiry();

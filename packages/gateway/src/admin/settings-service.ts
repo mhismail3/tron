@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
 import { contextWindowLimits, contextWindowMinimum, contextWindowPreferences, MAX_CONTEXT_PREFERENCES, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
 import { resolveCompactionPolicy, COMPACTION_POLICY_INSTRUCTION_LIMIT, COMPACTION_THINKING_LEVELS } from "../runtime/compaction-policy.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -202,6 +203,14 @@ export class SettingsService {
       throw new GatewayError("trust_required", "Trust this project before changing its project settings");
     }
     const patch = object(raw, "settings patch");
+    if (patch.defaultModel !== undefined && patch.defaultModel !== null) {
+      const selected = object(patch.defaultModel, "defaultModel");
+      await assertNewModelChoice(
+        options.modelRuntime ?? this.modelRuntime,
+        string(selected.provider, "defaultModel.provider", { max: 120 }),
+        string(selected.id, "defaultModel.id", { max: 300 }),
+      );
+    }
     const path = options.scope === "global"
       ? join(this.agentDir, "settings.json")
       : join(options.cwd, ".pi", "settings.json");
