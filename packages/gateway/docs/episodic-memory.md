@@ -37,10 +37,17 @@ it the commits the runtime reports, and sends each activation the view it render
   already knows; it falls back to a whole-file read when the identity changed,
   the file shrank, the line before the offset no longer matches, or the new
   entries do not chain onto that branch. An unchanged-source shortcut is allowed
-  only for a proven incremental no-change read; a whole-file rebuild first
-  reconciles projected messages and only then persists its cursor and
-  complete-prefix digest, even when size and branch leaf happen to match. A
-  whole-file read is bounded per line and never repairs or migrates the file.
+  only for a proven incremental no-change read; a whole-file rebuild reconciles
+  projected messages before it persists a refreshed cursor and complete-prefix
+  digest. Incremental reads do not hash the retained prefix: they verify the
+  file identity and the last complete line in an 8 KiB window, then hash only new
+  complete lines. Thus a same-length rewrite outside that window can remain
+  undetected on an otherwise-valid incremental read. A full rebuild reconciles
+  the projection and persists a digest of the bytes it read; it does not reject
+  the refresh merely because the old digest differs. A transient cut lookup
+  hashes the complete ingested prefix before and after reconstruction and refuses
+  a mismatch. The session file remains append-only under its owner; the reader
+  neither repairs nor migrates it, and whole-file reads are bounded per line.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
@@ -452,6 +459,9 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 - `packages/gateway/test-results/episodic-memory/scale.json` — the refold
   timings and worst synchronous slice, the context-encoding sizes, and the
   1,000-message invalidation (`npm run test:scale`).
+- `packages/gateway/test-results/episodic-reasoning-model/report.json` — the
+  reasoning-model end-to-end cases (`npx vitest run
+  src/episodic/episodic-reasoning-model.e2e.test.ts`).
 
 ## Home's use of this module
 

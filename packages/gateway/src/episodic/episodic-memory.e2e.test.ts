@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
@@ -17,6 +17,7 @@ import {
 } from "./episodic-contract.js";
 import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 /*
  * End-to-end: a real canonical session in OS temp, driven incrementally through
@@ -167,7 +168,7 @@ function expandInvalidated(view: Part[], invalid: Set<string>): Part[] {
 
 interface OracleState { view: Part[]; messages: number; nodes: Map<string, OracleNode> }
 
-function readJsonlSafe(path: string): Array<Record<string, unknown>> {
+function readJsonlFileSafe(path: string): Array<Record<string, unknown>> {
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -176,6 +177,21 @@ function readJsonlSafe(path: string): Array<Record<string, unknown>> {
     throw error;
   }
   return text.split("\n").filter(line => line.trim() !== "").map(line => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** Include the checkpoint baseline before its append-only tail. */
+function readJsonlSafe(path: string): Array<Record<string, unknown>> {
+  const root = dirname(path);
+  let checkpoint: Array<Record<string, unknown>> = [];
+  try {
+    const pointer = JSON.parse(readFileSync(join(root, "checkpoint.current.json"), "utf8")) as { directory?: unknown };
+    if (typeof pointer.directory === "string" && /^checkpoint-[A-Za-z0-9.-]+$/u.test(pointer.directory)) {
+      checkpoint = readJsonlFileSafe(join(root, pointer.directory, basename(path)));
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+  }
+  return [...checkpoint, ...readJsonlFileSafe(path)];
 }
 
 function maxIndex(records: Array<Record<string, unknown>>): number {
@@ -417,6 +433,13 @@ describe("episodic memory end to end", () => {
     const fx = await fixture("e2e", { viewBytes: 4_096, jobs: 4, retryMs: 1, maxRetries: 2 });
     report.limits = { ...fx.limits };
     const memory = await openMemory(fx);
+    const nodeWrites: Array<Record<string, unknown>> = [];
+    const storeOwner = memory as unknown as { store: { appendNode(record: unknown): Promise<void> } };
+    const appendNode = storeOwner.store.appendNode.bind(storeOwner.store);
+    storeOwner.store.appendNode = async record => {
+      await appendNode(record);
+      nodeWrites.push(record as Record<string, unknown>);
+    };
     const oracle: OracleState = { view: [], messages: 0, nodes: new Map() };
     let nodesConsumed = 0;
     let catalogConsumed = 0;
@@ -429,7 +452,7 @@ describe("episodic memory end to end", () => {
       const preStepNodes = new Map(oracle.nodes);
       await memory.entriesCommitted(fx.sessionId);
       const catalog = readJsonlSafe(fx.catalogPath);
-      const nodeRecords = readJsonlSafe(fx.nodesPath);
+      const nodeRecords = nodeWrites;
       const stepRecords = nodeRecords.slice(nodesConsumed);
       const invalidations = stepRecords.filter(record => typeof record.nodes === "string");
       if (invalidations.length > 0) {
@@ -509,7 +532,7 @@ describe("episodic memory end to end", () => {
     // prove it: the first pass appends leaves 0,1,2,… with no gap and no
     // repeat, and the context edit's rebuild touches exactly the invalidated
     // leaves, each once.
-    const levelZeroIndices = readJsonlSafe(fx.nodesPath)
+    const levelZeroIndices = nodeWrites
       .filter(record => typeof record.nodes !== "string" && record.level === 0)
       .sort((a, b) => (a.revision as number) - (b.revision as number))
       .map(record => record.index as number);
@@ -518,7 +541,7 @@ describe("episodic memory end to end", () => {
     expect(levelZeroIndices.slice(0, firstPass)).toEqual([...Array(firstPass).keys()]);
     expect(firstPass).toBe(messagesAtEdit);
     const rebuilt = levelZeroIndices.slice(firstPass).filter(index => index < messagesAtEdit);
-    const invalidatedLeaves = readJsonlSafe(fx.nodesPath)
+    const invalidatedLeaves = nodeWrites
       .filter(record => typeof record.nodes === "string")
       .flatMap(record => decodeCodes(record.nodes as string).filter(entry => entry.endsWith("+1")))
       .map(entry => Number(entry.split("+")[0]));
@@ -545,7 +568,7 @@ describe("episodic memory end to end", () => {
     expect(fx.compactor.maxConcurrent).toBeGreaterThan(1);
     expect(fx.compactor.feedbackTurns).toBeGreaterThan(0);
 
-    const catalogRaw = await readFile(fx.catalogPath, "utf8");
+    const catalogRaw = JSON.stringify(readJsonlSafe(fx.catalogPath));
     expect(catalogRaw).not.toContain(THINKING_PREFIX);
     expect(catalogRaw).not.toContain(IMAGE_BASE64);
     expect(catalogRaw).not.toContain(PLANTED_CREDENTIAL);
@@ -614,6 +637,13 @@ describe("episodic memory end to end", () => {
   it("discards a build whose inputs an invalidation revoked while it was in flight", async () => {
     const fx = await fixture("in-flight", { viewBytes: 4_096, jobs: 4, retryMs: 1 });
     const memory = await openMemory(fx);
+    const nodeWrites: Array<Record<string, unknown>> = [];
+    const storeOwner = memory as unknown as { store: { appendNode(record: unknown): Promise<void> } };
+    const appendNode = storeOwner.store.appendNode.bind(storeOwner.store);
+    storeOwner.store.appendNode = async record => {
+      await appendNode(record);
+      nodeWrites.push(record as Record<string, unknown>);
+    };
     for (let index = 0; index < 60; index += 1) {
       fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
       fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
@@ -628,31 +658,37 @@ describe("episodic memory end to end", () => {
     // through so a merge becomes startable beside the following leaf, and edit
     // an early message while both are in flight.
     fx.gate.paused = true;
-    for (let index = 60; index < 80; index += 1) {
-      fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
-      fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
+    let preEditNodes!: ReturnType<typeof liveNodes>;
+    try {
+      for (let index = 60; index < 80; index += 1) {
+        fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
+        fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
+      }
+      const first = memory.entriesCommitted(fx.sessionId);
+      await waitFor(() => memory.status().pump.busy >= 1 || undefined, "first episodic build to enter flight");
+      fx.gate.waiters.shift()?.();
+      await waitFor(() => memory.status().pump.busy >= 2 || undefined, "second episodic build to enter flight");
+      const inFlight = fx.compactor.prompts.slice(promptMark);
+      expect(inFlight.some(prompt => prompt.includes("Compress this message into one line"))).toBe(true);
+      expect(inFlight.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
+
+      preEditNodes = liveNodes(fx);
+      const invalidationStart = nodeWrites.length;
+      fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
+      const second = memory.entriesCommitted(fx.sessionId);
+      // Hold the parked builds until this exact invalidation append is durable.
+      await waitFor(() => nodeWrites.slice(invalidationStart).some(record => typeof record.nodes === "string") || undefined, "episodic invalidation to become durable");
+      const released = fx.gate.waiters.splice(0);
+      fx.gate.paused = false;
+      for (const resolve of released) resolve();
+      await Promise.all([first, second]);
+      await waitFor(() => memory.status().pump.busy === 0 || undefined, "episodic pump to become idle");
+    } finally {
+      fx.gate.paused = false;
+      for (const resolve of fx.gate.waiters.splice(0)) resolve();
     }
-    const first = memory.entriesCommitted(fx.sessionId);
-    while (memory.status().pump.busy < 1) await new Promise(resolve => setTimeout(resolve, 2));
-    fx.gate.waiters.shift()?.();
-    while (memory.status().pump.busy < 2) await new Promise(resolve => setTimeout(resolve, 2));
-    const inFlight = fx.compactor.prompts.slice(promptMark);
-    expect(inFlight.some(prompt => prompt.includes("Compress this message into one line"))).toBe(true);
-    expect(inFlight.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
 
-    const preEditNodes = liveNodes(fx);
-    fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
-    const second = memory.entriesCommitted(fx.sessionId);
-    // Hold the parked builds until the invalidation is durable: that is the
-    // window the reviewer asked for, and it is provable from the log.
-    while (!readJsonlSafe(fx.nodesPath).some(record => typeof record.nodes === "string")) await new Promise(resolve => setTimeout(resolve, 2));
-    const released = fx.gate.waiters.splice(0);
-    fx.gate.paused = false;
-    for (const resolve of released) resolve();
-    await Promise.all([first, second]);
-    while (memory.status().pump.busy > 0) await new Promise(resolve => setTimeout(resolve, 2));
-
-    const invalidations = readJsonlSafe(fx.nodesPath).filter(record => typeof record.nodes === "string");
+    const invalidations = nodeWrites.filter(record => typeof record.nodes === "string");
     const invalidated = new Set(invalidations.flatMap(record => decodeCodes(record.nodes as string)));
     const predicted = predictedInvalidation(preEditNodes, editIndex);
     report.inFlightEdit = { invalidated: invalidated.size, predicted: predicted.size, stalePublished: 0 };
@@ -796,8 +832,7 @@ describe("episodic memory end to end", () => {
     expect(text.endsWith(" end-of-paste")).toBe(true);
     // The record the store holds is far below its line bound, and the memory
     // summarized the capped text rather than the paste.
-    const raw = await readFile(fx.catalogPath, "utf8");
-    expect(Buffer.byteLength(raw.split("\n")[0]!)).toBeLessThan(fx.limits.maxStoreLineBytes);
+    expect(Buffer.byteLength(JSON.stringify(record))).toBeLessThan(fx.limits.maxStoreLineBytes);
     expect(fx.compactor.prompts.every(prompt => prompt.length < 500_000)).toBe(true);
     await memory.dispose();
 

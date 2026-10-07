@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
@@ -108,12 +109,8 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   };
 }
 
-async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 15_000): Promise<void> {
-  const deadline = performance.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (performance.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 12_000): Promise<void> {
+  await waitFor(async () => (await predicate()) || undefined, "Home activation condition", { boundMs: timeoutMs });
 }
 
 interface CapturedRequest {
@@ -315,7 +312,7 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
     .map((entry) => (entry as { message?: Record<string, unknown> }).message!);
 }
 
-describe.sequential("Tron Home activations end to end", () => {
+describe("Tron Home activations end to end", () => {
   // progress.md C12 (#466), the property Home exists for: the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.

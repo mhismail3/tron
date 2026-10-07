@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,9 +66,21 @@ describe("episodic memory scale", () => {
         return built.has(nodeAddress(part.level, part.index)) ? { built: true, bytes: 250 } : { built: false, bytes: PLACEHOLDER_BYTES };
       };
       const started = performance.now();
-      const parts = await foldViewSliced(messages, 128_000, bytesOf, key => built.has(key));
-      report.refold.push({ messages, ms: performance.now() - started, parts: parts.length, worstSliceMs: worstSlice, sliceMessages: 2_000 });
-      expect(parts.length).toBeGreaterThan(0);
+      let eventLoopTurns = 0;
+      let done = false;
+      const countTurn = (): void => {
+        eventLoopTurns += 1;
+        if (!done) setImmediate(countTurn);
+      };
+      setImmediate(countTurn);
+      const folding = foldViewSliced(messages, 128_000, bytesOf, key => built.has(key)).finally(() => { done = true; });
+      const parts = await folding;
+      const refoldMs = performance.now() - started;
+      const refoldWorstSliceMs = worstSlice;
+      const reference = foldView(messages, 128_000, bytesOf, key => built.has(key));
+      report.refold.push({ messages, ms: refoldMs, parts: parts.length, worstSliceMs: refoldWorstSliceMs, sliceMessages: 2_000 });
+      expect(parts).toEqual(reference);
+      expect(eventLoopTurns).toBeGreaterThan(1);
     }
     expect(report.refold).toHaveLength(2);
     // The sliced fold hands the loop back, so no single synchronous stretch is
@@ -138,18 +149,24 @@ describe("episodic memory scale", () => {
     }
     manager.appendMessage({ role: "user", content: `thousand case prompt 999 ${"k".repeat(600)}`, timestamp: Date.now() } satisfies Message);
     await memory.entriesCommitted(manager.getSessionId());
-    const nodesPath = join(home, "workspace", "state", "episodic", manager.getSessionId(), "nodes.jsonl");
-    const nodeLog = (): Array<Record<string, unknown>> => readFileSync(nodesPath, "utf8").split("\n").filter(line => line.trim() !== "").map(line => JSON.parse(line) as Record<string, unknown>);
-    const nodesBefore = nodeLog().filter(record => typeof record.nodes !== "string");
+    const nodesBefore = memory.status().nodes.total;
+    const nodeWrites: Array<Record<string, unknown>> = [];
+    const storeOwner = memory as unknown as { store: { appendNode(record: unknown): Promise<void> } };
+    const appendNode = storeOwner.store.appendNode.bind(storeOwner.store);
+    storeOwner.store.appendNode = async record => {
+      await appendNode(record);
+      nodeWrites.push(record as Record<string, unknown>);
+    };
     const target = manager.getBranch().filter(entry => entry.type === "message")[1]!;
+    const invalidationStart = nodeWrites.length;
     manager.appendContextEdit(target.id, { content: "early replacement" });
     await memory.entriesCommitted(manager.getSessionId());
-    const invalidations = nodeLog().filter(record => typeof record.nodes === "string");
+    const invalidations = nodeWrites.slice(invalidationStart).filter(record => typeof record.nodes === "string");
     const invalidated = invalidations.reduce((total, record) => total + (record.nodes as string).split(" ").filter(code => code !== "").length, 0);
-    report.earlyEdit = { messages: memory.status().messages, nodesBefore: nodesBefore.length, invalidated, chunks: invalidations.length };
+    report.earlyEdit = { messages: memory.status().messages, nodesBefore, invalidated, chunks: invalidations.length };
     expect(memory.status().messages).toBe(1_000);
     expect(invalidated).toBeGreaterThan(0);
-    expect(invalidated).toBeLessThanOrEqual(nodesBefore.length);
+    expect(invalidated).toBeLessThanOrEqual(nodesBefore);
     expect(memory.status().blocked).toBeNull();
     await memory.dispose();
   }, 900_000);
