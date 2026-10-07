@@ -216,7 +216,6 @@ export class EpisodicMemory {
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
-      memory.assertConsistent();
       return memory;
     } catch (error) {
       EpisodicMemory.openStores.delete(storeKey);
@@ -593,9 +592,7 @@ export class EpisodicMemory {
     await this.saveState();
   }
 
-  /** A catalog revision whose invalidation a crash lost: a live leaf whose
-   * recorded source digest disagrees with the message it summarizes is a leaf
-   * whose summary is stale, so the closure runs again at load. */
+  /** Repair survivors of an interrupted chunked invalidation before serving. */
   private async repairOrphanedDependencies(): Promise<void> {
     const orphaned = new Set<string>();
     for (const [address, node] of this.nodes) {
@@ -610,6 +607,7 @@ export class EpisodicMemory {
     if (orphaned.size > 0) await this.invalidateNodes(orphaned);
   }
 
+  /** A live leaf with a stale source digest is invalidated again at load. */
   private async repairCatalogMismatch(): Promise<void> {
     const changed: number[] = [];
     for (const node of this.nodes.values()) {
@@ -1099,10 +1097,6 @@ export class EpisodicMemory {
    * a concurrent build can never interleave a line. */
   private appendCatalog(record: EpisodicMessageRecord): Promise<void> {
     return this.enqueueAppend(() => this.store.appendCatalog(record));
-  }
-
-  private appendNode(record: EpisodicNodeRecord | EpisodicInvalidationRecord): Promise<void> {
-    return this.enqueueAppend(() => this.store.appendNode(record));
   }
 
   private enqueueAppend(operation: () => Promise<void>): Promise<void> {
