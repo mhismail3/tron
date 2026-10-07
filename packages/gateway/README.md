@@ -2921,7 +2921,9 @@ stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
 connection opened by an in-process socket in the Vitest worker and fails the
 current test (or the file, for async work that outlives its test), so an unstubbed in-process fetch cannot pass or
 hang depending on the host's network. It does not cover child processes or DNS
-lookups.
+lookups. `test-support/agent-dir-isolation.ts` gives each worker an empty
+`PI_CODING_AGENT_DIR`, so a fixture that omits an explicit credential store never
+reads the host's real agent credentials when the suite runs from an agent session.
 
 Waits are hang bounds, not speed budgets. Every condition a test waits for — a
 turn settling, a frame arriving, a record landing — is correct at any speed.
