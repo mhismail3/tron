@@ -12122,8 +12122,11 @@ export default function (pi) {
       if (!bash || bash.kind !== "bash") throw new Error("expected canonical Bash projection");
       expect(bash.output).toContain(`PI_SESSION_ID=${manager.getSessionId()}`);
       for (const name of names) expect(bash.output).not.toContain(`${name}=`);
-      expect(bash.output).not.toContain(`${homedir()}/.tron/`);
-      expect(bash.output).not.toContain(`${homedir()}/.tron-dev/`);
+      // PATH may legitimately locate Pi's managed agent tools under the live home;
+      // no other variable may name a path inside a Tron home.
+      const nonPath = bash.output.split("\n").filter((line) => !line.startsWith("PATH=")).join("\n");
+      expect(nonPath).not.toContain(`${homedir()}/.tron/`);
+      expect(nonPath).not.toContain(`${homedir()}/.tron-dev/`);
     } finally {
       for (const [name, value] of previous) {
         if (value === undefined) delete process.env[name];
