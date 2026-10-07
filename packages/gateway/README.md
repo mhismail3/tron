@@ -560,8 +560,9 @@ settings. AuthBroker serializes OpenAI and Codex legacy OAuth operations because
 both SDK flows use callback port 1455; live sign-in remains a manual acceptance
 gate.
 
-For first-party OpenAI ChatGPT OAuth, new model choices are gated at each Gateway
-`ModelRuntime` by that same OAuth access token's `GET https://api.openai.com/v1/models`
+For first-party OpenAI ChatGPT OAuth, new model choices are gated by one
+Gateway-wide owner and the public provider availability filters in each `ModelRuntime`,
+using that same OAuth access token's `GET https://api.openai.com/v1/models`
 response. The Gateway retains only `visibility: "list"` entries whose `slug`
 matches a model registered by the pinned SDK, preserving account order. This
 account list is the sole lifecycle and endpoint-eligibility authority for
@@ -585,12 +586,15 @@ models.
 `session.setModel`, default-model writes, `provider.list` choice counts, and
 `model.list.available` use the same policy. On a new session only, an ineligible
 saved OpenAI/Codex default is replaced by the first currently available model;
-the persisted setting is not rewritten. Existing session model identities are
+the persisted setting is not rewritten, and creation fails without publishing a
+session if no fallback exists. Existing session model identities are
 not rewritten, including on reopen. A Codex provider remains registered and its
 credential remains available to the usage adapter, but its models are not new
 choices while `providerUsageLentTo` identifies `openai`; a sole Codex sign-in is
 unchanged. This describes account-list behavior, not the current account's exact
-membership; a live account check remains a maintainer post-install validation.
+membership; a live account check remains a maintainer post-install validation. An
+extension can still call `ctx.setModel` directly; extension-authored selections are
+outside this Tron policy because the SDK has no pre-selection admission hook.
 
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot

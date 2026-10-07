@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type AddressInfo, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,15 +9,22 @@ import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 class SessionCredentials implements CredentialStore {
+  constructor(
+    private readonly openai: Credential | undefined = { type: "oauth", access: "session-openai-token", refresh: "refresh", expires: Date.now() + 3_600_000 },
+    private readonly codex: Credential | undefined | null = { type: "oauth", access: "session-codex-token", refresh: "refresh", expires: Date.now() + 3_600_000 },
+    private readonly anthropic?: Credential,
+  ) {}
   async read(providerId: string): Promise<Credential | undefined> {
-    if (providerId === "openai") return { type: "oauth", access: "session-openai-token", refresh: "refresh", expires: Date.now() + 3_600_000 };
-    if (providerId === "openai-codex") return { type: "oauth", access: "session-codex-token", refresh: "refresh", expires: Date.now() + 3_600_000 };
+    if (providerId === "openai") return this.openai;
+    if (providerId === "openai-codex") return this.codex ?? undefined;
+    if (providerId === "anthropic") return this.anthropic;
     return undefined;
   }
   async list(): Promise<readonly CredentialInfo[]> {
     return [
-      { providerId: "openai", type: "oauth" },
-      { providerId: "openai-codex", type: "oauth" },
+      ...(this.openai ? [{ providerId: "openai", type: this.openai.type } as const] : []),
+      ...(this.codex ? [{ providerId: "openai-codex", type: this.codex.type } as const] : []),
+      ...(this.anthropic ? [{ providerId: "anthropic", type: this.anthropic.type } as const] : []),
     ];
   }
   async modify(_providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>) {
@@ -39,6 +46,30 @@ describe("new-session OpenAI default admission", () => {
     if (root) await rm(root, { recursive: true, force: true });
     root = "";
   });
+
+  async function useAccountModels(entries: Array<{ slug: string; visibility: string }>): Promise<void> {
+    server = createServer((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ models: entries, has_more: false }));
+    });
+    await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/models`;
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = new URL(endpoint);
+      target.search = new URL(String(input)).search;
+      return originalFetch(target, init);
+    });
+  }
+
+  async function createRegistry(agentDir: string, credentials: CredentialStore): Promise<void> {
+    registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, credentials }),
+      trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    await registry.initialize();
+  }
 
   it("reopens an existing Codex transcript without changing its model identity", async () => {
     root = await mkdtemp(join(tmpdir(), "tron-openai-existing-session-"));
@@ -81,7 +112,7 @@ describe("new-session OpenAI default admission", () => {
     await writeFile(settingsPath, savedSettings);
     server = createServer((_request, response) => {
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ models: [{ slug: "gpt-5.5", visibility: "list" }], has_more: false }));
+      response.end(JSON.stringify({ models: [{ slug: "gpt-5.5", visibility: "list" }, { slug: "gpt-5.6-sol", visibility: "list" }], has_more: false }));
     });
     await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/models`;
@@ -107,7 +138,64 @@ describe("new-session OpenAI default admission", () => {
     const slot = await registry.create(cwd);
     const model = slot.snapshot().model;
     expect(model).toEqual({ provider: "openai", id: "gpt-5.5" });
-    expect(slot.modelRuntime.getAvailableSnapshot().some(available => available.provider === model.provider && available.id === model.id)).toBe(true);
+    const availableOpenAI = slot.modelRuntime.getAvailableSnapshot().filter(available => available.provider === "openai").map(available => available.id);
+    expect(availableOpenAI).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
+    const session = (slot as unknown as { runtime: { session: { cycleModel(direction: "forward"): Promise<{ model: { provider: string; id: string } } | undefined> } } }).runtime.session;
+    const cycled = await session.cycleModel("forward");
+    expect(cycled?.model.provider).toBe("openai");
+    expect(availableOpenAI).toContain(cycled?.model.id);
+    expect(cycled?.model.id).not.toBe("gpt-4");
     expect(await readFile(settingsPath, "utf8")).toBe(savedSettings);
+  });
+
+  it("refreshes an OAuth catalog before a no-default session resolves its first model", async () => {
+    root = await mkdtemp(join(tmpdir(), "tron-openai-no-default-oauth-"));
+    const agentDir = join(root, "agent"); const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await useAccountModels([{ slug: "gpt-5.5", visibility: "list" }]);
+    await createRegistry(agentDir, new SessionCredentials(undefined, null));
+    const slot = await registry!.create(cwd);
+    expect(slot.snapshot().model).toEqual({ provider: "openai", id: "gpt-5.5" });
+  });
+
+  it("keeps API-key OpenAI and an unrelated provider available for a no-default session", async () => {
+    root = await mkdtemp(join(tmpdir(), "tron-openai-no-default-api-key-"));
+    const agentDir = join(root, "agent"); const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    const credentials = new SessionCredentials({ type: "api_key", key: "api-key-fixture" }, null, { type: "api_key", key: "anthropic-fixture" });
+    await createRegistry(agentDir, credentials);
+    const slot = await registry!.create(cwd);
+    const available = slot.modelRuntime.getAvailableSnapshot();
+    expect(available.some(model => model.provider === "openai")).toBe(true);
+    expect(available.some(model => model.provider === "anthropic")).toBe(true);
+    expect(slot.snapshot().model).not.toEqual({ provider: "unknown", id: "unknown" });
+    expect(server).toBeUndefined();
+  });
+
+  it("fails a saved ineligible default only when no fallback exists and publishes no partial session", async () => {
+    root = await mkdtemp(join(tmpdir(), "tron-openai-no-fallback-"));
+    const agentDir = join(root, "agent"); const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4" }));
+    await useAccountModels([]);
+    await createRegistry(agentDir, new SessionCredentials(undefined, null));
+    await expect(registry!.create(cwd)).rejects.toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("saved default model is no longer available"),
+    });
+    expect((await registry!.catalog()).sessions).toEqual([]);
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    const files = await readdir(sessionDirectory).catch(() => [] as string[]);
+    expect(files.filter(file => file.endsWith(".jsonl"))).toEqual([]);
+  });
+
+  it("matches Pi's no-available-model behavior when a new account lists no eligible model", async () => {
+    root = await mkdtemp(join(tmpdir(), "tron-openai-no-model-control-"));
+    const agentDir = join(root, "agent"); const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await useAccountModels([]);
+    await createRegistry(agentDir, new SessionCredentials(undefined, null));
+    const slot = await registry!.create(cwd);
+    expect(slot.snapshot().model).toEqual({ provider: "unknown", id: "unknown" });
   });
 });

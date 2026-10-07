@@ -2322,7 +2322,8 @@ export class GatewayService {
 
   private async providers(modelRuntime: ModelRuntime, signal?: AbortSignal): Promise<JsonValue> {
     await openAIModelEligibility(modelRuntime)?.refresh(signal);
-    const credentials = new Map((await modelRuntime.listCredentials()).map((credential) => [credential.providerId, credential.type]));
+    const credentialEntries = await modelRuntime.listCredentials().catch(() => []);
+    const credentials = new Map(credentialEntries.map((credential) => [credential.providerId, credential.type]));
     const providers = await Promise.all(modelRuntime.getProviders().map(async (provider) => {
       const auth = await modelRuntime.checkAuth(provider.id).catch(() => undefined);
       return {
@@ -2336,7 +2337,7 @@ export class GatewayService {
         credentialType: credentials.get(provider.id) ?? null,
         authMethods: [provider.auth.apiKey?.login ? "api_key" : null, provider.auth.oauth ? "oauth" : null]
           .filter((value): value is string => value !== null),
-        modelCount: openAIModelEligibility(modelRuntime)?.countChoices(provider.id) ?? provider.getModels().length,
+        modelCount: openAIModelEligibility(modelRuntime)?.countChoices(provider.id, modelRuntime) ?? provider.getModels().length,
       };
     }));
     validateProviderCatalog(providers);
@@ -2344,8 +2345,12 @@ export class GatewayService {
   }
 
   private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown, signal?: AbortSignal): Promise<JsonValue> {
+    await openAIModelEligibility(modelRuntime)?.refresh(signal);
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
-      const available = new Set((await modelRuntime.getAvailable(undefined, signal ? { signal } : undefined)).map((model) => `${model.provider}\0${model.id}`));
+      const available = new Set((await Promise.all(modelRuntime.getProviders().map(async provider => {
+        try { return await modelRuntime.getAvailable(provider.id, signal ? { signal } : undefined); }
+        catch (error) { if (signal?.aborted) throw error; return []; }
+      }))).flat().map((model) => `${model.provider}\0${model.id}`));
       const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
         // Undated models simply omit the field; the picker's provider sections
         // list them without a release date.

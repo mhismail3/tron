@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { waitFor } from "../../test-support/wait-for.js";
 import { installOpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { GatewayError } from "../errors.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
+import { ProviderUsageOwner } from "../providers/provider-usage.js";
 
 const client = { id: "openai-catalog", identity: "device:openai-catalog", isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 const models = [
@@ -20,19 +22,30 @@ const models = [
 
 class Credentials implements CredentialStore {
   codex: Credential | undefined = { type: "oauth", access: "legacy-test-token", refresh: "refresh", expires: Date.now() + 3_600_000 };
-  constructor(public openai: Credential | undefined) {}
+  anthropic: Credential | undefined;
+  failList = false;
+  listCalls = 0;
+  listGate: { started: () => void; wait: Promise<void> } | undefined;
+  constructor(public openai: Credential | undefined, anthropic?: Credential) { this.anthropic = anthropic; }
   async read(providerId: string) {
-    return providerId === "openai" ? this.openai : providerId === "openai-codex" ? this.codex : undefined;
+    return providerId === "openai" ? this.openai : providerId === "openai-codex" ? this.codex : providerId === "anthropic" ? this.anthropic : undefined;
   }
   async list(): Promise<readonly CredentialInfo[]> {
-    return [
+    this.listCalls += 1;
+    if (this.failList) throw new Error("credential listing unavailable");
+    const snapshot = [
       ...(this.openai ? [{ providerId: "openai", type: this.openai.type } as const] : []),
       ...(this.codex ? [{ providerId: "openai-codex", type: this.codex.type } as const] : []),
+      ...(this.anthropic ? [{ providerId: "anthropic", type: this.anthropic.type } as const] : []),
     ];
+    const gate = this.listGate;
+    if (gate) { this.listGate = undefined; gate.started(); await gate.wait; }
+    return snapshot;
   }
   async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>) {
     if (providerId === "openai") return fn(this.openai);
     if (providerId === "openai-codex") return fn(this.codex);
+    if (providerId === "anthropic") return fn(this.anthropic);
     return undefined;
   }
   async delete() {}
@@ -67,6 +80,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
   let server: Awaited<ReturnType<typeof fakeModelsServer>> | undefined;
   const services: GatewayService[] = [];
   let upstreamUrls: string[] = [];
+  let upstreamSignals: Array<AbortSignal | undefined> = [];
   afterEach(async () => {
     for (const service of services.splice(0)) service.dispose();
     runtime = undefined;
@@ -75,11 +89,12 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     if (server) await server.close();
     server = undefined;
     upstreamUrls = [];
+    upstreamSignals = [];
   });
 
-  async function harness(credential: Credential | undefined, options: { now?: () => number; modelsPath?: string | null; configureModels?: (root: string) => Promise<string>; sessions?: unknown; providerUsage?: unknown } = {}) {
+  async function harness(credential: Credential | undefined, options: { now?: () => number; modelsPath?: string | null; configureModels?: (root: string) => Promise<string>; sessions?: unknown; providerUsage?: unknown; anthropic?: Credential } = {}) {
     root = await mkdtemp(join(tmpdir(), "gateway-openai-eligibility-"));
-    const credentials = new Credentials(credential);
+    const credentials = new Credentials(credential, options.anthropic);
     const modelsPath = options.configureModels ? await options.configureModels(root) : options.modelsPath ?? null;
     runtime = await ModelRuntime.create({
       modelsPath,
@@ -91,6 +106,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       now: options.now,
       fetch: async (input, init) => {
         upstreamUrls.push(String(input));
+        upstreamSignals.push(init?.signal ?? undefined);
         const target = new URL(server!.url);
         target.search = new URL(String(input)).search;
         return fetch(target, init);
@@ -212,6 +228,60 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     expect(server.requests.filter(request => request.authorization === "Bearer invalid-pagination-account")).toHaveLength(2);
   });
 
+  it("isolates credential-read failure, fences stale account reads, and keeps discovery runtime-owned", async () => {
+    let releaseC!: () => void;
+    let startedC!: () => void;
+    const responseC = new Promise<void>(resolve => { releaseC = resolve; });
+    const requestC = new Promise<void>(resolve => { startedC = resolve; });
+    server = await fakeModelsServer(async (request, response) => {
+      if (request.headers.authorization === "Bearer account-c") {
+        startedC(); await responseC;
+        return json(response, { models: [{ slug: "gpt-5.5", visibility: "list" }], has_more: false });
+      }
+      return json(response, { models: [{ slug: "gpt-5.6-sol", visibility: "list" }], has_more: false });
+    });
+    const { runtime, credentials, service } = await harness({ type: "oauth", access: "account-a", refresh: "refresh", expires: Date.now() + 3_600_000 }, {
+      anthropic: { type: "api_key", key: "unrelated-provider-key" },
+    });
+    const policy = openAIModelEligibility(runtime)!;
+    credentials.failList = true;
+    const failedCatalog = await catalog(service);
+    expect(failedCatalog.some(model => model.provider === "anthropic" && model.available)).toBe(true);
+    expect(failedCatalog.some(model => model.provider === "openai" && model.available)).toBe(false);
+    credentials.failList = false;
+
+    let releaseStale!: () => void;
+    let staleStarted!: () => void;
+    const staleGate = new Promise<void>(resolve => { releaseStale = resolve; });
+    const staleReadStarted = new Promise<void>(resolve => { staleStarted = resolve; });
+    credentials.openai = { type: "api_key", key: "stale-key" };
+    credentials.listGate = { started: staleStarted, wait: staleGate };
+    const staleRead = policy.refresh();
+    await staleReadStarted;
+    credentials.openai = { type: "oauth", access: "account-b", refresh: "refresh-b", expires: Date.now() + 3_600_000 };
+    await policy.refresh();
+    releaseStale();
+    await staleRead;
+    expect(policy.isEligible({ provider: "openai", id: "gpt-5.5" })).toBe(false);
+    expect(policy.isEligible({ provider: "openai", id: "gpt-5.6-sol" })).toBe(true);
+
+    credentials.openai = { type: "oauth", access: "account-c", refresh: "refresh-c", expires: Date.now() + 3_600_000 };
+    const beforeCancellation = upstreamSignals.length;
+    const caller = new AbortController();
+    const cancelledWait = policy.refresh(caller.signal);
+    await requestC;
+    caller.abort();
+    await cancelledWait;
+    expect(upstreamSignals[beforeCancellation]?.aborted).toBe(false);
+    const previousListCalls = credentials.listCalls;
+    const activeWait = policy.refresh();
+    await waitFor(() => credentials.listCalls > previousListCalls, "the second caller to join the active discovery");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    releaseC();
+    await activeWait;
+    expect(policy.isEligible({ provider: "openai", id: "gpt-5.5" })).toBe(true);
+  });
+
   it("does not publish a delayed account-A result after account B becomes current", async () => {
     let releaseA!: () => void;
     let startedA!: () => void;
@@ -282,23 +352,36 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("keeps usage lending visible and provider counts aligned with actual choices", async () => {
-    server = await fakeModelsServer((_request, response) => json(response, { models, has_more: false }));
-    const readUsage = vi.fn(async (runtime: ModelRuntime, providerId: string) => ({ providers: [{
-      providerId, source: "openai-codex.wham", scope: "account", status: "available", updatedAt: null, retryAt: null,
-      stale: false, message: null, windows: [{ id: "primary", label: "Primary", usedPercent: 25 }], balances: [],
-    }] }));
-    const providerUsage = { read: readUsage };
-    const { runtime, service } = await harness({ type: "oauth", access: "openai-plan-token", refresh: "refresh", expires: Date.now() + 3_600_000 }, { providerUsage });
+  it("keeps borrowed usage aligned with account choices without sending OpenAI OAuth to ChatGPT", async () => {
+    const usageRequests: Array<{ url: string; authorization: string | undefined; account: string | undefined }> = [];
+    server = await fakeModelsServer((request, response) => {
+      if (request.url === "/backend-api/wham/usage") {
+        usageRequests.push({ url: request.url, authorization: request.headers.authorization, account: request.headers["chatgpt-account-id"] as string | undefined });
+        return json(response, { rate_limit: { primary_window: { used_percent: 25, reset_at: "2026-01-02T05:00:00Z", limit_window_seconds: 18_000 }, secondary_window: { used_percent: 35, reset_at: "2026-01-09T00:00:00Z", limit_window_seconds: 604_800 } } });
+      }
+      return json(response, { models, has_more: false });
+    });
+    const codexToken = `h.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "fixture-account" } })).toString("base64url")}.s`;
+    const providerUsage = new ProviderUsageOwner({ fetch: async (input, init) => {
+      const upstream = new URL(String(input));
+      const target = new URL(server!.url);
+      target.pathname = upstream.pathname;
+      target.search = upstream.search;
+      return fetch(target, init);
+    } });
+    const { runtime, credentials, service } = await harness({ type: "oauth", access: "openai-plan-token", refresh: "refresh", expires: Date.now() + 3_600_000 }, { providerUsage });
+    credentials.codex = { type: "oauth", access: codexToken, refresh: "codex-refresh", expires: Date.now() + 3_600_000 };
     const providerResult = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; modelCount: number; usageLentTo: string | null }> };
     const openai = providerResult.providers.find(provider => provider.id === "openai");
     const codex = providerResult.providers.find(provider => provider.id === "openai-codex");
     expect(openai?.modelCount).toBe(2);
     expect(codex?.usageLentTo).toBe("openai");
     expect(codex?.modelCount).toBe(0);
+    const getAuth = vi.spyOn(runtime, "getAuth");
     const usage = await service.invoke(client, "provider.usage", { providerId: "openai" }) as { providers: Array<{ providerId: string; source: string | null; status: string }> };
-    expect(usage.providers).toMatchObject([{ providerId: "openai", source: "openai-codex.wham", status: "available", windows: [{ id: "primary", usedPercent: 25 }] }]);
-    expect(readUsage).toHaveBeenCalledWith(runtime, "openai", undefined);
+    expect(usage.providers).toMatchObject([{ providerId: "openai", source: "openai-codex.wham", status: "available", windows: [{ id: "primary", usedPercent: 25 }, { id: "secondary", usedPercent: 35 }] }]);
+    expect(usageRequests).toEqual([{ url: "/backend-api/wham/usage", authorization: `Bearer ${codexToken}`, account: "fixture-account" }]);
+    expect(getAuth.mock.calls.map(([providerId]) => providerId)).not.toContain("openai");
     expect(runtime.getModels("openai-codex").length).toBeGreaterThan(0);
   });
 

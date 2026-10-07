@@ -1144,14 +1144,21 @@ export class KnowledgeStore {
       state.records.set(key, head);
     }
   }
-  async configure(commandId: string, config: KnowledgeConfig): Promise<KnowledgeConfig> {
+  async configure(commandId: string, config: KnowledgeConfig, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
-    return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation"); const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next; });
+    return this.mutate("knowledge.config", commandId, config, async state => {
+      if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale");
+      if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation");
+      if (config.observation.model && config.observation.model !== state.config.observation.model) await admitModel?.(config.observation.model);
+      if (config.knowledgeModel?.model && config.knowledgeModel.model !== state.config.knowledgeModel?.model) await admitModel?.(config.knowledgeModel.model);
+      const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next;
+    });
   }
-  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string): Promise<KnowledgeConfig> {
+  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
     if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge model requires an exact config revision and a bounded provider/model string");
     return this.mutate("knowledge.config", commandId, { expectedConfigRevision, knowledgeModel: model ?? null }, async state => {
       if (state.config.revision !== expectedConfigRevision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
+      if (model && model !== state.config.knowledgeModel?.model) await admitModel?.(model);
       const { knowledgeModel: _previous, ...withoutKnowledgeModel } = state.config;
       const next = { ...withoutKnowledgeModel, ...(model ? { knowledgeModel: { model, maxInputChars: state.config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: state.config.knowledgeModel?.maxOutputChars ?? 8_000 } } : {}), revision: state.config.revision + 1 };
       validateKnowledgeConfig(next);
