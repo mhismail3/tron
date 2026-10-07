@@ -142,6 +142,7 @@ interface Fixture {
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
   registry: RuntimeRegistry;
   sessionId: string;
+  homeId: string;
   slot: HomeSlot;
 }
 
@@ -206,6 +207,7 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
     await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
   }
   f.sessionId = designation.sessionId;
+  f.homeId = designation.homeId;
   f.slot = await registry.acquire(designation.sessionId);
 }
 
@@ -302,6 +304,7 @@ async function runActivation(f: Fixture, input: string, steps: Step[]): Promise<
   ]);
   const before = f.requests.length;
   await f.slot.prompt(input);
+  await waitUntil(() => f.requests.length >= before + steps.length + 1);
   await waitUntil(() => !f.slot.isBusy);
   const activation = f.requests.slice(before);
   expect(activation.length, "one request per step, plus the closing reply").toBe(steps.length + 1);
@@ -357,7 +360,7 @@ const userMessage = (text: string): Message => ({ role: "user", content: text, t
 /** The text one durable node record holds for an address, read from the store the
  * memory wrote: the independent oracle for "what the line said before". */
 async function durableNodeText(f: Fixture, level: number, index: number): Promise<string | undefined> {
-  const path = join(f.tronHome, "workspace", "state", "episodic", f.sessionId, "nodes.jsonl");
+  const path = join(f.tronHome, "workspace", "state", "episodic", f.homeId, "nodes.jsonl");
   const lines = (await readFile(path, "utf8")).trimEnd().split("\n").filter((line) => line !== "");
   const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   const latest = records.filter((record) => record.level === level && record.index === index && typeof record.text === "string").at(-1);
@@ -384,7 +387,7 @@ async function persistedCatalog(f: Fixture): Promise<EpisodicMessageRecord[]> {
   // Reuse Home's initialized workspace. Store reads are read-only and do not
   // reserve another opener or reclaim its active checkpoint artifacts.
   const workspace = (f.registry as unknown as { workspace: TronWorkspace }).workspace;
-  const store = new EpisodicStore(workspace, f.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+  const store = new EpisodicStore(workspace, f.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
   return [...(await store.read()).messages.values()];
 }
 
@@ -676,31 +679,18 @@ describe.sequential("Tron Home memory tools end to end", () => {
     expect(row.oversizedText).toBe(row.emptyText);
   }, 120_000);
 
-  it("answers a typed unavailable result for a stopped memory", async () => {
+  it("refuses a new activation when the memory has stopped", async () => {
     const f = await fixture("blocked");
     await prompt(f, longInput("blocked first"), "reply-r0");
     await waitForBuiltTree(f);
-    // The next activation's own input needs a summary, and that compactor call
-    // fails permanently: the memory stops while the activation is already served.
     f.compactor.failing = true;
-
-    const answers = await toolAnswers(f, longInput("blocked second"), [
-      {
-        name: "zoom",
-        args: { id: 0, n: 1 },
-        before: () => waitUntil(async () => (await memoryStatus(f)).blocked === "permanent-failure"),
-      },
-      { name: "date", args: { id: 0 } },
-      { name: "memory_search", args: { query: "blocked", to: 2 } },
-    ]);
-    const texts = answers.map((answer) => unavailable(answer, "memory-blocked"));
-    const row = { blocked: (await memoryStatus(f)).blocked ?? null, texts, providerRequests: f.requests.length };
+    const requestsBefore = f.requests.length;
+    await f.slot.prompt(longInput("blocked second"));
+    await waitUntil(() => f.registry.homeOwner().requestPolicyFor(f.sessionId)?.refusalLog().some(entry => entry.reason === "memory-blocked") === true);
+    const row = { blocked: (await memoryStatus(f)).blocked ?? null, providerRequests: f.requests.length - requestsBefore };
     report.cases.push({ case: "blocked", ...row });
     expect(row.blocked).toBe("permanent-failure");
-    for (const text of row.texts) expect(text).toContain("stopped");
-    // The activation that was already served still ran its whole tool loop: the
-    // memory stopped its pump, not the turn.
-    expect(row.providerRequests).toBeGreaterThan(2);
+    expect(row.providerRequests).toBe(0);
   }, 120_000);
 
   it("shows an edit committed between activations, not the text the view carried", async () => {
@@ -750,7 +740,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
     const workspace = new TronWorkspace(f.tronHome);
     await workspace.initialize();
     try {
-      const store = new EpisodicStore(workspace, f.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+      const store = new EpisodicStore(workspace, f.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
       const snapshot = await store.read();
       if (!snapshot.state) throw new Error("Legacy timestamp fixture has no persisted store state");
       const legacyMessages = [...snapshot.messages.values()].map((record) => {

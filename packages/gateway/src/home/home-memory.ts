@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import {
   EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS,
-  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSummarizer,
+  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSourceCursor, type EpisodicSummarizer,
 } from "../episodic/episodic-contract.js";
+import type { EpisodicCanonicalCut } from "../episodic/episodic-source.js";
 import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { localTimestampText } from "../util/timestamp.js";
@@ -120,6 +121,8 @@ export interface HomeMemoryOptions {
    * session exists before it has a line, and a runtime may be evicted while the
    * memory stays open. */
   sessionFile: () => Promise<string | undefined>;
+  /** Reads the ordered physical chapter branches for this stable Home namespace. */
+  sessionSource?: (cursor: EpisodicSourceCursor | null) => Promise<EpisodicCanonicalCut>;
   /** Resolves the compactor's model the way Knowledge resolves the model for its
    * own model calls: from the Gateway's ModelRuntime, never a session's. */
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
@@ -519,6 +522,7 @@ export class HomeMemory {
         workspace: this.options.workspace,
         sessionId: this.options.sessionId,
         sessionFile,
+        ...(this.options.sessionSource ? { sessionSource: this.options.sessionSource } : {}),
         summarizer,
         ...(this.options.limits ? { limits: this.options.limits } : {}),
         ...(this.options.diagnostic ? { diagnostic: this.options.diagnostic } : {}),

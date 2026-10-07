@@ -47,6 +47,8 @@ export interface EpisodicCanonicalEntry {
   timestamp: string;
   type: string;
   raw: Record<string, unknown>;
+  /** Physical provenance when a stable Home source spans chapters. */
+  sourceSessionId?: string;
   /** The exact JSON text of the entry's line, without its newline. */
   line: string;
 }
@@ -329,6 +331,77 @@ export async function readCanonicalBranchAtCursor(options: {
   } finally { await handle.close(); }
 }
 
+/**
+ * Read the ordered active branches of a Home chapter ledger into one logical
+ * stream. Each entry keeps its physical source ID; the cursor retains per-file
+ * identity/offset/leaf evidence plus the ledger revision. Chapter boundaries do
+ * not reset the logical message index or introduce navigation.
+ */
+export async function readCanonicalHomeSessions(options: {
+  homeId: string;
+  ledgerRevision: number;
+  chapters: readonly { sessionId: string; path: string }[];
+  maxLineBytes: number;
+}): Promise<EpisodicCanonicalCut> {
+  if (!Number.isSafeInteger(options.ledgerRevision) || options.ledgerRevision < 1 || options.chapters.length === 0) {
+    throw new EpisodicMemoryError("source", "Home chapter source has no admitted ledger");
+  }
+  const branch: EpisodicCanonicalEntry[] = [];
+  const chapterCursors: NonNullable<EpisodicSourceCursor["home"]>["chapters"] = [];
+  const sessionIds = new Set<string>();
+  const entryIds = new Set<string>();
+  let completeBytes = 0;
+  let tornBytes = 0;
+  let last: EpisodicCanonicalCut | undefined;
+  for (const chapter of options.chapters) {
+    if (sessionIds.has(chapter.sessionId)) throw new EpisodicMemoryError("source", "Home chapter source repeats a session ID");
+    sessionIds.add(chapter.sessionId);
+    const cut = await readCanonicalSession({ path: chapter.path, sessionId: chapter.sessionId, maxLineBytes: options.maxLineBytes });
+    last = cut;
+    completeBytes += cut.completeBytes;
+    tornBytes += cut.tornBytes;
+    chapterCursors.push({
+      sessionId: chapter.sessionId,
+      dev: cut.cursor.dev,
+      ino: cut.cursor.ino,
+      size: cut.cursor.size,
+      completeBytes: cut.cursor.completeBytes,
+      leafEntryId: cut.cursor.leafEntryId,
+      leafLineDigest: cut.cursor.leafLineDigest,
+      ...(cut.cursor.completePrefixDigest === undefined ? {} : { completePrefixDigest: cut.cursor.completePrefixDigest }),
+    });
+    for (const entry of cut.branch) {
+      if (entryIds.has(entry.id)) throw new EpisodicMemoryError("source", "Home chapter source repeats a canonical entry ID");
+      entryIds.add(entry.id);
+      branch.push({ ...entry, sourceSessionId: chapter.sessionId });
+    }
+  }
+  if (!last) throw new EpisodicMemoryError("source", "Home chapter source has no files");
+  const leaf = branch.at(-1);
+  const aggregateDigest = createHash("sha256").update("tron-home-source-v1\0")
+    .update(String(options.ledgerRevision)).update("\0")
+    .update(chapterCursors.map(cursor => `${cursor.sessionId}\0${cursor.dev}\0${cursor.ino}\0${cursor.completeBytes}\0${cursor.leafLineDigest ?? ""}`).join("\n"))
+    .digest("hex");
+  return {
+    sessionId: options.homeId,
+    branch,
+    completeBytes,
+    tornBytes,
+    leafEntryId: leaf?.id ?? null,
+    cursor: {
+      dev: last.cursor.dev,
+      ino: last.cursor.ino,
+      size: completeBytes,
+      completeBytes,
+      leafEntryId: leaf?.id ?? null,
+      leafLineDigest: leaf ? digest(leaf.line) : null,
+      completePrefixDigest: aggregateDigest,
+      home: { ledgerRevision: options.ledgerRevision, chapters: chapterCursors },
+    },
+    incremental: false,
+  };
+}
+
 export async function readCanonicalSimpleAppend(options: {
   path: string;
   sessionId: string;
@@ -452,6 +525,7 @@ export async function readCanonicalEntryInstants(options: {
 
 export interface EpisodicProjectedMessage {
   entryId: string;
+  sourceSessionId?: string;
   kind: EpisodicMessageKind;
   text: string;
   /** The canonical entry's instant, carried so the catalog can answer a
@@ -608,6 +682,7 @@ export function projectBranch(cut: EpisodicCanonicalCut, limits: EpisodicLimits)
     if (credentials !== text) omissions.push("credentials");
     projected.push({
       entryId: entry.id,
+      ...(entry.sourceSessionId === undefined ? {} : { sourceSessionId: entry.sourceSessionId }),
       kind,
       text: credentials,
       timestamp: entry.timestamp,

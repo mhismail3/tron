@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { resolveBindHost } from "../config.js";
 import { resolveTronHome } from "../tron-home.js";
-import type { ContentPart, HomeContextProjection, HomeMemoryStatus, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
+import type { ContentPart, HomeContextProjection, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 
@@ -369,20 +369,30 @@ async function runTerminalChat(): Promise<void> {
   await client.connect();
 
   const requestedSession = argument("--session");
-  let sessionId = requestedSession;
+  let sessionId: string | undefined = requestedSession;
+  let logicalHome = false;
   if (!sessionId) {
-    const sessions = await listSessions(client);
-    const cwd = argument("--cwd") ?? process.cwd();
-    const matching = sessions.filter((session) => session.cwd === cwd);
-    const recent = matching[0] ?? sessions[0];
-    sessionId = recent?.id;
-    if (!sessionId) {
-      const result = await client.request("session.create", { cwd, commandId: randomUUID() }) as unknown as SessionMutationEnvelope;
-      sessionId = result.sessionId;
+    try {
+      const route = await client.request("home.open", {}) as unknown as HomeOpen;
+      logicalHome = route.logicalSessionId === "home";
+      if (route.chapterState === "active") sessionId = route.sessionId;
+    } catch (error) {
+      if (!(error instanceof GatewayClientError) || error.code !== "not_found") throw error;
+    }
+    if (!logicalHome) {
+      const sessions = await listSessions(client);
+      const cwd = argument("--cwd") ?? process.cwd();
+      const matching = sessions.filter((session) => session.cwd === cwd);
+      const recent = matching[0] ?? sessions[0];
+      sessionId = recent?.id;
+      if (!sessionId) {
+        const result = await client.request("session.create", { cwd, commandId: randomUUID() }) as unknown as SessionMutationEnvelope;
+        sessionId = result.sessionId;
+      }
     }
   }
 
-  let snapshot!: SessionSnapshot;
+  let snapshot: SessionSnapshot | undefined;
   let subscriptionToken!: string;
   let rendered = "";
   let renderedMessageId: string | undefined;
@@ -391,15 +401,20 @@ async function runTerminalChat(): Promise<void> {
   let reconciledSettledOperation: string | undefined;
   let pendingCommand: { method: string; commandId: string } | undefined;
   let settledResolve: (() => void) | undefined;
-  await synchronizeTerminalSession(client, sessionId, (installed) => {
+  const installSnapshot = (installed: SnapshotEnvelope): void => {
     snapshot = installed.session;
     subscriptionToken = installed.subscriptionToken;
     rendered = assistantText(snapshot);
     renderedMessageId = assistantMessageId(snapshot);
     cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
-    process.stdout.write(`Attached to Tron session ${snapshot.sessionId} (${snapshot.cwd})\n`);
     if (rendered) process.stdout.write(rendered);
-  });
+  };
+  if (sessionId) {
+    await synchronizeTerminalSession(client, sessionId, installSnapshot);
+    process.stdout.write(`Attached to Tron session ${sessionId} (${snapshot!.cwd})\n`);
+  } else if (logicalHome) {
+    process.stdout.write("Attached to Tron Home (logical route; the next prompt activates its reserved chapter).\n");
+  }
 
   let unsubscribers: Array<() => void> = [];
   let reconnecting: Promise<void> | undefined;
@@ -408,7 +423,7 @@ async function runTerminalChat(): Promise<void> {
     unsubscribers.forEach((unsubscribe) => unsubscribe());
     unsubscribers = [
       client.onEvent((event) => {
-        if (event.sessionId !== sessionId) return;
+        if (!sessionId || event.sessionId !== sessionId || !snapshot) return;
         if (event.topic === "transport.resyncRequired") {
           void reconnect();
           return;
@@ -457,17 +472,19 @@ async function runTerminalChat(): Promise<void> {
         client = new GatewayProtocolClient(socketURL, await readLocalCredential(tronHome));
         try {
           await connectResilient(client);
-          await synchronizeTerminalSession(client, sessionId, (installed) => {
-            snapshot = installed.session;
-            subscriptionToken = installed.subscriptionToken;
-            cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
-            const current = assistantText(snapshot);
-            const messageId = assistantMessageId(snapshot);
-            const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
-            if (awaitingOperation && delta) process.stdout.write(delta);
-            rendered = current;
-            renderedMessageId = messageId;
-          });
+          if (sessionId) {
+            await synchronizeTerminalSession(client, sessionId, (installed) => {
+              snapshot = installed.session;
+              subscriptionToken = installed.subscriptionToken;
+              cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
+              const current = assistantText(snapshot);
+              const messageId = assistantMessageId(snapshot);
+              const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
+              if (awaitingOperation && delta) process.stdout.write(delta);
+              rendered = current;
+              renderedMessageId = messageId;
+            });
+          }
           attachListeners();
           process.stderr.write("[Tron synchronized]\n");
           if (pendingCommand) {
@@ -476,7 +493,7 @@ async function runTerminalChat(): Promise<void> {
             else if (status.status === "missing") awaitingOperation = undefined;
             pendingCommand = undefined;
           }
-          if (awaitingOperation && snapshot.phase === "idle" && !snapshot.operation) {
+          if (awaitingOperation && snapshot?.phase === "idle" && !snapshot.operation) {
             reconciledSettledOperation = awaitingOperation;
             awaitingOperation = undefined;
             settledResolve?.();
@@ -534,7 +551,8 @@ async function runTerminalChat(): Promise<void> {
       if (!prompt) continue;
       if (prompt === "/quit" || prompt === "/exit") break;
       if (prompt === "/abort") {
-        await client.request("session.abort", { sessionId, kind: "agent", commandId: randomUUID() });
+        if (sessionId) await client.request("session.abort", { sessionId, kind: "agent", commandId: randomUUID() });
+        else process.stdout.write("No active Home chapter to abort.\n");
         continue;
       }
       // Home commands are Gateway-wide, not session-scoped, so they work before
@@ -542,15 +560,28 @@ async function runTerminalChat(): Promise<void> {
       if (await runHomeInput(client, prompt)) continue;
       const commandId = randomUUID();
       reconciledSettledOperation = undefined;
-      pendingCommand = { method: "session.prompt", commandId };
-      const result = await confirmedRequest("session.prompt", {
-        sessionId,
-        text: prompt,
-        uploadIds: [],
-        ...(snapshot.phase === "idle" ? {} : { behavior: "followUp" }),
-        commandId,
-      }, commandId) as unknown as { operationId: string };
+      const method = logicalHome ? "home.prompt" : "session.prompt";
+      pendingCommand = { method, commandId };
+      let result: { operationId: string; sessionId?: string };
+      if (logicalHome) {
+        result = await confirmedRequest(method, { text: prompt, commandId }, commandId) as unknown as typeof result;
+      } else {
+        if (!sessionId) throw new Error("No terminal session is attached");
+        result = await confirmedRequest(method, {
+          sessionId,
+          text: prompt,
+          uploadIds: [],
+          ...(snapshot?.phase === "idle" ? {} : { behavior: "followUp" }),
+          commandId,
+        }, commandId) as unknown as typeof result;
+      }
       pendingCommand = undefined;
+      if (logicalHome && result.sessionId !== sessionId) {
+        if (!result.sessionId) throw new Error("Home prompt returned no physical chapter identity");
+        sessionId = result.sessionId;
+        await synchronizeTerminalSession(client, sessionId, installSnapshot);
+        attachListeners();
+      }
       if (!operationNeedsSettlement(result.operationId, reconciledSettledOperation)) {
         reconciledSettledOperation = undefined;
         continue;
@@ -561,7 +592,7 @@ async function runTerminalChat(): Promise<void> {
   } finally {
     unsubscribers.forEach((unsubscribe) => unsubscribe());
     readline.close();
-    await client.request("session.close", { sessionId, subscriptionToken }).catch(() => null);
+    if (sessionId && subscriptionToken) await client.request("session.close", { sessionId, subscriptionToken }).catch(() => null);
     client.close();
   }
 }

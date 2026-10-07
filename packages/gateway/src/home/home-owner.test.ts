@@ -144,7 +144,7 @@ describe("Tron Home record", () => {
     expect(await f.owner.status()).toMatchObject({
       available: true, enabled: true, homeId: "home-1", sessionId: "session-1", generation: 2,
     });
-    expect(f.owner.chapterStateFor("session-1")).toEqual({ sessionId: "session-1", sealed: false });
+    expect(f.owner.chapterStateFor("session-1")).toMatchObject({ sessionId: "session-1", sealed: false, ordinal: 1 });
   });
 
   it("preserves and refuses the pre-chapter v1 record without rewriting it", async () => {

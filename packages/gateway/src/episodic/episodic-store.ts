@@ -378,7 +378,7 @@ function validateState(value: unknown): EpisodicStoreState {
   const cursor = state.cursor;
   if (cursor !== null) {
     if (typeof cursor !== "object" || Array.isArray(cursor)
-      || !hasOnlyKeys(cursor as unknown as Record<string, unknown>, ["dev", "ino", "size", "completeBytes", "leafEntryId", "completePrefixDigest", "leafLineDigest"])) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
+      || !hasOnlyKeys(cursor as unknown as Record<string, unknown>, ["dev", "ino", "size", "completeBytes", "leafEntryId", "completePrefixDigest", "leafLineDigest", "home"])) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
     for (const field of ["dev", "ino", "size", "completeBytes"] as const) {
       if (typeof cursor[field] !== "number" || !Number.isSafeInteger(cursor[field]) || cursor[field] < 0) {
         throw new EpisodicMemoryError("invalid-store", `Episodic memory state cursor has no ${field}`);
@@ -389,6 +389,28 @@ function validateState(value: unknown): EpisodicStoreState {
     if (cursor.completePrefixDigest !== undefined && cursor.completePrefixDigest !== null
       && (typeof cursor.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(cursor.completePrefixDigest))) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid prefix digest");
+    }
+    if (cursor.home !== undefined) {
+      const home = cursor.home as unknown as Record<string, unknown>;
+      if (!home || typeof home !== "object" || Array.isArray(home)
+        || !hasOnlyKeys(home, ["ledgerRevision", "chapters"])
+        || !Number.isSafeInteger(home.ledgerRevision) || (home.ledgerRevision as number) < 1
+        || !Array.isArray(home.chapters) || home.chapters.length === 0 || home.chapters.length > 100_000) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home source cursor");
+      }
+      for (const value of home.chapters) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
+        const chapter = value as Record<string, unknown>;
+        if (!hasOnlyKeys(chapter, ["sessionId", "dev", "ino", "size", "completeBytes", "leafEntryId", "leafLineDigest", "completePrefixDigest"])
+          || typeof chapter.sessionId !== "string" || chapter.sessionId.length < 1 || chapter.sessionId.length > 200
+          || ["dev", "ino", "size", "completeBytes"].some(field => !Number.isSafeInteger(chapter[field]) || (chapter[field] as number) < 0)
+          || (chapter.leafEntryId !== null && typeof chapter.leafEntryId !== "string")
+          || (chapter.leafLineDigest !== null && (typeof chapter.leafLineDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.leafLineDigest)))
+          || (chapter.completePrefixDigest !== undefined && chapter.completePrefixDigest !== null
+            && (typeof chapter.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.completePrefixDigest)))) {
+          throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
+        }
+      }
     }
   }
   const blocked = state.blocked;

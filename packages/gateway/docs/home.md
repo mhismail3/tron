@@ -15,21 +15,39 @@ edits, branch changes, bash, and extension-driven session replacement. Registry
 owners also preflight attention, archive and delete mutations against that same
 provider. A sealed result is a
 typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
-The version-2 Home record carries an ordered chapter ledger. An active chapter
-is writable; a sealed chapter remains readable but refuses mutation regardless
-of Home's enabled state or the runtime's ordinary/Home profile. The chapter-state
-check is physical-session-owned and is not bypassed when Home is disabled. A
-Registry-owned reservation materializer claims one attempt per reserved chapter,
-then scans every candidate before adoption or creation. The exact SDK path and
-attempt ID are durably recorded before a caller can receive the runtime and submit
-a first message. An unreadable, malformed, torn, duplicate, symlinked, or
-path-mismatched candidate blocks recovery without changing canonical bytes. The
-materializer is not yet called by a logical Home activation; rollover remains
-inactive until its route and memory owners are enabled together. If a future SDK operation fails
-after staging canonical entries, RuntimeSlot retains the existing uncertain-
-outcome fence rather than treating the staged mutation as a clean refusal. A
-sealed check before a custom-entry append is a clean typed refusal: it exits the
-bounded ownership-write retry path without draining or fencing the runtime.
+The version-2 Home record carries an ordered chapter ledger. At a quiescent
+turn boundary, crossing either the 24 MiB canonical-byte or 50,000-entry soft
+limit seals the active chapter and durably reserves its successor; this writes
+only bounded metadata. RuntimeSlot also refuses an admission before dispatch
+when the current chapter would exceed its 200 MiB or 100,000-entry hard limit.
+The next `home.prompt` activation is the only path that materializes that
+reservation. A sealed chapter remains readable but refuses
+mutation regardless of Home's enabled state or the runtime's ordinary/Home
+profile. The chapter-state check is physical-session-owned and is not bypassed
+when Home is disabled. The Registry materializer claims one attempt per reserved
+chapter, scans every candidate before adoption or creation, and durably records
+the exact SDK path and attempt ID before the caller can receive the runtime.
+Unreadable, malformed, torn, duplicate, symlinked, or path-mismatched evidence
+blocks recovery without changing canonical bytes.
+
+`home.open` returns Home's logical route and current binding. `home.prompt`
+persists an idempotency receipt containing the Home identity, binding revision,
+and selected physical chapter before materialization or dispatch, then verifies
+that binding again before sending the input. A stale binding cannot silently
+redirect a command. Replaying a command receipt returns its original result;
+accepted prompts are never replayed by a reconnect. Terminal chat uses these
+logical RPCs when Home is enabled and subscribes to the physical runtime only
+after a chapter is active. Ordinary session routes are unchanged.
+
+Home memory remains one bounded projection keyed by stable `homeId`, not by a
+physical chapter. Its canonical source reads active, sealed, and materializing
+chapters in ledger order, retains each physical session ID as provenance, and
+continues its cursor across chapter boundaries. A reserved chapter contributes
+nothing until canonical evidence exists. If an SDK operation fails after staging
+canonical entries, RuntimeSlot retains the existing uncertain-outcome fence
+rather than treating the staged mutation as a clean refusal. A sealed check
+before a custom-entry append is a clean typed refusal: it exits the bounded
+ownership-write retry path without draining or fencing the runtime.
 
 ## The record
 
@@ -41,8 +59,8 @@ record per installation:
 | --- | --- |
 | `version` | `2`; other versions, unknown fields, and invalid chapter topology are preserved and refused |
 | `homeId` | Stable identity of this installation's Home, generated once |
-| `chapters` | Ordered, unique physical sessions; step 3 starts with exactly one `active` chapter |
-| `bindingRevision` | Advances when designation binds Home to a different physical session |
+| `chapters` | Ordered, unique physical sessions; designation starts with one `active` chapter, then quiescent rollover appends one `reserved` successor |
+| `bindingRevision` | Advances when designation or reserved-chapter activation binds Home to a different physical session |
 | `generation` | Advances on every profile change (designate, re-enable, disable) |
 | `policyRevision` | The curated-profile revision in force; a re-enable writes this build's |
 | `enabled` | Whether Home is currently designated |
@@ -170,6 +188,11 @@ owner.
   all — live, or still a canonical session in the catalog. A Gateway whose first
   catalog cut has not completed reports `sessionPresent: true`, because an
   unread catalog cannot prove absence.
+- `home.open` returns the logical Home route and current binding without
+  creating a runtime or materializing a reserved successor. `home.prompt` binds
+  one command receipt to that route before effects, materializes a reserved
+  chapter only when needed, rechecks the exact binding, and returns the physical
+  session and operation identity.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
@@ -211,10 +234,15 @@ callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 
 ## The terminal client
 
-`tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the session-based
-terminal client, and today it is the only surface that can designate Home,
-configure its memory and recover it. Its `/home` line is resolved without
-touching the Gateway, so a bad argument is answered before any RPC. Malformed
+`tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the terminal
+client, and today it is the only surface that can designate Home, configure its
+memory and recover it. With no explicit `--session`, it first asks for the
+logical Home route; while Home is enabled, ordinary input goes through
+`home.prompt` even as physical chapters change. A reserved successor is not
+opened just to attach the terminal: its first runtime is created only when a
+prompt activates it. `--session` remains an explicit physical-session route.
+Its `/home` line is resolved without touching the Gateway, so a bad argument is
+answered before any RPC. Malformed
 arguments are caught within the command loop, and assistant refusals are rendered
 from the canonical message's `errorMessage`, even when it has no content text:
 

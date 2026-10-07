@@ -374,7 +374,7 @@ describe("Tron Home designation", () => {
 
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: true, homeId: designation.homeId,
-      sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
+      sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
       // Home has no memory defaults: until `home.configureMemory`, the
       // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false },

@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, realpath } from "node:fs/promises";
+import { chmod, mkdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeStatus, ModelRef } from "../protocol/types.js";
+import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
-import type { EpisodicDiagnostic } from "../episodic/episodic-contract.js";
+import { EPISODIC_DEFAULTS, type EpisodicDiagnostic, type EpisodicSourceCursor } from "../episodic/episodic-contract.js";
+import { readCanonicalHomeSessions, type EpisodicCanonicalCut, type EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durablePublishBoundedJson } from "../util/durable-json.js";
@@ -27,6 +28,8 @@ const MAXIMUM_MODEL_ID_BYTES = 300;
  * revision is still this build's record to read: only `version` gates admission,
  * because a profile change is not a format change. */
 const HOME_POLICY_REVISION = 1;
+const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
+const HOME_SOFT_ENTRIES = 50_000;
 
 export interface HomeChapter {
   sessionId: string;
@@ -79,6 +82,10 @@ export interface HomeSessionPort {
   sessionFile(sessionId: string): Promise<string | undefined>;
   /** Whether the session currently holds a live runtime. */
   hasLiveRuntime(sessionId: string): boolean;
+  /** Quiescent canonical size used to seal a chapter at its soft boundary. */
+  chapterMetrics?(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }>;
+  /** Whether the current SDK owner has observed a persisted conversation message. */
+  hasConversation?(sessionId: string): boolean;
   /** Replace the session's live runtime in place after `commit` changes the
    * profile decision for it, so the next prompt uses the new profile. A busy
    * session refuses retryably before `commit` runs. */
@@ -138,7 +145,7 @@ export class HomeOwner {
   /** Serializes durable record commits with model callbacks that arrive from a
    * slot lane while a Home lifecycle mutation owns `mutex`. */
   private readonly recordMutex = new AsyncMutex();
-  /** One memory per Home session id. Released when the record stops naming it. */
+  /** One memory per Home session id, replacing the previous session's. */
   private memory: { sessionId: string; owner: HomeMemory } | undefined;
   /** One request seam per Home session id, so a runtime replacement reuses the
    * open activation rather than dropping it. A fork is a new id, hence a new
@@ -202,8 +209,9 @@ export class HomeOwner {
           : { action: "none" };
     const ready = gaps.length === 0;
     const phase: HomeStatus["phase"] = !record.enabled ? "disabled"
-      : !sessionPresent ? "missing-session"
-        : memory.blocked || !memory.configured ? "blocked"
+      : record.chapters.at(-1)!.state === "reserved" || record.chapters.at(-1)!.state === "materializing" ? "rollover-pending"
+        : !sessionPresent ? "missing-session"
+          : memory.blocked || !memory.configured ? "blocked"
           : activation.available && activation.activationOpen ? "active" : "ready";
     return {
       phase, activation, readiness: { ready, gaps }, recovery,
@@ -211,6 +219,7 @@ export class HomeOwner {
       enabled: record.enabled,
       homeId: record.homeId,
       sessionId,
+      bindingRevision: record.bindingRevision,
       generation: record.generation,
       model: { ...record.model },
       live,
@@ -230,13 +239,49 @@ export class HomeOwner {
    * successor entries fail closed until their owning lifecycle transition lands. */
   chapterStateFor(sessionId: string): HomeChapterState {
     const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
-    return chapter?.state === "sealed" || chapter?.state === "reserved" || chapter?.state === "materializing"
-      ? { sessionId, sealed: true }
-      : unsealedHomeChapterState(sessionId);
+    if (chapter?.state === "materializing") return { sessionId, sealed: true, materializing: true, ordinal: chapter.ordinal };
+    if (chapter?.state === "sealed" || chapter?.state === "reserved") return { sessionId, sealed: true, ordinal: chapter.ordinal };
+    return chapter ? { sessionId, sealed: false, ordinal: chapter.ordinal } : unsealedHomeChapterState(sessionId);
   }
 
   /** Claim a durable reserved successor for the Registry's single-flight owner.
    * Replacing an older attempt is recovery after the prior Gateway process exited. */
+  /** Stable logical route target. A reserved successor's next binding revision
+   * is fixed before it can receive a command. */
+  open(): HomeOpen {
+    const binding = this.routeBinding();
+    const record = this.record!;
+    return {
+      logicalSessionId: "home",
+      homeId: binding.homeId,
+      bindingRevision: binding.bindingRevision,
+      sessionId: binding.physicalSessionId,
+      generation: record.generation,
+      chapterState: record.chapters.at(-1)!.state,
+    };
+  }
+
+  routeBinding(): { homeId: string; bindingRevision: number; physicalSessionId: string } {
+    const record = this.record;
+    if (!record || !record.enabled) throw new GatewayError("not_found", "Tron Home is not enabled");
+    const chapter = record.chapters.at(-1)!;
+    return {
+      homeId: record.homeId,
+      bindingRevision: chapter.state === "active" ? record.bindingRevision : record.bindingRevision + 1,
+      physicalSessionId: chapter.sessionId,
+    };
+  }
+
+  assertRouteBinding(binding: { homeId: string; bindingRevision: number; physicalSessionId: string }): void {
+    const current = this.routeBinding();
+    if (current.homeId !== binding.homeId || current.bindingRevision !== binding.bindingRevision
+      || current.physicalSessionId !== binding.physicalSessionId) {
+      throw new GatewayError("conflict", "The Home route binding is stale; open Home again before sending", false, {
+        reason: "binding-stale", bindingRevision: binding.bindingRevision,
+      });
+    }
+  }
+
   async claimReservedChapter(sessionId: string, attemptId: string): Promise<HomeChapter> {
     return this.recordMutex.run(async () => {
       const current = this.record;
@@ -306,7 +351,7 @@ export class HomeOwner {
    */
   requestPolicyFor(sessionId: string): HomeRequestPolicy | undefined {
     const record = this.record;
-    const designated = record !== undefined && record.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId && chapter.state === "active");
+    const designated = record !== undefined && record.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing"));
     if (!designated && !this.designating) return undefined;
     let policy = this.policies.get(sessionId);
     if (!policy) {
@@ -329,9 +374,55 @@ export class HomeOwner {
    */
   noteEntriesCommitted(sessionId: string): void {
     const record = this.record;
-    if (!record || !record.enabled || !record.chapters.some(chapter => chapter.sessionId === sessionId && chapter.state === "active")) return;
-    if (this.memory?.sessionId !== sessionId) return;
-    this.memory.owner.noteEntriesCommitted();
+    const chapter = record?.chapters.find(candidate => candidate.sessionId === sessionId);
+    if (!record || !record.enabled || !chapter || (chapter.state !== "active" && chapter.state !== "materializing")) return;
+    if (this.memory?.sessionId === record.homeId) this.memory.owner.noteEntriesCommitted();
+    if (chapter.state === "materializing" && this.options.sessions.hasConversation?.(sessionId)) {
+      void this.publishObservedMaterialization(sessionId);
+    }
+  }
+
+  /** Called by the Slot only after the completed turn has reached a quiescent boundary. */
+  async chapterQuiescent(sessionId: string): Promise<void> {
+    const record = this.record;
+    const chapter = record?.chapters.find(candidate => candidate.sessionId === sessionId);
+    if (!record || !record.enabled || chapter?.state !== "active" || !this.options.sessions.chapterMetrics) return;
+    const metrics = await this.options.sessions.chapterMetrics(sessionId);
+    if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES)) return;
+    await this.recordMutex.run(async () => {
+      const current = this.record;
+      const active = current?.chapters.find(candidate => candidate.sessionId === sessionId);
+      if (!current || !active || active.state !== "active") return;
+      const now = new Date().toISOString();
+      const successor: HomeChapter = {
+        sessionId: randomUUID(), ordinal: active.ordinal + 1, state: "reserved", createdAt: now,
+      };
+      await this.writeLocked({
+        ...current,
+        chapters: current.chapters.map(candidate => candidate.sessionId === sessionId
+          ? { ...candidate, state: "sealed" as const, sealedAt: now, sizeAtSeal: metrics.bytes, entriesAtSeal: metrics.entries }
+          : candidate).concat(successor),
+        updatedAt: now,
+      });
+    });
+  }
+
+  private async publishObservedMaterialization(sessionId: string): Promise<void> {
+    await this.recordMutex.run(async () => {
+      const current = this.record;
+      const chapter = current?.chapters.find(candidate => candidate.sessionId === sessionId);
+      if (!current || !current.enabled || chapter?.state !== "materializing"
+        || !this.options.sessions.hasConversation?.(sessionId)) return;
+      const now = new Date().toISOString();
+      await this.writeLocked({
+        ...current,
+        chapters: current.chapters.map(candidate => candidate.sessionId === sessionId
+          ? { sessionId, ordinal: candidate.ordinal, state: "active", createdAt: candidate.createdAt }
+          : candidate),
+        bindingRevision: current.bindingRevision + 1,
+        updatedAt: now,
+      });
+    });
   }
 
   /**
@@ -345,7 +436,7 @@ export class HomeOwner {
    */
   memoryToolsFor(sessionId: string): HomeMemoryToolAccess | undefined {
     const record = this.record;
-    if (!record || !record.enabled || !record.chapters.some(chapter => chapter.sessionId === sessionId && chapter.state === "active")) return undefined;
+    if (!record || !record.enabled || !record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing"))) return undefined;
     return {
       zoom: (id, n) => this.toolMemory(sessionId, memory => memory.zoom(id, n)),
       date: id => this.toolMemory(sessionId, memory => memory.date(id)),
@@ -371,12 +462,11 @@ export class HomeOwner {
         throw new GatewayError("conflict", "Tron Home is disabled: designate it before configuring its memory");
       }
       const memory = { model: { ...input.model } };
-      const sessionId = homeSessionId(record);
-      const owner = this.ownerFor(sessionId);
+      const owner = this.ownerFor(record.homeId);
       await owner.configure(memory);
       await this.recordMutex.run(async () => {
         const current = this.record;
-        if (!current || homeSessionId(current) !== sessionId || !current.enabled) {
+        if (!current || current.homeId !== record.homeId || !current.enabled) {
           throw new GatewayError("conflict", "Tron Home changed while configuring its memory");
         }
         await this.writeLocked({ ...current, memory, updatedAt: new Date().toISOString() });
@@ -400,7 +490,7 @@ export class HomeOwner {
       if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
       if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before resuming its memory");
       if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: configure it with home.configureMemory");
-      const owner = this.ownerFor(homeSessionId(record));
+      const owner = this.ownerFor(record.homeId);
       await owner.configure(record.memory);
       const blocked = owner.status().blocked;
       if (!blocked) {
@@ -426,12 +516,12 @@ export class HomeOwner {
     const record = this.record;
     if (!record) return { configured: false, open: false };
     const sessionId = homeSessionId(record);
-    const owner = this.memory?.sessionId === sessionId ? this.memory.owner : undefined;
+    const owner = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
     if (owner?.open) return owner.status();
     const base: HomeMemoryStatus = record.memory
       ? { configured: true, open: false, model: { ...record.memory.model } }
       : { configured: false, open: false };
-    const persisted = await (owner ?? this.ownerFor(sessionId)).persistedState().catch(() => undefined);
+    const persisted = await (owner ?? this.ownerFor(record.homeId)).persistedState().catch(() => undefined);
     if (!persisted) return base;
     return {
       ...base,
@@ -473,7 +563,9 @@ export class HomeOwner {
    * opened. */
   private toolMemory(sessionId: string, read: (memory: HomeMemory) => Promise<HomeMemoryToolResult>): Promise<HomeMemoryToolResult> {
     const record = this.record;
-    const memory = record && record.enabled && homeSessionId(record) === sessionId && this.memory?.sessionId === sessionId
+    const memory = record && record.enabled
+      && record.chapters.some(chapter => chapter.sessionId === sessionId && (chapter.state === "active" || chapter.state === "materializing"))
+      && this.memory?.sessionId === record.homeId
       ? this.memory.owner
       : undefined;
     if (memory) return read(memory);
@@ -503,26 +595,53 @@ export class HomeOwner {
     if (!record.memory) {
       throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     }
-    const owner = this.ownerFor(homeSessionId(record));
+    const owner = this.ownerFor(record.homeId);
     // After a Gateway restart the record still holds the configuration; the
     // first activation opens the store from it.
     await owner.configure(record.memory);
     return owner.activationView(activation, signal);
   }
 
-  /** The memory owner for one session id, replacing the previous session's. */
-  private ownerFor(sessionId: string): HomeMemory {
+  /** One memory owner and persisted namespace for the stable installation Home. */
+  private async readHomeSource(_cursor: EpisodicSourceCursor | null): Promise<EpisodicCanonicalCut> {
+    const record = this.record;
+    if (!record) throw new GatewayError("conflict", "Tron Home is unavailable");
+    const chapters: Array<{ sessionId: string; path: string }> = [];
+    for (const chapter of record.chapters) {
+      if (chapter.state !== "sealed" && chapter.state !== "active" && chapter.state !== "materializing") continue;
+      const path = await this.options.sessions.sessionFile(chapter.sessionId);
+      if (!path) continue;
+      const info = await stat(path).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (info?.isFile()) chapters.push({ sessionId: chapter.sessionId, path });
+    }
+    if (chapters.length === 0) throw new GatewayError("conflict", "Home has no canonical chapter file to read");
+    return readCanonicalHomeSessions({
+      homeId: record.homeId,
+      ledgerRevision: record.bindingRevision,
+      chapters,
+      maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+    });
+  }
+
+  private ownerFor(homeId: string): HomeMemory {
     const current = this.memory;
-    if (current && current.sessionId === sessionId) return current.owner;
+    if (current && current.sessionId === homeId) return current.owner;
     if (current) void current.owner.dispose();
     const owner = new HomeMemory({
       workspace: this.options.workspace,
-      sessionId,
-      sessionFile: () => this.options.sessions.sessionFile(sessionId),
+      sessionId: homeId,
+      sessionFile: async () => {
+        const record = this.record;
+        return record ? this.options.sessions.sessionFile(homeSessionId(record)) : undefined;
+      },
+      sessionSource: (cursor) => this.readHomeSource(cursor),
       modelSummarizer: this.options.memorySummarizer,
       ...(this.options.memoryDiagnostic ? { diagnostic: this.options.memoryDiagnostic } : {}),
     });
-    this.memory = { sessionId, owner };
+    this.memory = { sessionId: homeId, owner };
     return owner;
   }
 

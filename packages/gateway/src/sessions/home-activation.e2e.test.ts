@@ -12,7 +12,7 @@
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
@@ -26,6 +26,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus } from "../protocol/types.js";
@@ -250,7 +251,8 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
  * thing a Gateway restart does. */
 async function restart(f: Fixture): Promise<void> {
   await f.registry.dispose();
-  registries.splice(registries.indexOf(f.registry), 1);
+  const registeredIndex = registries.indexOf(f.registry);
+  if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
   openRegistry(f);
   await f.registry.initialize();
   // A restarted Gateway has to read its catalog before it can resolve a session
@@ -287,10 +289,13 @@ async function sessionJsonl(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>
   return slot.sessionFile ? await readFile(slot.sessionFile, "utf8").catch(() => "") : "";
 }
 
-/** The memory store's state document for one session, as the memory persists it
- * (and as a restart restores it). */
-function memoryStatePath(f: Fixture, sessionId: string): string {
-  return join(f.tronHome, "workspace", "state", "episodic", sessionId, "state.json");
+/** The memory store's state document keyed by Home's stable logical identity. */
+function memoryStatePath(f: Fixture, homeId: string): string {
+  return join(f.tronHome, "workspace", "state", "episodic", homeId, "state.json");
+}
+
+async function homeMemoryStateId(f: Fixture): Promise<string> {
+  return (JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord).homeId;
 }
 
 async function readMemoryState(f: Fixture, sessionId: string): Promise<Record<string, unknown> | undefined> {
@@ -313,6 +318,142 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
 }
 
 describe("Tron Home activations end to end", () => {
+  it.each([
+    ["canonical bytes", 24 * 1_024 * 1_024 + 1, 3],
+    ["canonical entries", 0, 50_001],
+  ])("seals lazily after the soft %s threshold at a quiescent boundary", async (_label, bytes, entries) => {
+    const f = await fixture(`soft-threshold-${_label.replaceAll(" ", "-")}`);
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `e2e-soft-threshold-${bytes}-${entries}`);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      chapterQuiescent(sessionId: string): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes, entries, quiescent: true });
+    f.faux.setResponses([fauxAssistantMessage("soft threshold crossed")]);
+    await slot.prompt("cross the soft Home threshold");
+    await waitUntil(async () => {
+      const record = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+      return record.chapters.length === 2;
+    });
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters).toHaveLength(2);
+    expect(stored.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: bytes, entriesAtSeal: entries });
+    expect(stored.chapters[1]).toMatchObject({ state: "reserved", ordinal: 2 });
+    expect(stored.bindingRevision).toBe(1);
+    // Lazy rollover: threshold crossing seals and reserves metadata only.
+    expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(stored.chapters[1]!.sessionId);
+  });
+
+  it.each(["hard bytes", "hard entries"] as const)("refuses a Home activation before staged state at the %s boundary", async boundary => {
+    const f = await fixture(`hard-boundary-${boundary.replaceAll(" ", "-")}`);
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `e2e-hard-boundary-${boundary.replaceAll(" ", "-")}`);
+    let providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("seed the Home transcript"); }]);
+    await slot.prompt("seed the canonical Home chapter");
+    await waitUntil(() => providerCalls === 1);
+    await waitUntil(() => !slot.isBusy);
+    providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("unexpected hard-boundary dispatch"); }]);
+    const branchBefore = slot.sessionManager.getBranch();
+    const file = slot.sessionFile!;
+    if (boundary === "hard bytes") {
+      await truncate(file, 200 * 1_024 * 1_024 + 1);
+    } else {
+      Object.defineProperty(slot, "canonicalEntryCount", { configurable: true, get: () => 100_000 });
+    }
+    const sizeBefore = (await stat(file)).size;
+    await expect(slot.prompt("must not dispatch beyond the hard Home limit")).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: boundary === "hard bytes" ? "hard-bytes" : "hard-entries" },
+    });
+    expect(slot.sessionManager.getBranch()).toEqual(branchBefore);
+    expect((await stat(file)).size).toBe(sizeBefore);
+    expect(providerCalls).toBe(0);
+  });
+
+  it("recovers a durable reservation after restart and routes the next activation to one successor", async () => {
+    const f = await fixture("reserved-crash-recovery");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const oldSlot = await designateHome(f, "e2e-reservation-crash-designate");
+    f.faux.setResponses([fauxAssistantMessage("recovered successor reply")]);
+    await oldSlot.prompt("BEFORE-ROLLOVER-FACT: the lighthouse is blue");
+    await waitUntil(() => !oldSlot.isBusy);
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-crash-successor";
+    await f.registry.dispose();
+    const registeredIndex = registries.indexOf(f.registry);
+    if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
+    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), `${JSON.stringify({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString(), sizeAtSeal: 24 * 1_024 * 1_024, entriesAtSeal: 2 },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    })}\n`);
+    openRegistry(f);
+    await f.registry.initialize();
+    const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+    await waitUntil(() => catalogCut(), 20_000);
+    await f.registry.catalog("all");
+
+    const opened = await f.service.invoke(client, "home.open", {}) as unknown as {
+      homeId: string; bindingRevision: number; sessionId: string;
+    };
+    expect(opened).toMatchObject({ homeId: current.homeId, bindingRevision: current.bindingRevision + 1, sessionId: reservedId, chapterState: "reserved" });
+    expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(reservedId);
+    f.faux.setResponses([fauxAssistantMessage("after reservation recovery")]);
+    const accepted = await f.service.invoke(client, "home.prompt", {
+      commandId: "e2e-home-prompt-after-reservation", text: "AFTER-ROLLOVER-FACT: the bell rings twice",
+    }) as unknown as { sessionId: string; operationId: string };
+    await waitUntil(async () => {
+      const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+      return status.sessionId !== oldSlot.id && status.phase === "active";
+    }, 30_000);
+    expect(accepted.sessionId).toBe(reservedId);
+    expect(accepted.operationId).toBeTypeOf("string");
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(status).toMatchObject({ sessionId: reservedId, bindingRevision: current.bindingRevision + 1 });
+  });
+
+  it("keeps one homeId memory stream continuous across a crash and physical chapter boundary", async () => {
+    const f = await fixture("chapter-memory-continuity");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const oldSlot = await designateHome(f, "e2e-memory-chapter-designate");
+    const beforeRequests: CapturedRequest[] = [];
+    f.faux.setResponses([responsesOf(f, beforeRequests)("before chapter response")]);
+    await oldSlot.prompt("CONTINUITY-FACT: the brass key is under the red bowl");
+    await waitUntil(() => !oldSlot.isBusy);
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "memory-chapter-successor";
+    await f.registry.dispose();
+    const registeredIndex = registries.indexOf(f.registry);
+    if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
+    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), `${JSON.stringify({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString(), sizeAtSeal: 24 * 1_024 * 1_024, entriesAtSeal: 2 },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    })}\n`);
+    openRegistry(f);
+    await f.registry.initialize();
+    const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+    await waitUntil(() => catalogCut(), 20_000);
+    await f.registry.catalog("all");
+    const afterRequests: CapturedRequest[] = [];
+    f.faux.setResponses([responsesOf(f, afterRequests)("after chapter response")]);
+    await f.service.invoke(client, "home.prompt", {
+      commandId: "e2e-home-prompt-after-rollover", text: "Where is the brass key?",
+    });
+    await waitUntil(() => afterRequests.length === 1, 30_000);
+    expect(viewOf(afterRequests[0]!)).toContain("CONTINUITY-FACT");
+    const after = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(after).toMatchObject({ homeId: current.homeId, sessionId: reservedId });
+    expect(beforeRequests).toHaveLength(1);
+  });
+
   // progress.md C12 (#466), the property Home exists for: the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.
@@ -709,9 +850,10 @@ describe("Tron Home activations end to end", () => {
     // The Gateway that a transient outage blocked: the memory's own durable state
     // is exactly what a restart hands over.
     await restart(f);
-    const state = await readMemoryState(f, slot.id);
+    const memoryId = await homeMemoryStateId(f);
+    const state = await readMemoryState(f, memoryId);
     expect(state).toBeDefined();
-    await writeMemoryState(f, slot.id, { ...state!, blocked: { reason: "retries-exhausted" } });
+    await writeMemoryState(f, memoryId, { ...state!, blocked: { reason: "retries-exhausted" } });
 
     const reopened = await f.registry.acquire(slot.id);
     f.faux.setResponses([responsesOf(f, requests)(longInput("transient response two"))]);
@@ -835,12 +977,11 @@ describe("Tron Home activations end to end", () => {
     expect(row.newSessionDiffers).toBe(true);
     expect(row.configuredOnNewSession).toBe(true);
     expect(row.modelOnNewSession).toEqual(MEMORY_MODEL);
-    expect(row.spendOnNewSession).toBe(0);
+    expect(row.spendOnNewSession).toBeGreaterThanOrEqual(row.spentOnFirstSession);
     expect(row.spentOnFirstSession).toBeGreaterThan(0);
 
-    // The new session's memory opens and builds (#483). Its namespace was never
-    // created, which is not lost state, even though the first session's store
-    // set the workspace's episodic marker.
+    // The new physical chapter opens the same Home memory namespace (#483), so
+    // the stable Home identity retains configuration and spend across recovery.
     const freshSlot = await f.registry.acquire(reDesignated.sessionId);
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply three"))]);
     await freshSlot.prompt(longInput("lifecycle activation three"));
@@ -999,10 +1140,11 @@ describe("Tron Home activations end to end", () => {
     await restart(f);
     // The store the restart closed: its own document is what the status must
     // report, because the reopened memory has not opened it yet.
-    const persisted = await readMemoryState(f, slot.id);
+    const memoryId = await homeMemoryStateId(f);
+    const persisted = await readMemoryState(f, memoryId);
     expect(persisted).toBeDefined();
     const closed = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    await writeMemoryState(f, slot.id, { ...persisted!, blocked: { reason: "source-unavailable", detail: "canonical session is unreadable" } });
+    await writeMemoryState(f, memoryId, { ...persisted!, blocked: { reason: "source-unavailable", detail: "canonical session is unreadable" } });
     const blocked = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const row = {
       openWhenClosed: closed.memory.open,
@@ -1100,7 +1242,7 @@ describe("Tron Home activations end to end", () => {
     await reopened.prompt(longInput("restart activation two"));
     await waitUntil(() => !reopened.isBusy);
     const after = await f.registry.homeOwner().memoryStatus();
-    const persisted = await readMemoryState(f, slot.id);
+    const persisted = await readMemoryState(f, await homeMemoryStateId(f));
     const row = {
       usedBeforeRestart: beforeUsed,
       usedAfterRestart: after.episodic?.tokens.used ?? 0,

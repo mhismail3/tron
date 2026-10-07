@@ -291,10 +291,12 @@ export class EpisodicMemory {
     const cursor = this.sourceCursor;
     if (!cursor) return undefined;
     try {
-      const branch = await readCanonicalBranchAtCursor({
-        path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId,
-        maxLineBytes: this.limits.maxSourceLineBytes, cursor,
-      });
+      const branch = this.dependencies.sessionSource
+        ? (await this.dependencies.sessionSource(cursor)).branch
+        : await readCanonicalBranchAtCursor({
+          path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId,
+          maxLineBytes: this.limits.maxSourceLineBytes, cursor,
+        });
       if (!branch) return undefined;
       let result = 0;
       let found = false;
@@ -526,20 +528,22 @@ export class EpisodicMemory {
   private async ingest(): Promise<void> {
     let cut: EpisodicCanonicalCut;
     try {
-      cut = this.sourceCursor ? await readCanonicalSimpleAppend({
-        path: this.dependencies.sessionFile,
-        sessionId: this.dependencies.sessionId,
-        maxLineBytes: this.limits.maxSourceLineBytes,
-        cursor: this.sourceCursor,
-      }) ?? await readCanonicalSession({
-        path: this.dependencies.sessionFile,
-        sessionId: this.dependencies.sessionId,
-        maxLineBytes: this.limits.maxSourceLineBytes,
-      }) : await readCanonicalSession({
-        path: this.dependencies.sessionFile,
-        sessionId: this.dependencies.sessionId,
-        maxLineBytes: this.limits.maxSourceLineBytes,
-      });
+      cut = this.dependencies.sessionSource
+        ? await this.dependencies.sessionSource(this.sourceCursor)
+        : this.sourceCursor ? await readCanonicalSimpleAppend({
+          path: this.dependencies.sessionFile,
+          sessionId: this.dependencies.sessionId,
+          maxLineBytes: this.limits.maxSourceLineBytes,
+          cursor: this.sourceCursor,
+        }) ?? await readCanonicalSession({
+          path: this.dependencies.sessionFile,
+          sessionId: this.dependencies.sessionId,
+          maxLineBytes: this.limits.maxSourceLineBytes,
+        }) : await readCanonicalSession({
+          path: this.dependencies.sessionFile,
+          sessionId: this.dependencies.sessionId,
+          maxLineBytes: this.limits.maxSourceLineBytes,
+        });
       if (cut.incremental && cut.branch.some(entry => this.entryIndex.has(entry.id))) {
         cut = await readCanonicalSession({ path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId, maxLineBytes: this.limits.maxSourceLineBytes });
       }
@@ -576,7 +580,10 @@ export class EpisodicMemory {
         const existing = this.entryIndex.get(message.entryId);
         if (existing === undefined) {
           const index = this.messages.size;
-          const record: EpisodicMessageRecord = { revision: this.takeRevision(), index, ...message, sessionId: this.dependencies.sessionId };
+          const record: EpisodicMessageRecord = {
+            revision: this.takeRevision(), index, ...message,
+            sessionId: message.sourceSessionId ?? this.dependencies.sessionId,
+          };
           await this.appendCatalog(record);
           this.entryIndex.set(message.entryId, index);
           this.setMessage(record);
@@ -587,7 +594,10 @@ export class EpisodicMemory {
         }
         const current = this.messages.get(existing);
         if (current && current.text === message.text && current.omitted === message.omitted && current.kind === message.kind) continue;
-        const record: EpisodicMessageRecord = { revision: this.takeRevision(), index: existing, ...message, sessionId: this.dependencies.sessionId };
+        const record: EpisodicMessageRecord = {
+          revision: this.takeRevision(), index: existing, ...message,
+          sessionId: message.sourceSessionId ?? this.dependencies.sessionId,
+        };
         await this.appendCatalog(record);
         this.setMessage(record);
         changed.push(existing);
@@ -711,11 +721,13 @@ export class EpisodicMemory {
    * `unavailable` rather than a guess.
    */
   private canonicalTimestamps(): Promise<Map<string, string>> {
-    this.legacyTimestamps ??= readCanonicalEntryInstants({
-      path: this.dependencies.sessionFile,
-      sessionId: this.dependencies.sessionId,
-      maxLineBytes: this.limits.maxSourceLineBytes,
-    }).catch(() => {
+    this.legacyTimestamps ??= (this.dependencies.sessionSource
+      ? this.dependencies.sessionSource(this.sourceCursor).then(cut => new Map(cut.branch.map(entry => [entry.id, entry.timestamp])))
+      : readCanonicalEntryInstants({
+        path: this.dependencies.sessionFile,
+        sessionId: this.dependencies.sessionId,
+        maxLineBytes: this.limits.maxSourceLineBytes,
+      })).catch(() => {
       this.legacyTimestamps = undefined;
       return new Map<string, string>();
     });

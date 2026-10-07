@@ -803,6 +803,17 @@ export class RuntimeRegistry {
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
+        chapterMetrics: async (sessionId) => {
+          const slot = this.slots.get(sessionId);
+          if (!slot) return { bytes: 0, entries: 0, quiescent: false };
+          const path = slot.sessionFile;
+          const bytes = path ? await stat(path).then(info => info.size).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+            throw error;
+          }) : 0;
+          return { bytes, entries: slot.canonicalEntryCount, quiescent: !slot.isBusy };
+        },
+        hasConversation: (sessionId) => this.slots.get(sessionId)?.hasConversationMessage ?? false,
         replaceRuntimeForProfile: async (sessionId, commit) => {
           const slot = this.slots.get(sessionId);
           if (!slot || slot.isDisposed) {
@@ -1216,6 +1227,7 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      homeQuiescent: (sessionId: string) => this.home.chapterQuiescent(sessionId),
       turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
         // Admission is detached from inference, but RuntimeSlot invokes this
         // only after the terminal receipt and canonical attention barrier settle.

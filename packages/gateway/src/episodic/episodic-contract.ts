@@ -202,12 +202,25 @@ export function isInvalidationRecord(record: EpisodicNodeLogRecord): record is E
 
 /** Where the canonical reader stopped, and the identity of the file it read, so
  * the next read can continue at the offset when the file only grew. */
+export interface EpisodicChapterSourceCursor {
+  sessionId: string;
+  dev: number;
+  ino: number;
+  size: number;
+  completeBytes: number;
+  leafEntryId: string | null;
+  leafLineDigest: string | null;
+  completePrefixDigest?: string | null;
+}
+
 export interface EpisodicSourceCursor {
   dev: number;
   ino: number;
   size: number;
   completeBytes: number;
   leafEntryId: string | null;
+  /** Ordered canonical chapter cursors for a stable Home namespace. */
+  home?: { ledgerRevision: number; chapters: EpisodicChapterSourceCursor[] };
   /** sha256 chain over every complete source line through this cursor. */
   completePrefixDigest?: string | null;
   /** sha256 of the last complete line's JSON text, so an in-place rewrite of
@@ -304,6 +317,8 @@ export type EpisodicMemoryDependencies = {
   sessionId: string;
   /** The canonical session JSONL path. Read only, never repaired. */
   sessionFile: string;
+  /** Ordered canonical source for a multi-chapter Home namespace. */
+  sessionSource?: (cursor: EpisodicSourceCursor | null) => Promise<import("./episodic-source.js").EpisodicCanonicalCut>;
   limits?: Partial<EpisodicLimits>;
   /** Where this module raises its bounded records; the caller (gateway-main)
    * decides whether to persist them. */

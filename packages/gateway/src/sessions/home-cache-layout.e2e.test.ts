@@ -276,7 +276,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     expect(requests.every((request) => request.body.prompt_cache_retention === "24h")).toBe(true);
     const summaries = f.requests.filter((request) => request.kind === "summarizer");
     expect(summaries.length).toBeGreaterThan(0);
-    expect(new Set(summaries.map((request) => request.body.prompt_cache_key))).toEqual(new Set([`tron-episodic:${status.sessionId}`]));
+    expect(new Set(summaries.map((request) => request.body.prompt_cache_key))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(summaries.every((request) => request.body.prompt_cache_retention === "24h")).toBe(true);
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
     report.cases.push({ case: "openai-responses", requests: requests.map((request) => request.body), summarizerCalls: summaries.length });
@@ -354,7 +354,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     expect(sampleMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
     // #491 R6: the summarizer's calls ask for long retention too.
     expect(markTtls(sample)).toEqual(new Set(["1h"]));
-    expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.sessionId}`]));
+    expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
     // The memory keeps building merges after the last turn. A tree over N
     // messages is complete at exactly sum(floor(N / 2^l)) nodes, and nothing can

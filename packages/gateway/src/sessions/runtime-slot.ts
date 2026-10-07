@@ -12,7 +12,7 @@ import {
   trustedDelegatedController,
 } from "./delegated-provider.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -205,9 +205,14 @@ type PromptQueueDisplay = {
   photoCount?: number;
   fileAttachmentCount?: number;
   attachments?: QueuedMessageState["attachments"];
+  /** Constructed only by the logical Home route for its first materializing prompt. */
+  homeMaterializationPermit?: boolean;
 };
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
+
+const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
+const HOME_HARD_ENTRIES = 100_000;
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
   resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
@@ -382,6 +387,8 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
+  homeQuiescent?: (sessionId: string) => Promise<void>;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
   turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
@@ -625,6 +632,7 @@ export class RuntimeSlot {
    * continuation from restart reconciliation. */
   private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
   private readonly completionWorkOwners = new Map<string, string>();
+  private readonly homeMaterializationPermitOperations = new Set<string>();
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** The session replacement a running extension command requested. */
@@ -1510,6 +1518,15 @@ export class RuntimeSlot {
 
   get sessionFile(): string | undefined {
     return this.runtime.session.sessionFile;
+  }
+
+  get canonicalEntryCount(): number {
+    return this.runtime.session.sessionManager.getEntries().length;
+  }
+
+  get hasConversationMessage(): boolean {
+    return this.runtime.session.sessionManager.getEntries().some(entry => entry.type === "message"
+      && (entry.message.role === "user" || entry.message.role === "assistant"));
   }
 
   /** Pi may reserve a future JSONL path before writing its first user or
@@ -3182,13 +3199,14 @@ export class RuntimeSlot {
     describe: string;
     existing: () => "absent" | "matching" | "contradictory";
     append: () => void;
+    homeMaterializationPermit?: boolean;
   }): void {
     const state = options.existing();
     if (state === "contradictory") {
       throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
     }
     if (state === "matching") return;
-    this.assertChapterWritable();
+    this.assertChapterWritable(options.homeMaterializationPermit === true);
     try {
       options.append();
     } catch (error) {
@@ -3207,6 +3225,7 @@ export class RuntimeSlot {
     data: JsonValue,
     identity: string,
     owner?: GatewayWorkHandle,
+    homeMaterializationPermit = false,
   ): Promise<void> {
     // A receipt belongs to the session bound when it was requested. Retries run
     // after a delay and must not follow a rebind into the replacement's file.
@@ -3215,6 +3234,7 @@ export class RuntimeSlot {
       () => this.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
         this.persistVerifiedCustomEntry({
           describe: "canonical receipt",
+          homeMaterializationPermit,
           existing: () => {
             const entry = manager.getBranch().find((candidate) => {
               if (candidate.type !== "custom" || candidate.customType !== customType) return false;
@@ -3235,7 +3255,9 @@ export class RuntimeSlot {
 
   private persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
     if (this.handedOffInvocations.has(receipt.invocationId)) return Promise.resolve();
-    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+    const permit = receipt.operationId !== undefined && this.homeMaterializationPermitOperations.has(receipt.operationId);
+    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner, permit)
+      .finally(() => { if (receipt.operationId) this.homeMaterializationPermitOperations.delete(receipt.operationId); });
   }
 
   private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
@@ -3494,6 +3516,7 @@ export class RuntimeSlot {
         return;
       }
       this.hooks.settled(this.id);
+      await this.hooks.homeQuiescent?.(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
       this.operation ??= this.compactionOperation;
       this.revision += 1;
@@ -6834,7 +6857,7 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
-    this.assertChapterWritable();
+    this.assertChapterWritable(queueDisplay?.homeMaterializationPermit === true, Buffer.byteLength(text), 1);
     if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
@@ -6985,7 +7008,11 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
-      this.assertChapterWritable();
+      this.assertChapterWritable(queueDisplay?.homeMaterializationPermit === true, Buffer.byteLength(queueDisplay?.text ?? ""), 1);
+      if (queueDisplay?.homeMaterializationPermit) {
+        this.homeMaterializationPermitOperations.add(operationId);
+        while (this.homeMaterializationPermitOperations.size > 32) this.homeMaterializationPermitOperations.delete(this.homeMaterializationPermitOperations.values().next().value!);
+      }
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -9154,9 +9181,28 @@ export class RuntimeSlot {
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
-  private assertChapterWritable(): void {
+  private assertChapterWritable(homeMaterializationPermit = false, addedBytes = 0, addedEntries = 1): void {
     const state = this.dependencies.homeChapterState?.(this.id);
-    if (state) assertChapterWritable(state);
+    if (state) assertChapterWritable(state, homeMaterializationPermit);
+    if (this.liveProfile() !== "home" || state?.sealed) return;
+    const entries = this.canonicalEntryCount;
+    if (entries + addedEntries > HOME_HARD_ENTRIES) {
+      throw new GatewayError("conflict", "This Home chapter reached its canonical entry limit", false, {
+        reason: "hard-entries", chapterOrdinal: state?.ordinal ?? 0, entries,
+      });
+    }
+    const path = this.sessionFile;
+    let bytes = 0;
+    if (path) {
+      try { bytes = statSync(path).size; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    if (bytes + addedBytes > HOME_HARD_BYTES) {
+      throw new GatewayError("conflict", "This Home chapter reached its canonical byte limit", false, {
+        reason: "hard-bytes", chapterOrdinal: state?.ordinal ?? 0, bytes, entries,
+      });
+    }
   }
 
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {

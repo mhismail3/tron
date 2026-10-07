@@ -56,6 +56,29 @@ async function receiptFiles(root: string): Promise<string[]> {
 }
 
 describe("CommandReceiptStore", () => {
+  it("persists a logical Home binding before effects and replays its original result", async () => {
+    const root = await temporaryRoot("tron-receipts-home-binding-");
+    const store = new CommandReceiptStore(root);
+    let resolveCount = 0;
+    let observedPending: Record<string, unknown> | undefined;
+    const binding = { homeId: "home-stable", bindingRevision: 7, physicalSessionId: "chapter-seven" };
+    const operation = async () => {
+      const [path] = await receiptFiles(root);
+      observedPending = JSON.parse(await readFile(path!, "utf8")) as Record<string, unknown>;
+      return { operationId: "accepted", ...binding };
+    };
+    const original = await store.execute("device", "home.prompt", "home-binding-command", operation, {
+      resolveBinding: () => { resolveCount += 1; return binding; },
+    });
+    expect(observedPending).toMatchObject({ version: 2, status: "pending", binding });
+    expect(original).toEqual({ operationId: "accepted", ...binding });
+    const replay = await store.execute("device", "home.prompt", "home-binding-command", async () => {
+      throw new Error("completed route receipt replayed its effect");
+    }, { resolveBinding: () => { throw new Error("replay attempted to resolve a new route"); } });
+    expect(replay).toEqual(original);
+    expect(resolveCount).toBe(1);
+  });
+
   it("allows distinct commands to execute concurrently", async () => {
     const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);

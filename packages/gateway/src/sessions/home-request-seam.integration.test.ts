@@ -385,7 +385,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ],
     });
     expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
-    expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toEqual({ sessionId: item.slot.id, sealed: true });
+    expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toMatchObject({ sessionId: item.slot.id, sealed: true, ordinal: 1 });
     const oldBytes = await item.jsonl();
     await item.registry.dispose();
 
