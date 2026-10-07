@@ -208,6 +208,8 @@ export interface EpisodicSourceCursor {
   size: number;
   completeBytes: number;
   leafEntryId: string | null;
+  /** sha256 chain over every complete source line through this cursor. */
+  completePrefixDigest?: string | null;
   /** sha256 of the last complete line's JSON text, so an in-place rewrite of
    * the prefix is detected by the window read before the offset. */
   leafLineDigest: string | null;

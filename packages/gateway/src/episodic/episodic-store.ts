@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readSecureJson } from "../util/secure-json.js";
-import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
+import { durableAtomicWriteJson, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
   EpisodicMemoryError, EPISODIC_STORE_VERSION,
@@ -34,6 +34,15 @@ const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
 const STATE_MAX_BYTES = 64 * 1_024;
 const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "source-unavailable"]);
 
+export interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
+  lstat: typeof lstat;
+  readdir: typeof readdir;
+  writeFile: typeof writeFile;
+  syncDurably(handle: { sync(): Promise<void> }): Promise<void>;
+}
+
+const productionFileSystem: EpisodicStoreFileSystem = { lstat, mkdir, open, readdir, rename, rm, writeFile, syncDurably };
+
 interface StorePaths {
   root: string;
   initialized: string;
@@ -61,6 +70,7 @@ export class EpisodicStore {
     private readonly workspace: TronWorkspace,
     private readonly sessionId: string,
     private readonly maxLineBytes: number,
+    private readonly fileSystem: EpisodicStoreFileSystem = productionFileSystem,
   ) {
     if (!SESSION_ID.test(sessionId)) throw new EpisodicMemoryError("invalid-request", "Source session id cannot name a store directory");
   }
@@ -76,6 +86,26 @@ export class EpisodicStore {
     const descriptor = await this.workspace.describe();
     if (!descriptor.available) throw new EpisodicMemoryError("unsafe-store", "Tron internal workspace is unavailable; episodic memory cannot be persisted");
     return join(descriptor.root, "state");
+  }
+
+  async readState(): Promise<EpisodicStoreState | undefined> {
+    const paths = await this.paths();
+    const initialized = await this.featureInitialized();
+    if (!(await directoryExists(paths.root))) {
+      if (initialized && !(await directoryExists(dirname(paths.root)))) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
+      }
+      return undefined;
+    }
+    await assertOwnerDirectory(paths.root);
+    const marker = await readSecureJson<unknown>(paths.initialized, 256);
+    if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
+    if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
+      || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
+      throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
+    }
+    const stateRead = await readSecureJson<unknown>(paths.state, STATE_MAX_BYTES);
+    return stateRead.present ? validateState(stateRead.value) : undefined;
   }
 
   async read(): Promise<EpisodicStoreSnapshot> {
@@ -125,10 +155,27 @@ export class EpisodicStore {
       } else nodes.set(nodeAddress(record.level, record.index), record);
       highestRevision = Math.max(highestRevision, record.revision);
     });
-    await cleanupCheckpoints(paths, checkpoint.directory);
     return { present: true, messages, nodes, state, recoveredTornBytes: catalogRead.tornBytes + nodesRead.tornBytes, highestGeneration, highestRevision };
   }
 
+
+  /** Remove abandoned checkpoint artifacts only while the single memory opener owns this session. */
+  async cleanupOrphans(): Promise<void> {
+    const paths = await this.paths();
+    if (!(await directoryExists(paths.root))) return;
+    await assertOwnerDirectory(paths.root);
+    const pointer = await readSecureJson<unknown>(paths.checkpointPointer, 4_096);
+    let active: string | null = null;
+    if (pointer.present) {
+      const value = pointer.value as { version?: unknown; directory?: unknown; watermark?: unknown };
+      if (!value || value.version !== 1 || typeof value.directory !== "string" || !/^checkpoint-[A-Za-z0-9.-]+$/u.test(value.directory)
+        || typeof value.watermark !== "number" || !Number.isSafeInteger(value.watermark) || value.watermark < 0) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint pointer is malformed");
+      }
+      active = value.directory;
+    }
+    await cleanupCheckpoints(paths, active, this.fileSystem);
+  }
 
   async appendCatalog(record: EpisodicMessageRecord): Promise<void> {
     await this.append((await this.paths()).catalog, record);
@@ -138,51 +185,49 @@ export class EpisodicStore {
     await this.append((await this.paths()).nodes, record);
   }
 
-  async shouldCheckpoint(messages: Iterable<EpisodicMessageRecord>, nodes: Iterable<EpisodicNodeRecord>): Promise<boolean> {
+  async shouldCheckpoint(liveBytes: number): Promise<boolean> {
     const paths = await this.paths();
     const logBytes = (await fileSize(paths.catalog)) + (await fileSize(paths.nodes));
+    if (logBytes <= 16_384) return false;
     if (logBytes >= 32_768) return true;
-    let liveBytes = 0;
-    for (const record of messages) liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
-    for (const record of nodes) liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
     return logBytes > liveBytes + 16_384;
   }
 
   async saveState(state: EpisodicStoreState): Promise<void> {
     await this.ensureRoot();
-    await durableAtomicWriteJson((await this.paths()).state, state, 0o600);
+    await durableAtomicWriteJson((await this.paths()).state, state, 0o600, this.fileSystem);
   }
 
   /** Publish a bounded-line checkpoint before reclaiming append history. */
   async checkpoint(options: { messages: Iterable<EpisodicMessageRecord>; nodes: Iterable<EpisodicNodeRecord>; state: EpisodicStoreState; watermark: number }): Promise<void> {
     const paths = await this.ensureRoot();
-    await durableAtomicWriteJson(paths.state, options.state, 0o600);
+    await durableAtomicWriteJson(paths.state, options.state, 0o600, this.fileSystem);
     const name = `checkpoint-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const staging = join(paths.root, ".checkpoint-staging");
-    const stagingInfo = await lstat(staging).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+    const stagingInfo = await this.fileSystem.lstat(staging).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
     if (stagingInfo) {
       if (!stagingInfo.isDirectory() || stagingInfo.uid !== process.getuid?.() || (stagingInfo.mode & 0o077) !== 0) {
         throw new EpisodicMemoryError("unsafe-store", "Episodic checkpoint staging entry is unsafe");
       }
-      await removeOwnedTree(staging);
+      await removeOwnedTree(staging, this.fileSystem);
     }
-    await mkdir(staging, { mode: 0o700 });
+    await this.fileSystem.mkdir(staging, { mode: 0o700 });
     let pointerPublished = false;
     try {
-      await writeCheckpointLines(join(staging, "catalog.jsonl"), options.messages, this.maxLineBytes);
-      await writeCheckpointLines(join(staging, "nodes.jsonl"), options.nodes, this.maxLineBytes);
-      await writeFile(join(staging, "state.json"), `${JSON.stringify(options.state)}\n`, { mode: 0o600 });
-      const stateFile = await open(join(staging, "state.json"), constants.O_RDONLY);
-      try { await syncDurably(stateFile); } finally { await stateFile.close(); }
-      await syncDirectory(staging);
+      await writeCheckpointLines(join(staging, "catalog.jsonl"), options.messages, this.maxLineBytes, this.fileSystem);
+      await writeCheckpointLines(join(staging, "nodes.jsonl"), options.nodes, this.maxLineBytes, this.fileSystem);
+      await this.fileSystem.writeFile(join(staging, "state.json"), `${JSON.stringify(options.state)}\n`, { mode: 0o600 });
+      const stateFile = await this.fileSystem.open(join(staging, "state.json"), constants.O_RDONLY);
+      try { await this.fileSystem.syncDurably(stateFile); } finally { await stateFile.close(); }
+      await syncDirectory(staging, this.fileSystem);
       const checkpoint = join(paths.root, name);
-      await rename(staging, checkpoint);
-      await syncDirectory(paths.root);
-      await durableAtomicWriteJson(paths.checkpointPointer, { version: 1, directory: name, watermark: options.watermark }, 0o600);
+      await this.fileSystem.rename(staging, checkpoint);
+      await syncDirectory(paths.root, this.fileSystem);
+      await durableAtomicWriteJson(paths.checkpointPointer, { version: 1, directory: name, watermark: options.watermark }, 0o600, this.fileSystem);
       pointerPublished = true;
-      await truncateLog(paths.catalog, paths.root);
-      await truncateLog(paths.nodes, paths.root);
-      await cleanupCheckpoints(paths, name);
+      await truncateLog(paths.catalog, paths.root, this.fileSystem);
+      await truncateLog(paths.nodes, paths.root, this.fileSystem);
+      await cleanupCheckpoints(paths, name, this.fileSystem);
     } catch (error) {
       const failure = new EpisodicMemoryError("invalid-store", `Episodic checkpoint could not be committed: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`) as EpisodicMemoryError & { publicationUncertain: boolean };
       failure.publicationUncertain = pointerPublished || (typeof error === "object" && error !== null && (error as { publicationVisible?: unknown }).publicationVisible === true);
@@ -268,28 +313,28 @@ async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<
   return { messages, nodes, watermark, directory: value.directory };
 }
 
-async function writeCheckpointLines<T>(path: string, records: Iterable<T>, maxLineBytes: number): Promise<void> {
-  const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+async function writeCheckpointLines<T>(path: string, records: Iterable<T>, maxLineBytes: number, fileSystem: EpisodicStoreFileSystem): Promise<void> {
+  const handle = await fileSystem.open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
     for (const record of records) {
       const line = `${JSON.stringify(record)}\n`;
       if (Buffer.byteLength(line, "utf8") > maxLineBytes) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint record exceeds the store's line bound");
       await handle.writeFile(line, "utf8");
     }
-    await syncDurably(handle);
+    await fileSystem.syncDurably(handle);
   } finally { await handle.close(); }
 }
 
-async function truncateLog(path: string, root: string): Promise<void> {
+async function truncateLog(path: string, root: string, fileSystem: EpisodicStoreFileSystem): Promise<void> {
   const temp = join(root, `.checkpoint-log-${Math.random().toString(36).slice(2)}`);
-  const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  try { await syncDurably(handle); } finally { await handle.close(); }
-  await rename(temp, path);
-  await syncDirectory(root);
+  const handle = await fileSystem.open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try { await fileSystem.syncDurably(handle); } finally { await handle.close(); }
+  await fileSystem.rename(temp, path);
+  await syncDirectory(root, fileSystem);
 }
 
-async function cleanupCheckpoints(paths: StorePaths, active: string | null): Promise<void> {
-  const names = await readdir(paths.root);
+async function cleanupCheckpoints(paths: StorePaths, active: string | null, fileSystem: EpisodicStoreFileSystem): Promise<void> {
+  const names = await fileSystem.readdir(paths.root);
   for (const name of names) {
     if (name === active || name === "checkpoint.current.json" || name === "catalog.jsonl" || name === "nodes.jsonl" || name === "state.json" || name === "initialized.json") continue;
     const directory = name === ".checkpoint-staging" || /^checkpoint-[A-Za-z0-9.-]+$/u.test(name);
@@ -297,24 +342,24 @@ async function cleanupCheckpoints(paths: StorePaths, active: string | null): Pro
       || /^checkpoint\.current\.json\.[0-9]+\.[a-f0-9]{12}\.tmp$/u.test(name);
     if (!directory && !temporaryFile) continue;
     const path = join(paths.root, name);
-    const info = await lstat(path);
+    const info = await fileSystem.lstat(path);
     if (info.uid !== process.getuid?.() || (directory ? !info.isDirectory() || (info.mode & 0o777) !== 0o700 : !info.isFile() || (info.mode & 0o777) !== 0o600)) {
       throw new EpisodicMemoryError("unsafe-store", "Episodic checkpoint cleanup encountered an unsafe entry");
     }
-    await removeOwnedTree(path);
+    await removeOwnedTree(path, fileSystem);
   }
 }
 
-async function removeOwnedTree(path: string): Promise<void> {
-  const info = await lstat(path);
+async function removeOwnedTree(path: string, fileSystem: EpisodicStoreFileSystem): Promise<void> {
+  const info = await fileSystem.lstat(path);
   if (info.uid !== process.getuid?.() || (!info.isFile() && !info.isDirectory())
     || (info.mode & 0o777) !== (info.isDirectory() ? 0o700 : 0o600)) {
     throw new EpisodicMemoryError("unsafe-store", "Episodic cleanup encountered an unsafe entry");
   }
   if (info.isDirectory()) {
-    for (const name of await readdir(path)) await removeOwnedTree(join(path, name));
+    for (const name of await fileSystem.readdir(path)) await removeOwnedTree(join(path, name), fileSystem);
   }
-  await rm(path, { recursive: info.isDirectory(), force: false });
+  await fileSystem.rm(path, { recursive: info.isDirectory(), force: false });
 }
 
 function validateState(value: unknown): EpisodicStoreState {
@@ -332,6 +377,10 @@ function validateState(value: unknown): EpisodicStoreState {
     }
     if (cursor.leafEntryId !== null && typeof cursor.leafEntryId !== "string") throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid leaf");
     if (cursor.leafLineDigest !== null && typeof cursor.leafLineDigest !== "string") throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid line digest");
+    if (cursor.completePrefixDigest !== undefined && cursor.completePrefixDigest !== null
+      && (typeof cursor.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(cursor.completePrefixDigest))) {
+      throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid prefix digest");
+    }
   }
   const blocked = state.blocked;
   if (blocked !== null && blocked !== undefined) {
@@ -393,10 +442,10 @@ async function fileSize(path: string): Promise<number> {
   return info.size;
 }
 
-async function syncDirectory(path: string): Promise<void> {
-  const handle = await open(path, constants.O_RDONLY);
+async function syncDirectory(path: string, fileSystem: EpisodicStoreFileSystem = productionFileSystem): Promise<void> {
+  const handle = await fileSystem.open(path, constants.O_RDONLY);
   try {
-    await syncDurably(handle);
+    await fileSystem.syncDurably(handle);
   } finally {
     await handle.close();
   }

@@ -116,8 +116,7 @@ export async function readEpisodicState(options: {
     options.sessionId,
     options.maxStoreLineBytes ?? EPISODIC_DEFAULTS.maxStoreLineBytes,
   );
-  const snapshot = await store.read();
-  return snapshot.state ?? undefined;
+  return store.readState();
 }
 
 export class EpisodicMemory {
@@ -143,6 +142,8 @@ export class EpisodicMemory {
   private readonly messages = new Map<number, EpisodicMessageRecord>();
   private readonly nodes = new Map<string, EpisodicNodeRecord>();
   private readonly entryIndex = new Map<string, number>();
+  /** Serialized bytes in current maps; updated with each committed replacement. */
+  private liveBytes = 0;
   private readonly building = new Set<string>();
   private view: EpisodicViewPart[] = [];
   private revision = 1;
@@ -187,6 +188,7 @@ export class EpisodicMemory {
     try {
       let snapshot: EpisodicStoreSnapshot;
       try {
+        await memory.store.cleanupOrphans();
         snapshot = await memory.store.read();
       } catch (error) {
         if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
@@ -194,8 +196,8 @@ export class EpisodicMemory {
         }
         throw error;
       }
-      for (const [index, record] of snapshot.messages) memory.messages.set(index, record);
-      for (const [address, record] of snapshot.nodes) memory.nodes.set(address, record);
+      for (const record of snapshot.messages.values()) memory.setMessage(record);
+      for (const record of snapshot.nodes.values()) memory.setNode(record);
       for (const record of memory.messages.values()) memory.entryIndex.set(record.entryId, record.index);
       memory.revision = snapshot.highestRevision + 1;
       memory.committedRevision = snapshot.highestRevision;
@@ -549,7 +551,9 @@ export class EpisodicMemory {
       throw error;
     }
     if (this.sourceCursor && cut.completeBytes === this.sourceCursor.completeBytes && cut.leafEntryId === this.sourceCursor.leafEntryId) {
+      const addPrefixFence = !this.sourceCursor.completePrefixDigest && Boolean(cut.cursor.completePrefixDigest);
       this.sourceCursor = cut.cursor;
+      if (addPrefixFence) await this.saveState();
       return;
     }
 
@@ -565,7 +569,7 @@ export class EpisodicMemory {
           const record: EpisodicMessageRecord = { revision: this.takeRevision(), index, ...message, sessionId: this.dependencies.sessionId };
           await this.appendCatalog(record);
           this.entryIndex.set(message.entryId, index);
-          this.messages.set(index, record);
+          this.setMessage(record);
           // A new message appends one part to the view; nothing is invalidated.
           this.view.push({ level: 0, index, start: index, span: 1 });
           this.fit();
@@ -575,7 +579,7 @@ export class EpisodicMemory {
         if (current && current.text === message.text && current.omitted === message.omitted && current.kind === message.kind) continue;
         const record: EpisodicMessageRecord = { revision: this.takeRevision(), index: existing, ...message, sessionId: this.dependencies.sessionId };
         await this.appendCatalog(record);
-        this.messages.set(existing, record);
+        this.setMessage(record);
         changed.push(existing);
       }
 
@@ -595,7 +599,7 @@ export class EpisodicMemory {
             omissions: [...new Set([...current.omissions, "off-branch"])],
           };
           await this.appendCatalog(record);
-          this.messages.set(index, record);
+          this.setMessage(record);
           changed.push(index);
         }
       }
@@ -612,14 +616,15 @@ export class EpisodicMemory {
     }
     this.sourceCursor = cut.cursor;
     await this.saveState();
-    if (await this.store.shouldCheckpoint(this.messages.values(), this.nodes.values())) {
+    if (!this.closed && await this.store.shouldCheckpoint(this.liveBytes)) {
       await this.enqueueAppend(() => this.publishCheckpoint());
     }
   }
 
   private async checkpointIfNeeded(): Promise<void> {
     await this.mutex.run(async () => {
-      if (await this.store.shouldCheckpoint(this.messages.values(), this.nodes.values())) {
+      if (this.closed) return;
+      if (await this.store.shouldCheckpoint(this.liveBytes)) {
         await this.enqueueAppend(() => this.publishCheckpoint());
       }
     });
@@ -636,6 +641,28 @@ export class EpisodicMemory {
 
   private currentStoreState(): EpisodicStoreState {
     return { version: EPISODIC_STORE_VERSION, generation: this.generation, cursor: this.sourceCursor, blocked: this.blocked, spend: this.spend };
+  }
+
+  private setMessage(record: EpisodicMessageRecord): void {
+    const previous = this.messages.get(record.index);
+    if (previous) this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
+    this.messages.set(record.index, record);
+    this.liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
+  }
+
+  private setNode(record: EpisodicNodeRecord): void {
+    const address = nodeAddress(record.level, record.index);
+    const previous = this.nodes.get(address);
+    if (previous) this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
+    this.nodes.set(address, record);
+    this.liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
+  }
+
+  private deleteNode(address: string): void {
+    const previous = this.nodes.get(address);
+    if (!previous) return;
+    this.nodes.delete(address);
+    this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
   }
 
   /** Repair survivors of an interrupted chunked invalidation before serving. */
@@ -751,7 +778,7 @@ export class EpisodicMemory {
         record.revision = this.revision++;
         await this.store.appendNode(record);
         this.committedRevision = record.revision;
-        for (const address of chunk) this.nodes.delete(address);
+        for (const address of chunk) this.deleteNode(address);
         this.expandInvalidatedParts(new Set(chunk));
         this.fit();
       }
@@ -880,7 +907,7 @@ export class EpisodicMemory {
         record.revision = this.revision++;
         await this.store.appendNode(record);
         this.committedRevision = record.revision;
-        this.nodes.set(address, record);
+        this.setNode(record);
         this.fit();
       });
     } catch (error) {
@@ -1150,7 +1177,7 @@ export class EpisodicMemory {
       record.revision = this.revision++;
       await this.store.appendCatalog(record);
       this.committedRevision = record.revision;
-      this.messages.set(record.index, record);
+      this.setMessage(record);
     });
   }
 

@@ -51,7 +51,9 @@ it the commits the runtime reports, and sends each activation the view it render
 
 The owner never subscribes to a session and never opens it with
 `SessionManager`. It reads the file itself, which is what makes "never repair or
-migrate a canonical file" a property it can hold.
+migrate a canonical file" a property it can hold. A transient cut lookup streams
+and hashes the complete ingested prefix before and after reconstructing the
+branch; if any earlier source byte changed in place, the cut is refused.
 
 ## Storage
 
@@ -82,7 +84,10 @@ state/episodic/<sourceSessionId>/
   renames it to an immutable directory and publishes `checkpoint.current.json`.
   The pointer watermark identifies records represented by that checkpoint.
   Reads validate the checkpoint and every log record, then apply only tail
-  records above the watermark. `state.json` remains the sole state authority;
+  records above the watermark. Persisted-state status reads validate only the
+  authoritative state and do not replay or repair logs; neither they nor
+  `read()` reclaim checkpoint artifacts. Abandoned staging/checkpoint cleanup
+  runs only in the single-opener path after it reserves the session. `state.json` remains the sole state authority;
   the checkpoint copy records the captured cut and is shape-validated, but is
   not compared with later `state.json` updates. Superseded checkpoint data is
   reclaimed only after pointer publication.
@@ -108,10 +113,12 @@ state/episodic/<sourceSessionId>/
   from its source and its recorded spend starts again (D5: repair, with no
   budget; #420 owns restore).
 - Every open of an existing store folds replayed tails and repairs forward into
-  a checkpoint before returning. While running, the owner checkpoints when log
-  bytes exceed the live-record estimate by the internal superseded-record margin
-  or cross the internal byte trigger; small ordinary appends do not rewrite the
-  live store. Large invalidations contribute to the same log threshold. Once the
+  a checkpoint before returning. While running, the owner maintains a serialized
+  byte estimate as live records are inserted, replaced, or invalidated; it
+  checkpoints when log bytes exceed that estimate by the internal
+  superseded-record margin or cross the internal byte trigger. A small log that
+  cannot meet the superseded-record margin is rejected before visiting live
+  records, so ordinary small appends do not serialize or rewrite the whole store. Large invalidations contribute to the same log threshold. Once the
   pointer is durable, append logs are replaced by empty owner-only files and
   superseded checkpoint directories and recognized interrupted temp files are
   removed. Legacy JSONL logs seed this same checkpoint representation; no schema

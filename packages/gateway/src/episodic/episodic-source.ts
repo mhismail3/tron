@@ -26,6 +26,7 @@ const SUPPORTED_SESSION_VERSION = 3;
 /** How many bytes before the cursor the incremental reader re-reads to prove the
  * prefix is the one it read last time. */
 const PREFIX_WINDOW_BYTES = 8 * 1_024;
+const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
 
 export interface EpisodicCanonicalEntry {
   id: string;
@@ -59,15 +60,17 @@ interface LineBatch {
   lines: string[];
   completeBytes: number;
   tornBytes: number;
+  completePrefixDigest: string;
 }
 
 /** Read complete lines from `start` to the end of the file, bounded per line. */
-async function readLines(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, start: number, maxLineBytes: number, endExclusive?: number): Promise<LineBatch> {
+async function readLines(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, start: number, maxLineBytes: number, endExclusive?: number, previousPrefixDigest?: string | null): Promise<LineBatch> {
   const lines: string[] = [];
   const buffer = Buffer.alloc(1_024 * 1_024);
   let pending = Buffer.alloc(0);
   let offset = start;
   let completeBytes = start;
+  let completePrefixDigest = previousPrefixDigest ?? COMPLETE_PREFIX_SEED;
   for (;;) {
     if (endExclusive !== undefined && offset >= endExclusive) break;
     const length = endExclusive === undefined ? buffer.length : Math.min(buffer.length, endExclusive - offset);
@@ -78,7 +81,9 @@ async function readLines(handle: { read(buffer: Buffer, offset: number, length: 
     let newline = chunk.indexOf(0x0a);
     while (newline >= 0) {
       if (newline > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
-      lines.push(chunk.subarray(0, newline).toString("utf8"));
+      const lineBytes = chunk.subarray(0, newline);
+      lines.push(lineBytes.toString("utf8"));
+      completePrefixDigest = extendPrefixDigest(completePrefixDigest, lineBytes);
       completeBytes += newline + 1;
       chunk = chunk.subarray(newline + 1);
       newline = chunk.indexOf(0x0a);
@@ -86,7 +91,11 @@ async function readLines(handle: { read(buffer: Buffer, offset: number, length: 
     if (chunk.length > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
     pending = chunk;
   }
-  return { lines, completeBytes, tornBytes: pending.length };
+  return { lines, completeBytes, tornBytes: pending.length, completePrefixDigest };
+}
+
+function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
+  return createHash("sha256").update(prefix).update("\\0").update(lineBytes).update("\\n").digest("hex");
 }
 
 function parseEntry(line: string): EpisodicCanonicalEntry {
@@ -180,11 +189,11 @@ export async function readCanonicalSession(options: {
     if (!info.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
 
     const previous = options.previous;
-    if (previous && previous.cursor.dev === info.dev && previous.cursor.ino === info.ino
+    if (previous && previous.cursor.completePrefixDigest && previous.cursor.dev === info.dev && previous.cursor.ino === info.ino
       && info.size >= previous.cursor.size && info.size >= previous.cursor.completeBytes) {
       const digest = await prefixLineDigest(handle, previous.cursor.completeBytes);
       if (digest !== undefined && digest === previous.cursor.leafLineDigest) {
-        const batch = await readLines(handle, previous.cursor.completeBytes, options.maxLineBytes);
+        const batch = await readLines(handle, previous.cursor.completeBytes, options.maxLineBytes, undefined, previous.cursor.completePrefixDigest);
         const entries: EpisodicCanonicalEntry[] = [];
         for (const line of batch.lines) {
           if (line.trim() === "") continue;
@@ -206,6 +215,7 @@ export async function readCanonicalSession(options: {
               dev: end.dev, ino: end.ino, size: end.size,
               completeBytes: batch.completeBytes,
               leafEntryId: tail?.entry.id ?? previous.cursor.leafEntryId,
+              completePrefixDigest: batch.completePrefixDigest,
               leafLineDigest: tail ? digestOf(tail.line) : previous.cursor.leafLineDigest,
             },
           };
@@ -236,6 +246,7 @@ export async function readCanonicalSession(options: {
         dev: end.dev, ino: end.ino, size: end.size,
         completeBytes: batch.completeBytes,
         leafEntryId: tail?.entry.id ?? null,
+        completePrefixDigest: batch.completePrefixDigest,
         leafLineDigest: tail ? digestOf(tail.line) : null,
       },
     };
@@ -244,10 +255,33 @@ export async function readCanonicalSession(options: {
   }
 }
 
+/** Hash every complete line through a cursor without retaining the source text. */
+async function digestCompletePrefix(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, endBytes: number, maxLineBytes: number): Promise<string | undefined> {
+  const buffer = Buffer.alloc(1_024 * 1_024);
+  let pending = Buffer.alloc(0);
+  let offset = 0;
+  let digestValue = COMPLETE_PREFIX_SEED;
+  while (offset < endBytes) {
+    const read = await handle.read(buffer, 0, Math.min(buffer.length, endBytes - offset), offset);
+    if (read.bytesRead === 0) return undefined;
+    offset += read.bytesRead;
+    let chunk = Buffer.concat([pending, buffer.subarray(0, read.bytesRead)]);
+    let newline = chunk.indexOf(0x0a);
+    while (newline >= 0) {
+      if (newline > maxLineBytes) return undefined;
+      digestValue = extendPrefixDigest(digestValue, chunk.subarray(0, newline));
+      chunk = chunk.subarray(newline + 1);
+      newline = chunk.indexOf(0x0a);
+    }
+    if (chunk.length > maxLineBytes) return undefined;
+    pending = chunk;
+  }
+  return pending.length === 0 ? digestValue : undefined;
+}
+
 /** Reconstruct the current branch only through the exact cursor already ingested.
- * The prefix identity and leaf digest are checked before and after reading; no
- * bytes beyond completeBytes are read, so a newer un-ingested branch cannot
- * change a cut lookup. */
+ * A full streaming prefix hash must match before and after reconstruction; the
+ * last-line window alone cannot detect a same-size rewrite earlier in history. */
 export async function readCanonicalBranchAtCursor(options: {
   path: string;
   sessionId: string;
@@ -259,14 +293,15 @@ export async function readCanonicalBranchAtCursor(options: {
   try {
     const start = await handle.stat();
     if (!start.isFile() || start.dev !== options.cursor.dev || start.ino !== options.cursor.ino
-      || start.size < options.cursor.completeBytes || options.cursor.completeBytes <= 0) return undefined;
-    if (await prefixLineDigest(handle, options.cursor.completeBytes) !== options.cursor.leafLineDigest) return undefined;
+      || start.size < options.cursor.completeBytes || options.cursor.completeBytes <= 0 || !options.cursor.completePrefixDigest) return undefined;
+    if (await digestCompletePrefix(handle, options.cursor.completeBytes, options.maxLineBytes) !== options.cursor.completePrefixDigest) return undefined;
     const { batch, byId } = await readWholeFile(handle, {
       path: options.path, sessionId: options.sessionId, maxLineBytes: options.maxLineBytes,
       endBytes: options.cursor.completeBytes,
     });
-    if (batch.completeBytes !== options.cursor.completeBytes || batch.tornBytes !== 0) return undefined;
-    if (await prefixLineDigest(handle, options.cursor.completeBytes) !== options.cursor.leafLineDigest) return undefined;
+    if (batch.completeBytes !== options.cursor.completeBytes || batch.tornBytes !== 0
+      || batch.completePrefixDigest !== options.cursor.completePrefixDigest) return undefined;
+    if (await digestCompletePrefix(handle, options.cursor.completeBytes, options.maxLineBytes) !== options.cursor.completePrefixDigest) return undefined;
     const end = await handle.stat();
     if (end.dev !== start.dev || end.ino !== start.ino || end.size < options.cursor.completeBytes) return undefined;
     const leafId = options.cursor.leafEntryId;
@@ -296,8 +331,8 @@ export async function readCanonicalSimpleAppend(options: {
     const start = await handle.stat();
     const cursor = options.cursor;
     if (!start.isFile() || start.dev !== cursor.dev || start.ino !== cursor.ino || start.size < cursor.completeBytes
-      || await prefixLineDigest(handle, cursor.completeBytes) !== cursor.leafLineDigest) return undefined;
-    const batch = await readLines(handle, cursor.completeBytes, options.maxLineBytes);
+      || !cursor.completePrefixDigest || await prefixLineDigest(handle, cursor.completeBytes) !== cursor.leafLineDigest) return undefined;
+    const batch = await readLines(handle, cursor.completeBytes, options.maxLineBytes, undefined, cursor.completePrefixDigest);
     const branch: EpisodicCanonicalEntry[] = [];
     let parentId = cursor.leafEntryId;
     const ids = new Set<string>();
@@ -317,6 +352,7 @@ export async function readCanonicalSimpleAppend(options: {
       dev: end.dev, ino: end.ino, size: end.size,
       completeBytes: batch.completeBytes,
       leafEntryId: last?.id ?? cursor.leafEntryId,
+      completePrefixDigest: batch.completePrefixDigest,
       leafLineDigest: last ? digestOf(last.line) : cursor.leafLineDigest,
     };
     return {
