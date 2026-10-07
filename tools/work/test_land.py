@@ -620,6 +620,16 @@ class TypeSpecificPullBodyTests(LandFixture):
         self.assertEqual(self.writes(before), [])
         self.assertEqual(self.remote_head(), self.claim_sha)
 
+    def assert_existing_body_rejected_without_publication(self, summary: str, merged=False):
+        body = chr(10).join(("Closes #7", "", "## Summary", "", summary,
+                             "## Verification", "", "Generated.", ""))
+        before = len(self.calls())
+        result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False,
+                               existing_body=body, merged=merged)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.writes(before), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+
     def test_missing_bug_sections_are_refused_before_any_publication(self):
         self.assert_rejected_without_publication("## Repro\n\nShown.\n\n## Cause\n\nKnown.\n")
 
@@ -690,6 +700,55 @@ class TypeSpecificPullBodyTests(LandFixture):
         result = self.cli_land(summary, labels=["task", "kind:bug"])
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("## Verification", self.state()["pulls"][0]["body"])
+
+    def test_unicode_line_separators_cannot_create_required_sections(self):
+        summary = ("## Repro\u2028\u2028Failure.\u2028\u2028## Cause\u2028\u2028Known.\u2028\u2028"
+                   "## Fix\u2028\u2028Done.\n")
+        self.assert_rejected_without_publication(summary)
+
+    def test_unicode_line_separators_are_rejected_when_adopting_open_pr(self):
+        summary = ("## Repro\u2028\u2028Failure.\u2028\u2028## Cause\u2028\u2028Known.\u2028\u2028"
+                   "## Fix\u2028\u2028Done.\n")
+        self.assert_existing_body_rejected_without_publication(summary)
+
+    def test_unicode_line_separators_are_rejected_on_merged_resume(self):
+        summary = ("## Repro\u2028\u2028Failure.\u2028\u2028## Cause\u2028\u2028Known.\u2028\u2028"
+                   "## Fix\u2028\u2028Done.\n")
+        self.assert_existing_body_rejected_without_publication(summary, merged=True)
+
+    def test_adjacent_hashes_are_not_atx_closing_sequences(self):
+        summary = "## Repro###\n\nFailure.\n\n## Cause###\n\nKnown.\n\n## Fix###\n\nDone.\n"
+        self.assert_rejected_without_publication(summary)
+
+    def test_adjacent_hashes_are_rejected_when_adopting_open_pr(self):
+        summary = "## Repro###\n\nFailure.\n\n## Cause###\n\nKnown.\n\n## Fix###\n\nDone.\n"
+        self.assert_existing_body_rejected_without_publication(summary)
+
+    def test_adjacent_hashes_are_rejected_on_merged_resume(self):
+        summary = "## Repro###\n\nFailure.\n\n## Cause###\n\nKnown.\n\n## Fix###\n\nDone.\n"
+        self.assert_existing_body_rejected_without_publication(summary, merged=True)
+
+    def test_atx_closing_hashes_with_preceding_space_remain_valid(self):
+        summary = ("## Repro ###\n\nFailure.\n\n## Cause ##\n\nKnown.\n\n"
+                   "## Fix #\n\nDone.\n")
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("## Verification", self.state()["pulls"][0]["body"])
+
+    def test_preformatted_html_headings_cannot_supply_required_sections(self):
+        summary = ("## Repro\n\nFailure.\n\n<pre>\n## Cause\n\nKnown.\n\n"
+                   "## Fix\n\nDone.\n</pre>\n")
+        self.assert_rejected_without_publication(summary)
+
+    def test_preformatted_html_headings_are_rejected_when_adopting_open_pr(self):
+        summary = ("## Repro\n\nFailure.\n\n<pre>\n## Cause\n\nKnown.\n\n"
+                   "## Fix\n\nDone.\n</pre>\n")
+        self.assert_existing_body_rejected_without_publication(summary)
+
+    def test_preformatted_html_headings_are_rejected_on_merged_resume(self):
+        summary = ("## Repro\n\nFailure.\n\n<pre>\n## Cause\n\nKnown.\n\n"
+                   "## Fix\n\nDone.\n</pre>\n")
+        self.assert_existing_body_rejected_without_publication(summary, merged=True)
 
     def test_four_space_and_tab_fence_markers_are_code_not_closers(self):
         self.assert_rejected_without_publication(

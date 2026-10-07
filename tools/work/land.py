@@ -259,13 +259,37 @@ def acceptance_evidence(records: List[dict]) -> str:
     return "\n".join(lines)
 
 
+def _markdown_lines(text: str) -> List[str]:
+    """Split only Markdown line endings; Unicode separators remain ordinary text."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+_PRE_OPEN = re.compile(r" {0,3}<pre(?:[ \t]+[^>]*)?>", re.IGNORECASE)
+_PRE_CLOSE = re.compile(r"</pre\s*>", re.IGNORECASE)
+_PRE_TAG = re.compile(r"</?pre\b[^>]*>", re.IGNORECASE)
+
+
 def _visible_markdown(text: str) -> Tuple[List[str], List[bool], bool, bool]:
-    """Blank HTML comments and fence delimiters while retaining code payload and line positions."""
+    """Blank comments, fence delimiters and raw pre tags while retaining literal payload."""
     visible: List[str] = []
     code_lines: List[bool] = []
     fence: Optional[Tuple[str, int]] = None
     in_comment = False
-    for line in text.replace("\r\n", "\n").splitlines():
+    in_pre = False
+    for line in _markdown_lines(text):
+        # Markdown treats raw <pre> blocks as literal HTML; headings inside are not sections.
+        if in_pre:
+            visible.append(_PRE_TAG.sub(lambda match: " " * len(match.group()), line))
+            code_lines.append(True)
+            if _PRE_CLOSE.search(line):
+                in_pre = False
+            continue
+        if fence is None and not in_comment and _PRE_OPEN.match(line):
+            visible.append(_PRE_TAG.sub(lambda match: " " * len(match.group()), line))
+            code_lines.append(True)
+            if not _PRE_CLOSE.search(line):
+                in_pre = True
+            continue
         fence_match = re.match(r" {0,3}(`{3,}|~{3,})", line)
         if not in_comment and fence_match:
             marker = fence_match.group(1)
@@ -324,7 +348,7 @@ def _markdown_headings(text: str) -> Tuple[List[Tuple[str, int, int]], bool, boo
     for index, line in enumerate(lines):
         if code_lines[index]:
             continue
-        match = re.fullmatch(r" {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*", line)
+        match = re.fullmatch(r" {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+[ \t]*|[ \t]*)", line)
         if match:
             headings.append((match.group(2).strip(), len(match.group(1)), index))
     return headings, balanced_fence, balanced_comment
@@ -396,14 +420,15 @@ def validate_existing_bug_body(body: str, labels: List[str], pull: int) -> None:
     """Validate an adopted or merged bug PR body, not just its parsed prefix."""
     if "kind:bug" not in labels:
         return
-    text = (body or "").replace("\r\n", "\n")
+    text = body or ""
+    lines = _markdown_lines(text)
     headings, balanced_fence, balanced_comment = _markdown_h2_sections(text)
     summaries = [index for title, index in headings if title == "Summary"]
     verifications = [index for title, index in headings if title == "Verification"]
     if (not balanced_fence or not balanced_comment or len(summaries) != 1 or len(verifications) != 1
             or summaries[0] >= verifications[0]):
         raise LandError(f"#{pull} bug pull request must have one Summary and one generated Verification section")
-    summary = "\n".join(text.splitlines()[summaries[0] + 1:verifications[0]])
+    summary = "\n".join(lines[summaries[0] + 1:verifications[0]])
     validate_issue_summary(summary, labels)
 
 
@@ -421,7 +446,7 @@ def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Op
 
 def merge_intent(pull: int, body: str, number: int) -> Tuple[str, Optional[str]]:
     """The keyword a body written by pull_body merges with, and its validation text (None for Closes)."""
-    text = (body or "").replace("\r\n", "\n")  # a body saved from the web editor has CRLF line ends
+    text = body or ""  # the shared scanner normalizes CR/LF without splitting Unicode separators
     keyword = re.match(rf"(Closes|Refs) #{number}(?!\d)", text)
     if keyword is None:
         raise LandError(f"#{pull} neither closes nor refers to #{number}")
@@ -434,7 +459,7 @@ def merge_intent(pull: int, body: str, number: int) -> Tuple[str, Optional[str]]
                           and index > verification_index), None)
     action = None
     if handoff_index is not None:
-        lines = text.splitlines()
+        lines = _markdown_lines(text)
         action = "\n".join(lines[handoff_index + 1:]).strip() or None
     if keyword.group(1) == "Refs" and not action:
         raise LandError(f"#{pull} refers to #{number} but has no Maintainer validation text to hand off")
@@ -705,8 +730,8 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         summary = summary_path.read_text()
     elif pull is not None and "kind:bug" in issue["labels"]:
         validate_existing_bug_body(pull["body"], issue["labels"], pull["number"])
-        body_lines = pull["body"].replace("\r\n", "\n").splitlines()
-        headings, _, _ = _markdown_h2_sections(pull["body"].replace("\r\n", "\n"))
+        body_lines = _markdown_lines(pull["body"])
+        headings, _, _ = _markdown_h2_sections(pull["body"])
         summary_index = next(index for title, index in headings if title == "Summary")
         verification_index = next(index for title, index in headings if title == "Verification")
         summary = "\n".join(body_lines[summary_index + 1:verification_index])
