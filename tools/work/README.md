@@ -241,6 +241,9 @@ the GitHub side.
 
 `scripts/tron work verify [--post] [--evidence-manifest <json>]` validates the
 committed head of the current branch and writes a receipt for that exact commit.
+Before loading or selecting checks, it rejects inherited environment values that
+resolve into a live Tron home; the Gateway's shared path policy also guards its
+Vitest configurations and Node test scripts.
 
 1. **Clean head.** A worktree with modified, staged or untracked files is
    refused, because the receipt describes a commit and not a working tree.

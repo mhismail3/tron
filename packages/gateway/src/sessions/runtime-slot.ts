@@ -1610,7 +1610,7 @@ export class RuntimeSlot {
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
+      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
       let initialModel: Model<never> | undefined;
       if (sessionManager.getEntryCount() === 0) {
@@ -8141,7 +8141,11 @@ export class RuntimeSlot {
           this.publishSnapshot();
           const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
           const startedMonotonicMs = performance.now();
-          const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId });
+          const result = await this.runtime.session.executeBash(command, undefined, {
+            excludeFromContext,
+            id: operationId,
+            operations: this.directBashProcesses!.shellOperations(),
+          });
           const completedAt = new Date().toISOString();
           const bashEntries = this.sessionManager.getBranch().filter((entry) =>
             !previousEntryIDs.has(entry.id)

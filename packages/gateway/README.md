@@ -2926,9 +2926,7 @@ stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
 connection opened by an in-process socket in the Vitest worker and fails the
 current test (or the file, for async work that outlives its test), so an unstubbed in-process fetch cannot pass or
 hang depending on the host's network. It does not cover child processes or DNS
-lookups. `test-support/agent-dir-isolation.ts` gives each worker an empty
-`PI_CODING_AGENT_DIR`, so a fixture that omits an explicit credential store never
-reads the host's real agent credentials when the suite runs from an agent session.
+lookups.
 
 Waits are hang bounds, not speed budgets. Every condition a test waits for — a
 turn settling, a frame arriving, a record landing — is correct at any speed.
@@ -3297,7 +3295,20 @@ asynchronous delegated subagents that already have an authoritative producer. It
 not add another shell tool, detached executor, PTY, process supervisor, or event journal.
 Assistant `bash`, direct user `!` bash, Terminal-sheet PTYs, ordinary tools,
 administrative work, and shell grandchildren inferred from command syntax remain outside
-this surface and continue through their existing transcript/tool presentation.
+this surface and continue through their existing transcript/tool presentation. The built-in
+foreground bash owner gives each shell a filtered snapshot: it withholds all inherited
+`PI_*` and `TRON_GATEWAY_*` variables, then supplies only that canonical session's opaque
+`PI_SESSION_ID` for `scripts/tron work`. It preserves PATH intact so managed agent tools
+under the live home remain available; PATH identifies executable search locations, not a
+data root. The delegated-provider keeps its separate in-process `PI_SUBAGENTS_TEMP_ROOT`
+for pi-subagents children; arbitrary shell commands and their process trees do not receive
+that live-home root, Gateway supervision/payload identity, or the `TRON_DATA_DIR` and
+`TRON_HOME_NAME` selectors. Gateway Vitest configurations (regular, scale and corpus), Node
+test scripts, and `scripts/tron work verify` share one environment
+policy. Vitest rejects during setup, before test modules execute; `scripts/tron work verify`
+rejects before checks are selected or carried. The policy expands SDK-style `~` paths and
+normalizes dot segments, including path-list entries, and interprets `TRON_HOME_NAME` using
+the same home-relative resolution as `resolveTronHome()`.
 
 `SessionProcessActivity` gives subagent rows a stable namespaced `processId`, typed
 source/mode/lifecycle, bounded current-tool/output facts,

@@ -15,6 +15,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import verify
@@ -65,6 +66,56 @@ def git(cwd: Path, *args: str) -> str:
 
 
 class VerifyFixture(unittest.TestCase):
+    def test_live_home_environment_fails_before_check_selection(self):
+        root = Path(__file__).resolve().parents[2]
+        live_home = Path.home() / ".tron"
+        with mock.patch.dict(os.environ, {"PI_SESSION_FILE": str(live_home / "sessions" / "guard.jsonl")}):
+            with self.assertRaisesRegex(verify.VerifyError, "Tron-home environment"):
+                verify.verify(root, {})
+
+    def test_home_name_selector_fails_before_check_selection(self):
+        root = Path(__file__).resolve().parents[2]
+        node_bin = str(Path(subprocess.check_output(["which", "node"], text=True).strip()).parent)
+        with mock.patch.dict(os.environ, {"TRON_HOME_NAME": ".tron-dev", "PATH": node_bin}, clear=True):
+            with self.assertRaisesRegex(verify.VerifyError, "Tron-home environment"):
+                verify.verify(root, {})
+
+    def test_tron_home_path_entries_are_allowed_but_data_roots_are_rejected(self):
+        root = Path(__file__).resolve().parents[2]
+        user_home = self.tmp / "user-home"
+        agent_bin = user_home / ".tron" / "agent" / "bin"
+        policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
+        environment = {"HOME": str(user_home), "PATH": str(agent_bin)}
+        node = subprocess.check_output(["which", "node"], text=True).strip()
+        allowed = subprocess.run(
+            [node, str(policy)],
+            env=environment, capture_output=True, text=True,
+        )
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+        rejected = subprocess.run(
+            [allowed.args[0], str(policy)],
+            env={**environment, "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent")},
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+        self.assertIn("PI_CODING_AGENT_DIR=", rejected.stderr)
+
+    def test_node_test_runner_rejects_home_name_selector(self):
+        root = Path(__file__).resolve().parents[2]
+        node_bin = str(Path(subprocess.check_output(["which", "node"], text=True).strip()).parent)
+        environment = {"PATH": os.pathsep.join((node_bin, "/usr/bin", "/bin")), "TRON_HOME_NAME": ".tron-dev"}
+        gateway = root / "packages/gateway"
+        result = subprocess.run(
+            [
+                str(Path(node_bin) / "node"), "--import", "./test-support/tron-home-environment-preflight.mjs",
+                "--test", "scripts/check-pi-sdk.test.mjs", "scripts/update-pi-sdk.test.mjs",
+                "scripts/compare-pi-sdk-graph.test.mjs",
+            ], cwd=gateway, env=environment, capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("TRON_HOME_NAME=/", result.stderr + result.stdout)
+
     def test_scale_suite_selector_is_narrow(self):
         root = Path(__file__).resolve().parents[2]
         config = json.loads((root / ".github/work.json").read_text())
