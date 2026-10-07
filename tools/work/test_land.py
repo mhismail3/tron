@@ -380,7 +380,40 @@ def _owned_test_processes(disable_automatic_maintenance: bool = True):
             os.environ.update(saved)
 
 
+def _release_child_and_close(release_child, process_owner, fifo_descriptors):
+    try:
+        release_child()
+    finally:
+        try:
+            process_owner.__exit__(None, None, None)
+        finally:
+            for fd in fifo_descriptors:
+                os.close(fd)
+
+
 class GitMaintenanceCleanupTests(unittest.TestCase):
+    def test_child_release_failure_still_restores_process_owner_and_closes_fifos(self):
+        temporary = tempfile.TemporaryDirectory()
+        with temporary:
+            fifo = Path(temporary.name) / "cleanup.fifo"
+            os.mkfifo(fifo)
+            fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+            original_popen = subprocess.Popen
+            original_git_config = os.environ.get("GIT_CONFIG_COUNT")
+            owner = _owned_test_processes()
+            owner.__enter__()
+
+            def fail_release():
+                raise RuntimeError("injected child-release failure")
+
+            with self.assertRaisesRegex(RuntimeError, "injected child-release failure"):
+                _release_child_and_close(fail_release, owner, (fd,))
+
+            self.assertIs(subprocess.Popen, original_popen)
+            self.assertEqual(os.environ.get("GIT_CONFIG_COUNT"), original_git_config)
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+
     def _auto_gc_cleanup(self, disable_automatic_maintenance: bool):
         temporary_directory = tempfile.TemporaryDirectory()
         temporary = temporary_directory.name
@@ -522,10 +555,14 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
                 finally:
                     shutil.os.scandir = original_scandir
                     if child_started and not child_released:
-                        release_child()
-                    close_process_owner()
-                    for fd in (ready_fd, trigger_fd):
-                        os.close(fd)
+                        _release_child_and_close(release_child, process_owner, (ready_fd, trigger_fd))
+                        owner_closed = True
+                    else:
+                        try:
+                            close_process_owner()
+                        finally:
+                            for fd in (ready_fd, trigger_fd):
+                                os.close(fd)
                 if Path(temporary).exists():
                     shutil.rmtree(temporary)
 

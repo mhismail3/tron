@@ -174,7 +174,9 @@ children before fixture-directory cleanup, including on test failures.
 `GitMaintenanceCleanupTests` makes auto-GC eligible with auto-detachment disabled,
 then uses an owner-tracked writer to reproduce a late write during
 `TemporaryDirectory` cleanup without the fixture configuration. It verifies
-cleanup succeeds with the fixture configuration.
+cleanup succeeds with the fixture configuration. Its failure-injection case
+also verifies that a child-release exception still restores the process owner
+and closes both FIFO descriptors.
 
 75. **A stacked claim uses the wrong base.** `verify`, `land` (update, pull
     request, merge, resume and the closing comment), `steward` and `cleanup`
