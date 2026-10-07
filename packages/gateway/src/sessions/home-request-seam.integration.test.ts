@@ -273,6 +273,31 @@ async function open(label: string, options: FixtureOptions = {}) {
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe.sequential("Home request seam inside the Gateway runtime", () => {
+  it("continues refusing sealed physical mutations after Home is disabled", async () => {
+    const item = await open("disabled-sealed-chapter", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+    let sealed = false;
+    const owner = item.registry.homeOwner() as unknown as {
+      chapterStateFor: (sessionId: string) => { sessionId: string; sealed: boolean };
+    };
+    owner.chapterStateFor = (sessionId) => ({ sessionId, sealed });
+    await item.registry.homeOwner().disable();
+    expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    sealed = true;
+    const entries = item.session.sessionManager.getEntries();
+    const leaf = item.session.sessionManager.getLeafId();
+    const bytes = await item.jsonl();
+    await expect(item.slot.setThinking("low")).rejects.toMatchObject({
+      code: "conflict", details: { reason: "sealed-chapter", sessionId: item.slot.id },
+    });
+    expect(item.session.sessionManager.getEntries()).toEqual(entries);
+    expect(item.session.sessionManager.getLeafId()).toBe(leaf);
+    expect(await item.jsonl()).toBe(bytes);
+    item.record("disabled-sealed-chapter", { profile: "ordinary", refused: true, bytesUnchanged: true });
+  });
+
   it("refuses sealed Slot mutation paths before changing SDK state or the canonical file", async () => {
     const item = await open("sealed-mutation-paths", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);

@@ -170,6 +170,22 @@ describe("Tron Home record", () => {
     await expect(readFile(f.recordPath, "utf8")).resolves.toBe(persisted);
   });
 
+  it.each(["reserved", "materializing"] as const)("does not replace an unresolved %s reservation during designation", async (state) => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const persisted = chapterRecordBytes({ chapters: [
+      { sessionId: "session-old", ordinal: 1, state: "sealed", createdAt: new Date().toISOString(), sealedAt: new Date().toISOString() },
+      { sessionId: "session-reserved", ordinal: 2, state, createdAt: new Date().toISOString(),
+        ...(state === "materializing" ? { attemptId: "attempt-1", expectedPath: "/sessions/reserved.jsonl" } : {}) },
+    ] });
+    await writeFile(f.recordPath, persisted, { mode: 0o600 });
+    await f.owner.initialize();
+    await expect(f.owner.designate({ model: MODEL }, defaultModel)).rejects.toMatchObject({ code: "conflict" });
+    expect(f.created).toEqual([]);
+    expect(await readFile(f.recordPath, "utf8")).toBe(persisted);
+    await f.owner.dispose();
+  });
+
   it("preserves malformed chapter topology rather than choosing an active target", async () => {
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
@@ -301,6 +317,27 @@ describe("Tron Home record", () => {
     await symlinked.owner.initialize();
     expect(await symlinked.owner.status()).toMatchObject({ available: false, enabled: false });
   });
+
+  it("refuses an oversized outgoing ledger before replacing the readable record", async () => {
+    const f = await harness();
+    await f.owner.designate({ model: MODEL }, defaultModel);
+    const previous = await readFile(f.recordPath, "utf8");
+    const now = new Date().toISOString();
+    const chapters = Array.from({ length: 100_000 }, (_, index) => ({
+      sessionId: `chapter-${index}-${"x".repeat(140)}`,
+      ordinal: index + 1,
+      state: index === 99_999 ? "active" as const : "sealed" as const,
+      createdAt: now,
+      ...(index === 99_999 ? {} : { sealedAt: now }),
+    }));
+    const oversized: HomeRecord = {
+      version: 2, homeId: "home-large", chapters, bindingRevision: 1, generation: 1,
+      policyRevision: 1, enabled: true, model: MODEL, createdAt: now, updatedAt: now,
+    };
+    const writer = f.owner as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    await expect(writer.writeLocked(oversized)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(previous);
+  }, 30_000);
 
   it("writes the record owner-only with no temporary file left, and an owner-only workspace", async () => {
     // Failure modes 4, 5 and 10: one durable replacement, owner-only bytes, and

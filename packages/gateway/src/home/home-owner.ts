@@ -7,7 +7,7 @@ import type { TrustService } from "../admin/trust-service.js";
 import type { EpisodicDiagnostic } from "../episodic/episodic-contract.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durablePublishBoundedJson } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
@@ -499,6 +499,9 @@ export class HomeOwner {
     return this.mutex.run(async () => {
       this.assertAvailable();
       const existing = this.record;
+      if (existing?.chapters.some(chapter => chapter.state === "reserved" || chapter.state === "materializing")) {
+        throw new GatewayError("conflict", "Tron Home has an unresolved chapter reservation; recover that chapter before designation");
+      }
       const existingSessionId = existing ? homeSessionId(existing) : undefined;
       if (existing && existingSessionId && await this.options.sessions.sessionPresent(existingSessionId)) {
         if (existing.enabled) {
@@ -669,7 +672,15 @@ export class HomeOwner {
   }
 
   private async writeLocked(record: HomeRecord): Promise<void> {
-    await durableAtomicWriteJson(this.recordPath, record);
+    if (!admitRecord(record)) throw new GatewayError("conflict", "The Home record is invalid or exceeds its chapter bounds");
+    try {
+      await durablePublishBoundedJson(this.recordPath, record, MAXIMUM_RECORD_BYTES);
+    } catch (error) {
+      if (error instanceof Error && error.message === "JSON document exceeds its byte limit") {
+        throw new GatewayError("conflict", "The Home chapter ledger exceeds its persisted size limit");
+      }
+      throw error;
+    }
     this.record = record;
   }
 

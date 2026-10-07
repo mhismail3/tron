@@ -15,10 +15,12 @@ edits, branch changes, bash, and extension-driven session replacement. Registry
 owners also preflight attention, archive and delete mutations against that same
 provider. A sealed result is a
 typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
-The version-2 Home record carries an ordered chapter ledger. Only its active
-chapter is writable through Home's request and mutation seams; sealed chapters
-remain readable but refuse mutation. No rollover or chapter materialization is
-activated by this format step. If a future SDK operation fails
+The version-2 Home record carries an ordered chapter ledger. At this step Home
+operates on one active physical session; no rollover path creates a successor.
+An active chapter is writable; a sealed chapter remains readable but refuses
+mutation regardless of Home's enabled state or the runtime's ordinary/Home
+profile. The chapter-state check is physical-session-owned and is not bypassed
+when Home is disabled. If a future SDK operation fails
 after staging canonical entries, RuntimeSlot retains the existing uncertain-
 outcome fence rather than treating the staged mutation as a clean refusal. A
 sealed check before a custom-entry append is a clean typed refusal: it exits the

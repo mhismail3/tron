@@ -9155,7 +9155,6 @@ export class RuntimeSlot {
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
   private assertChapterWritable(): void {
-    if (this.liveProfile() !== "home") return;
     const state = this.dependencies.homeChapterState?.(this.id);
     if (state) assertChapterWritable(state);
   }

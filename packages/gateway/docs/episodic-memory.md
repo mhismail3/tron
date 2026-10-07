@@ -114,11 +114,12 @@ state/episodic/<sourceSessionId>/
   `gateway/workspace-state/episodic-initialized.json` records that the shared
   `state/episodic` container was initialized, so a **deleted container is lost
   state**: it refuses instead of restarting and re-spending every compactor call.
-  This strict version-2 record is separate from the frozen shared workspace
-  record. Version-1 per-session markers and state are preserved and refused; no
-  implicit migration resets memory history or compactor spend. The marker describes
-  the container, never one session. Each session's namespace is created lazily
-  inside it, so a session without one, such as a new Home session after another
+  The shared workspace feature record remains version 1; it is distinct from the
+  per-session `initialized.json` marker and `state.json`, which use strict version
+  2. Version-1 per-session markers and state are preserved and refused; no
+  implicit migration resets memory history or compactor spend. The shared marker
+  describes the container, never one session. Each session's namespace is created
+  lazily inside it, so a session without one, such as a new Home session after another
   session's memory set the marker, starts fresh (#483). Spend is recorded inside
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
