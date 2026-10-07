@@ -7662,8 +7662,10 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let releaseResponse!: () => void;
     let releaseSteeringResponse!: () => void;
+    let steeringResponseStarted!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const steeringResponseBarrier = new Promise<void>((resolve) => { releaseSteeringResponse = resolve; });
+    const steeringStarted = new Promise<void>((resolve) => { steeringResponseStarted = resolve; });
     const faux = fauxProvider({ provider: "tron-steering-ownership", tokensPerSecond: 10_000 });
     faux.setResponses([
       async () => {
@@ -7671,6 +7673,7 @@ export default function (pi) {
         return fauxAssistantMessage("initial complete");
       },
       async () => {
+        steeringResponseStarted();
         await steeringResponseBarrier;
         return fauxAssistantMessage("steering complete");
       },
@@ -7688,6 +7691,11 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
+    const admissions: any[] = [];
+    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), {
+      admit(cut: any) { admissions.push(structuredClone(cut)); },
+      dispose() {},
+    } as any));
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
@@ -7724,6 +7732,16 @@ export default function (pi) {
     );
     expect(consumedSteeringIDs.length).toBeGreaterThan(0);
     expect(steeringSnapshot.activeToolSegmentId).toBe(toolSegmentId(consumedSteeringIDs.at(-1)!));
+    await steeringStarted;
+    const canonicalBeforeSteeringResponse = slot.canonicalSessionEntries();
+    const firstCompletion = canonicalBeforeSteeringResponse.find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("initial complete"));
+    expect(firstCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === firstCompletion!.id), "the first completion cut while the steering response is held");
+    const firstCut = admissions.find(cut => cut.completionId === firstCompletion!.id)!;
+    expect(firstCut.entries.some((entry: any) => entry.message?.role === "assistant"
+      && contentText(entry.message.content).includes("initial complete"))).toBe(true);
     releaseSteeringResponse();
     await initial;
     await waitFor(() => [queued.operationId, duplicate.operationId].every(operationId =>
@@ -7742,6 +7760,21 @@ export default function (pi) {
       expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
       expect(receipts.at(-1)).toMatchObject({ lifecycle: "completed" });
     }
+    const finalCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("steering complete"));
+    expect(finalCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === finalCompletion!.id), "the final same-run completion cut");
+    const finalCut = admissions.find(cut => cut.completionId === finalCompletion!.id)!;
+    const observedMessages = finalCut.entries
+      .filter((entry: any) => entry.type === "message")
+      .map((entry: any) => `${entry.message.role}: ${contentText(entry.message.content)}`)
+      .join("\n");
+    expect(observedMessages).toContain("user: steer me");
+    expect(observedMessages).toContain("steering complete");
+    expect(observedMessages).not.toContain("initial complete");
+    expect(admissions.filter(cut => cut.completionId === firstCompletion!.id)).toHaveLength(1);
+    expect(admissions.filter(cut => cut.completionId === finalCompletion!.id)).toHaveLength(1);
     expect(slot.snapshot().queuedItems).toEqual([]);
   });
 

@@ -2725,6 +2725,9 @@ export class RuntimeSlot {
   }
 
   private readonly observationStarts = new Map<string, { entryIndex: number; branchId: string }>();
+  /** Exact last completion already admitted for an operation, used only to
+   * suppress the later agent_settled duplicate when canonical settlement won. */
+  private readonly observedCompletionsByOperation = new Map<string, string>();
 
   private completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
@@ -3257,10 +3260,15 @@ export class RuntimeSlot {
 
   private admitCompletionObservation(item: CompletionOwnershipItem): void {
     if (item.observationSettled) return;
-    item.observationSettled = true;
     const operationId = item.completion.operationId ?? this.completionWorkOwners.get(item.completion.id);
     if (!operationId) return;
+    const start = this.observationStarts.get(operationId);
+    if (!start) return;
+    const entries = this.canonicalSessionEntries();
+    const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
+    if (completionIndex < start.entryIndex) return;
     const observed = this.observationEntries(operationId, item.completion.id);
+    if (observed.entries.length === 0) return;
     try {
       this.hooks.turnSettled?.(
         this.id,
@@ -3273,7 +3281,18 @@ export class RuntimeSlot {
       );
     } catch {
       // Observation admission is fire-and-forget; it cannot undo durable completion.
-    } finally {
+      return;
+    }
+    item.observationSettled = true;
+    if (!this.hasActiveAgentRun || this.activeOperationId === operationId) {
+      this.observedCompletionsByOperation.set(operationId, item.completion.id);
+    }
+    if (this.hasActiveAgentRun && this.activeOperationId === operationId) {
+      // The same foreground operation can continue after a completion (for
+      // example, a consumed steer). Advance to the exact next canonical entry;
+      // its later completion owns only the remaining range.
+      this.observationStarts.set(operationId, { entryIndex: completionIndex + 1, branchId: start.branchId });
+    } else {
       this.observationStarts.delete(operationId);
     }
   }
@@ -3601,6 +3620,7 @@ export class RuntimeSlot {
               }
               await this.beginAttentionSettlement(completion);
               const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+              if (completionOperationId) this.observedCompletionsByOperation.delete(completionOperationId);
               // A successful earlier completion is admitted by its exact
               // settlement owner; this lane admits only a distinct follow-up cut.
               if (settledOperationId && settledOperationId !== completionOperationId) {
@@ -3624,11 +3644,18 @@ export class RuntimeSlot {
               terminalLifecycle,
               terminalErrorCode,
             ).then(async () => {
-              if (this.observationStarts.has(settledOperationId)) {
+              const alreadyObservedCompletion = terminalNotification !== undefined
+                && this.observedCompletionsByOperation.get(settledOperationId) === terminalNotification.sourceId;
+              if (!alreadyObservedCompletion && this.observationStarts.has(settledOperationId)) {
                 const observed = this.observationEntries(settledOperationId);
-                this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
-                this.observationStarts.delete(settledOperationId);
+                if (observed.entries.length > 0) {
+                  this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+                }
               }
+              // Only the exact completion ID proves that this terminal cut was
+              // already admitted. A missing cursor alone never means coverage.
+              this.observationStarts.delete(settledOperationId);
+              this.observedCompletionsByOperation.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });
