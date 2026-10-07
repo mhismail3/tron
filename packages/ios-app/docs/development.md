@@ -30,6 +30,8 @@ The logo/search controls stay stationary. Reduce Motion
 keeps the original fixed position and title size while retaining the existing blur fade.
 Row identity, search state, and managed-sheet/mutation owners remain dashboard-owned.
 
+Home status is owned separately from the ordinary Sessions catalogue. A mounted Home dashboard/chat surface registers the focused profile, authenticated connection, `home.v1` capability and its managed presentation activity with `HomeStatusPresentationOwner`; entry/reconnect and Gateway session-summary/list invalidations trigger an immediate bounded `home.status` read, while one sequential mounted foreground fallback refresh runs no more frequently than every five seconds. The caller must retire the owner when its exact surface generation disappears or goes offscreen; it must not persist status or physical session IDs. The `HomeStatusPresentationOwnerTests` suite covers strict wire sections/closed enums, unsupported capability, stale profile/read generation, reconnect and retirement, plus the fallback admission policy. This status owner does not alter ordinary Sessions rows or sorting.
+
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
 Settings and configuration actions; Filter/Search and view-specific controls;
 Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below

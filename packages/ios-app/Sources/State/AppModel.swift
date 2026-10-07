@@ -246,6 +246,8 @@ final class AppModel {
     private var sessionSearchPolicyMutationTails: [String: (id: UUID, task: Task<SessionSearchPolicy, Error>)] = [:]
     private var sessionSearchPolicyLoadedConnections: [String: String] = [:]
     let automationCatalog: AutomationCatalogCoordinator
+    /// Focused-profile, disposable Home status; never a mirror of Home storage.
+    let homeStatus = HomeStatusPresentationOwner()
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
     /// The Library's bounded first-page projection and its preview images. Both
@@ -1871,6 +1873,7 @@ final class AppModel {
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
         recordSceneTransition(to: .background, flush: true)
+        homeStatus.retireSurface()
         sceneAllowsCatalogRefresh = false
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
@@ -4676,6 +4679,39 @@ final class AppModel {
         try await terminal.terminate(id, intent: intent)
     }
 
+    /// The visible Home owner registers only authenticated focused-Gateway
+    /// status reads. This is disposable presentation work, never a mutation.
+    func mountHomeStatus(presentationActive: Bool) {
+        guard let profileID = lifecycle.selectedProfileID,
+              let admission = lifecycle.admission,
+              let connectionID = admission.connectionID else {
+            homeStatus.retireSurface()
+            return
+        }
+        let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
+        homeStatus.mountFallback(
+            profileID: profileID,
+            connectionID: String(connectionID),
+            capabilityEnabled: capable,
+            presentationActive: presentationActive
+        ) { [weak self] fence in
+            guard let self,
+                  self.lifecycle.selectedProfileID == fence.profileID,
+                  self.lifecycle.admits(admission) else { throw CancellationError() }
+            let value = try await self.lifecycle.client.requestValue(
+                "home.status", JSONValue.object([:]),
+                expectedConnection: GatewayConnectionAdmission(connectionID: admission.connectionID)
+            )
+            guard self.lifecycle.selectedProfileID == fence.profileID,
+                  self.lifecycle.admits(admission) else { throw CancellationError() }
+            return try HomeStatusDTO.decode(value)
+        }
+    }
+
+    func unmountHomeStatus() {
+        homeStatus.retireSurface()
+    }
+
     func handle(_ event: GatewayEvent) async {
         await handle(event, connectionID: nil)
     }
@@ -4784,6 +4820,9 @@ final class AppModel {
         case "transport.resyncRequired":
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
+            if let sessionID = event.sessionId {
+                Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(sessionID: sessionID, presentationActive: true) }
+            }
             guard case .sessionSummary(let update) = event.preparation else {
                 // A malformed or newer summary must not silently leave a row's
                 // icon stale. The authoritative catalog is the recovery path;
@@ -4793,6 +4832,7 @@ final class AppModel {
             }
             apply(update)
         case "session.listChanged":
+            Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(presentationActive: true) }
             scheduleSessionListRefresh()
         case "auth.prompt":
             providerAuth.handlePrompt(event.payload)
