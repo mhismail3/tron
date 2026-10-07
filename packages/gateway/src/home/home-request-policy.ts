@@ -4,9 +4,10 @@ import {
   convertToLlm,
   estimateTokens,
   type AgentSession,
+  type ModelRuntime,
   type SessionProjection,
 } from "@earendil-works/pi-coding-agent";
-import { cachePieces, markAnthropicPieces } from "../episodic/cache-layout.js";
+import { markAnthropicBlocks } from "../episodic/cache-layout.js";
 
 /*
  * Tron Home's request seam (gist §7).
@@ -137,6 +138,12 @@ export interface HomeActivationIdentity {
 /** The frozen view one activation receives, and how long it waited for it. */
 export interface HomeActivationView {
   text: string;
+  /** The view as request blocks (`viewPieces`); they rejoin to `text`. */
+  pieces: string[];
+  /** Records that a request carrying this view was prepared, so the next
+   * activation's blocks start where this one ended. Called after every refusal
+   * check: a refused activation sends nothing, and must not move it. */
+  commit: () => void;
   /** Milliseconds spent waiting for the memory to cover the activation's start;
    * 0 when every line it needed was already built. */
   waitedMs: number;
@@ -431,6 +438,7 @@ export class HomeRequestPolicy {
         digest,
         identityEqual: rewritten.identityEqual,
       };
+      memoryView.commit();
       this.recordStep(activation.step);
       // Once per activation, not once per request: a tool loop or a retry is the
       // same activation and its effective size and wait are already reported.
@@ -675,14 +683,14 @@ export class HomeRequestPolicy {
         else excludedMessages += 1;
       }
     });
-    // The view first, cut at the recipe's cache marks, and the per-activation
-    // nonce last: anything that changes every activation must follow the view,
-    // or no request could re-read the view from a provider's cache (gist §8).
+    // The view first, as its cache blocks (#491), and the per-activation nonce
+    // last: anything that changes every activation must follow the view, or no
+    // request could re-read the view from a provider's cache (gist §8).
     const memory: AgentMessage = {
       role: "custom",
       customType: HOME_MEMORY_CUSTOM_TYPE,
       content: [
-        ...cachePieces(memoryView.text).map((text) => ({ type: "text" as const, text })),
+        ...memoryView.pieces.map((text) => ({ type: "text" as const, text })),
         { type: "text" as const, text: `${HOME_NONCE_MARKER}${activation.nonce}` },
       ],
       display: false,
@@ -764,11 +772,12 @@ export function digestLlmMessages(messages: unknown): string {
 
 /** Occurrences of the activation nonce anywhere in one request's messages. */
 /**
- * Place the recipe's cache breakpoints on the memory message of an Anthropic
- * Messages payload (gist §8): a mark at the end of every view piece except the
- * last, and none on the nonce. It runs as Home's `before_provider_request`
- * handler, after this seam validated the request, and changes only
- * `cache_control` fields (cache-layout.ts).
+ * Place Home's cache breakpoints on the memory message of an Anthropic Messages
+ * payload (#491): one on the view's base block, which is unchanged between
+ * rebalances, and one on its last line, where the next request's 20-block
+ * lookback finds this request's entry; none on the footer or the nonce. It runs
+ * as Home's `before_provider_request` handler, after this seam validated the
+ * request, and changes only `cache_control` fields (cache-layout.ts).
  */
 export function markHomeMemoryCache(payload: unknown): unknown {
   const messages = (payload as { messages?: unknown } | null)?.messages;
@@ -782,8 +791,39 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   });
   if (index < 0) return payload;
   const blocks = (messages[index] as { content: unknown[] }).content;
-  // Every view piece but the last ends at a cut; the final block is the nonce.
-  return markAnthropicPieces(payload, index, blocks.length - 2);
+  // [first, ...lines, footer, nonce]: the last line is third from the end, or the
+  // first block when no line followed it. The first block is found by shape, not
+  // position: a provider that composes its own request may put blocks before it
+  // (CortexKit prepends its cached prompt block to the first user message).
+  const last = blocks.length - 3;
+  let first = last;
+  while (first > 0 && isViewLineBlock(blocks[first])) first -= 1;
+  return last < 0 ? payload : markAnthropicBlocks(payload, index, [...new Set([first, last])]);
+}
+
+/** One block per view line after the first block (`viewPieces`): `id+n|text` and a line end. */
+function isViewLineBlock(block: unknown): boolean {
+  const text = (block as { type?: unknown; text?: unknown } | null)?.text;
+  return (block as { type?: unknown } | null)?.type === "text" && typeof text === "string" && /^\d+\+\d+\|[^\n]*\n$/u.test(text);
+}
+
+/**
+ * Home's requests ask pi-ai for long prompt-cache retention (#491): Anthropic's
+ * one-hour TTL where the model supports it, OpenAI's longest retention. Home is
+ * used on and off through a day, so a five-minute cache would expire between
+ * most turns, and Home's view is a long prefix that is worth keeping. pi-ai maps
+ * `long` per provider; a provider that composes its own requests, such as
+ * CortexKit's, applies its own retention.
+ *
+ * The override is a write on `runtime`, which must be the Home session's own
+ * view of the shared runtime (`sessionRuntimeView`), never the shared runtime
+ * itself: ordinary sessions keep pi-ai's default retention.
+ */
+export function applyHomeCacheRetention(runtime: ModelRuntime): ModelRuntime {
+  const stream = runtime.streamSimple.bind(runtime);
+  runtime.streamSimple = ((model, context, options) =>
+    stream(model, context, { ...options, cacheRetention: options?.cacheRetention ?? "long" })) as ModelRuntime["streamSimple"];
+  return runtime;
 }
 
 function countNonce(messages: readonly unknown[], nonce: string): number {

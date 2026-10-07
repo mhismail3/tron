@@ -21,7 +21,7 @@ import {
 } from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
-  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, fitView, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress,
+  EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress, rebalanceView,
   parseNodeAddress, placeholderBytes, snippetAround, utf8Bytes, viewContext,
   type EpisodicViewPart,
 } from "./episodic-tree.js";
@@ -999,7 +999,7 @@ export class EpisodicMemory {
   // ---- view, waiters, blocked state --------------------------------------------
 
   private fit(): void {
-    fitView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address));
+    rebalanceView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address));
     this.settleWaiters();
   }
 

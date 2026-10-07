@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import {
   createEpisodicTokenBudget, EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS,
@@ -133,6 +134,8 @@ export interface HomeMemoryOptions {
 
 interface MemoryBinding {
   memory: EpisodicMemory;
+  /** What the last activation's request sent from this memory (#491). */
+  sent?: SentView;
 }
 
 /** The attribution every Home memory view carries. Summaries of the earlier
@@ -152,6 +155,39 @@ const VIEW_HEADER = [
   "<chat>",
 ].join("\n");
 const VIEW_FOOTER = "</chat>";
+
+/** The view lines one request sent, by count and digest (#491). */
+export interface SentView {
+  lines: number;
+  digest: string;
+}
+
+function digestLines(lines: readonly string[]): string {
+  return createHash("sha256").update(lines.join("\n")).digest("hex");
+}
+
+/**
+ * The view as the blocks a Home request sends (#491): the header with every line
+ * the previous request sent, one block per line after it, then the footer. They
+ * rejoin to exactly `header\nlines\nfooter`, the text the model reads.
+ *
+ * Between two rebalances the view only gains lines at its end, so the previous
+ * request's lines are still this view's start, and the first block ends exactly
+ * where that request marked its last line: a provider that caches only where a
+ * request marks it (Anthropic) re-reads that entry, and only the new lines are
+ * written. After a rebalance the start changed, so nothing earlier is reusable
+ * and the whole view is one block, written once.
+ */
+export function viewPieces(text: string, previous: SentView | undefined): { pieces: string[]; sent: SentView } {
+  const lines = text === "" ? [] : text.split("\n");
+  const kept = previous && previous.lines <= lines.length && digestLines(lines.slice(0, previous.lines)) === previous.digest
+    ? previous.lines : lines.length;
+  const base = `${VIEW_HEADER}\n${lines.slice(0, kept).map(line => `${line}\n`).join("")}${lines.length === 0 ? "\n" : ""}`;
+  return {
+    pieces: [base, ...lines.slice(kept).map(line => `${line}\n`), VIEW_FOOTER],
+    sent: { lines: lines.length, digest: digestLines(lines) },
+  };
+}
 
 export class HomeMemory {
   private config: HomeMemoryConfig | undefined;
@@ -311,7 +347,14 @@ export class HomeMemory {
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not cover the activation start: ${messageOf(error)}`);
     }
     const view = binding.memory.renderView(cut);
-    return { text: `${VIEW_HEADER}\n${view.text}\n${VIEW_FOOTER}`, waitedMs: Math.round(performance.now() - waitingSince) };
+    const { pieces, sent } = viewPieces(view.text, binding.sent);
+    return {
+      text: pieces.join(""),
+      pieces,
+      waitedMs: Math.round(performance.now() - waitingSince),
+      // A reopened memory starts from nothing sent; an old activation must not move it.
+      commit: () => { if (this.binding === binding) binding.sent = sent; },
+    };
   }
 
   /** The bounded memory status, for `home.status` and for the seam's evidence. */

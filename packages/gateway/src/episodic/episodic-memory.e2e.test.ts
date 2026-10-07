@@ -124,11 +124,14 @@ function partBytes(part: Part, nodes: Map<string, OracleNode>): number {
  * recorded one-time negative control used. */
 const GIST_WEIGHT = (level: number): number => 2 ** (level + 2);
 
+/** The view's fit (gist §5.2) as #491 batches it: nothing until the view passes
+ * its budget, then merges down to seven eighths of it. */
 function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>, weight = GIST_WEIGHT): void {
+  const size = () => view.reduce((sum, part) => sum + partBytes(part, nodes), 0);
+  if (size() <= budget) return;
+  const target = budget - Math.floor(budget / 8);
   for (;;) {
-    let size = 0;
-    for (const part of view) size += partBytes(part, nodes);
-    if (size <= budget) return;
+    if (size() <= target) return;
     let best: { position: number; due: number } | undefined;
     for (let position = 0; position + 1 < view.length; position += 1) {
       const a = view[position]!;

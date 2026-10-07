@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, CACHE_MARKS, cachePieces, markAnthropicPieces } from "./cache-layout.js";
+import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, CACHE_MARKS, cachePieces, markAnthropicBlocks } from "./cache-layout.js";
 
 // Isolated checks for the failure modes the Home cache E2E cannot enumerate
 // (progress.md C2-C6, C8): every cut-point case of the splitter, and payload
@@ -86,14 +86,14 @@ describe("cachePieces", () => {
   });
 });
 
-describe("markAnthropicPieces", () => {
+describe("markAnthropicBlocks", () => {
   const memory = ["piece one\n", "piece two\n", "piece three\n", "last piece\n", "nonce"];
 
   // C4 and C6: within the budget, with view marks and the request end kept.
   it("marks the cut pieces, keeps the request end, and never exceeds the budget", () => {
     for (const oauth of [false, true]) {
       const payload = anthropicPayload({ oauth, memoryBlocks: memory });
-      const marked = markAnthropicPieces(payload, 0, 3) as Record<string, unknown>;
+      const marked = markAnthropicBlocks(payload, 0, [0, 1, 2]) as Record<string, unknown>;
       const found = marks(marked);
       expect(found.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
       expect(found).toEqual(expect.arrayContaining([
@@ -106,22 +106,24 @@ describe("markAnthropicPieces", () => {
 
   it("keeps the system mark when the budget allows it", () => {
     const payload = anthropicPayload({ memoryBlocks: memory });
-    const found = marks(markAnthropicPieces(payload, 0, 1) as Record<string, unknown>);
+    const found = marks(markAnthropicBlocks(payload, 0, [0]) as Record<string, unknown>);
     expect(found).toEqual([".system[0]", ".tools[1]", ".messages[0].content[0]", ".messages[1].content[0]"]);
   });
 
   // C5: no marks at all means caching is off; the layout adds none.
   it("adds nothing when the request carries no cache marks", () => {
     const payload = withoutCacheControl(anthropicPayload({ memoryBlocks: memory })) as Record<string, unknown>;
-    expect(markAnthropicPieces(payload, 0, 3)).toEqual(payload);
+    expect(markAnthropicBlocks(payload, 0, [0, 1, 2])).toEqual(payload);
   });
 
   // C8 and a malformed target: anything that is not the expected shape is left as it is.
   it("leaves other payload shapes and out-of-range targets unchanged", () => {
     const openai = { model: "m", messages: [{ role: "user", content: "text" }], prompt_cache_key: "k" };
-    expect(markAnthropicPieces(openai, 0, 3)).toEqual(openai);
+    expect(markAnthropicBlocks(openai, 0, [0, 1, 2])).toEqual(openai);
     const payload = anthropicPayload({ memoryBlocks: memory });
-    expect(markAnthropicPieces(payload, 7, 3)).toEqual(payload);
-    expect(markAnthropicPieces(payload, 0, 0)).toEqual(payload);
+    expect(markAnthropicBlocks(payload, 7, [0, 1, 2])).toEqual(payload);
+    expect(markAnthropicBlocks(payload, 0, [])).toEqual(payload);
+    // A block past the message's end is a malformed target, not a partial mark.
+    expect(markAnthropicBlocks(payload, 0, [0, memory.length])).toEqual(payload);
   });
 });

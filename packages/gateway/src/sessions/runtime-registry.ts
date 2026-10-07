@@ -103,7 +103,7 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
 import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
-import type { HomeRequestRecord } from "../home/home-request-policy.js";
+import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
@@ -1619,7 +1619,7 @@ export class RuntimeRegistry {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      homeModelRuntime: async () => sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime()),
+      homeModelRuntime: async () => applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
       createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),
