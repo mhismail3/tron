@@ -2344,9 +2344,8 @@ export class GatewayService {
   }
 
   private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown, signal?: AbortSignal): Promise<JsonValue> {
-    await openAIModelEligibility(modelRuntime)?.refresh(signal);
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
-      const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
+      const available = new Set((await modelRuntime.getAvailable(undefined, signal ? { signal } : undefined)).map((model) => `${model.provider}\0${model.id}`));
       const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
         // Undated models simply omit the field; the picker's provider sections
         // list them without a release date.

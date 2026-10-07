@@ -36,6 +36,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -1598,9 +1599,30 @@ export class RuntimeSlot {
       }
       const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
       this.directBashProcesses = directBashProcesses;
+      let initialModel: Model<never> | undefined;
+      if (sessionManager.getEntryCount() === 0) {
+        const defaultProvider = services.settingsManager.getDefaultProvider();
+        const defaultModelId = services.settingsManager.getDefaultModel();
+        if ((defaultProvider === "openai" || defaultProvider === "openai-codex") && defaultModelId) {
+          const savedDefault = modelRuntime.getModel(defaultProvider, defaultModelId);
+          const eligibility = openAIModelEligibility(modelRuntime);
+          if (savedDefault && eligibility) {
+            const available = await modelRuntime.getAvailable();
+            if (!eligibility.isEligible(savedDefault)) {
+              // Pi reads a saved default directly, independently of its filtered
+              // available-model snapshot. Only brand-new sessions may replace
+              // that stale preference; existing transcript identities stay intact.
+              const fallback = available[0];
+              if (!fallback) throw new GatewayError("invalid_request", "No eligible model is available for a new session");
+              initialModel = fallback as Model<never>;
+            }
+          }
+        }
+      }
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
+        ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.

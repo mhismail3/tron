@@ -12,7 +12,7 @@ const installed = new WeakMap<ModelRuntime, OpenAIModelEligibility>();
 
 type OpenAIModel = Model<any>;
 interface DiscoveryEntry { slug: string; visibility: string; displayName?: string; }
-interface AccountModels { entries: readonly string[]; displayNames: ReadonlyMap<string, string>; expiresAt: number; }
+interface AccountModels { fingerprint: string; entries: readonly string[]; displayNames: ReadonlyMap<string, string>; expiresAt: number; }
 export interface OpenAIModelEligibilityOptions {
   /** Provider-usage has the same narrow fetch injection seam; production always uses global fetch. */
   fetch?: typeof globalThis.fetch;
@@ -20,6 +20,8 @@ export interface OpenAIModelEligibilityOptions {
 }
 
 function firstPartyOpenAI(runtime: ModelRuntime): boolean {
+  // Mixed SDK/custom compositions are outside account-list authority. Leave the
+  // provider unchanged rather than gating proxy models alongside SDK models.
   const provider = runtime.getProvider("openai");
   if (!provider || normalize(provider.baseUrl ?? "") !== "https://api.openai.com/v1") return false;
   const models = runtime.getModels("openai");
@@ -49,14 +51,12 @@ function parsePage(value: unknown): { entries: DiscoveryEntry[]; hasMore: boolea
 export class OpenAIModelEligibility {
   private readonly fetch: typeof globalThis.fetch;
   private readonly now: () => number;
-  private readonly byAccount = new Map<string, AccountModels>();
+  private lastSuccessful: AccountModels | undefined;
   private currentFingerprint: string | undefined;
   private currentOAuth: boolean | undefined;
   private readonly discovery = new Map<string, Promise<void>>();
   private currentEligible: readonly string[] = [];
   private currentDisplayNames: ReadonlyMap<string, string> = new Map();
-  private unregisteredAccountSlugs = 0;
-  private currentAccount: string | undefined;
 
   constructor(private readonly runtime: ModelRuntime, options: OpenAIModelEligibilityOptions = {}) {
     this.fetch = options.fetch ?? globalThis.fetch;
@@ -75,9 +75,9 @@ export class OpenAIModelEligibility {
     if (signal?.aborted) return;
     if (!firstPartyOpenAI(this.runtime)) {
       this.currentOAuth = false;
+      this.currentFingerprint = undefined;
       this.currentEligible = [];
       this.currentDisplayNames = new Map();
-      this.currentAccount = undefined;
       return;
     }
     let credentials;
@@ -87,7 +87,6 @@ export class OpenAIModelEligibility {
       this.currentOAuth = undefined;
       this.currentEligible = [];
       this.currentDisplayNames = new Map();
-      this.currentAccount = undefined;
       return;
     }
     const credential = credentials.find(item => item.providerId === "openai");
@@ -99,36 +98,30 @@ export class OpenAIModelEligibility {
         this.currentOAuth = undefined;
         this.currentEligible = [];
         this.currentDisplayNames = new Map();
-        this.currentAccount = undefined;
         return;
       }
     }
     this.currentOAuth = authType === "oauth";
     if (!this.currentOAuth) {
+      this.currentFingerprint = undefined;
       this.currentEligible = [];
       this.currentDisplayNames = new Map();
-      this.currentAccount = undefined;
       return;
     }
     const result = await this.runtime.getAuth("openai", signal ? { signal } : undefined);
     const token = result?.auth.apiKey;
     if (!token) {
+      this.currentFingerprint = undefined;
       this.currentEligible = [];
       this.currentDisplayNames = new Map();
-      this.currentAccount = undefined;
       return;
     }
     const fingerprint = tokenFingerprint(token);
     this.currentFingerprint = fingerprint;
-    this.currentAccount = fingerprint;
-    const cached = this.byAccount.get(fingerprint);
+    const cached = this.lastSuccessful?.fingerprint === fingerprint ? this.lastSuccessful : undefined;
     this.currentEligible = cached?.entries ?? [];
     this.currentDisplayNames = cached?.displayNames ?? new Map();
-    if (cached && cached.expiresAt > this.now()) {
-      this.currentEligible = cached.entries;
-      this.currentDisplayNames = cached.displayNames;
-      return;
-    }
+    if (cached && cached.expiresAt > this.now()) return;
     const pending = this.discovery.get(fingerprint);
     if (pending) return pending;
     const controller = new AbortController();
@@ -137,7 +130,7 @@ export class OpenAIModelEligibility {
     signal?.addEventListener("abort", abort, { once: true });
     const task = this.discover(token, fingerprint, controller.signal).catch(() => {
       if (this.currentFingerprint !== fingerprint) return;
-      const last = this.byAccount.get(fingerprint);
+      const last = this.lastSuccessful?.fingerprint === fingerprint ? this.lastSuccessful : undefined;
       this.currentEligible = last?.entries ?? [];
       this.currentDisplayNames = last?.displayNames ?? new Map();
     }).finally(() => {
@@ -152,8 +145,7 @@ export class OpenAIModelEligibility {
   isEligible(model: Pick<OpenAIModel, "provider" | "id">): boolean {
     if (model.provider === "openai") {
       if (this.currentOAuth === false || !firstPartyOpenAI(this.runtime)) return true;
-      return this.currentOAuth === true && this.currentFingerprint !== undefined && this.currentAccount === this.currentFingerprint
-        && this.currentEligible.includes(model.id);
+      return this.currentOAuth === true && this.currentFingerprint !== undefined && this.currentEligible.includes(model.id);
     }
     if (model.provider === "openai-codex" && providerUsageLentTo(this.runtime, "openai-codex") === "openai") return false;
     return true;
@@ -168,8 +160,6 @@ export class OpenAIModelEligibility {
   countChoices(providerId: string): number {
     return this.runtime.getModels(providerId).filter(model => this.isEligible(model)).length;
   }
-
-  get ignoredUnknownSlugCount(): number { return this.unregisteredAccountSlugs; }
 
   displayName(provider: string, id: string): string | undefined {
     return provider === "openai" && this.currentEligible.includes(id) ? this.currentDisplayNames.get(id) : undefined;
@@ -212,13 +202,11 @@ export class OpenAIModelEligibility {
     const current = await this.runtime.getAuth("openai", { signal });
     if (!current?.auth.apiKey || tokenFingerprint(current.auth.apiKey) !== fingerprint || this.currentFingerprint !== fingerprint || signal.aborted) return;
     const registered = new Set(this.runtime.getModels("openai").map(model => model.id));
-    this.unregisteredAccountSlugs = entries.filter((entry, index) => !registered.has(entry.slug)
-      && entries.findIndex(candidate => candidate.slug === entry.slug) === index).length;
     const recognizedEntries = entries.filter((entry, index) => registered.has(entry.slug)
       && entries.findIndex(candidate => candidate.slug === entry.slug) === index);
     const recognized = recognizedEntries.map(entry => entry.slug);
     const displayNames = new Map(recognizedEntries.flatMap(entry => entry.displayName ? [[entry.slug, entry.displayName] as const] : []));
-    this.byAccount.set(fingerprint, { entries: recognized, displayNames, expiresAt: this.now() + SUCCESS_TTL_MS });
+    this.lastSuccessful = { fingerprint, entries: recognized, displayNames, expiresAt: this.now() + SUCCESS_TTL_MS };
     if (this.currentFingerprint === fingerprint) {
       this.currentEligible = recognized;
       this.currentDisplayNames = displayNames;

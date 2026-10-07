@@ -563,24 +563,34 @@ gate.
 For first-party OpenAI ChatGPT OAuth, new model choices are gated at each Gateway
 `ModelRuntime` by that same OAuth access token's `GET https://api.openai.com/v1/models`
 response. The Gateway retains only `visibility: "list"` entries whose `slug`
-matches a model registered by the pinned SDK, preserving account order. The
-account list is the authority for currently eligible Responses models; bundled
-models it omits (including hidden, retired, or route-incompatible entries) are
-not selectable. Unknown account slugs are ignored because Tron has no registered
-transport metadata for them. Discovery is bounded to five seconds and paginated;
-the first account-backed availability/catalog read waits for this bounded
-request, then fails closed to an empty OpenAI OAuth choice set on failure. Only the previous successful set for the
-exact same token may remain visible after a refresh failure. Cached account sets
-never authorize a different token. The access token is sent only to the fixed
-first-party URL; API-key OpenAI and overridden provider/model endpoints keep their
-existing catalog behavior without discovery. `session.setModel`, new default
-model writes, `provider.list` choice counts, and `model.list.available` use the
-same policy. A Codex provider remains registered and its credential remains
-available to the usage adapter, but its models are not new choices while
-`providerUsageLentTo` identifies `openai`; a sole Codex sign-in is unchanged.
-Historical session model identities are not rewritten. This is account-list
-behavior, not evidence of the current account's exact model membership; the
-maintainer's post-install check verifies live account results.
+matches a model registered by the pinned SDK, preserving account order. This
+account list is the sole lifecycle and endpoint-eligibility authority for
+first-party OpenAI OAuth choices: bundled models it omits (including hidden,
+retired, or route-incompatible entries) are not selectable. Unknown account
+slugs are ignored because Tron has no registered transport metadata for them.
+Discovery is paginated and bounded to five seconds. The first account-backed
+availability/catalog read may therefore wait up to five seconds; before a
+successful result, or after a failure without a same-token success, OAuth OpenAI
+fails closed to no choices. Successful discoveries are fresh for 60 seconds
+before another bounded refresh; on refresh failure, the last successful list for
+the same token may remain available. A token change does not authorize the
+previous token's list. The access token is sent
+only to `https://api.openai.com/v1/models`; API-key OpenAI and custom endpoints
+keep their existing catalog behavior without discovery. Eligibility applies
+only when the provider and every registered OpenAI model use the SDK's exact
+first-party Responses route. If a mixed/custom model is registered, the whole
+provider is left unchanged rather than applying account authority to proxy
+models.
+
+`session.setModel`, default-model writes, `provider.list` choice counts, and
+`model.list.available` use the same policy. On a new session only, an ineligible
+saved OpenAI/Codex default is replaced by the first currently available model;
+the persisted setting is not rewritten. Existing session model identities are
+not rewritten, including on reopen. A Codex provider remains registered and its
+credential remains available to the usage adapter, but its models are not new
+choices while `providerUsageLentTo` identifies `openai`; a sole Codex sign-in is
+unchanged. This describes account-list behavior, not the current account's exact
+membership; a live account check remains a maintainer post-install validation.
 
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot
