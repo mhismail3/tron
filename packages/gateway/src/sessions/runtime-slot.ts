@@ -458,6 +458,7 @@ class CanonicalCustomEntryConflictError extends Error {}
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
+  observationSettled: boolean;
   fallbackWork?: GatewayWorkHandle;
 };
 
@@ -3188,6 +3189,7 @@ export class RuntimeSlot {
       item = {
         completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
+        observationSettled: false,
         ...(exactOwner ? {} : {
           fallbackWork: this.dependencies.workRegistry.beginDerived({
             kind: "terminal-receipt-persistence",
@@ -3253,6 +3255,29 @@ export class RuntimeSlot {
     if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
   }
 
+  private admitCompletionObservation(item: CompletionOwnershipItem): void {
+    if (item.observationSettled) return;
+    item.observationSettled = true;
+    const operationId = item.completion.operationId ?? this.completionWorkOwners.get(item.completion.id);
+    if (!operationId) return;
+    const observed = this.observationEntries(operationId, item.completion.id);
+    try {
+      this.hooks.turnSettled?.(
+        this.id,
+        observed.entries,
+        "completed",
+        item.completion.id,
+        observed.branchId,
+        this.cwd,
+        this.invocationForOperation(operationId)?.invocationId,
+      );
+    } catch {
+      // Observation admission is fire-and-forget; it cannot undo durable completion.
+    } finally {
+      this.observationStarts.delete(operationId);
+    }
+  }
+
   private async settleAssistantCompletion(item: CompletionOwnershipItem): Promise<void> {
     const { completion } = item;
     try {
@@ -3287,6 +3312,7 @@ export class RuntimeSlot {
       if (!completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
+      this.admitCompletionObservation(item);
       const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
       this.settleOperationWork(completionWorkOwner);
       this.completionWorkOwners.delete(completion.id);
@@ -3575,11 +3601,8 @@ export class RuntimeSlot {
               }
               await this.beginAttentionSettlement(completion);
               const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
-              const observed = this.observationEntries(completionOperationId ?? "", completion.id);
-              // The completion waiting for attention is a separate owner from
-              // the follow-up that just settled. Admit each exact cut with its
-              // own outcome and invocation provenance.
-              this.hooks.turnSettled?.(this.id, observed.entries, "completed", completion.id, observed.branchId, this.cwd, completionOperationId ? this.invocationForOperation(completionOperationId)?.invocationId : undefined);
+              // A successful earlier completion is admitted by its exact
+              // settlement owner; this lane admits only a distinct follow-up cut.
               if (settledOperationId && settledOperationId !== completionOperationId) {
                 const followUpObserved = this.observationEntries(settledOperationId);
                 this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
@@ -3601,9 +3624,11 @@ export class RuntimeSlot {
               terminalLifecycle,
               terminalErrorCode,
             ).then(async () => {
-              const observed = this.observationEntries(settledOperationId);
-              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
-              this.observationStarts.delete(settledOperationId);
+              if (this.observationStarts.has(settledOperationId)) {
+                const observed = this.observationEntries(settledOperationId);
+                this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+                this.observationStarts.delete(settledOperationId);
+              }
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });

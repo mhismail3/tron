@@ -7484,13 +7484,9 @@ export default function (pi) {
     let releaseInitial!: () => void;
     let releaseFollowUp!: () => void;
     let followUpStarted!: () => void;
-    let releaseAttention!: () => void;
-    let attentionStarted!: () => void;
     const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
     const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
-    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
-    const attentionStart = new Promise<void>((resolve) => { attentionStarted = resolve; });
-    onTestFinished(() => { releaseAttention(); releaseFollowUp(); });
+    onTestFinished(() => releaseFollowUp());
     const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
     const faux = fauxProvider({ provider: "tron-follow-up-steering-settlement", tokensPerSecond: 10_000 });
     faux.setResponses([
@@ -7523,12 +7519,6 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
 
-    const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
-    slot.hooks.assistantResponseCompleted = async (...args: any[]) => {
-      attentionStarted();
-      await attentionBarrier;
-      return originalAttention(...args);
-    };
     const initial = slot.prompt("initial");
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");
     const initialOperationId = slot.snapshot().operation?.id;
@@ -7536,19 +7526,10 @@ export default function (pi) {
     const queuedFollowUp = await slot.prompt("queued follow-up", [], "followUp");
     releaseInitial();
     await followUpStart;
-    await attentionStart;
 
     let steer: { operationId: string };
     try {
-      let steerSettled = false;
-      const steering = slot.prompt("steer during follow-up", [], "steer").then(result => {
-        steerSettled = true;
-        return result;
-      });
-      await Promise.resolve();
-      expect(steerSettled, "admission remains ordered behind the real attention commit").toBe(false);
-      releaseAttention();
-      steer = await steering;
+      steer = await slot.prompt("steer during follow-up", [], "steer");
       expect(steer.operationId).toBeTruthy();
       expect(slot.snapshot().queuedItems).toEqual([
         expect.objectContaining({ id: steer.operationId, behavior: "steer" }),
@@ -7557,7 +7538,6 @@ export default function (pi) {
         receipt.operationId === initialOperationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed"),
       "the initial terminal receipt while the follow-up is active");
     } finally {
-      releaseAttention();
       releaseFollowUp();
     }
     await initial;
@@ -7572,6 +7552,77 @@ export default function (pi) {
       .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === steer.operationId)
       .map(entry => entry.data);
     expect(steerReceipt.at(-1)).toMatchObject({ receiptKind: "terminal", lifecycle: "completed" });
+    const artifactPath = join(process.cwd(), "test-results", "runtime-slot-follow-up-steering.json");
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({
+      test: "queued follow-up then steer",
+      transcript: entries.filter(entry => entry.type === "message"
+        && (entry.message.role === "user" || entry.message.role === "assistant"))
+        .map(entry => ({ role: entry.message.role, content: entry.message.content, stopReason: entry.message.stopReason })),
+      receipts: entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+        && [queuedFollowUp.operationId, steer.operationId].includes(entry.data?.operationId))
+        .map(entry => entry.data),
+    }, null, 2)}\n`);
+  });
+
+  it("orders a prompt behind a genuinely pending attention commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-attention-admission-order-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let secondResponseStarted!: () => void;
+    let attentionStarted!: () => void;
+    let releaseAttention!: () => void;
+    const secondStarted = new Promise<void>((resolve) => { secondResponseStarted = resolve; });
+    const attentionEntered = new Promise<void>((resolve) => { attentionStarted = resolve; });
+    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
+    onTestFinished(() => releaseAttention());
+    const faux = fauxProvider({ provider: "tron-attention-admission-order", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("first complete"),
+      async () => {
+        secondResponseStarted();
+        return fauxAssistantMessage("second complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
+    slot.hooks.assistantResponseCompleted = async (...args: any[]) => {
+      attentionStarted();
+      await attentionBarrier;
+      return originalAttention(...args);
+    };
+
+    await slot.prompt("first");
+    await attentionEntered;
+    let secondSettled = false;
+    const second = slot.prompt("ordered second", [], "steer").then(result => {
+      secondSettled = true;
+      return result;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(secondSettled, "the newer command waits for the durable attention commit").toBe(false);
+    releaseAttention();
+    const accepted = await second;
+    expect(accepted.operationId).toBeTruthy();
+    await secondStarted;
+    await waitFor(() => !slot.isBusy, "the second response and its settlement");
   });
 
   it("names the exact pending completion and age when attention blocks prompt admission", async () => {
@@ -12107,11 +12158,16 @@ export default function (pi) {
     const modelStarted = barrier();
     const releaseModel = barrier();
     const attentionEntered = barrier();
-    const releaseAttention = barrier();
+    const followUpStarted = barrier();
+    const releaseFollowUpFailure = barrier();
     const faux = fauxProvider({ provider: "tron-knowledge-overlap", tokensPerSecond: 100_000 });
     faux.setResponses([
       async () => { modelStarted.resolve(); await releaseModel.promise; return fauxAssistantMessage("SYNTHETIC_EARLIER_RESPONSE"); },
-      fauxAssistantMessage("SYNTHETIC_FOLLOWUP_FAILURE", { stopReason: "error", errorMessage: "synthetic controlled failure" }),
+      async () => {
+        followUpStarted.resolve();
+        await releaseFollowUpFailure.promise;
+        return fauxAssistantMessage("SYNTHETIC_FOLLOWUP_FAILURE", { stopReason: "error", errorMessage: "synthetic controlled failure" });
+      },
     ]);
     const admissions: any[] = [];
     const registry = new RuntimeRegistry({
@@ -12126,7 +12182,7 @@ export default function (pi) {
     const selectedModel = faux.getModel();
     await slot.setModel(selectedModel.provider, selectedModel.id);
     const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
-    slot.hooks.assistantResponseCompleted = async (...args: any[]) => { attentionEntered.resolve(); await releaseAttention.promise; return originalAttention(...args); };
+    slot.hooks.assistantResponseCompleted = async (...args: any[]) => { attentionEntered.resolve(); return originalAttention(...args); };
     let initial: { operationId: string };
     let queued: { operationId: string };
     try {
@@ -12134,11 +12190,17 @@ export default function (pi) {
       await modelStarted.promise;
       queued = await slot.prompt("SYNTHETIC_QUEUED_TASK", [], "followUp");
       releaseModel.resolve();
+      await followUpStarted.promise;
       await attentionEntered.promise;
+      await waitFor(() => admissions.some(cut => cut.completionId !== undefined), "the earlier completion cut while the follow-up is blocked");
+      expect(admissions.find(cut => cut.completionId !== undefined)?.invocationId).toBe(
+        invocationReceipts(slot.canonicalSessionEntries(), slot.id).find(receipt => receipt.operationId === initial.operationId && receipt.receiptKind === "terminal")?.invocationId,
+      );
+      releaseFollowUpFailure.resolve();
       await waitFor(() => invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt => receipt.operationId === queued.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "failed"), "the failed receipt for the queued prompt");
     } finally {
       releaseModel.resolve();
-      releaseAttention.resolve();
+      releaseFollowUpFailure.resolve();
     }
     await waitFor(() => !slot.isBusy && !slot.isDrainBusy, "the slot to go idle after the failed operation");
     const terminals = invocationReceipts(slot.canonicalSessionEntries(), slot.id).filter(receipt => receipt.receiptKind === "terminal");

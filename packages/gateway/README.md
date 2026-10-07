@@ -13,9 +13,15 @@ automatically replayed. When Pi appends a canonical successful assistant reply,
 RuntimeSlot immediately starts that exact completion's durable attention
 settlement; it does not wait for `agent_settled`, because Pi can begin a queued
 follow-up inside the same run. Settlement retires only the prior completion's
-receipt and marker while the follow-up remains active. If a durable commit truly
-blocks admission, the `attention-pending` diagnostic names the owning operation
-and its age.
+receipt and marker while the follow-up remains active, and admits that exact
+completed observation cut once from the same completion owner. A later follow-up
+failure cannot swallow the earlier success cut. If a durable commit truly blocks
+admission, the `attention-pending` diagnostic names the owning operation and its
+age. The faux-provider regression in
+`src/sessions/runtime-registry.integration.test.ts` retains its canonical
+transcript and invocation receipts at
+`test-results/runtime-slot-follow-up-steering.json` for inspection and
+regeneration with that focused Vitest case.
 
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
