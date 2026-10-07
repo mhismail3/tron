@@ -19,6 +19,7 @@ from gh import Gh, GhError
 _FORM_PREFIX = re.compile(r"^\s*\[[^\]]*\]:?\s*")
 _SUMMARY = re.compile(r"^## Summary\n\n(.*?)\n\n## Verification\n", re.DOTALL | re.MULTILINE)
 _VALIDATION = "\n## Maintainer validation\n\n"
+_BUG_SUMMARY_SECTIONS = ("Repro", "Cause", "Fix")
 # Git's markers for an operation that has stopped half way.
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
                 ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
@@ -256,6 +257,101 @@ def acceptance_evidence(records: List[dict]) -> str:
                      f"{record['artifacts']} artifact(s); report sha256 `{record['sha256']}`; "
                      f"source `{record['revision']}` fingerprint `{record['fingerprint']}`.")
     return "\n".join(lines)
+
+
+def validate_issue_summary(summary: str, labels: List[str]) -> None:
+    """Require a bug's evidence headings in the Summary, before any landing writes.
+
+    Verification is the separate, receipt-generated PR section, so it is not
+    user-authored summary content. Fenced code and nested headings are payload,
+    not section delimiters; this also prevents an apparent heading in an example
+    from satisfying the contract.
+    """
+    if "kind:bug" not in labels:
+        return
+    headings: Dict[str, List[int]] = {name: [] for name in _BUG_SUMMARY_SECTIONS}
+    sections: Dict[str, List[str]] = {}
+    current: Optional[str] = None
+    fence: Optional[Tuple[str, int]] = None
+    verification_heading = False
+    for index, line in enumerate(summary.replace("\r\n", "\n").splitlines()):
+        stripped = line.lstrip()
+        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
+                fence = None
+            if current:
+                sections[current].append(line)
+            continue
+        if fence is not None:
+            if current:
+                sections[current].append(line)
+            continue
+        heading = re.fullmatch(r"##[ \t]+([^#\n]+?)[ \t]*#*[ \t]*", line)
+        if heading and heading.group(1) in headings:
+            current = heading.group(1)
+            headings[current].append(index)
+            sections.setdefault(current, [])
+            continue
+        if re.match(r"^##[ \t]+Verification(?:[ \t]+#*)?[ \t]*$", line):
+            verification_heading = True
+            current = None
+            continue
+        if current:
+            sections[current].append(line)
+    absent = [name for name in _BUG_SUMMARY_SECTIONS if len(headings[name]) != 1]
+    positions = [headings[name][0] for name in _BUG_SUMMARY_SECTIONS if len(headings[name]) == 1]
+    ordered = len(positions) == len(_BUG_SUMMARY_SECTIONS) and positions == sorted(positions)
+    empty = [name for name in _BUG_SUMMARY_SECTIONS if len(headings[name]) == 1
+             and not any(line.strip() and not re.match(r"^#{1,6}[ \t]+", line)
+                         for line in re.sub(r"<!--.*?-->", "", "\n".join(sections.get(name, [])),
+                                            flags=re.DOTALL).splitlines())]
+    if absent or empty or not ordered or verification_heading:
+        missing = absent + [name for name in empty if name not in absent]
+        if not ordered and not absent:
+            missing.append("sections in Repro, Cause, Fix order")
+        if verification_heading:
+            missing.append("generated `## Verification` (do not include it in the summary)")
+        raise LandError("bug summary requires exactly one non-empty `## Repro`, `## Cause`, and `## Fix` "
+                        "section before the generated `## Verification`; missing or empty: "
+                        + ", ".join(missing))
+
+
+def _markdown_h2_sections(text: str) -> List[Tuple[str, int]]:
+    """Return top-level H2 headings outside fenced code, with their line indexes."""
+    sections: List[Tuple[str, int]] = []
+    fence: Optional[Tuple[str, int]] = None
+    for index, line in enumerate(text.splitlines()):
+        fence_match = re.match(r"(`{3,}|~{3,})", line.lstrip())
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
+                fence = None
+            continue
+        if fence is None:
+            heading = re.fullmatch(r"##[ \t]+([^#\n]+?)[ \t]*#*[ \t]*", line)
+            if heading:
+                sections.append((heading.group(1), index))
+    return sections
+
+
+def validate_existing_bug_body(body: str, labels: List[str], pull: int) -> None:
+    """Validate an adopted or merged bug PR body, not just its parsed prefix."""
+    if "kind:bug" not in labels:
+        return
+    text = (body or "").replace("\r\n", "\n")
+    headings = _markdown_h2_sections(text)
+    summaries = [index for title, index in headings if title == "Summary"]
+    verifications = [index for title, index in headings if title == "Verification"]
+    if len(summaries) != 1 or len(verifications) != 1 or summaries[0] >= verifications[0]:
+        raise LandError(f"#{pull} bug pull request must have one Summary and one generated Verification section")
+    summary = "\n".join(text.splitlines()[summaries[0] + 1:verifications[0]])
+    validate_issue_summary(summary, labels)
 
 
 def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Optional[str],
@@ -548,6 +644,13 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     _refuse_stacked(gh, root, config, owner, name, branch)
     if summary_path is not None:
         summary = summary_path.read_text()
+    elif pull is not None and "kind:bug" in issue["labels"]:
+        validate_existing_bug_body(pull["body"], issue["labels"], pull["number"])
+        body_lines = pull["body"].replace("\r\n", "\n").splitlines()
+        headings = _markdown_h2_sections(pull["body"].replace("\r\n", "\n"))
+        summary_index = next(index for title, index in headings if title == "Summary")
+        verification_index = next(index for title, index in headings if title == "Verification")
+        summary = "\n".join(body_lines[summary_index + 1:verification_index])
     elif pull is not None and _SUMMARY.search((pull["body"] or "").replace("\r\n", "\n")):
         # A body saved from the web editor has CRLF line ends.
         summary = _SUMMARY.search(pull["body"].replace("\r\n", "\n")).group(1)
@@ -556,6 +659,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     title = title_arg or (pull["title"] if pull else default_title(branch, issue["title"]))
     _scrub(root, config, "title", title)
     _scrub(root, config, "summary", summary)
+    validate_issue_summary(summary, issue["labels"])
     if section is not None:
         # Checked now: after the merge a refusal would lose the handoff.
         _scrub(root, config, "validation text", section)
@@ -653,6 +757,7 @@ def _resume(gh: Gh, root: Path, config: dict, branch: str, number: int, session:
         _scrub(root, config, "validation text", action)
     owner_name, name = _repository(gh)
     issue = start.load_issue(gh, owner_name, name, number, rules, config["project"]["title"])
+    validate_existing_bug_body(pull["body"], issue["labels"], pull["number"])
     if issue["item"] is None:
         raise LandError(f"#{number} is not in the Project; add it back first")
     merge_sha = pull["mergeCommit"]["oid"]
@@ -756,6 +861,7 @@ def steward(gh: Gh, repo: Path, config: dict, number: Optional[int]) -> int:
     issue = start.load_issue(gh, owner, name, number, rules, config["project"]["title"])
     if issue["state"] != "OPEN":
         raise LandError(f"#{number} is closed")
+    validate_existing_bug_body(row["body"], issue["labels"], row["pr"])
     _refuse_stacked(gh, root, config, owner, name, branch)
     merge_sha = merge(gh, row["pr"], row["title"], number, head, keyword, base, time.sleep,
                       config["land"]["pollSeconds"])

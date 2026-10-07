@@ -718,7 +718,15 @@ as does `acceptance` for the journeys it can run.
      `--irreducible` without `--needs-user-validation`;
    - `--acceptance` names no journeys, or an id the registry does not hold;
    - the scrub command (`verify.scrubCommand`) finds anything in the title,
-     the summary, the validation text or the acceptance evidence.
+     the summary, the validation text or the acceptance evidence;
+   - an issue labeled `kind:bug` has a Summary without exactly one non-empty,
+     top-level `## Repro`, `## Cause` and `## Fix` section in that order. Fenced
+     examples, nested headings and a user-authored `## Verification` do not
+     satisfy this contract. The separate `## Verification` section is generated
+     from the passing receipt. This is checked before publication, push or PR
+     create/edit; adopting an existing PR, resuming a merged PR and stewarding a
+     merge check the stored body too. Other issue kinds keep the existing freeform
+     summary contract.
 2. **Update.** It fetches the remote base branch and, when the branch does not
    contain its tip, merges it in. It merges rather than rebases, so the
    incremental re-verify can carry over checks whose inputs did not change. On
@@ -1045,6 +1053,14 @@ Project state and records every call. The live E2E covers GitHub itself.
     irreducible part and then the check, and the handoff comment carries both;
     a resumed land compares that whole section with the merged body, so a
     resume cannot quietly drop or change the irreducible part.
+79. **A malformed bug summary is published or merged.** `test_land.py` runs
+    the real `cli.py land` process against its isolated Git/fake-GitHub fixture.
+    It refuses missing, empty, reordered, nested or fenced headings and a
+    user-supplied Verification heading before any publication, including when
+    adopting an existing open PR or resuming a merged one. A valid bug summary
+    retains the tool-generated receipt Verification section; valid non-bug
+    summaries remain unchanged. The same stored-body validation runs in
+    `steward --land` before merging.
 
 ## `cleanup`
 

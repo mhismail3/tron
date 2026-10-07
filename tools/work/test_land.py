@@ -583,6 +583,104 @@ class TreeStateTests(LandFixture):
         self.assertEqual(self.writes(), [])
 
 
+class TypeSpecificPullBodyTests(LandFixture):
+    """The public CLI must reject malformed bug evidence before writing or opening a PR."""
+
+    BUG_SUMMARY = "## Repro\n\nThe regression is reproduced.\n\n## Cause\n\nThe cause is identified.\n\n## Fix\n\nThe fix is described.\n"
+
+    def cli_land(self, summary: str, labels=None, summary_file=True, existing_body=None, merged=False):
+        self.set_state(issues={str(NUMBER): {**self.issue(), "labels": labels or ["task"]}})
+        config_path = self.repo / ".github" / "work.json"
+        if not config_path.exists():
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config = json.loads(json.dumps(self.config))
+            config["verify"]["checks"][0]["paths"].append(".github/**")
+            config_path.write_text(json.dumps(config))
+            git(self.repo, "add", ".github/work.json")
+            git(self.repo, "commit", "-q", "-m", "fixture work configuration")
+        if existing_body is not None:
+            pull = {"number": 100, "headRefName": BRANCH, "title": "feat: Add the widget",
+                    "base": BASE, "body": existing_body, "state": "MERGED" if merged else "OPEN",
+                    "headRefOid": git(self.repo, "rev-parse", "HEAD"),
+                    "mergeCommit": {"oid": git(self.repo, "rev-parse", "HEAD")} if merged else None}
+            self.set_state(pulls=[pull])
+        path = self.tmp / "cli-summary.md"
+        path.write_text(summary)
+        command = [sys.executable, str(Path(__file__).with_name("cli.py")), "land", "--session", SESSION]
+        if summary_file:
+            command += ["--summary-file", str(path)]
+        result = subprocess.run(command, cwd=self.repo, env=os.environ.copy(), capture_output=True, text=True)
+        return result
+
+    def assert_rejected_without_publication(self, summary: str):
+        before = len(self.calls())
+        result = self.cli_land(summary, labels=["task", "kind:bug"])
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Repro", result.stderr)
+        self.assertEqual(self.writes(before), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+
+    def test_missing_bug_sections_are_refused_before_any_publication(self):
+        self.assert_rejected_without_publication("## Repro\n\nShown.\n\n## Cause\n\nKnown.\n")
+
+    def test_empty_bug_section_is_refused_before_any_publication(self):
+        self.assert_rejected_without_publication(
+            "## Repro\n\nShown.\n\n## Cause\n\nKnown.\n\n## Fix\n\n   ")
+        self.assert_rejected_without_publication(
+            "## Repro\n\nShown.\n\n## Cause\n\nKnown.\n\n## Fix\n\n<!-- pending -->\n")
+
+    def test_heading_depth_and_fenced_heading_text_do_not_count(self):
+        self.assert_rejected_without_publication(
+            "### Repro\n\nShown.\n\n## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+        self.assert_rejected_without_publication(
+            "```md\n## Repro\n```\n\n## Cause\n\nKnown.\n\n## Fix\n\nDone.\n")
+
+    def test_reordered_bug_sections_are_refused(self):
+        self.assert_rejected_without_publication(
+            "## Cause\n\nKnown.\n\n## Repro\n\nShown.\n\n## Fix\n\nDone.\n")
+
+    def test_verification_heading_cannot_be_confused_with_summary_content(self):
+        self.assert_rejected_without_publication(
+            self.BUG_SUMMARY + "\n## Verification\n\nThis would shadow generated evidence.\n")
+
+    def test_valid_bug_summary_lands_through_cli_with_generated_verification(self):
+        result = self.cli_land(self.BUG_SUMMARY, labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        body = self.state()["pulls"][0]["body"]
+        for heading in ("## Repro", "## Cause", "## Fix", "## Verification"):
+            self.assertIn(heading, body)
+
+    def test_nonbug_summary_remains_unchanged_through_cli(self):
+        result = self.cli_land("Adds the widget.\n", labels=["task", "kind:feature"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("Adds the widget.", self.state()["pulls"][0]["body"])
+
+    def test_adopting_valid_bug_pr_ignores_verification_example_in_fenced_code(self):
+        body = ("Closes #7\n\n## Summary\n\n" + self.BUG_SUMMARY
+                + "\n```md\n## Verification\n```\n\n## Verification\n\nGenerated.\n")
+        result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False, existing_body=body)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("```md\n## Verification\n```", self.state()["pulls"][0]["body"])
+
+    def test_adopting_open_bug_pr_with_confusing_verification_heading_is_refused(self):
+        malformed_body = ("Closes #7\n\n## Summary\n\n" + self.BUG_SUMMARY
+                          + "\n## Verification\n\nExisting check text.\n\n## Verification\n\nGenerated.\n")
+        before = len(self.calls())
+        result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False,
+                               existing_body=malformed_body)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.writes(before), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+
+    def test_merged_bug_resume_validates_the_merged_body(self):
+        malformed_body = "Closes #7\n\n## Summary\n\n## Repro\n\nShown.\n\n## Verification\n\nGenerated.\n"
+        before = len(self.calls())
+        result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False,
+                               existing_body=malformed_body, merged=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.writes(before), [])
+
+
 class ReceiptTests(LandFixture):
     # Failure mode 34.
     def test_failing_receipt_stops_before_push_post_or_pull_request(self):
@@ -1556,6 +1654,18 @@ class StackedStewardTests(StackedFixture):
         self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
         self.assertEqual(self.remote_file(HELD, "app/a.txt"), "two")
         self.assertEqual(self.remote_file(BASE, "app/a.txt"), "one")
+
+    def test_steward_refuses_a_bug_pull_request_with_missing_evidence_sections(self):
+        self.open_pull(HELD)
+        issues = self.state()["issues"]
+        issues[str(NUMBER)]["labels"] = ["task", "kind:bug"]
+        pulls = self.state()["pulls"]
+        pulls[0]["body"] = "Closes #7\n\n## Summary\n\n## Repro\n\nShown.\n\n## Verification\n\nGenerated.\n"
+        self.set_state(issues=issues, pulls=pulls)
+        with self.assertRaises(land.LandError) as raised:
+            self.steward_land()
+        self.assertIn("Cause", str(raised.exception))
+        self.assertEqual(self.merges(), [])
 
     # Failure mode 78.
     def test_a_pull_request_into_another_base_is_refused(self):
