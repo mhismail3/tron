@@ -17,8 +17,9 @@ import tempfile
 from pathlib import Path
 
 MAX_XCTESTRUN_BYTES = 16 * 1024 * 1024
-# Blueprint name to the IsUITestBundle value that identifies that target: the
-# hosted unit target is not a UI-test bundle, the XCUITest target is.
+# Blueprint name to whether that target is the XCUITest bundle. Xcode writes
+# `IsUITestBundle = true` on a UI-test target and omits the key on a unit target
+# (#497), so a unit target is one whose key is anything but true.
 TARGETS = {
     "TronMobileTests": False,
     "TronMobileUITests": True,
@@ -58,7 +59,8 @@ def patch_document(document: object, target_blueprint: str, values: dict[str, st
         for target in targets:
             if not isinstance(target, dict):
                 fail("xctestrun contains a malformed test target")
-            if target.get("BlueprintName") == target_blueprint and target.get("IsUITestBundle") is expected_ui_bundle:
+            is_ui_bundle = target.get("IsUITestBundle") is True
+            if target.get("BlueprintName") == target_blueprint and is_ui_bundle is expected_ui_bundle:
                 matches.append(target)
 
     if len(matches) != 1:
