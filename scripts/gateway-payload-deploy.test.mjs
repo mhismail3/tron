@@ -1,5 +1,4 @@
 import { strict as assert } from "node:assert";
-import { watch } from "node:fs";
 import { chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -953,29 +952,17 @@ test("concurrent retention ignores a live source staging directory", async () =>
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-staging-retention-")));
   try {
     const { store, sourceRoot } = await makeSourceBuildFixture(root);
-    let retained;
-    const retentionDone = new Promise((resolve, reject) => {
-      const watcher = watch(store.channelRoot, async (_event, name) => {
-        if (!String(name).startsWith(".source-staging-")) return;
-        watcher.close();
-        const staging = join(store.channelRoot, String(name));
-        try {
-          await cleanupPayloadVersions(store);
-          retained = await stat(staging);
-          resolve();
-        } catch (error) { reject(error); }
-      });
-    });
-    const build = buildSourcePayload({
+    const result = await buildSourcePayload({
       paths: store, config: { sourceRoot }, candidateVersion: "retention-candidate",
       runCommand: async (tool, args) => {
+        const liveStaging = join(store.channelRoot, ".source-staging-live-build");
+        await mkdir(liveStaging);
+        await cleanupPayloadVersions(store);
+        assert.ok((await stat(liveStaging)).isDirectory(), "retention must leave live source staging intact");
         await mkdir(args.at(-1), { recursive: true });
         await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
       },
     });
-    await retentionDone;
-    assert.ok(retained.isDirectory());
-    const result = await build;
     assert.equal(result.manifest.version, "retention-candidate");
   } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
