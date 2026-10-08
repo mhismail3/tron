@@ -812,12 +812,14 @@ describe("Tron Home activations end to end", () => {
     }
     const before = statSync(slot.sessionFile!).size;
     expect(before).toBeLessThan(admissionLimits.bytes);
-    const internal = slot as unknown as { terminalizeInvocation(...args: unknown[]): Promise<void> };
-    const terminalize = internal.terminalizeInvocation.bind(slot);
+    // Both abort and agent settlement persist through this owner; the wrapper
+    // now only adds terminal notification and is not the completion boundary.
+    const internal = slot as unknown as { persistInvocationTerminal(...args: unknown[]): Promise<unknown> };
+    const terminalize = internal.persistInvocationTerminal.bind(slot);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let losingObserverEntered = false;
-    const held = vi.spyOn(internal, "terminalizeInvocation").mockImplementation(async (...args) => {
+    const held = vi.spyOn(internal, "persistInvocationTerminal").mockImplementation(async (...args) => {
       const abortObserver = args[2] === "chapter-limit";
       if (abortObserver === (ordering === "completion-first")) {
         losingObserverEntered = true;

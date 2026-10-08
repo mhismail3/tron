@@ -327,6 +327,18 @@
         "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi"
       },
       {
+        "name": "pi-subagents",
+        "paths": [
+          "packages/gateway/package.json",
+          "packages/gateway/package-lock.json",
+          "packages/gateway/pi-subagents-pin.json",
+          "packages/gateway/artifacts/pi-subagents-*",
+          "packages/gateway/scripts/*pi-subagents*",
+          ".node-version"
+        ],
+        "command": "cd packages/gateway && npm run check:pi-subagents && npm run test:pi-subagents-scripts"
+      },
+      {
         "name": "gateway-scale",
         "paths": [
           "packages/gateway/src/knowledge/*.scale.test.ts",
@@ -422,11 +434,15 @@
           "scripts/validate-push-service-config.sh",
           "config/PushService.xcconfig",
           "scripts/gateway-payload-deploy.mjs",
+          "scripts/gateway-install-inputs.mjs",
+          "scripts/gateway-install-inputs.test.mjs",
+          "scripts/gateway-payload-deploy.test.mjs",
+          "scripts/tron-dev",
           "scripts/hash-npm-runtime.py",
           "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
+        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
       },
       {
         "name": "mac-native-computer-control",

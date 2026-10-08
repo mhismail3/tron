@@ -11,7 +11,7 @@ const client = (): ClientContext => ({ id: "connection-object", identity: "local
 
 function service(chunk: (params: Record<string, unknown>) => unknown): GatewayService {
   const root = join(tmpdir(), `tron-gateway-object-${Date.now()}-${Math.random().toString(16).slice(2)}`); roots.push(root);
-  return new GatewayService({ config: { tronHome: root }, knowledge: { invoke: async (_action: unknown) => chunk((_action as { request: Record<string, unknown> }).request) }, receipts: { status: async () => undefined, execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() } } as any);
+  return new GatewayService({ config: { tronHome: root }, sessions: { isAdministrativeDrainStarted: false }, knowledge: { invoke: async (_action: unknown) => chunk((_action as { request: Record<string, unknown> }).request) }, receipts: { status: async () => undefined, execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() } } as any);
 }
 
 describe("Gateway knowledge object transport", () => {

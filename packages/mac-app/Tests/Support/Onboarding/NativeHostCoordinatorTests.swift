@@ -13,6 +13,34 @@ struct NativeHostCoordinatorTests {
         #expect(try !NativeHostRegistrationPolicy.shouldRegister(.requiresApproval))
     }
 
+    @Test("startup only reconnects to the macOS-approved native service")
+    func approvedServiceOnlyIsRestored() {
+        #expect(NativeHostStartupPolicy.shouldRestore(state: .enabled))
+        #expect(!NativeHostStartupPolicy.shouldRestore(state: .needsRegistration))
+        #expect(!NativeHostStartupPolicy.shouldRestore(state: .needsApproval))
+        #expect(!NativeHostStartupPolicy.shouldRestore(state: .unavailable))
+    }
+
+    @Test("Quit drains without unregistering the approved native service")
+    func quitDrainPreservesApproval() async throws {
+        let fake = FakeNativeHost()
+        await fake.approve()
+        let owner = NativeHostCoordinator(operations: fake.operations)
+        try await owner.retireForQuit()
+        #expect(await fake.events == ["drain"])
+        #expect(await owner.serviceState() == .enabled)
+    }
+
+    @Test("failed Quit drain leaves the approved native service registered")
+    func quitDrainFailurePreservesApproval() async {
+        let fake = FakeNativeHost()
+        await fake.approve(); await fake.failDrain()
+        let owner = NativeHostCoordinator(operations: fake.operations)
+        await #expect(throws: NativeHostError.retirementFailed) { try await owner.retireForQuit() }
+        #expect(await fake.events == ["drain"])
+        #expect(await owner.serviceState() == .enabled)
+    }
+
     @Test("retirement status policy never treats notFound as a joined helper")
     func retirementStatusPolicy() async throws {
         let fake = FakeNativeHost()

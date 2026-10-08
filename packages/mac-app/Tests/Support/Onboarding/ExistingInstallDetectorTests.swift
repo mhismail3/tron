@@ -187,7 +187,8 @@ struct ExistingInstallDetectorTests {
         for (key, value) in [
             ("RunAtLoad", false as Any),
             ("KeepAlive", false as Any),
-            ("KeepAlive", ["SuccessfulExit": false] as Any),
+            ("KeepAlive", true as Any),
+            ("KeepAlive", ["SuccessfulExit": true] as Any),
             ("KeepAlive", "true" as Any),
         ] {
             let tmp = TestTempDir.make()

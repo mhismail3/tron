@@ -94,6 +94,7 @@ async function fixture() {
   const receipts = { execute: vi.fn(async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation()) };
   const service = new GatewayService({
     config: { tronHome: root }, notifications, devices,
+    sessions: { isAdministrativeDrainStarted: false },
     receipts,
   } as any);
   return { service, calls, devices, notifications, registered, upserts, receipts };

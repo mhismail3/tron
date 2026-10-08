@@ -116,6 +116,33 @@ class VerifyFixture(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("TRON_HOME_NAME=/", result.stderr + result.stdout)
 
+    def test_pi_subagents_selector_covers_pin_packages_and_artifacts_not_runtime_sources(self):
+        root = Path(__file__).resolve().parents[2]
+        config = json.loads((root / ".github/work.json").read_text())
+        checks = verify.load_checks(config["verify"])
+        provider = next((check for check in checks if check.name == "pi-subagents"), None)
+        self.assertIsNotNone(provider, "provider pin changes must select offline verification")
+        for path in (
+            "packages/gateway/package.json",
+            "packages/gateway/package-lock.json",
+            "packages/gateway/pi-subagents-pin.json",
+            "packages/gateway/artifacts/pi-subagents-0.76.1-tron.3.tgz",
+            "packages/gateway/artifacts/pi-subagents-0.76.1-tron.3-package-lock.json",
+            "packages/gateway/scripts/update-pi-subagents.mjs",
+            "packages/gateway/scripts/build-pi-subagents-closure.py",
+            ".node-version",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(provider.matches(path))
+        for path in (
+            "packages/gateway/src/sessions/session-manager.ts",
+            "packages/gateway/README.md",
+            "packages/gateway/scripts/update-pi-sdk.mjs",
+            "packages/gateway/artifacts/unrelated.tgz",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(provider.matches(path))
+
     def test_scale_suite_selector_is_narrow(self):
         root = Path(__file__).resolve().parents[2]
         config = json.loads((root / ".github/work.json").read_text())

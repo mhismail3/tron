@@ -274,14 +274,21 @@ imported Registry target is ordinary unless the ledger names it.
 
 | | Home | Ordinary |
 | --- | --- | --- |
-| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) |
-| Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles` | agent directory and trusted project resources |
+| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
+| Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed provider settings view excludes user declarations of pi-subagents |
 | System prompt | the agent directory's `SYSTEM.md` and `APPEND_SYSTEM.md` are dropped through `systemPromptOverride`/`appendSystemPromptOverride` | loaded |
 | Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | a session-local view of the Gateway-wide user-scope runtime | one per session runtime |
 | Cache warming | zero requests | unchanged |
+
+The managed pi-subagents loader and admission apply only to ordinary runtimes.
+Home is delegate-only through Home tasks, not subagents: `session.resources`
+returns an empty subagent catalog without invoking provider discovery. This
+boundary follows the live runtime's profile through reload, profile replacement
+and cold acquisition. `home-managed-provider.integration.test.ts` exercises
+those transitions beside an ordinary managed-provider session.
 
 Home runs on the Gateway-wide model runtime, the one that serves the model
 catalog, admits `home.designate` and backs Home's summarizer. User provider

@@ -50,17 +50,15 @@ struct MenuBarItemBuilderTests {
         #expect(actions.filter { $0.1 == .restartServer }.isEmpty)
     }
 
-    @Test("a refused installation can still be paused and offers one repair")
-    func needsRepairOffersPause() {
+    @Test("service controls expose repair but no manual pause or resume")
+    func needsRepairOffersRestartOnly() {
         let snapshot = ServerStatusSnapshot(state: .needsRepair(version: "1", port: 9847, reason: "refused"))
         let actions = Self.build(snapshot: snapshot).compactMap { item -> (String, MenuBarAction)? in
             guard case .action(let title, _, let action) = item else { return nil }
             return (title, action)
         }
-        // The reinstall runbook pauses the old wrapper before the app is
-        // replaced, so a refused admission must not leave only restart actions.
-        #expect(actions.contains { $0.1 == .pauseServer })
         #expect(actions.filter { $0.0 == "Repair Tron" }.map(\.1) == [.restartServer])
+        #expect(actions.allSatisfy { $0.0 != "Pause Tron" && $0.0 != "Resume Tron" })
     }
 
     @Test("Debug pairing is exposed only for an admitted pairable gateway")
@@ -90,7 +88,7 @@ struct MenuBarItemBuilderTests {
             snapshot: ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847)),
             canManageLaunchAgent: false
         )
-        let protectedActions: [MenuBarAction] = [.pauseServer, .restartServer, .uninstall]
+        let protectedActions: [MenuBarAction] = [.restartServer, .uninstall]
         for item in items {
             guard case .action(_, let enabled, let action) = item,
                   protectedActions.contains(action) else { continue }

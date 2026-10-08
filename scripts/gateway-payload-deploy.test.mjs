@@ -1,12 +1,13 @@
 import { strict as assert } from "node:assert";
-import { watch } from "node:fs";
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { gatewayBuildInputFingerprint, verifyGatewayBuildInputReceipt } from "./gateway-install-inputs.mjs";
 
 import {
   deploymentTransition,
@@ -232,6 +233,38 @@ async function makeTreeWritable(root) {
   if (info.isDirectory()) for (const entry of await readdir(root)) await makeTreeWritable(join(root, entry));
 }
 
+let pinnedNpmRootPromise;
+async function pinnedNpmRoot() {
+  if (pinnedNpmRootPromise) return pinnedNpmRootPromise;
+  pinnedNpmRootPromise = (async () => {
+    const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+    const nodeVersion = (await readFile(join(repoRoot, ".node-version"), "utf8")).trim();
+    assert.equal(process.version, `v${nodeVersion}`, "payload tests require the repository-pinned Node version");
+    const cacheRoot = resolve(repoRoot, process.env.TRON_CI_TOOLS_DIR ?? ".ci-tools");
+    const nodeRoot = process.env.TRON_NODE_ROOT
+      ? resolve(process.env.TRON_NODE_ROOT)
+      : join(cacheRoot, `node-v${nodeVersion}-${process.arch}`);
+    const archiveNpmRoot = join(nodeRoot, "lib", "node_modules", "npm");
+    let npmRoot = archiveNpmRoot;
+    try { await lstat(npmRoot); }
+    catch (error) {
+      if (error?.code !== "ENOENT" || !nodeRoot.includes("/Contents/Resources/Gateway/runtime")) throw error;
+      // The signed app runtime keeps the verified npm tree next to its Node binary.
+      npmRoot = join(nodeRoot, `npm-${process.arch}`);
+      await lstat(npmRoot);
+    }
+    const toolchain = await readFile(fileURLToPath(new URL("../config/ci-toolchain.env", import.meta.url)), "utf8");
+    const expected = toolchain.match(/^TRON_NODE_NPM_TREE_SHA256=([a-f0-9]{64})$/mu)?.[1];
+    assert.ok(expected, "pinned Node npm-tree digest is missing from config/ci-toolchain.env");
+    const actual = (await execFileAsync("python3", [
+      fileURLToPath(new URL("./hash-npm-runtime.py", import.meta.url)), npmRoot,
+    ])).stdout.trim();
+    assert.equal(actual, expected, `npm tree at ${npmRoot} must match the pinned Node archive tree`);
+    return npmRoot;
+  })();
+  return pinnedNpmRootPromise;
+}
+
 async function addRuntimeNodeAliases(root) {
   const piPackage = join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent");
   const piCli = join(piPackage, "dist", "cli.js");
@@ -252,11 +285,7 @@ async function addRuntimeNodeAliases(root) {
   const basePreset = join(root, "runtime", "xcodegen", "share", "xcodegen", "SettingPresets", "base.yml");
   await mkdir(dirname(basePreset), { recursive: true });
   await writeFile(basePreset, "PRODUCT_NAME: $TARGET_NAME\n");
-  const nodeExecutable = await realpath(process.execPath);
-  const nodeRoot = process.env.TRON_NODE_ROOT ?? dirname(dirname(nodeExecutable));
-  const officialNpmRoot = join(nodeRoot, "lib/node_modules/npm");
-  const officialNpmPackage = join(officialNpmRoot, "package.json");
-  await lstat(officialNpmPackage);
+  const officialNpmRoot = await pinnedNpmRoot();
   for (const architecture of ["arm64", "x64"]) {
     const directory = join(root, "runtime", `bin-${architecture}`);
     const npmRoot = join(root, "runtime", `npm-${architecture}`);
@@ -518,9 +547,10 @@ test("source build failure leaves active selection and deployment state unchange
     await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
     await mkdir(join(versionRoot, "app", "node_modules"), { recursive: true });
     await mkdir(join(versionRoot, "runtime"), { recursive: true });
-    const emptyLock = `${JSON.stringify({ lockfileVersion: 3, packages: { "": {} } })}\n`;
+    const packageText = `${JSON.stringify({ name: "@tron/gateway", version: "1.0.0" })}\n`;
+    const emptyLock = `${JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "@tron/gateway", version: "1.0.0" } } })}\n`;
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
-    await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "package.json"), packageText);
     await writeFile(join(versionRoot, "app", "package-lock.json"), emptyLock);
     await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
@@ -535,10 +565,42 @@ test("source build failure leaves active selection and deployment state unchange
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(manifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
-    await mkdir(join(root, "packages", "gateway"), { recursive: true });
+    const gatewayRoot = join(root, "packages", "gateway");
+    const sourceScripts = join(root, "scripts");
+    await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
+    await mkdir(join(gatewayRoot, "src"), { recursive: true });
     await mkdir(join(root, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
-    await writeFile(join(root, "packages", "gateway", "package.json"), "{}\n");
-    await writeFile(join(root, "packages", "gateway", "package-lock.json"), emptyLock);
+    await mkdir(join(root, "packages", "mac-app", "scripts"), { recursive: true });
+    await mkdir(sourceScripts, { recursive: true });
+    await writeFile(join(root, "packages", "mac-app", "scripts", "bundle-gateway.sh"), "#!/bin/sh\n");
+    await writeFile(join(gatewayRoot, "package.json"), packageText);
+    await writeFile(join(gatewayRoot, "package-lock.json"), emptyLock);
+    await writeFile(join(gatewayRoot, "tsconfig.json"), "{}\n");
+    await writeFile(join(gatewayRoot, "src", "index.ts"), "export const source = true;\n");
+    await writeFile(join(gatewayRoot, "scripts", "check-pi-sdk.mjs"), "// check\n");
+    await writeFile(join(gatewayRoot, "scripts", "check-pi-subagents.mjs"), "// provider pin check\n");
+    await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
+    await writeFile(join(gatewayRoot, "scripts", "install-pi-subagents.mjs"), "// provider installer\n");
+    await writeFile(join(gatewayRoot, "pi-subagents-pin.json"), "{}\n");
+    await copyFile(new URL("./gateway-install-inputs.mjs", import.meta.url), join(sourceScripts, "gateway-install-inputs.mjs"));
+    await writeFile(join(sourceScripts, "gateway-payload-deploy.mjs"), "// updater\n");
+    const fingerprintInputs = {
+      ".node-version": "22.22.0\n", "config/ci-toolchain.env": "pins\n",
+      "config/GatewayProtocol.json": "{}\n", "config/PushService.xcconfig": "origin\n",
+      "scripts/gateway_protocol_contract.py": "# contract\n", "scripts/hash-npm-runtime.py": "# hash\n",
+      "scripts/install-ci-tools.sh": "#!/bin/sh\n", "scripts/validate-push-service-config.sh": "#!/bin/sh\n",
+      "scripts/verify-gateway-protocol-contract.py": "# verifier\n",
+    };
+    for (const [path, content] of Object.entries(fingerprintInputs)) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), content);
+    }
+    await mkdir(join(gatewayRoot, "node_modules"), { recursive: true });
+    await writeFile(join(gatewayRoot, "node_modules", ".package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {} }));
+    await writeFile(join(root, ".gitignore"), "packages/gateway/node_modules/\npackages/gateway/dist/\n");
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    await execFileAsync("git", ["add", "-A"], { cwd: root });
+    await execFileAsync("git", ["-c", "user.email=fixture@example.test", "-c", "user.name=Fixture", "commit", "-q", "-m", "fixture source"], { cwd: root });
     const before = `${JSON.stringify({ untouched: true })}\n`;
     await writeFile(store.state, before);
     await assert.rejects(buildSourcePayload({ paths: store, config: { sourceRoot: root }, runCommand: async () => { throw new Error("build failed"); } }), /build failed/);
@@ -606,7 +668,7 @@ test("payload clone copy preserves fingerprints and relative symlinks and refuse
     assert.equal(await payloadFingerprint(destination), sourceFingerprint);
     await assert.rejects(copyValidatedPayloadBase({ root: payload, manifest }, destination), /destination already exists/);
     assert.equal(await payloadFingerprint(destination), sourceFingerprint);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
 test("validated runtime snapshot rejects source mutation after admission and removes its private copy", async () => {
@@ -626,7 +688,7 @@ test("validated runtime snapshot rejects source mutation after admission and rem
       /fingerprint does not match/,
     );
     await assert.rejects(lstat(destination), { code: "ENOENT" });
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
 const execFileAsync = promisify(execFile);
@@ -639,11 +701,35 @@ async function makeSourceBuildFixture(root) {
   await mkdir(join(sourceRoot, "scripts"), { recursive: true });
   await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
   await mkdir(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
+  await mkdir(join(sourceRoot, "packages", "mac-app", "scripts"), { recursive: true });
+  await writeFile(join(sourceRoot, "packages", "mac-app", "scripts", "bundle-gateway.sh"), "#!/bin/sh\n");
   await writeFile(join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), "// trusted updater\n");
+  await copyFile(new URL("./gateway-install-inputs.mjs", import.meta.url), join(sourceRoot, "scripts", "gateway-install-inputs.mjs"));
   await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// trusted helper\n");
+  await writeFile(join(gatewayRoot, "scripts", "check-pi-sdk.mjs"), "// checked SDK owner\n");
+  await writeFile(join(gatewayRoot, "scripts", "check-pi-subagents.mjs"), "// provider pin check\n");
+  await writeFile(join(gatewayRoot, "scripts", "install-pi-subagents.mjs"), "// provider installer\n");
+  await writeFile(join(gatewayRoot, "pi-subagents-pin.json"), "{}\n");
+  for (const [path, content] of Object.entries({
+    ".node-version": "22.22.0\n",
+    "config/ci-toolchain.env": "TRON_NODE_NPM_VERSION=10.9.4\n",
+    "config/GatewayProtocol.json": "{}\n",
+    "config/PushService.xcconfig": "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n",
+    "scripts/gateway_protocol_contract.py": "# fixture\n",
+    "scripts/hash-npm-runtime.py": "# fixture\n",
+    "scripts/install-ci-tools.sh": "#!/bin/sh\nexit 0\n",
+    "scripts/validate-push-service-config.sh": "#!/bin/sh\nexit 0\n",
+    "scripts/verify-gateway-protocol-contract.py": "# fixture\n",
+  })) {
+    await mkdir(dirname(join(sourceRoot, path)), { recursive: true });
+    await writeFile(join(sourceRoot, path), content);
+  }
   const sourceFiles = {
-    "package.json": JSON.stringify({ version: "1.0.0" }),
-    "package-lock.json": `${JSON.stringify({ lockfileVersion: 3, packages: { "": { version: "1.0.0" } } })}\n`,
+    "package.json": JSON.stringify({ name: "@tron/gateway", version: "1.0.0", devDependencies: { typescript: "5.9.3" } }),
+    "package-lock.json": `${JSON.stringify({ lockfileVersion: 3, packages: {
+      "": { name: "@tron/gateway", version: "1.0.0", devDependencies: { typescript: "5.9.3" } },
+      "node_modules/typescript": { version: "5.9.3", resolved: "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz", integrity: "sha512-typescript", dev: true },
+    } })}\n`,
     "tsconfig.json": "{}\n",
     "src/index.ts": "export const source = true;\n",
   };
@@ -653,8 +739,15 @@ async function makeSourceBuildFixture(root) {
   // The source revision is read from the checkout's git metadata and the
   // manifest must carry a 40-hex commit, so the fixture is a real repository.
   await execFileAsync("git", ["init", "-q"], { cwd: sourceRoot });
+  await writeFile(join(sourceRoot, ".gitignore"), "packages/gateway/node_modules/\npackages/gateway/dist/\n");
+  await execFileAsync("git", ["add", "-A"], { cwd: sourceRoot });
   await execFileAsync("git", ["-c", "user.email=fixture@example.test", "-c", "user.name=Fixture",
-    "commit", "-q", "--allow-empty", "-m", "fixture source"], { cwd: sourceRoot });
+    "commit", "-q", "-m", "fixture source"], { cwd: sourceRoot });
+  await mkdir(join(gatewayRoot, "node_modules", "typescript"), { recursive: true });
+  await writeFile(join(gatewayRoot, "node_modules", ".package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {
+    "node_modules/typescript": { version: "5.9.3", resolved: "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz", integrity: "sha512-typescript", dev: true },
+  } }));
+  await writeFile(join(gatewayRoot, "node_modules", "typescript", "package.json"), JSON.stringify({ name: "typescript", version: "5.9.3" }));
   const versionRoot = join(store.versionsRoot, "active");
   await mkdir(join(versionRoot, "app", "dist"), { recursive: true });
   await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
@@ -685,6 +778,43 @@ async function makeSourceBuildFixture(root) {
   await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
   return { store, sourceRoot, gatewayRoot, sourceFiles };
 }
+
+test("source rebuild refuses stale packages before compile and records dirty source inputs", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-stale-install-")));
+  try {
+    const { store, sourceRoot, gatewayRoot } = await makeSourceBuildFixture(root);
+    await writeFile(join(gatewayRoot, "node_modules", "typescript", "package.json"), JSON.stringify({ name: "typescript", version: "5.8.0" }));
+    const priorState = await readFile(store.state, "utf8").catch(() => undefined);
+    const priorSelection = await readFile(store.current, "utf8");
+    let compilerStarted = false;
+    await assert.rejects(buildSourcePayload({
+      paths: store, config: { sourceRoot }, candidateVersion: "stale-install",
+      runCommand: async () => { compilerStarted = true; throw new Error("compiler must not run"); },
+    }), /actual package node_modules\/typescript.*5.8.0.*expected typescript@5.9.3.*npm ci/);
+    assert.equal(compilerStarted, false);
+    assert.equal(await readFile(store.state, "utf8").catch(() => undefined), priorState);
+    assert.equal(await readFile(store.current, "utf8"), priorSelection);
+
+    await writeFile(join(gatewayRoot, "node_modules", "typescript", "package.json"), JSON.stringify({ name: "typescript", version: "5.9.3" }));
+    await writeFile(join(gatewayRoot, "src", "index.ts"), "export const edited = true;\n");
+    const dirtyFingerprint = await gatewayBuildInputFingerprint(sourceRoot);
+    const built = await buildSourcePayload({
+      paths: store, config: { sourceRoot }, candidateVersion: "dirty-source",
+      runCommand: async (tool, args) => {
+        compilerStarted = true;
+        assert.equal(tool, process.execPath);
+        await mkdir(args.at(-1), { recursive: true });
+        await writeFile(join(args.at(-1), "index.js"), `${"d".repeat(1_024)}\n`);
+      },
+    });
+    assert.equal(compilerStarted, true);
+    await verifyGatewayBuildInputReceipt(sourceRoot, join(built.root, "app"), built.manifest.sourceRevision, dirtyFingerprint);
+    assert.equal(await readFile(store.current, "utf8"), priorSelection);
+  } finally {
+    await makeTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("source builds compile privately and leave the trusted source tree unchanged", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-private-build-")));
@@ -822,29 +952,17 @@ test("concurrent retention ignores a live source staging directory", async () =>
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-staging-retention-")));
   try {
     const { store, sourceRoot } = await makeSourceBuildFixture(root);
-    let retained;
-    const retentionDone = new Promise((resolve, reject) => {
-      const watcher = watch(store.channelRoot, async (_event, name) => {
-        if (!String(name).startsWith(".source-staging-")) return;
-        watcher.close();
-        const staging = join(store.channelRoot, String(name));
-        try {
-          await cleanupPayloadVersions(store);
-          retained = await stat(staging);
-          resolve();
-        } catch (error) { reject(error); }
-      });
-    });
-    const build = buildSourcePayload({
+    const result = await buildSourcePayload({
       paths: store, config: { sourceRoot }, candidateVersion: "retention-candidate",
       runCommand: async (tool, args) => {
+        const liveStaging = join(store.channelRoot, ".source-staging-live-build");
+        await mkdir(liveStaging);
+        await cleanupPayloadVersions(store);
+        assert.ok((await stat(liveStaging)).isDirectory(), "retention must leave live source staging intact");
         await mkdir(args.at(-1), { recursive: true });
         await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
       },
     });
-    await retentionDone;
-    assert.ok(retained.isDirectory());
-    const result = await build;
     assert.equal(result.manifest.version, "retention-candidate");
   } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });

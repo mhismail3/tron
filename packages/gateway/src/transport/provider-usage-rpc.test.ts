@@ -16,6 +16,7 @@ describe("provider.usage RPC", () => {
     const service = new GatewayService({
       config: { machineId: "machine", machineName: "Mac", tronHome: "/tmp/tron-usage-rpc" },
       modelRuntime: runtime,
+      sessions: { isAdministrativeDrainStarted: false },
       providerUsage: { read },
       globalProviderResources: { withStableSnapshot: (operation: () => Promise<unknown>) => operation() },
     } as unknown as GatewayServiceDependencies);
@@ -26,7 +27,7 @@ describe("provider.usage RPC", () => {
 
   it("rejects unknown fields and requires an open session for session-scoped reads", async () => {
     const read = vi.fn(async () => ({ providers: [] }));
-    const service = new GatewayService({ modelRuntime: {}, providerUsage: { read }, sessions: {} } as unknown as GatewayServiceDependencies);
+    const service = new GatewayService({ modelRuntime: {}, providerUsage: { read }, sessions: { isAdministrativeDrainStarted: false } } as unknown as GatewayServiceDependencies);
     await expect(service.invoke(client, "provider.usage", { unexpected: true })).rejects.toMatchObject({ code: "invalid_request" });
     await expect(service.invoke({ ...client, isSubscribed: () => false }, "provider.usage", { sessionId: "closed" })).rejects.toMatchObject({ code: "invalid_request" });
     expect(read).not.toHaveBeenCalled();
@@ -68,6 +69,7 @@ describe("provider.list usage support", () => {
   it("marks only first-party composed providers as usage-supported", async () => {
     const service = new GatewayService({
       modelRuntime: runtime,
+      sessions: { isAdministrativeDrainStarted: false },
       globalProviderResources: { withStableSnapshot: (read: () => Promise<unknown>) => read() },
     } as unknown as GatewayServiceDependencies);
     const result = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean; localOnly: boolean }> };
@@ -90,6 +92,7 @@ describe("provider.list usage support", () => {
     // API-key or absent OpenAI login must leave the Codex row as it is.
     const service = new GatewayService({
       modelRuntime: runtime,
+      sessions: { isAdministrativeDrainStarted: false },
       globalProviderResources: { withStableSnapshot: (read: () => Promise<unknown>) => read() },
     } as unknown as GatewayServiceDependencies);
     const lentTo = async () => {
