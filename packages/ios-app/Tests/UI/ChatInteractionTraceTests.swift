@@ -25,8 +25,34 @@ struct ChatInteractionTraceTests {
             "presentation=\(ChatInteractionTrace.maximumRecords + 19)"
         ) == true)
         #expect(records.last?.record.event == "chat.context.begin")
-        #expect(zip(records, records.dropFirst()).allSatisfy { pair in
-            pair.0.record.timestamp > pair.1.record.timestamp
+        let sequences = records.compactMap { record in
+            record.record.message
+                .split(separator: " ")
+                .first { $0.hasPrefix("sequence=") }
+                .flatMap { Int($0.dropFirst("sequence=".count)) }
+        }
+        func isNewestFirst(_ values: [Int]) -> Bool {
+            zip(values, values.dropFirst()).allSatisfy { pair in pair.0 > pair.1 }
+        }
+        #expect(sequences.count == records.count)
+        #expect(isNewestFirst(sequences))
+        #expect(!isNewestFirst(Array(sequences.reversed())))
+
+        let sameTimestampRecords = records.map { value in
+            GatewayProfileLogRecord(
+                profileID: value.profileID,
+                profileLabel: value.profileLabel,
+                record: GatewayLogRecord(
+                    timestamp: "2026-01-01T00:00:00.000Z",
+                    level: value.record.level,
+                    message: value.record.message,
+                    event: value.record.event,
+                    source: value.record.source
+                )
+            )
+        }
+        #expect(!zip(sameTimestampRecords, sameTimestampRecords.dropFirst()).allSatisfy {
+            $0.record.timestamp > $1.record.timestamp
         })
     }
 
