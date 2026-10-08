@@ -281,7 +281,9 @@ single source of version authority is `pi-subagents-pin.json`: the fork commit,
 source archive SHA-256, fork lockfile SHA-256, Node/npm build versions, and
 SHA-512 of the self-contained closure are bound together. `npm run
 check:pi-subagents` validates both immutable inputs, their package identity, and
-every bundled runtime dependency without registry access. The source tarball and
+every bundled runtime dependency without registry access. A retained predecessor
+pin must bind its exact source archive, registry integrity, lock subtree, and
+self-contained closure; a partial rollback record is rejected. The source tarball and
 fork lockfile are retained under `artifacts/`; build the deterministic closure
 with `npm run build:pi-subagents-closure` using the pinned Node 22/npm toolchain.
 The closure excludes Pi SDK peer dependencies so those resolve from the selected

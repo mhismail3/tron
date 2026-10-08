@@ -18,6 +18,21 @@ test("the vendored source and closure match their pinned provenance", () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("a previous pin must bind a source archive and lockfile", () => {
+  const root = mkdtempSync(join(gateway, "artifacts", ".previous-pin-"));
+  try {
+    const pin = JSON.parse(readFileSync(pinPath, "utf8"));
+    pin.previous = { version: "0.59.0", path: "artifacts/missing.tgz", sha512: "a".repeat(128) };
+    const candidate = join(root, "pin.json");
+    writeFileSync(candidate, JSON.stringify(pin));
+    const result = check(candidate);
+    assert.notEqual(result.status, 0, "incomplete previous pin unexpectedly passed");
+    assert.match(result.stderr, /previous|predecessor/iu);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a modified closure is refused", () => {
   const root = mkdtempSync(join(gateway, "artifacts", ".tamper-"));
   try {
