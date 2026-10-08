@@ -473,11 +473,18 @@ separate test-support process owner: each leg records native spawn handles/PIDs
 and detached groups, propagates its scoped `--import` preload to runner descendants,
 and stops/joins the trees before retiring HTTP state or removing roots. Normal
 exit, assertion failure and termination signals all use this owner; TERM is
-bounded and escalates to KILL, and disposal confirms PID/group absence (including
-zombies), never retrying directory removal.
+bounded and escalates once to KILL. Disposal confirms no owned non-zombie
+PID/group members remain and direct child exit events have settled, never
+retrying directory removal. Zombies cannot write; their reaping belongs to the
+parent/OS. macOS EPERM during signaling is ignored only after a fresh process
+snapshot proves the target is absent or contains exclusively zombies; live
+permission failures or failed inspections still reject disposal.
 The updater supplies the exclusive `TRON_TEST_PROCESS_OWNER_FAILURE` JSONL path
 inside its staging owner, outside disposable leg roots. Join failures record
-unjoined PIDs, attempted signals and the error there. Any record fails the update,
+unjoined live PIDs, attempted signals and the error there. The owner regression
+suite keeps this record outside its disposable writer root and includes it plus
+host stderr in exit assertions, so a failure is diagnosable from one test log.
+Any record fails the update,
 restores owned publications and preserves staging for explicit diagnosis; a
 later update refuses that still-owned staging directory. Standalone probes own
 the same failure record within their fixture root and likewise refuse removal. Scripted model responses are

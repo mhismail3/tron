@@ -26,9 +26,23 @@ function processes() {
   });
 }
 
+// A zombie has terminated and cannot write; its reaping belongs to its parent
+// or the OS. Handle exit events still have to settle before this owner exits.
+const live = row => !row.state.startsWith("Z");
+
 function signal(pid, value, group = false) {
   try { process.kill(group ? -pid : pid, value); }
-  catch (error) { if (error.code !== "ESRCH") throw error; }
+  catch (error) {
+    if (error.code === "ESRCH") return;
+    if (error.code === "EPERM") {
+      // macOS rejects signals to zombie-only groups. Reinspect after the
+      // signal: members may have terminated or been reaped since the send
+      // snapshot. An absent or zombie-only target cannot write.
+      const target = processes().filter(row => group ? row.group === pid : row.pid === pid);
+      if (!target.some(live)) return;
+    }
+    throw error;
+  }
 }
 
 export function disposeFixtureProcesses() {
@@ -49,10 +63,11 @@ export function disposeFixtureProcesses() {
     for (const row of table) if (owned.has(row.pid) && owned.has(row.group)) groups.add(row.group);
     const send = value => {
       attemptedSignals.push(value);
-      for (const group of groups) signal(group, value, true);
-      for (const row of processes()) if (owned.has(row.pid) && !groups.has(row.group)) signal(row.pid, value);
+      const table = processes().filter(live);
+      for (const group of groups) if (table.some(row => row.group === group)) signal(group, value, true);
+      for (const row of table) if (owned.has(row.pid) && !groups.has(row.group)) signal(row.pid, value);
     };
-    const remaining = () => processes().filter(row => owned.has(row.pid) || groups.has(row.group));
+    const remaining = () => processes().filter(row => live(row) && (owned.has(row.pid) || groups.has(row.group)));
     send("SIGTERM");
     const deadline = Date.now() + 5_000;
     const escalateAt = Date.now() + 1_000;
@@ -66,7 +81,7 @@ export function disposeFixtureProcesses() {
     // The outer fixture must not delete roots if any descendant could still
     // write. Preserve the failed owner and its exact PID diagnostic instead.
     let pids = children.filter(child => !child.exited).map(child => child.pid);
-    try { pids = processes().filter(row => ownedPids.has(row.pid) || ownedGroups.has(row.group)).map(row => row.pid); } catch {}
+    try { pids = processes().filter(row => live(row) && (ownedPids.has(row.pid) || ownedGroups.has(row.group))).map(row => row.pid); } catch {}
     appendFileSync(process.env.TRON_TEST_PROCESS_OWNER_FAILURE, `${JSON.stringify({ pids, attemptedSignals, error: error.message })}\n`);
     throw error;
   });
