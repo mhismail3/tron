@@ -10,11 +10,13 @@ import { TrustService } from "../admin/trust-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { HomeTaskStore } from "./home-task-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { SessionCatalog } from "../sessions/session-catalog.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { runHomeInput } from "../client/terminal-chat.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
 
 const evidence: Array<Record<string, unknown>> = [];
 const fixtures: Array<{ registry: RuntimeRegistry; root: string }> = [];
@@ -65,7 +67,7 @@ async function fixture(providerVersion?: string, codemode = false) {
   await trust.set(cwd, true);
   const signals: Array<Record<string, unknown>> = [];
   const notifications: Array<Record<string, unknown>> = [];
-  const registry = new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test",
+  const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test",
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
@@ -80,16 +82,196 @@ async function fixture(providerVersion?: string, codemode = false) {
     } },
     homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("bounded summary") }),
   });
-  fixtures.push({ registry, root });
+  const registry = createRegistry();
+  const owned = { registry, root };
+  fixtures.push(owned);
   await registry.initialize();
   await (registry as any).sessionCatalog.whenPublished();
   const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } });
-  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust };
+  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust,
+    restart: async () => {
+      await owned.registry.dispose();
+      await owned.registry.administrativeWorkRegistry.waitUntilSettled();
+      owned.registry = createRegistry();
+      await owned.registry.initialize();
+      await (owned.registry as any).sessionCatalog.whenPublished();
+      return owned.registry;
+    } };
 }
 const reportCall = (id = "report-one", text = "Verified result") => fauxToolCall("report", { resultId: id, outcome: "final", text, evidence: ["focused check passed"] }, { id: `call-${id}` });
 async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-one") {
   return f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
 }
+
+describe("Home task cold reconciliation", () => {
+  it.each(["before-report", "after-report", "after-terminal"])("recovers %s without replay and keeps terminal outbox/authorization", async cut => {
+    const f = await fixture();
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const authorization = (f.registry.homeOwner() as any).tasks.authorization;
+    await store.initialize();
+    await authorization.enableInitialScope(await store.restoreEpoch());
+    await authorization.recordDecisionAndGrant({ intentRevision: 1, intentDigest: "a".repeat(64), target: f.cwd,
+      authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: await store.restoreEpoch() },
+      { decisionId: "unspent", expiresAt: Date.now() + 60_000 });
+    const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const beforeAuthority = await readFile(authorizationPath, "utf8");
+    let providers = 0;
+    const effect = join(f.cwd, "effect");
+    f.faux.setResponses([() => { providers++; return fauxAssistantMessage([fauxToolCall("write", { path: effect, content: "once" })], { stopReason: "toolUse" }); },
+      () => { providers++; return fauxAssistantMessage(cut === "before-report" ? "No report" : [reportCall()], { stopReason: cut === "before-report" ? "stop" : "toolUse" }); }]);
+    const update = store.update.bind(store);
+    if (cut === "after-terminal") {
+      vi.spyOn(store, "update").mockImplementation(freezeHomeLedgerWriter(update, task => task.lifecycle === "terminal"));
+    } else {
+      vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+        if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+        return update(id, change);
+      });
+    }
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow(/frozen/);
+    expect(await readFile(effect, "utf8")).toBe("once");
+    const frozen = await store.read(run.taskId);
+    expect(frozen?.lifecycle).toBe(cut === "after-terminal" ? "terminal" : "active");
+    expect(f.notifications).toHaveLength(0);
+    vi.restoreAllMocks();
+    const recovered = await f.restart();
+    const task = await recovered.homeOwner().taskResult(run.taskId);
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: cut === "before-report" ? "unknown" : "final" }, wake: { state: "pending", push: "decided" } });
+    expect(await readFile(authorizationPath, "utf8")).toBe(beforeAuthority);
+    expect(providers).toBe(2);
+    expect(f.notifications).toHaveLength(1);
+    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd })).rejects.toThrow(/already exists/);
+    const again = await f.restart();
+    expect(await again.homeOwner().taskResult(run.taskId)).toEqual(task);
+    expect(f.notifications).toHaveLength(1);
+    expect(providers).toBe(2);
+    evidence.push({ case: `cold-${cut}`, frozen, task, providers, effect: await readFile(effect, "utf8"), authorizationUnchanged: true });
+  }, 20_000);
+
+  it.each(["missing-marker", "duplicate-marker", "wrong-marker", "missing-report", "malformed-report", "wrong-report", "duplicate-report", "torn", "interrupted", "off-branch", "missing-session", "bad-header", "old-format", "bad-graph", "sync-refused"])("reconciles %s evidence conservatively without constructing a worker", async mode => {
+    const f = await fixture();
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const update = store.update.bind(store);
+    vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+      if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+      return update(id, change);
+    });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow(/frozen/);
+    const worker = await f.registry.acquire(run.sessionId);
+    const path = worker.sessionFile!;
+    const rows = (await readFile(path, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    const marker = rows.find(row => row.customType === "tron-home-task");
+    const report = rows.find(row => row.customType === "tron-home-task-report");
+    expect(report).toBeDefined();
+    if (mode === "missing-marker") rows.splice(rows.indexOf(marker), 1);
+    if (mode === "duplicate-marker") rows.push({ ...marker, id: "duplicate-marker", parentId: rows.at(-1).id });
+    if (mode === "wrong-marker") marker.data.operationId = "other-operation";
+    if (mode === "bad-header") rows[0].id = "other-session";
+    if (mode === "old-format") rows[0].version = 2;
+    if (mode === "bad-graph") report.parentId = report.id;
+    if (mode === "interrupted") expect(rows).toContainEqual(expect.objectContaining({ customType: "tron.chat-invocation.v1", data: expect.objectContaining({ receiptKind: "terminal", lifecycle: "interrupted", operationId: run.operationId }) }));
+    if (mode === "missing-report" || mode === "interrupted") {
+      for (const row of rows) if (row.parentId === report.id) row.parentId = report.parentId;
+      rows.splice(rows.indexOf(report), 1);
+    }
+    if (mode === "malformed-report") report.data.outcome = "invented-success";
+    if (mode === "wrong-report") report.data.receiptId = "report:other-operation";
+    if (mode === "duplicate-report") rows.push({ ...report, id: "duplicate-report", parentId: rows.at(-1).id });
+    if (mode === "off-branch") rows.push({ type: "custom", id: "view-other-branch", parentId: marker.id, timestamp: new Date().toISOString(), customType: "view-only", data: {} });
+    vi.restoreAllMocks();
+    // Retire the old process owner before changing its frozen canonical cut.
+    await f.registry.dispose();
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    if (mode === "missing-session") await rm(path);
+    else await writeFile(path, rows.map(row => JSON.stringify(row)).join("\n") + "\n" + (mode === "torn" ? '{"partial":' : ""));
+    if (mode === "sync-refused") {
+      const anchor = await fileSystem.open(f.cwd, "r");
+      const prototype = Object.getPrototypeOf(anchor); const sync = prototype.sync; await anchor.close();
+      const target = await fileSystem.stat(path);
+      vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+        const current = await this.stat();
+        if (current.dev === target.dev && current.ino === target.ino) throw new Error("task evidence sync refused");
+        return sync.call(this);
+      });
+    }
+    const frozenCanonical = mode === "missing-session" ? undefined : await readFile(path, "utf8");
+    const open = vi.spyOn(RuntimeRegistry.prototype, "acquire");
+    const recovered = await f.restart();
+    expect(open).not.toHaveBeenCalled();
+    const task = await (recovered.homeOwner() as any).tasks.store.read(run.taskId);
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: mode === "off-branch" ? "final" : "unknown" }, wake: { state: "pending", push: "decided" } });
+    expect(f.notifications).toHaveLength(1);
+    if (frozenCanonical !== undefined) expect(await readFile(path, "utf8")).toBe(frozenCanonical);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: mode === "off-branch" ? "cold-explicit-report" : expect.stringMatching(/^cold-/) }));
+    evidence.push({ case: `cold-evidence-${mode}`, task, runtimeConstructed: false });
+  }, 20_000);
+
+  it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {
+    const f = await fixture();
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await expect(run.completion).rejects.toThrow(/frozen/);
+    vi.restoreAllMocks();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = SessionCatalog.prototype.whenReconciled;
+    const barrier = vi.spyOn(SessionCatalog.prototype, "whenReconciled").mockImplementation(async function(this: SessionCatalog) {
+      await gate; await ready.call(this);
+    });
+    const starting = f.restart(); void starting.catch(() => {});
+    try {
+      await waitFor(() => barrier.mock.calls.length > 0, "cold task joins catalog readiness", { boundMs: 1000 });
+      expect(JSON.parse(await readFile(join(f.tronHome, "gateway/home/tasks", `${run.taskId}.json`), "utf8")).lifecycle).toBe("active");
+    } finally { release(); await starting; }
+    const recovered = await starting;
+    expect(await recovered.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    evidence.push({ case: "cold-catalog-readiness", task: await recovered.homeOwner().taskResult(run.taskId) });
+  }, 20_000);
+
+  it.each(["pending", "grant-consumed", "worker-created", "operation-bound"])("retires the %s admission cut without replay or renewing grants", async cut => {
+    const f = await fixture();
+    const tasks = (f.registry.homeOwner() as any).tasks;
+    const store = tasks.store as HomeTaskStore;
+    await store.initialize();
+    const epoch = await store.restoreEpoch();
+    const intent = { revision: 1, text: "Finite work" };
+    const { createHash } = await import("node:crypto");
+    await tasks.authorization.recordDecisionAndGrant({ intentRevision: 1, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
+      target: f.cwd, authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: epoch },
+      { decisionId: "single-use", expiresAt: Date.now() + 60_000 });
+    const put = store.put.bind(store);
+    let frozen = false;
+    vi.spyOn(store, "put").mockImplementation(async (task, expected) => {
+      if (frozen) throw new Error("frozen admission owner");
+      if (cut === "worker-created" && task.lifecycle === "active") { frozen = true; throw new Error("frozen admission owner"); }
+      await put(task, expected);
+      if (task.lifecycle === (cut === "pending" ? "pending" : "active") && cut !== "grant-consumed" && cut !== "worker-created") { frozen = true; throw new Error("frozen admission owner"); }
+    });
+    if (cut === "grant-consumed") {
+      const save = store.authorization.save;
+      vi.spyOn(store.authorization, "save").mockImplementation(async state => {
+        await save(state); frozen = true; throw new Error("frozen admission owner");
+      });
+    }
+    const calls = vi.fn(() => fauxAssistantMessage("Never replay")); f.faux.setResponses([calls]);
+    await expect(dispatch(f)).rejects.toThrow(/frozen/);
+    const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const before = await readFile(authorizationPath, "utf8");
+    vi.restoreAllMocks();
+    const recovered = await f.restart();
+    const task = await (recovered.homeOwner() as any).tasks.store.read("task-one");
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" }, wake: { state: "pending", push: "decided" } });
+    expect(await readFile(authorizationPath, "utf8")).toBe(before);
+    expect(JSON.parse(before).grants[0].state).toBe(cut === "pending" ? "available" : "consumed");
+    expect(calls).not.toHaveBeenCalled();
+    expect(f.notifications).toHaveLength(1);
+    evidence.push({ case: `cold-admission-${cut}`, task, authorityPreserved: true, providers: calls.mock.calls.length });
+  }, 20_000);
+});
 
 describe("Home task production dispatch", () => {
   it("commits one push plus pending wake and consumes the immutable report only on the next Home message", async () => {
@@ -611,11 +793,15 @@ describe("Home task production dispatch", () => {
     expect(f.notifications.filter(record => record.sessionId === run.sessionId)).toEqual([]);
     await expect(dispatch(f)).rejects.toThrow(/already|conflict/i);
     expect(await f.registry.homeOwner().taskResult("task-one")).toEqual(result);
-    const originalText = canonical.data.text;
-    canonical.data.text = "edited evidence";
-    await expect(f.registry.homeOwner().taskResult("task-one")).rejects.toThrow(/contradictory|changed/);
-    canonical.data.text = originalText;
     const worker = await f.registry.acquire(run.sessionId);
+    const path = worker.sessionFile!;
+    const original = await readFile(path, "utf8");
+    const changed = original.trimEnd().split("\n").map(line => JSON.parse(line));
+    changed.find(entry => entry.id === ref.entryId).data.text = "edited evidence";
+    try {
+      await writeFile(path, changed.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+      await expect(f.registry.homeOwner().taskResult("task-one")).rejects.toThrow(/contradictory|changed/);
+    } finally { await writeFile(path, original); }
     const inputEntry = entries.find((entry: any) => entry.type === "message" && entry.message.role === "user")!;
     await worker.navigate(inputEntry.id, { summarize: false });
     expect(await f.registry.homeOwner().taskResult("task-one")).toEqual(result);

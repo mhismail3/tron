@@ -169,8 +169,7 @@ export class WakeInboxOwner {
   }
   private async tasks(): Promise<HomeTaskRecord[]> {
     const tasks: HomeTaskRecord[] = [];
-    try { await this.store.list(task => { if (task.wake && task.wake.state !== "acknowledged") tasks.push(task); }); }
-    catch (error) { if ((error as { code?: string }).code === "not-initialized") return []; throw error; }
+    await this.store.list(task => { if (task.wake && task.wake.state !== "acknowledged") tasks.push(task); });
     return tasks.sort((a, b) => a.wake!.createdAt.localeCompare(b.wake!.createdAt) || a.wake!.eventId.localeCompare(b.wake!.eventId));
   }
   private async change(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent, reason: string): Promise<HomeTaskRecord> {

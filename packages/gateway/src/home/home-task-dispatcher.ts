@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
@@ -10,7 +11,7 @@ import { HomeTaskAuthorization, type HomeTaskAuthorizationDiagnostic } from "./h
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
-import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, type HomeTaskReport } from "./home-task-report.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
@@ -35,6 +36,63 @@ export class HomeTaskDispatcher {
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
     private readonly sessions: RuntimeRegistry, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
     private readonly inbox: WakeInboxOwner) {}
+
+  /** Only startup calls this, before live dispatch closures can exist. The
+   * durable record outlives a process; its executable lease never does. */
+  async recover(): Promise<void> {
+    const tasks: HomeTaskRecord[] = [];
+    await this.store.list(task => { if (task.lifecycle !== "terminal" || task.wake?.push === "pending") tasks.push(task); });
+    for (const task of tasks) {
+      if (task.lifecycle !== "terminal") {
+        let report: HomeTaskReport | undefined;
+        let entryId: string | undefined;
+        let spend = task.spend;
+        let entryIds: string[] = [];
+        let reason = "cold-no-report";
+        if (task.lifecycle === "active" && task.sessionId && task.operationId) {
+          try {
+            const entries = await this.sessions.readTaskEvidence(task.sessionId);
+            const evidence = await this.reportEvidence(task, entries);
+            report = evidence?.report; entryId = evidence?.entryId;
+            const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+            const runEntries = entries.slice(marker + 1);
+            const observed = homeTaskSpend(runEntries);
+            if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
+            spend = observed;
+            const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+            entryIds = entryId ? [entryId] : last ? [last.id] : [];
+            if (report) reason = "cold-explicit-report";
+          } catch {
+            // Contradictory or unproven bytes cannot qualify a result. Retain
+            // already published spend/authority; never repair or replay work.
+            report = undefined; entryId = undefined; entryIds = []; reason = "cold-evidence-unavailable";
+          }
+        }
+        const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
+          wake: this.inbox.event(current),
+          reportRefs: report && entryId ? [{ resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) }] : null,
+          terminalEvidence: { outcome: report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds, reason } }));
+        this.transition(final, reason);
+      }
+      // Includes a crash after terminal/outbox co-commit but before advisory
+      // publication. The inbox's durable decision makes repeats harmless.
+      await this.inbox.publish(task.taskId);
+    }
+  }
+
+  private async reportEvidence(task: HomeTaskRecord, entries: readonly FileEntry[]): Promise<{ report: HomeTaskReport; entryId: string } | undefined> {
+    const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+    if (markers.length !== 1 || markers[0]?.type !== "custom" || !task.sessionId) throw new GatewayError("conflict", "Task marker is missing or contradictory");
+    await this.validateWorkerMarker(task.sessionId, markers[0].data);
+    const reports = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_REPORT);
+    if (reports.length > 1) throw new GatewayError("conflict", "Conflicting canonical task reports");
+    const entry = reports[0];
+    if (!entry || entry.type !== "custom") return undefined;
+    const report = parseHomeTaskReport(entry.data);
+    if (entries.indexOf(entry) <= entries.indexOf(markers[0]) || report.taskId !== task.taskId || report.intentRevision !== task.intent.revision
+      || report.homeId !== task.homeId || report.generation !== task.generation || report.operationId !== task.operationId || report.sessionId !== task.sessionId) throw new GatewayError("conflict", "Task report reference is contradictory");
+    return { report, entryId: entry.id };
+  }
 
   async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest): Promise<HomeTaskHandle> {
     const registry = this.sessions.administrativeWorkRegistry;
@@ -122,14 +180,9 @@ export class HomeTaskDispatcher {
         const entries = slot.canonicalSessionEntries();
         const markerIndex = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
           && (entry.data as { operationId?: string }).operationId === operationId);
-        if (markerIndex >= 0) await this.validateWorkerMarker(slot.id, (entries[markerIndex] as { data: unknown }).data);
         const runEntries = markerIndex < 0 ? [] : entries.slice(markerIndex + 1);
-        const reportEntries = runEntries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_REPORT);
-        if (reportEntries.length > 1) throw new GatewayError("conflict", "Conflicting canonical task reports");
-        const reportEntry = reportEntries[0];
-        const report = reportEntry?.type === "custom" ? reportEntry.data as HomeTaskReport : undefined;
-        if (report && (report.taskId !== active.taskId || report.intentRevision !== active.intent.revision || report.homeId !== active.homeId
-          || report.generation !== active.generation || report.operationId !== operationId || report.sessionId !== slot.id)) throw new GatewayError("conflict", "Task report reference is contradictory");
+        const evidence = await this.reportEvidence(active, slot.canonicalTaskEvidence());
+        const report = evidence?.report;
         const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
         const lastMessage = last?.type === "message" && last.message.role === "assistant" ? last.message : undefined;
         const deadlineStopped = outcome.state === "deadline-stopped";
@@ -144,9 +197,9 @@ export class HomeTaskDispatcher {
           });
         const interrupted = interruption !== undefined;
         const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
-          reportRefs: report && reportEntry ? [{ resultId: report.resultId, sessionId: slot.id, entryId: reportEntry.id, digest: reportDigest(report) }] : null,
+          reportRefs: report && evidence ? [{ resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) }] : null,
           terminalEvidence: { outcome: detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
-            sessionId: slot.id, entryIds: reportEntry ? [reportEntry.id] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
+            sessionId: slot.id, entryIds: evidence ? [evidence.entryId] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
             reason: detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
@@ -231,16 +284,11 @@ export class HomeTaskDispatcher {
     }
     if (task.reportRefs?.length) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
-      const entries = (await this.sessions.acquire(task.sessionId)).canonicalTaskEvidence();
-      const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-      if (markers.length !== 1 || markers[0]?.type !== "custom") throw new GatewayError("conflict", "Task marker is missing or contradictory");
-      await this.validateWorkerMarker(task.sessionId, markers[0].data);
-      for (const ref of task.reportRefs) {
-        const entry = entries.find(candidate => candidate.id === ref.entryId);
-        const report = entry?.type === "custom" && entry.customType === HOME_TASK_REPORT ? entry.data as HomeTaskReport : undefined;
-        if (!report || reportDigest(report) !== ref.digest || report.taskId !== taskId || report.resultId !== ref.resultId || report.sessionId !== ref.sessionId
-          || report.operationId !== task.operationId || report.intentRevision !== task.intent.revision || report.homeId !== task.homeId || report.generation !== task.generation) throw new GatewayError("conflict", "Task report reference is missing or contradictory");
-      }
+      const entries = await this.sessions.readTaskEvidence(task.sessionId);
+      const evidence = await this.reportEvidence(task, entries);
+      const ref = task.reportRefs[0]!;
+      if (!evidence || task.reportRefs.length !== 1 || evidence.entryId !== ref.entryId || evidence.report.resultId !== ref.resultId
+        || evidence.report.sessionId !== ref.sessionId || reportDigest(evidence.report) !== ref.digest) throw new GatewayError("conflict", "Task report reference is missing or contradictory");
     }
     return task;
   }

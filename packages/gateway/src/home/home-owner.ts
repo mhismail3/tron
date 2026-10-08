@@ -197,7 +197,7 @@ export class HomeOwner {
         result: async taskId => {
           const task = await this.tasks!.result(taskId);
           const report = task.reportRefs?.[0];
-          const entries = task.sessionId ? (await options.taskSessions!.acquire(task.sessionId)).canonicalTaskEvidence() : [];
+          const entries = report && task.sessionId ? await options.taskSessions!.readTaskEvidence(task.sessionId) : [];
           const entry = report && entries.find(entry => entry.id === report.entryId);
           return { task, text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
         },
@@ -216,6 +216,10 @@ export class HomeOwner {
     }
     return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
   }
+
+  /** Registry startup only, after workspace/catalog initialization and before
+   * admission. Recovery has no executable session lifetime to resurrect. */
+  async recoverTasks(): Promise<void> { await this.tasks?.recover(); }
 
   async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
     if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");

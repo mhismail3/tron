@@ -43,6 +43,21 @@ function admit(value: unknown): HomeTaskReportRequest {
   return { resultId: request.resultId, outcome: request.outcome, text: request.text, evidence: [...request.evidence] };
 }
 
+/** Canonical reports cross a cold-process trust boundary too: the tool schema
+ * alone cannot qualify persisted evidence after restart. */
+export function parseHomeTaskReport(value: unknown): HomeTaskReport {
+  const report = value as HomeTaskReport;
+  const identityKeys = ["version", "taskId", "intentRevision", "homeId", "generation", "operationId", "receiptId", "sessionId", "acceptedAt"];
+  if (!report || typeof report !== "object" || Array.isArray(report)
+    || Object.keys(report).sort().join(",") !== [...identityKeys, "resultId", "outcome", "text", "evidence"].sort().join(",")
+    || report.version !== 1 || !Number.isSafeInteger(report.intentRevision) || report.intentRevision < 1
+    || !Number.isSafeInteger(report.generation) || report.generation < 1
+    || [report.taskId, report.homeId, report.operationId, report.sessionId].some(id => typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(id))
+    || report.receiptId !== `report:${report.operationId}` || typeof report.acceptedAt !== "string" || !Number.isFinite(Date.parse(report.acceptedAt))) throw new Error("Invalid canonical task report");
+  admit({ resultId: report.resultId, outcome: report.outcome, text: report.text, evidence: report.evidence });
+  return report;
+}
+
 /** One immutable result belongs to one worker operation, not to a slot-wide map.
  * Append evidence before sealing; failure leaves no false accepted result. */
 export class HomeTaskReportOwner {

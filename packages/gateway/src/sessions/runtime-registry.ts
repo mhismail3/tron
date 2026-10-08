@@ -76,7 +76,8 @@ import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
-import { readCanonicalSession } from "../episodic/episodic-source.js";
+import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
+import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
@@ -1111,6 +1112,9 @@ export class RuntimeRegistry {
     // any event the watcher could not see (G-9 moves both into the scheduler).
     // A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
+    // Retire abandoned task identities before any runtime/admission is exposed.
+    // This uses canonical files only; accepted prompts are never recreated.
+    await this.home.recoverTasks();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -4649,6 +4653,27 @@ export class RuntimeRegistry {
     } catch {
       return undefined;
     }
+  }
+
+  /** Cold task inspection never constructs executable resources or repairs the
+   * canonical file. Sync and identity checks precede immutable publication. */
+  async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
+    // Recovery publishes a permanent result. A loaded previous catalog cut or
+    // a not-yet-ready projection cannot decide whether its report exists.
+    await this.sessionCatalog.whenReconciled();
+    const path = await this.homeSessionFile(sessionId);
+    if (!path) throw new GatewayError("conflict", "Task canonical session is missing");
+    const before = await lstat(path);
+    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Task canonical session is unsafe");
+    for (const durablePath of [path, dirname(path)]) {
+      const handle = await open(durablePath, "r");
+      try { await syncDurably(handle); } finally { await handle.close(); }
+    }
+    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes });
+    const after = await lstat(path);
+    if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+    return entries.map(entry => entry.raw as unknown as FileEntry);
   }
 
   /** Whether Home's recorded session still exists: a live runtime, or a

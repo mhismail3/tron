@@ -135,11 +135,12 @@ export class HomeTaskStore {
     });
   }
 
-  /** Calls a synchronous visitor for each secure bounded record. The caller
-   * owns any projection it retains; the namespace has no total task-count cap. */
+  /** Calls a synchronous visitor for each secure bounded record. Uninitialized
+   * absence is an empty read, not setup or a refusal; missing-after-init still
+   * fails closed. The caller owns its projection; there is no task-count cap. */
   async list(visit: (record: HomeTaskRecord) => void): Promise<void> {
     await this.run(async () => {
-      if (!(await this.inspect(visit))) throw new HomeTaskStoreError("not-initialized");
+      await this.inspect(visit);
     });
   }
 

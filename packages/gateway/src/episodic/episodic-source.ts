@@ -432,6 +432,29 @@ async function readWholeFile(
   return { batch, entries, byId };
 }
 
+/** Exact file-wide evidence for cold owners. Unlike a model branch, immutable
+ * report addresses survive navigation. Refuse torn/changed graphs; never open
+ * the SDK's repairing/migrating SessionManager just to inspect evidence. */
+export async function readCanonicalSessionFile(options: {
+  path: string; sessionId: string; maxLineBytes: number;
+}): Promise<EpisodicCanonicalEntry[]> {
+  const handle = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const start = await handle.stat();
+    if (!start.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
+    const { batch, entries } = await readWholeFile(handle, { ...options, endBytes: start.size });
+    if (JSON.parse(batch.lines[0]!).version !== SUPPORTED_SESSION_VERSION) throw new EpisodicMemoryError("source", "Canonical task evidence requires the current session format");
+    if (batch.tornBytes) throw new EpisodicMemoryError("source", "Canonical session evidence has an incomplete tail");
+    const parents = new Set<string>();
+    for (const entry of entries) {
+      if (entry.parentId !== null && !parents.has(entry.parentId)) throw new EpisodicMemoryError("source", "Canonical session evidence has a missing parent");
+      parents.add(entry.id);
+    }
+    if (!sameSnapshot(start, await handle.stat())) throw new EpisodicSourceChangedError();
+    return entries;
+  } finally { await handle.close(); }
+}
+
 /**
  * The instant of every entry the file holds, keyed by entry id: every parsed entry,
  * not only the branch the last entry follows, because an entry that has left the

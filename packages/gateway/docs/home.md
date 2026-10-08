@@ -309,7 +309,9 @@ instance; a fresh owner must securely reload it rather than continue with stale
 state. Failed pre-rename writes remove only their own temporary artifacts.
 Enumeration streams bounded directory entries and validates every file: no
 second task catalog, growing task snapshot, total task-count cap, or silent
-pruning. A listing that later refuses is not a publishable complete projection.
+pruning. Never-initialized absence is an empty read, not setup or a diagnostic
+refusal; missing-after-initialization still blocks. A listing that later refuses
+is not a publishable complete projection.
 
 There is deliberately no task-membership index. The result and canonical
 worker-marker owners preserve and block on missing/invalid referenced tasks;
@@ -436,10 +438,45 @@ computed `usage.cost` has no authoritative billing provenance, so all current
 provider amounts are explicitly unpriced, never estimated bills.
 `home.task.transition`, `home.task.spend` and `home.task.runaway-stop` emit only
 bounded/hash references after durable publication. Reports enter the task-owned
-inbox described below, never a result-triggered Home model call. Restart never
-replays accepted work; reconciliation of abandoned active tasks is required
-before task release and is not yet implemented. Terminal-task inbox recovery is
-separate from that in-flight execution recovery.
+inbox described below, never a result-triggered Home model call.
+
+### Cold task reconciliation
+
+Gateway startup retires abandoned `pending` and `active` task records before
+exposing runtime admission. It does not construct an executable worker runtime,
+resume an operation, recreate control callbacks, or replay a prompt/tool. Pending
+identities (including authorization consumed before worker binding) become
+terminal `unknown`. Scopes and unspent grants remain byte-identical; consumed
+grants stay consumed. Restart never initializes an absent namespace or enables,
+renews, revokes or re-stamps authority.
+
+An active task becomes report-backed only if the Registry's read-only canonical
+file boundary proves exactly one matching `tron-home-task` marker and one valid
+`tron-home-task-report` after it. Task, intent revision, Home identity/generation,
+worker session, operation and report receipt must agree; the full payload schema
+is checked again. These are file-wide immutable addresses, not the selected
+model branch: navigation cannot discard an accepted report. The current session
+format, unique entry IDs, append-ordered parents, stable untorn file identity and
+canonical file/directory fsync are required. Missing, duplicate, contradictory,
+malformed or unsynced evidence settles terminal `unknown`, not success, and is
+never repaired. A canonical interruption without a report is still `unknown`
+on cold recovery; a last assistant reply is evidence only. Valid reports retain
+their `progress`, `needs-input` or `final` outcome and exact payload digest/address.
+Canonical usage is reconstructed when provable; previously published spend is
+preserved if the source is unavailable or regresses.
+
+Recovered terminal results co-commit their wake event through the same task-file
+owner as live settlement. Startup also publishes an undecided advisory push for
+a previously committed terminal/outbox; a decided push is never retried. Inbox
+consumption still waits for the next maintainer Home message. The one-step signal
+is `home.task.transition` with `cold-explicit-report`, `cold-no-report` or
+`cold-evidence-unavailable`; it contains only task/operation hashes and revision.
+`home-task-dispatch.e2e.test.ts` (`HOME_TASK_REPORT=<artifact-path>`) retains
+frozen-owner cuts at pending commit, grant consumption, worker creation,
+operation binding, provider/tool execution before report, report append before
+terminal commit, and terminal/outbox commit before publication, plus adversarial
+canonical evidence. These prove process-abandonment behavior, not physical
+power-loss durability.
 
 ## Task wake inbox and terminal push
 
