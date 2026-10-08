@@ -43,8 +43,12 @@ fingerprints them under `Gateway/runtime/xcodegen`. Bundle writers serialize
 before touching the shared dependency tree, assemble and verify generated
 resources under a private source-local staging root, and publish the payload,
 launcher, and icon through bounded backup renames. Failure or interruption
-restores the prior generated projection; `ensure-gateway-bundle.sh` never erases
-that projection before a replacement is ready. The completed app uses only those
+restores the prior generated projection, removes invocation-owned staging and
+backup roots, and releases its build lock; `ensure-gateway-bundle.sh` never erases
+that projection before a replacement is ready. Download and compiler scratch
+roots share the staging owner's lifetime. Disposal closes each directory
+enumeration before descending, opens immutable directories only for removal,
+and unlinks symlinks without following their targets. The completed app uses only those
 embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
 destination checkout's `.ci-tools` cache.
 
@@ -174,10 +178,14 @@ packages/mac-app/scripts/test-tron-gateway-npm.sh
 packages/mac-app/scripts/test-update-payload-fingerprint.sh
 
 # Two real builds in this checkout, the second with --skip-download; Node/npm
-# pin violations and symlinks refused without changing published bytes or modes.
+# pin violations and symlinks refused without changing published bytes or modes,
+# with no private staging/backup roots or build lock remaining after each refusal.
 # Downloads Node and rebuilds the payload; retains the log at
 # packages/mac-app/test-results/bundle-gateway-rebuild.log.
 packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
+# Focused disposal regression: immutable nested tree, bounded descriptors,
+# external symlink target preserved; no download or build.
+packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --cleanup-only
 ```
 
 ## Generate and build

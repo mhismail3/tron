@@ -442,6 +442,12 @@ before the `chat.geometry.*`, `chat.viewport.transition` and
 only as a last resort. A composer flag missing from an export was therefore a
 repeat, or was reclaimed ahead of geometry — not a control the app never sampled.
 
+## Mac payload build diagnostics
+
+| Signal | Where to inspect | Meaning / action | Regression |
+| --- | --- | --- | --- |
+| `staged npm runtime content is not from the pinned Node archive` | `bundle-gateway.sh` stderr; `packages/mac-app/test-results/bundle-gateway-rebuild.log` | The copied npm runtime differs from the official pinned archive. Refusal exits 2, preserves the published tree, and removes its private staging/backup roots and build lock. A residue assertion or cleanup error in the same log diagnoses disposal rather than a provider closure or Python bytecode issue. | `test-bundle-gateway-rebuild.sh`: every Node/npm refusal checks lock/private-root absence before status; `--cleanup-only` exercises immutable nested disposal with bounded descriptors and an external symlink sentinel |
+
 ## Managed delegated-provider admission diagnostics
 
 These are request/activation diagnostics, not a new log stream. They are owned

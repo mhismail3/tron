@@ -84,19 +84,29 @@ assert_owned_ancestors() {
     done
 }
 safe_remove_tree() {
-    local path="$1" entry
-    [[ -e "$path" || -L "$path" ]] || return 0
-    if [[ -L "$path" ]]; then
-        unlink "$path"
-        return 0
-    fi
-    if [[ -d "$path" ]]; then
-        chmod u+w "$path"
-        while IFS= read -r -d '' entry; do safe_remove_tree "$entry"; done < <(find "$path" -mindepth 1 -maxdepth 1 -print0)
-        rmdir "$path"
-    else
-        unlink "$path"
-    fi
+    # Finish and close each directory enumeration before descending. Recursive
+    # shell process substitutions retain ancestor pipes and hide producer
+    # failures; cleanup must not depend on those stream lifetimes.
+    python3 - "$1" <<'PY'
+import os, stat, sys
+
+def remove(path):
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(mode):
+        os.chmod(path, mode | stat.S_IWUSR)
+        with os.scandir(path) as entries:
+            children = [entry.path for entry in entries]
+        for child in children:
+            remove(child)
+        os.rmdir(path)
+    else:
+        os.unlink(path)
+
+remove(sys.argv[1])
+PY
 }
 assert_owned_ancestors "$RESOURCES_DIR"
 assert_owned_ancestors "$PAYLOAD_DIR"
@@ -186,8 +196,8 @@ acquire_bundle_lock() {
         safe_remove_tree "$BUNDLE_LOCK"
         mkdir "$BUNDLE_LOCK" || { echo "cannot acquire Gateway bundle build lock" >&2; exit 75; }
     fi
-    printf '%s\n' "$$" > "$BUNDLE_LOCK/pid"
     BUNDLE_LOCK_OWNED=1
+    printf '%s\n' "$$" > "$BUNDLE_LOCK/pid"
 }
 release_bundle_lock() {
     if ((BUNDLE_LOCK_OWNED)); then
@@ -201,9 +211,9 @@ cleanup_bundle_lock() {
     release_bundle_lock
     exit "$status"
 }
-acquire_bundle_lock
 trap cleanup_bundle_lock EXIT
 trap 'exit 130' INT TERM HUP
+acquire_bundle_lock
 
 # Xcode and LaunchAgents may provide a sanitized PATH. Resolve the exact
 # canonical Node once, before any install/build work, and derive npm from that
@@ -463,7 +473,7 @@ stage_node() {
     fi
     local archive="node-v${NODE_VERSION}-darwin-${arch}.tar.gz"
     local temp source_root
-    temp="$(mktemp -d)"
+    temp="$(mktemp -d "$STAGING_ROOT/node-download.XXXXXX")"
     curl -fsSL --retry 3 "https://nodejs.org/dist/v${NODE_VERSION}/${archive}" -o "$temp/$archive"
     tar -xzf "$temp/$archive" -C "$temp"
     source_root="$temp/node-v${NODE_VERSION}-darwin-${arch}"
@@ -514,7 +524,7 @@ for arch in arm64 x64; do
     ln -s "../../app/node_modules/.bin/pi" "$alias_dir/pi"
 done
 
-launcher_temp="$(mktemp -d)/tron"
+launcher_temp="$(mktemp -d "$STAGING_ROOT/launcher.XXXXXX")/tron"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
     -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
     "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$launcher_temp"
