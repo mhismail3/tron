@@ -154,6 +154,8 @@ took. If they ask for options, list the top three and wait.
    - The Debug Gateway may be restarted by agents (AGENTS.md rule 8); Stable
      may not.
 8. **Clean up and sync.**
+   - Follow the [creator-owned cleanup rule](../../../AGENTS.md#process-lifecycle-and-cleanup),
+     including on failure.
    - Run `scripts/tron work cleanup` from the task worktree. It runs the
      configured release commands (the iOS lane and Gateway E2E `clean`) itself,
      then removes the worktree and both branches only if they are provably

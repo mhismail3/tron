@@ -8,7 +8,7 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
@@ -7476,6 +7476,416 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
+  it.each(["successful append", "pre-staging append failure"])(
+    "retires completion observations after queued successful operations settle (%s)", async (appendOutcome) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseFollowUp!: () => void;
+    let releaseAttention!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
+    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(async () => {
+      releaseInitial();
+      releaseFollowUp();
+      releaseAttention();
+      await rm(root, { recursive: true, force: true });
+    });
+    const faux = fauxProvider({ provider: "tron-completion-observation-retirement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        followUpStarted();
+        await followUpBarrier;
+        return fauxAssistantMessage("follow-up complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const attention = (registry as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+    }).attention;
+    const originalComplete = attention.complete.bind(attention);
+    vi.spyOn(attention, "complete").mockImplementation(async (...args) => {
+      await attentionBarrier;
+      return originalComplete(...args);
+    });
+    // This lifecycle-only record has no public projection. Inspect private
+    // state rather than adding a production accessor for the regression.
+    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
+
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const queued = await slot.prompt("queued follow-up", [], "followUp");
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    const append = manager.appendCustomEntry.bind(manager);
+    let failed = false;
+    const receiptAppend = vi.spyOn(manager, "appendCustomEntry").mockImplementation((customType, data) => {
+      const receipt = data as { receiptKind?: unknown; operationId?: unknown } | undefined;
+      if (appendOutcome === "pre-staging append failure" && !failed && customType === INVOCATION_RECEIPT_TYPE
+        && receipt?.receiptKind === "terminal" && receipt?.operationId === initialOperationId) {
+        failed = true;
+        throw new Error("injected pre-staging terminal receipt failure");
+      }
+      return append(customType, data);
+    });
+    releaseInitial();
+    try {
+      await followUpStart;
+      // Canonical receipt ordering cannot depend on the delayed attention store:
+      // ownership transfer settles the predecessor before the next input appends.
+      const entries = slot.canonicalSessionEntries();
+      const completionIndex = entries.findIndex(entry => entry.type === "message"
+        && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"));
+      expect(completionIndex).toBeGreaterThanOrEqual(0);
+      const followUpIndex = entries.findIndex(entry => entry.type === "message" && entry.message.role === "user"
+        && contentText(entry.message.content).includes("queued follow-up"));
+      if (appendOutcome === "pre-staging append failure") expect(failed).toBe(true);
+      // Transfer ends the predecessor, not completion admission. The next
+      // canonical input must wait even when its receipt needs a bounded retry.
+      expect(entries[completionIndex + 1]).toMatchObject({
+        type: "custom",
+        customType: INVOCATION_RECEIPT_TYPE,
+        data: { receiptKind: "terminal", operationId: initialOperationId, lifecycle: "completed" },
+      });
+      expect(followUpIndex).toBeGreaterThan(completionIndex + 1);
+    } catch (error) {
+      releaseAttention();
+      throw error;
+    } finally {
+      releaseFollowUp();
+    }
+    await waitFor(() => faux.state.callCount === 2, "both successful model responses");
+    await initial;
+    releaseAttention();
+    await waitFor(() => !slot.isBusy, "both operations to settle");
+
+    receiptAppend.mockRestore();
+    const persisted = (await readFile(manager.getSessionFile()!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line));
+    const terminalEntries = persisted.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.receiptKind === "terminal" && entry.data?.operationId === initialOperationId);
+    expect(terminalEntries).toHaveLength(1);
+    expect(terminalEntries[0].data).toMatchObject({ lifecycle: "completed" });
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
+    expect(slotInternals.operationObservations.has(queued.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.size).toBe(0);
+  });
+
+  it("retires a steered operation observation when a successful queued follow-up takes ownership", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-steering-follow-up-observation-retirement-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseSteering!: () => void;
+    let steeringStarted!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const steeringBarrier = new Promise<void>((resolve) => { releaseSteering = resolve; });
+    const steeringStart = new Promise<void>((resolve) => { steeringStarted = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(() => {
+      releaseInitial();
+      releaseSteering();
+    });
+    const faux = fauxProvider({ provider: "tron-steering-follow-up-observation-retirement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        steeringStarted();
+        await steeringBarrier;
+        return fauxAssistantMessage("steering complete");
+      },
+      async () => {
+        followUpStarted();
+        return fauxAssistantMessage("follow-up complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    const admissions: any[] = [];
+    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), {
+      admit(cut: any) { admissions.push(structuredClone(cut)); },
+      dispose() {},
+    } as any));
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
+
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const steer = await slot.prompt("steer during foreground run", [], "steer");
+    releaseInitial();
+    await steeringStart;
+    const initialCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("initial complete"));
+    expect(initialCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === initialCompletion!.id), "the initial completion observation");
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(true);
+
+    const queuedFollowUp = await slot.prompt("queued successful follow-up", [], "followUp");
+    releaseSteering();
+    await followUpStart;
+    await waitFor(() => !slot.isBusy, "the steering and queued follow-up to settle");
+    await initial;
+
+    const steeringCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("steering complete"));
+    const followUpCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("follow-up complete"));
+    expect(steeringCompletion?.type).toBe("message");
+    expect(followUpCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === followUpCompletion!.id), "the follow-up completion observation");
+    const initialCut = admissions.filter(cut => cut.completionId === initialCompletion!.id);
+    const steeringCut = admissions.filter(cut => cut.completionId === steeringCompletion!.id);
+    const followUpCut = admissions.filter(cut => cut.completionId === followUpCompletion!.id);
+    expect(initialCut).toHaveLength(1);
+    expect(steeringCut).toHaveLength(1);
+    expect(followUpCut).toHaveLength(1);
+    expect(initialCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"))).toBe(true);
+    expect(steeringCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("steering complete"))).toBe(true);
+    expect(steeringCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"))).toBe(false);
+    expect(followUpCut[0].entries.some((entry: any) => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes("follow-up complete"))).toBe(true);
+    expect(admissions.filter(cut => [initialCompletion!.id, steeringCompletion!.id, followUpCompletion!.id]
+      .includes(cut.completionId))).toHaveLength(3);
+    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
+    expect(slotInternals.operationObservations.has(steer.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.has(queuedFollowUp.operationId)).toBe(false);
+    expect(slotInternals.operationObservations.size).toBe(0);
+  });
+
+  it("settles a reply before the queued follow-up runs so steering remains admissible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-follow-up-steering-settlement-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseInitial!: () => void;
+    let releaseFollowUp!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
+    onTestFinished(() => releaseFollowUp());
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    const faux = fauxProvider({ provider: "tron-follow-up-steering-settlement", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await initialBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      async () => {
+        followUpStarted();
+        await followUpBarrier;
+        return fauxAssistantMessage("follow-up complete");
+      },
+      fauxAssistantMessage("steering complete"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const initial = slot.prompt("initial");
+    await waitFor(() => slot.snapshot().phase === "running", "the initial run");
+    const initialOperationId = slot.snapshot().operation?.id;
+    expect(initialOperationId).toBeTruthy();
+    const queuedFollowUp = await slot.prompt("queued follow-up", [], "followUp");
+    releaseInitial();
+    await followUpStart;
+
+    let steer: { operationId: string };
+    try {
+      steer = await slot.prompt("steer during follow-up", [], "steer");
+      expect(steer.operationId).toBeTruthy();
+      expect(slot.snapshot().queuedItems).toEqual([
+        expect.objectContaining({ id: steer.operationId, behavior: "steer" }),
+      ]);
+      await waitFor(() => invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt =>
+        receipt.operationId === initialOperationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed"),
+      "the initial terminal receipt while the follow-up is active");
+    } finally {
+      releaseFollowUp();
+    }
+    await initial;
+    await waitFor(() => !slot.isBusy, "the follow-up and accepted steer to settle");
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const queuedReceipt = entries
+      .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === queuedFollowUp.operationId)
+      .map(entry => entry.data);
+    expect(queuedReceipt.at(-1)).toMatchObject({ receiptKind: "terminal", lifecycle: "completed" });
+    const steerReceipt = entries
+      .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === steer.operationId)
+      .map(entry => entry.data);
+    expect(steerReceipt.at(-1)).toMatchObject({ receiptKind: "terminal", lifecycle: "completed" });
+    const artifactPath = join(process.cwd(), "test-results", "runtime-slot-follow-up-steering.json");
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({
+      test: "queued follow-up then steer",
+      transcript: entries.filter(entry => entry.type === "message"
+        && (entry.message.role === "user" || entry.message.role === "assistant"))
+        .map(entry => ({ role: entry.message.role, content: entry.message.content, stopReason: entry.message.stopReason })),
+      receipts: entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+        && [queuedFollowUp.operationId, steer.operationId].includes(entry.data?.operationId))
+        .map(entry => entry.data),
+    }, null, 2)}\n`);
+  });
+
+  it("orders a prompt behind a genuinely pending attention commit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-attention-admission-order-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let secondResponseStarted!: () => void;
+    let attentionStarted!: () => void;
+    let releaseAttention!: () => void;
+    const secondStarted = new Promise<void>((resolve) => { secondResponseStarted = resolve; });
+    const attentionEntered = new Promise<void>((resolve) => { attentionStarted = resolve; });
+    const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
+    onTestFinished(() => releaseAttention());
+    const faux = fauxProvider({ provider: "tron-attention-admission-order", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("first complete"),
+      async () => {
+        secondResponseStarted();
+        return fauxAssistantMessage("second complete");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
+    slot.hooks.assistantResponseCompleted = async (...args: any[]) => {
+      attentionStarted();
+      await attentionBarrier;
+      return originalAttention(...args);
+    };
+
+    await slot.prompt("first");
+    await attentionEntered;
+    let secondSettled = false;
+    const second = slot.prompt("ordered second", [], "steer").then(result => {
+      secondSettled = true;
+      return result;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(secondSettled, "the newer command waits for the durable attention commit").toBe(false);
+    releaseAttention();
+    const accepted = await second;
+    expect(accepted.operationId).toBeTruthy();
+    await secondStarted;
+    await waitFor(() => !slot.isBusy, "the second response and its settlement");
+  });
+
+  it("names the exact pending completion and age when attention blocks prompt admission", async () => {
+    const fixture = await coldFixture("attention-pending-diagnostic");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const completion = {
+      id: "canonical-completion-id",
+      completedAt: new Date(Date.now() - 2_000).toISOString(),
+      operationId: "pending-operation-id",
+    };
+    const rejectedBarrier = Promise.reject(new Error("injected blocked completion"));
+    void rejectedBarrier.catch(() => {});
+    const internal = slot as unknown as {
+      attentionBarrier: Promise<void>;
+      pendingAssistantCompletion: typeof completion;
+    };
+    internal.pendingAssistantCompletion = completion;
+    internal.attentionBarrier = rejectedBarrier;
+
+    const error = await slot.prompt("new prompt").then(() => undefined, value => value);
+    expect(error).toMatchObject({
+      code: "busy",
+      diagnosticReason: "attention-pending",
+      details: { reason: "attention-pending", operationId: "pending-operation-id", ageMs: expect.any(Number) },
+    });
+    expect(fixture.events.find(event => event.topic === "session.diagnostic")?.payload.data).toMatchObject({
+      code: "attention-pending",
+      operationId: "pending-operation-id",
+      ageMs: expect.any(Number),
+    });
+  });
+
   it("binds duplicate consumed steering to each exact queue operation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-steering-ownership-"));
     const agentDir = join(root, "agent");
@@ -7483,8 +7893,10 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let releaseResponse!: () => void;
     let releaseSteeringResponse!: () => void;
+    let steeringResponseStarted!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const steeringResponseBarrier = new Promise<void>((resolve) => { releaseSteeringResponse = resolve; });
+    const steeringStarted = new Promise<void>((resolve) => { steeringResponseStarted = resolve; });
     const faux = fauxProvider({ provider: "tron-steering-ownership", tokensPerSecond: 10_000 });
     faux.setResponses([
       async () => {
@@ -7492,6 +7904,7 @@ export default function (pi) {
         return fauxAssistantMessage("initial complete");
       },
       async () => {
+        steeringResponseStarted();
         await steeringResponseBarrier;
         return fauxAssistantMessage("steering complete");
       },
@@ -7509,6 +7922,11 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
+    const admissions: any[] = [];
+    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), {
+      admit(cut: any) { admissions.push(structuredClone(cut)); },
+      dispose() {},
+    } as any));
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
@@ -7545,6 +7963,16 @@ export default function (pi) {
     );
     expect(consumedSteeringIDs.length).toBeGreaterThan(0);
     expect(steeringSnapshot.activeToolSegmentId).toBe(toolSegmentId(consumedSteeringIDs.at(-1)!));
+    await steeringStarted;
+    const canonicalBeforeSteeringResponse = slot.canonicalSessionEntries();
+    const firstCompletion = canonicalBeforeSteeringResponse.find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("initial complete"));
+    expect(firstCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === firstCompletion!.id), "the first completion cut while the steering response is held");
+    const firstCut = admissions.find(cut => cut.completionId === firstCompletion!.id)!;
+    expect(firstCut.entries.some((entry: any) => entry.message?.role === "assistant"
+      && contentText(entry.message.content).includes("initial complete"))).toBe(true);
     releaseSteeringResponse();
     await initial;
     await waitFor(() => [queued.operationId, duplicate.operationId].every(operationId =>
@@ -7563,6 +7991,21 @@ export default function (pi) {
       expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
       expect(receipts.at(-1)).toMatchObject({ lifecycle: "completed" });
     }
+    const finalCompletion = slot.canonicalSessionEntries().find(entry =>
+      entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("steering complete"));
+    expect(finalCompletion?.type).toBe("message");
+    await waitFor(() => admissions.some(cut => cut.completionId === finalCompletion!.id), "the final same-run completion cut");
+    const finalCut = admissions.find(cut => cut.completionId === finalCompletion!.id)!;
+    const observedMessages = finalCut.entries
+      .filter((entry: any) => entry.type === "message")
+      .map((entry: any) => `${entry.message.role}: ${contentText(entry.message.content)}`)
+      .join("\n");
+    expect(observedMessages).toContain("user: steer me");
+    expect(observedMessages).toContain("steering complete");
+    expect(observedMessages).not.toContain("initial complete");
+    expect(admissions.filter(cut => cut.completionId === firstCompletion!.id)).toHaveLength(1);
+    expect(admissions.filter(cut => cut.completionId === finalCompletion!.id)).toHaveLength(1);
     expect(slot.snapshot().queuedItems).toEqual([]);
   });
 
@@ -11892,6 +12335,37 @@ export default function (pi) {
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
   });
 
+  it("filters Gateway-private environment from a real session Bash command", async () => {
+    const { manager, registry } = await coldFixture("bash-command-environment");
+    const slot = await registry.acquire(manager.getSessionId());
+    const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT"] as const;
+    const previous = new Map(names.map(name => [name, process.env[name]]));
+    process.env.PI_SUBAGENTS_TEMP_ROOT = join(homedir(), ".tron", "internal", "subagents");
+    process.env.PI_CODING_AGENT_DIR = join(homedir(), ".tron", "agent");
+    process.env.PI_SESSION_FILE = join(homedir(), ".tron", "sessions", "private.jsonl");
+    process.env.PI_SUBAGENT_PARENT_SESSION = "supervision-parent";
+    process.env.TRON_GATEWAY_SUPERVISED = "1";
+    process.env.TRON_GATEWAY_PAYLOAD_ROOT = join(homedir(), ".tron", "payload");
+    try {
+      await slot.executeBash("env | sort", true);
+      const bash = slot.snapshot().transcript.find((item) => item.kind === "bash");
+      expect(bash).toMatchObject({ kind: "bash" });
+      if (!bash || bash.kind !== "bash") throw new Error("expected canonical Bash projection");
+      expect(bash.output).toContain(`PI_SESSION_ID=${manager.getSessionId()}`);
+      for (const name of names) expect(bash.output).not.toContain(`${name}=`);
+      // PATH may legitimately locate Pi's managed agent tools under the live home;
+      // no other variable may name a path inside a Tron home.
+      const nonPath = bash.output.split("\n").filter((line) => !line.startsWith("PATH=")).join("\n");
+      expect(nonPath).not.toContain(`${homedir()}/.tron/`);
+      expect(nonPath).not.toContain(`${homedir()}/.tron-dev/`);
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it("retains exact direct Bash timing for canonical projection", async () => {
     const { manager, registry } = await coldFixture("bash-canonical-timing");
     const slot = await registry.acquire(manager.getSessionId());
@@ -11979,11 +12453,16 @@ export default function (pi) {
     const modelStarted = barrier();
     const releaseModel = barrier();
     const attentionEntered = barrier();
-    const releaseAttention = barrier();
+    const followUpStarted = barrier();
+    const releaseFollowUpFailure = barrier();
     const faux = fauxProvider({ provider: "tron-knowledge-overlap", tokensPerSecond: 100_000 });
     faux.setResponses([
       async () => { modelStarted.resolve(); await releaseModel.promise; return fauxAssistantMessage("SYNTHETIC_EARLIER_RESPONSE"); },
-      fauxAssistantMessage("SYNTHETIC_FOLLOWUP_FAILURE", { stopReason: "error", errorMessage: "synthetic controlled failure" }),
+      async () => {
+        followUpStarted.resolve();
+        await releaseFollowUpFailure.promise;
+        return fauxAssistantMessage("SYNTHETIC_FOLLOWUP_FAILURE", { stopReason: "error", errorMessage: "synthetic controlled failure" });
+      },
     ]);
     const admissions: any[] = [];
     const registry = new RuntimeRegistry({
@@ -11998,7 +12477,7 @@ export default function (pi) {
     const selectedModel = faux.getModel();
     await slot.setModel(selectedModel.provider, selectedModel.id);
     const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
-    slot.hooks.assistantResponseCompleted = async (...args: any[]) => { attentionEntered.resolve(); await releaseAttention.promise; return originalAttention(...args); };
+    slot.hooks.assistantResponseCompleted = async (...args: any[]) => { attentionEntered.resolve(); return originalAttention(...args); };
     let initial: { operationId: string };
     let queued: { operationId: string };
     try {
@@ -12006,11 +12485,17 @@ export default function (pi) {
       await modelStarted.promise;
       queued = await slot.prompt("SYNTHETIC_QUEUED_TASK", [], "followUp");
       releaseModel.resolve();
+      await followUpStarted.promise;
       await attentionEntered.promise;
+      await waitFor(() => admissions.some(cut => cut.completionId !== undefined), "the earlier completion cut while the follow-up is blocked");
+      expect(admissions.find(cut => cut.completionId !== undefined)?.invocationId).toBe(
+        invocationReceipts(slot.canonicalSessionEntries(), slot.id).find(receipt => receipt.operationId === initial.operationId && receipt.receiptKind === "terminal")?.invocationId,
+      );
+      releaseFollowUpFailure.resolve();
       await waitFor(() => invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt => receipt.operationId === queued.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "failed"), "the failed receipt for the queued prompt");
     } finally {
       releaseModel.resolve();
-      releaseAttention.resolve();
+      releaseFollowUpFailure.resolve();
     }
     await waitFor(() => !slot.isBusy && !slot.isDrainBusy, "the slot to go idle after the failed operation");
     const terminals = invocationReceipts(slot.canonicalSessionEntries(), slot.id).filter(receipt => receipt.receiptKind === "terminal");

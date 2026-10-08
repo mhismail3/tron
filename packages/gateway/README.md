@@ -9,7 +9,38 @@ the same session branch and never enter model context. Plain prompt bodies remai
 only in their canonical user entries rather than being duplicated into receipts;
 resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
-automatically replayed.
+automatically replayed. When Pi appends a canonical successful assistant reply,
+RuntimeSlot starts the exact completion's durable attention settlement immediately
+rather than waiting for `agent_settled` (#522). A response completion is not an
+operation terminal outcome: automatic compaction and same-owner continuation may
+still run, and Stop during those phases must remain authoritative. Terminal
+receipts are decided only at final `agent_settled` or transfer to a distinct
+follow-up/extension operation. At transfer, the predecessor's exact completion
+is captured before its observation record retires. The SDK's awaited public
+admission hooks join pending canonical terminal receipt writes before the next
+operation's admitted user input, including bounded retries after a pre-staging
+failure. SDK-owned between-turn entries emitted before that input (for example,
+a tool-loadout system message) are outside this ordering guarantee and may fall
+on either side of the receipt. Consumers must not infer anything from receipt-
+versus-SDK-entry order. The hooks do not join attention I/O; already accepted follow-ups remain free
+to run while preceding attention commits. No terminal promise is retained on a
+completion-ownership item. Automation terminal notification still follows the
+owning attention settlement. Completion settlement retires only the prior
+completion's marker and work while the follow-up remains active, and admits that
+exact completed observation cut once from the same completion owner. The operation
+observation record owns both its cursor and terminal-callback
+completion deduplication. Ownership transfer retires that per-operation record;
+a completion already admitted to the durable ownership queue carries its exact
+cursor until its cut is settled. When an owner continues in the same run, its
+cursor advances just past the completion, so a later cut includes steering input
+and its answer without replaying the earlier cut. A later follow-up failure
+cannot swallow the earlier success cut. If a durable commit truly blocks
+admission, the `attention-pending` diagnostic names the owning operation and its
+age. The faux-provider regression in
+`src/sessions/runtime-registry.integration.test.ts` retains its canonical
+transcript and invocation receipts at
+`test-results/runtime-slot-follow-up-steering.json` for inspection and
+regeneration with that focused Vitest case.
 
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
@@ -416,9 +447,12 @@ attribution headers.
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
 purpose, declared tool and command names), so the installed list cannot name a
-module a session does not load or omit one it does. MCP servers are managed only
-through the explicit `mcp.*` methods below; they are not projected as Tron
-connection instances.
+module a session does not load or omit one it does. The always-loaded
+`tron-invocation-settlement` module comes first in definition and registration
+order. It has no tools or commands: its awaited hooks join RuntimeSlot-owned
+terminal receipt writes before the next admitted input, without waiting for
+attention settlement. MCP servers are managed only through the explicit `mcp.*`
+methods below; they are not projected as Tron connection instances.
 
 `hooks.list` serves the same hook fields `session.resources` returns
 (`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
@@ -545,6 +579,47 @@ answers `unavailable` instead of the lent windows. Sign in with ChatGPT receives
 settings. AuthBroker serializes OpenAI and Codex legacy OAuth operations because
 both SDK flows use callback port 1455; live sign-in remains a manual acceptance
 gate.
+
+For first-party OpenAI ChatGPT OAuth, new model choices are gated by one
+Gateway-wide owner and the public provider availability filters in each `ModelRuntime`,
+using that same OAuth access token's `GET https://api.openai.com/v1/models`
+response. The Gateway retains only `visibility: "list"` entries whose `slug`
+matches a model registered by the pinned SDK, preserving account order. This
+account list is the sole lifecycle and endpoint-eligibility authority for
+first-party OpenAI OAuth choices: bundled models it omits (including hidden,
+retired, or route-incompatible entries) are not selectable. Unknown account
+slugs are ignored because Tron has no registered transport metadata for them.
+Discovery is paginated and bounded to five seconds. The first account-backed
+availability/catalog read may therefore wait up to five seconds; before a
+successful result, or after a failure without a same-token success, OAuth OpenAI
+fails closed to no choices. Successful discoveries are fresh for 60 seconds
+before another bounded refresh; on refresh failure, the last successful list for
+the same token may remain available. A token change does not authorize the
+previous token's list. The access token is sent
+only to `https://api.openai.com/v1/models`; API-key OpenAI and custom endpoints
+keep their existing catalog behavior without discovery. Eligibility applies
+only when the provider and every registered OpenAI model use the SDK's exact
+first-party Responses route. If a mixed/custom model is registered, the whole
+provider is left unchanged rather than applying account authority to proxy
+models.
+
+`session.setModel`, default-model writes, `provider.list` choice counts, and
+`model.list.available` use the same policy. On a new session only, an ineligible
+saved OpenAI/Codex default is replaced by the first currently available model;
+the persisted setting is not rewritten, and creation fails without publishing a
+session if no fallback exists. Existing session model identities are
+not rewritten, including on reopen. A Codex provider remains registered and its
+credential remains available to the usage adapter, but its models are not new
+choices while `providerUsageLentTo` identifies `openai`; a sole Codex sign-in is
+unchanged. This describes account-list behavior, not the current account's exact
+membership; a live account check remains a maintainer post-install validation. An
+extension can still call `ctx.setModel` directly; extension-authored selections are
+outside this Tron policy because the SDK has no pre-selection admission hook. Likewise, an
+extension provider contribution that re-registers `openai` or `openai-codex`
+replaces the SDK filter decoration (the SDK keeps native and extension providers
+mutually exclusive). Gateway catalog, selection, default and Knowledge admission
+still consult the eligibility owner directly, but SDK snapshot consumers (model
+cycling and Pi's own no-default initial pick) are unfiltered for that composition.
 
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot
@@ -3240,7 +3315,20 @@ asynchronous delegated subagents that already have an authoritative producer. It
 not add another shell tool, detached executor, PTY, process supervisor, or event journal.
 Assistant `bash`, direct user `!` bash, Terminal-sheet PTYs, ordinary tools,
 administrative work, and shell grandchildren inferred from command syntax remain outside
-this surface and continue through their existing transcript/tool presentation.
+this surface and continue through their existing transcript/tool presentation. The built-in
+foreground bash owner gives each shell a filtered snapshot: it withholds all inherited
+`PI_*` and `TRON_GATEWAY_*` variables, then supplies only that canonical session's opaque
+`PI_SESSION_ID` for `scripts/tron work`. It preserves PATH intact so managed agent tools
+under the live home remain available; PATH identifies executable search locations, not a
+data root. The delegated-provider keeps its separate in-process `PI_SUBAGENTS_TEMP_ROOT`
+for pi-subagents children; arbitrary shell commands and their process trees do not receive
+that live-home root, Gateway supervision/payload identity, or the `TRON_DATA_DIR` and
+`TRON_HOME_NAME` selectors. Gateway Vitest configurations (regular, scale and corpus), Node
+test scripts, and `scripts/tron work verify` share one environment
+policy. Vitest rejects during setup, before test modules execute; `scripts/tron work verify`
+rejects before checks are selected or carried. The policy expands SDK-style `~` paths and
+normalizes dot segments, including path-list entries, and interprets `TRON_HOME_NAME` using
+the same home-relative resolution as `resolveTronHome()`.
 
 `SessionProcessActivity` gives subagent rows a stable namespaced `processId`, typed
 source/mode/lifecycle, bounded current-tool/output facts,

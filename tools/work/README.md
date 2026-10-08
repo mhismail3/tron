@@ -207,7 +207,18 @@ merges and silently drop the work.
 ### Base failure modes
 
 `test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
-repositories, local bare remotes and the fake `gh`.
+repositories, local bare remotes and the fake `gh`. The land fixtures disable
+Git auto-GC and automatic maintenance for every child Git process, so repository
+temporary-directory cleanup does not race detached maintenance.
+The fixture-level test process owner tracks every child process and applies the
+Git auto-GC/maintenance configuration. It terminates and joins any remaining
+children before fixture-directory cleanup, including on test failures.
+`GitMaintenanceCleanupTests` makes auto-GC eligible with auto-detachment disabled,
+then uses an owner-tracked writer to reproduce a late write during
+`TemporaryDirectory` cleanup without the fixture configuration. It verifies
+cleanup succeeds with the fixture configuration. Its failure-injection case
+also verifies that a child-release exception still restores the process owner
+and closes both FIFO descriptors.
 
 75. **A stacked claim uses the wrong base.** `verify`, `land` (update, pull
     request, merge, resume and the closing comment), `steward` and `cleanup`
@@ -283,6 +294,9 @@ the GitHub side.
 
 `scripts/tron work verify [--post] [--evidence-manifest <json>]` validates the
 committed head of the current branch and writes a receipt for that exact commit.
+Before loading or selecting checks, it rejects inherited environment values that
+resolve into a live Tron home; the Gateway's shared path policy also guards its
+Vitest configurations and Node test scripts.
 
 1. **Clean head.** A worktree with modified, staged or untracked files is
    refused, because the receipt describes a commit and not a working tree.
@@ -407,6 +421,10 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   build. Any other changed input, or a deleted or renamed Gateway file, runs the
   full suite instead, because `vitest related` cannot select a test that still
   imports a deleted module and the build excludes tests.
+- **Gateway scale** runs the dedicated scale suite when one of its own
+  `*.scale.test.ts` files, `vitest.scale.config.ts`, or an explicitly exercised
+  Knowledge source/helper changes. It stays separate from the ordinary source
+  selector so unrelated Gateway changes do not pay for the large corpus tests.
 - **iOS** runs the source, build-matrix and archive-privacy policy scripts,
   then `scripts/tron-ios-test build`. For changed test files, verify derives
   their declared suites only when every non-private top-level declaration is a
@@ -480,7 +498,9 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 
 `test_verify.py` checks these against real temporary repositories, local bare
 remotes and a fake `gh` (`WORK_GH`) that records every call. The live E2E
-covers the GitHub side.
+covers the GitHub side. `test_scale_suite_selector_is_narrow` also protects the
+Tron-specific selector: a scale test path selects `gateway-scale`, while an
+unrelated Gateway source does not.
 
 12. **A stale receipt is accepted for another head.** A receipt is named by and
     records its head. `--post` publishes only the receipt it just made for the
