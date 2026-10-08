@@ -5,9 +5,9 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const GATEWAY = dirname(dirname(fileURLToPath(import.meta.url)));
-const DEFAULT_PIN = join(GATEWAY, "pi-subagents-pin.json");
 const args = process.argv.slice(2);
+const GATEWAY = args[0] === "--root" && args.length === 2 ? resolve(args[1]) : dirname(dirname(fileURLToPath(import.meta.url)));
+const DEFAULT_PIN = join(GATEWAY, "pi-subagents-pin.json");
 const pinPath = args[0] === "--pin" && args.length === 2 ? resolve(args[1]) : DEFAULT_PIN;
 
 function fail(message) { console.error(`pi-subagents pin check failed: ${message}`); process.exitCode = 1; }

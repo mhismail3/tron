@@ -670,7 +670,16 @@ scripts/tron dev stop
 scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable candidate
 ```
 
-Each selected Gateway payload carries the Tron-owned `pi-subagents` pin/closure.
+The bundler's `stage-gateway-app.sh` step copies the Tron-owned `pi-subagents`
+pin, both selections' source archives/locks/closures, and the activation installer
+and checker into the existing fingerprinted `app` tree. It checks those staged
+inputs before dependency installation; the payload verifier independently uses
+the trusted source checker against that app root, rejecting missing or invalid
+current/retained provider inputs. This step never installs into a Gateway home.
+The owning regression is `managed-subagents.payload.test.ts` (build the Gateway
+first): it runs this real staging step, imports its compiled startup boundary
+with TCP denied, and verifies activation plus retained-closure refusal.
+
 Startup installs it offline into the home-owned versioned reserved root before
 extension discovery, or verifies and reuses an existing exact install; damaged
 bytes/receipts refuse startup. Debug uses `~/.tron-dev/internal/pi-subagents/`.

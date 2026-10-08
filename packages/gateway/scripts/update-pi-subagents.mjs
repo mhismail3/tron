@@ -2,7 +2,7 @@
 /** Prepare a reviewed provider build from immutable git objects, never deploy it. */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -106,6 +106,21 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     copyFileSync(join(root, "scripts/check-pi-subagents.mjs"), join(candidateRoot, "scripts/check-pi-subagents.mjs"));
     writeFileSync(join(candidateRoot, PIN), JSON.stringify(candidate, null, 2) + "\n");
     invoke(process.execPath, [join(candidateRoot, "scripts/check-pi-subagents.mjs")], candidateRoot, env);
+    // Qualify the exact unpublished bytes in their own payload lifetime. The
+    // repository pin stays current until both real execution gates have settled.
+    for (const path of ["src", "test-support", "vitest.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
+    symlinkSync(join(root, "node_modules"), join(candidateRoot, "node_modules"));
+    const gate = (label, file, reportName, reportEnv) => {
+      const reportPath = join(staging, reportName);
+      try {
+        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", file, "--maxWorkers=2"], candidateRoot, { ...env, [reportEnv]: reportPath });
+        const report = JSON.parse(readFileSync(reportPath, "utf8"));
+        if (report.passed !== true) throw new Error("execution report did not pass");
+        return report;
+      } catch (error) { throw new Error(`${label} failed: ${error.message}`, { cause: error }); }
+    };
+    const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT");
+    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));
       const destination = join(root, path);
@@ -117,7 +132,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     renameSync(join(candidateRoot, PIN), pinPath);
     published = true;
     invoke("npm", ["run", "check:pi-subagents"], root, env);
-    return { version: candidate.version, forkCommit: commit, upstream, latestUpstream, closureSha512: candidate.closure.sha512 };
+    return { version: candidate.version, forkCommit: commit, upstream, latestUpstream, closureSha512: candidate.closure.sha512, executionGate, rollbackProbe };
   } catch (error) {
     if (published) {
       const restore = join(staging, "restore-pin.json");

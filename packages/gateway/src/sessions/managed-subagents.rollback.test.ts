@@ -48,7 +48,8 @@ it("executes previous → candidate → previous and retains candidate history o
     for (const name of ["previous", "candidate", "rollback"]) {
       const payload = join(payloads, name);
       await copyPayload(payload);
-      const selection = name === "candidate" ? pin : { ...pin, version: pin.previous.version, closure: pin.previous.closure, fork: { commit: null } };
+      const selection = name === "candidate" ? pin : pin.previous.fork ? pin.previous
+        : { ...pin, version: pin.previous.version, closure: pin.previous.closure, fork: { commit: null } };
       await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(selection));
       let before: Record<string, string> | undefined;
       let parentBefore: Buffer | undefined;
@@ -68,10 +69,14 @@ it("executes previous → candidate → previous and retains candidate history o
         await writeFile(join(root, `${name}.log`), (error.stdout ?? "") + (error.stderr ?? ""));
         const failed = JSON.parse(await readFile(join(root, `${name}.json`), "utf8"));
         report.legs.push(failed);
-        throw new Error(`${name} leg failed: ${failed.error ?? error.message}`);
+        throw new Error(`${name} leg failed: ${JSON.stringify(failed)}`);
       });
       await writeFile(join(root, `${name}.log`), output.stdout + output.stderr);
-      report.legs.push(JSON.parse(await readFile(join(root, `${name}.json`), "utf8")));
+      const completed = JSON.parse(await readFile(join(root, `${name}.json`), "utf8"));
+      const retainedSelection = name === "candidate" ? pin : pin.previous;
+      expect(completed.receipt).toEqual({ version: retainedSelection.version, sha512: retainedSelection.closure.sha512,
+        forkCommit: retainedSelection.fork?.commit ?? null });
+      report.legs.push(completed);
       if (before) {
         const after = await retainedFiles(join(root, "agent", "sessions"));
         const parentPath = join(root, candidate!.completion.parentFile);
@@ -87,7 +92,7 @@ it("executes previous → candidate → previous and retains candidate history o
     }
     for (const selection of [pin, pin.previous]) {
       const receipt = JSON.parse(await readFile(join(root, "tron", "internal", "pi-subagents", selection.version, "tron-install-receipt.json"), "utf8"));
-      expect(receipt).toMatchObject({ version: selection.version, sha512: selection.closure.sha512 });
+      expect(receipt).toEqual({ version: selection.version, sha512: selection.closure.sha512, forkCommit: selection.fork?.commit ?? null });
     }
     expect((await readdir(join(root, "tron", "internal", "pi-subagents"))).sort()).toEqual([pin.previous.version, pin.version].sort());
     report.passed = true;
@@ -160,11 +165,14 @@ async function runLeg(): Promise<void> {
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
-  const overrides = { PI_CODING_AGENT_DIR: agentDir, npm_config_cache: join(root, "npm-cache"), npm_config_offline: "true", npm_config_registry: "http://registry.invalid" };
+  const overrides = { PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "internal", "subagents"),
+    npm_config_cache: join(root, "npm-cache"), npm_config_offline: "true", npm_config_registry: "http://registry.invalid" };
   const previous = Object.fromEntries(Object.keys(overrides).map((name) => [name, process.env[name]]));
   let registry: RuntimeRegistry | undefined;
   let server: Server | undefined;
-  const responses: Array<string | { id: string; args: Record<string, unknown> }> = [];
+  let revival: { asyncId: string; asyncDir: string } | undefined;
+  let resumeTarget: string | undefined;
+  let candidateTarget: string | undefined;
   let requests = 0;
   const facts: Record<string, unknown> = { leg, passed: false };
   try {
@@ -185,11 +193,39 @@ async function runLeg(): Promise<void> {
       return;
     }
     const model = { provider: "tron-rollback-subagents", id: "rollback-model" };
-    server = createServer((request, response) => {
-      request.resume();
-      const scripted = responses.shift();
-      if (++requests > 16 || scripted === undefined || request.url !== "/v1/chat/completions") {
-        response.writeHead(500).end("Unexpected model request");
+    // Requests are keyed by the current canonical turn, not arrival order:
+    // detached revive and parent acknowledgement can arrive concurrently.
+    server = createServer(async (request, response) => {
+      let bytes = "";
+      for await (const chunk of request) {
+        bytes += chunk;
+        if (bytes.length > 2 * 1024 * 1024) { response.writeHead(413).end(); return; }
+      }
+      const messages = JSON.parse(bytes).messages as Array<{ role: string; content: unknown }>;
+      const last = messages.at(-1);
+      const input = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
+      let scripted: string | { id: string; args: Record<string, unknown> } | undefined;
+      if (last?.role === "tool") scripted = "PARENT_COMPLETE";
+      else if (input.includes("Launch rollback-worker and report completion")) scripted = {
+        id: `${leg}-launch`, args: { agent: "rollback-worker", task: `Return CHILD_${leg!.toUpperCase()}_COMPLETE`, async: false,
+          acceptance: { level: "none", reason: "Read-only rollback probe" } },
+      };
+      else if (input.includes("Inspect the retained candidate run without changing it")) scripted = {
+        id: "rollback-status", args: { action: "status", id: candidateTarget },
+      };
+      else if (input.includes("Resume the retained candidate child through the selected previous provider")) scripted = {
+        id: "rollback-resume", args: { action: "resume", id: candidateTarget, message: "Return CHILD_ROLLBACK_RESUMED", async: false },
+      };
+      else if (input.includes("Inspect the completed revived run")) scripted = {
+        id: "rollback-resume-status", args: { action: "status", id: resumeTarget },
+      };
+      else if (input.includes("CHILD_ROLLBACK_RESUMED")) scripted = "CHILD_ROLLBACK_RESUMED";
+      else if (input.includes(`CHILD_${leg!.toUpperCase()}_COMPLETE`)) scripted = `CHILD_${leg!.toUpperCase()}_COMPLETE`;
+      // Completion notifications are additional parent turns, never child work.
+      else if (input.includes("Subagent updates above.") || (input.toLowerCase().includes("subagent") && input.includes("complete"))) scripted = "PARENT_COMPLETE";
+      ((facts.modelRoutes ??= []) as unknown[]).push({ role: last?.role, input: input.slice(0, 512), response: scripted });
+      if (++requests > 24 || scripted === undefined || request.url !== "/v1/chat/completions") {
+        response.writeHead(500).end(`Unexpected model request: ${input}`);
         return;
       }
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -237,12 +273,13 @@ async function runLeg(): Promise<void> {
         activities: old.snapshot().processActivities };
       // Producer-owned status is exercised through the real tool, not inferred
       // from a surviving directory. No resume is assumed for non-resumable runs.
-      responses.push({ id: "rollback-status", args: { action: "status", id: candidate.completion.runId } }, "ROLLBACK_STATUS_READ");
+      candidateTarget = candidate.completion.runId;
       await old.prompt("Inspect the retained candidate run without changing it");
       await waitFor(() => !old.isBusy, "rollback candidate status");
       const result = SessionManager.open(old.sessionFile!).getEntries().find((entry) => entry.type === "message"
         && entry.message.role === "toolResult" && entry.message.toolCallId === "rollback-status");
-      expect(result).toMatchObject({ message: { isError: false } });
+      facts.retainedStatusResult = result;
+      expect(result, JSON.stringify(result)).toMatchObject({ message: { isError: false } });
       if (!result || result.type !== "message" || result.message.role !== "toolResult") throw new Error("Missing retained candidate status");
       const text = result.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
       expect(text).toContain(candidate.completion.runId);
@@ -257,8 +294,6 @@ async function runLeg(): Promise<void> {
     expect(resources.subagents.some((agent) => agent.name === "rollback-worker")).toBe(true);
     expect(resources.tools.some((tool) => tool.name === "subagent")).toBe(true);
     const marker = `CHILD_${leg!.toUpperCase()}_COMPLETE`;
-    responses.push({ id: `${leg}-launch`, args: { agent: "rollback-worker", task: `Return ${marker}`, async: false,
-      acceptance: { level: "none", reason: "Read-only rollback probe" } } }, marker, "PARENT_COMPLETE");
     await slot.prompt("Launch rollback-worker and report completion");
     await waitFor(() => !slot.isBusy, `${leg} real child completion`);
     const session = SessionManager.open(slot.sessionFile!);
@@ -283,34 +318,67 @@ async function runLeg(): Promise<void> {
     if (leg === "rollback") {
       const candidate = JSON.parse(await readFile(join(root, "candidate.json"), "utf8")) as { completion: Completion };
       const old = await registry.acquire(candidate.completion.parentId);
-      responses.push({ id: "rollback-resume", args: { async: false,
-        workflowScript: `return runs.run("rollback-resume", { resume: ${JSON.stringify(candidate.completion.runId)}, task: "Return CHILD_ROLLBACK_RESUMED" })`,
-      } }, "CHILD_ROLLBACK_RESUMED", "PARENT_RESUME_COMPLETE");
       await old.prompt("Resume the retained candidate child through the selected previous provider");
-      await waitFor(() => !old.isBusy, "rollback candidate resume");
-      const resumed = SessionManager.open(old.sessionFile!).getEntries().find((entry) => entry.type === "message"
-        && entry.message.role === "toolResult" && entry.message.toolCallId === "rollback-resume");
-      expect(resumed).toMatchObject({ message: { isError: false } });
+      const resumed = await waitFor(() => SessionManager.open(old.sessionFile!).getEntries().find((entry) => entry.type === "message"
+        && entry.message.role === "toolResult" && entry.message.toolCallId === "rollback-resume"), "accepted rollback revival");
+      facts.retainedResumeResult = resumed;
+      expect(resumed, JSON.stringify(resumed)).toMatchObject({ message: { isError: false } });
       if (!resumed || resumed.type !== "message" || resumed.message.role !== "toolResult") throw new Error("Missing canonical rollback resume");
-      expect(resumed.message.content.some((block) => block.type === "text" && block.text.includes("CHILD_ROLLBACK_RESUMED"))).toBe(true);
-      const detail = resumed.message.details as { runId: string; results: Array<{ sessionFile: string; exitCode: number; finalOutput: string }> };
-      expect(detail.results).toHaveLength(1);
-      expect(detail.results[0]).toMatchObject({ sessionFile: join(root, candidate.completion.childFile), exitCode: 0, finalOutput: "CHILD_ROLLBACK_RESUMED" });
+      const detail = resumed.message.details as { asyncId: string; asyncDir: string };
+      expect(detail.asyncId).toBeTruthy();
+      expect(detail.asyncDir).toBeTruthy();
+      revival = detail;
+      resumeTarget = detail.asyncId;
+      const childFile = join(root, candidate.completion.childFile);
+      await waitFor(() => SessionManager.open(childFile).getEntries().some((entry) => entry.type === "message"
+        && entry.message.role === "assistant" && entry.message.content.some((block) => block.type === "text" && block.text === "CHILD_ROLLBACK_RESUMED")),
+      "revived canonical child completion", { intervalMs: 100 });
+      const terminal = await waitFor(async () => {
+        try {
+          const proof = JSON.parse(await readFile(join(detail.asyncDir, "process-terminal.json"), "utf8"));
+          return proof.state === "observed" ? proof : false;
+        } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+      }, "revived process exit observation", { intervalMs: 100 });
+      expect(terminal.runId).toBe(detail.asyncId);
+      expect(terminal.instances.length).toBeGreaterThan(0);
+      for (const instance of terminal.instances) expect(instance).toMatchObject({ exitCode: 0, signal: null });
+      await waitFor(() => !old.isBusy, "revive notification settlement").catch((error) => {
+        facts.busyAfterRevival = { snapshot: old.snapshot(), tail: SessionManager.open(old.sessionFile!).getEntries().slice(-4) };
+        throw error;
+      });
+      await old.prompt("Inspect the completed revived run");
+      await waitFor(() => !old.isBusy, "revived producer status");
+      const status = SessionManager.open(old.sessionFile!).getEntries().find((entry) => entry.type === "message"
+        && entry.message.role === "toolResult" && entry.message.toolCallId === "rollback-resume-status");
+      expect(status).toMatchObject({ message: { isError: false } });
+      if (!status || status.type !== "message" || status.message.role !== "toolResult") throw new Error("Missing revived status");
+      const text = status.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+      facts.revivedTerminal = terminal;
+      facts.revivedStatus = text;
+      expect(text).toMatch(/complete|completed/);
+      expect(text).toContain("Process terminal: observed");
       const child = SessionManager.open(join(root, candidate.completion.childFile));
       expect(child.getSessionId()).toBe(candidate.completion.childId);
       expect(child.getEntries().some((entry) => entry.type === "message" && entry.message.role === "assistant"
         && entry.message.content.some((block) => block.type === "text" && block.text === "CHILD_ROLLBACK_RESUMED"))).toBe(true);
-      facts.candidateResume = { runId: detail.runId, childId: child.getSessionId(), exitCode: detail.results[0]!.exitCode,
-        output: detail.results[0]!.finalOutput, canonicalChildRetained: true };
+      facts.candidateResume = { runId: detail.asyncId, childId: child.getSessionId(), exitCode: 0,
+        output: "CHILD_ROLLBACK_RESUMED", canonicalChildRetained: true, processesExited: true };
     }
-    expect(responses).toEqual([]);
     facts.passed = true;
   } catch (error) {
     facts.error = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    try { await registry?.dispose(); }
-    finally {
+    try {
+      // Accepted detached revival outlives the presentation turn. Its owner
+      // observes runner/writer exit before retiring HTTP and fixture state,
+      // including when a later assertion fails.
+      if (revival) await waitFor(async () => {
+        try { return JSON.parse(await readFile(join(revival!.asyncDir, "process-terminal.json"), "utf8")).state === "observed"; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+      }, "fixture-owned revival exit", { intervalMs: 100 });
+    } finally {
+      await registry?.dispose();
       server?.closeAllConnections();
       if (server) await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
       for (const [name, value] of Object.entries(previous)) {

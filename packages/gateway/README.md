@@ -308,17 +308,25 @@ online, reports latest upstream for information only, and exports immutable git
 objects into a disposable tree. It uses the recorded Node/npm to install build
 dependencies, run `npm pack` (including the fork's packaging scripts), and build
 the closure. The candidate must have a new exact upstream-based `-tron.N` version.
-Only after staged offline validation does it exclusively create new immutable
-artifacts and atomically rename the pin, retaining current as previous. A final
+Before publication, the exact staged candidate must pass the offline real-Gateway
+activation/discovery/child-execution gate and the mandatory previous → candidate
+→ previous execution/resume probe. Both use disposable payloads and isolated homes;
+no repository pin or immutable artifact is published while either gate runs.
+Their passing JSON reports accompany the command result. Any gate failure refuses
+the update and removes its staging; original pin/artifact bytes remain unchanged.
+Only then does it exclusively create new immutable artifacts and atomically
+rename the pin, retaining the complete current pin (including fork provenance)
+as previous. A final
 `npm run check:pi-subagents` failure restores the original pin and removes only
 newly created files. The private `.pi-subagents-update-staging` directory is
 also the exclusive invocation lease; overlapping updates are refused. An
 uncatchable termination leaves it in place: inspect the interrupted owner before
 manually removing staging, never sweep another update's files. Dirty owned
 inputs, reused artifact paths, and mismatched provenance are refused. The updater never edits fork refs/working-tree files or
-Gateway homes, deploys, or starts a service. `test:pi-subagents-scripts` covers
-real local-git export/pack/build/check and late-failure restoration; the online
-metadata boundary is faked in those tests. Work verification selects the offline
+installed Gateway homes, deploys, or starts a service. `test:pi-subagents-scripts`
+covers real local-git export/pack/build/check, both execution gates, unusable
+candidate and return-leg resume refusal, and late-failure restoration; only the
+online release metadata boundary is faked in those tests. Work verification selects the offline
 checker and script suite for provider pin/artifacts/scripts, package manifests,
 and Node pin changes, not unrelated runtime sources.
 
@@ -396,7 +404,13 @@ sequence against one isolated home. Each leg loads a fresh Gateway runtime with
 the selected exact closure, discovers packaged/project agents, and completes a
 real foreground child. The return leg reconstructs the candidate parent, reads
 its retained run through the previous provider, refuses terminal live control,
-and resumes the candidate child through the previous provider's workflow API.
+and resumes the candidate child through the producer's documented `action: resume`
+management API. Revival is detached even with `async: false`: the probe awaits the
+same canonical child identity/output and the producer's observed runner/writer
+exit-0 proof, then reads terminal producer status. Scripted model responses are
+turn-addressed, not globally queued, so parent notifications and the revived
+child cannot steal each other's responses. The fixture supplies the same reserved
+delegated-artifact root as Gateway startup, before extension initialization.
 The original parent/child JSONL prefixes and all other retained session-tree run
 artifacts must remain unchanged; supported continuation appends canonical history rather
 than converting it. Both immutable installs/receipts survive rollback. Only the
@@ -413,8 +427,18 @@ directory; the probe refuses to overwrite an existing fixture. Without that
 explicit retention request, it removes the fixture on success and failure.
 Payload source copies always retire after the probe. This gate selects provider
 versions with the current Gateway/SDK, not historical Gateway executables or a
-Stable/Debug service transition. Actual service qualification and detached/live
-control scenarios remain separate release gates.
+Stable/Debug service transition. Actual service qualification and the broader
+detached/live control matrix remain separate release gates.
+
+After `npm run build`, run `npx vitest run
+src/sessions/managed-subagents.payload.test.ts --maxWorkers=2` to execute the
+bundler's real app-input staging step and activate that staged compiled runtime
+with TCP denied. It verifies both selections through the same trusted checker
+used by the payload verifier, proves the shipped installer is usable, and rejects
+a damaged retained closure. The report is
+`test-results/managed-subagents.payload.json` (or `TRON_SUBAGENTS_PAYLOAD_REPORT`).
+It shares the selected SDK dependency tree only; pin/artifact authority comes
+exclusively from staged app bytes.
 
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
 layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote

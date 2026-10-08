@@ -62,13 +62,14 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
     const observed = await proof.definition.execute('proof',{},undefined,undefined,{});
     console.log(JSON.stringify({moduleIdentity:observed.details.SessionManager===sdk.SessionManager,
       providerTool:result.extensions.some(e=>e.tools.has('subagent')),networkAttempts}));`);
+  const providerEntry = provider.loaderOptions(SettingsManager.inMemory(), home).additionalExtensionPaths[0]!;
   for (const payloadName of ["payload-a", "payload-b"]) {
     const payload = join(home, payloadName);
     const sdkRoot = join(payload, "sdk");
     mkdirSync(payload);
     cpSync(join(gatewayRoot, "node_modules", "@earendil-works", "pi-coding-agent"), sdkRoot, { recursive: true });
     symlinkSync(join(gatewayRoot, "node_modules"), join(payload, "node_modules"));
-    const output = execFileSync(process.execPath, [script, join(sdkRoot, "dist", "index.js"), payload, join(root, "index.js"), probe], {
+    const output = execFileSync(process.execPath, [script, join(sdkRoot, "dist", "index.js"), payload, providerEntry, probe], {
       timeout: 8_000, encoding: "utf8", env: { PATH: process.env.PATH!, HOME: home, TMPDIR: home },
     });
     expect(JSON.parse(output.trim())).toEqual({ moduleIdentity: true, providerTool: true, networkAttempts: 0 });
@@ -91,15 +92,16 @@ it("refuses a user-installed different version before loading and leaves its man
 it("refuses a tampered installed byte for both admission and discovery", async () => {
   const provider = new ManagedSubagents(home);
   const root = provider.install();
-  const bytes = readFileSync(join(root, "index.js"));
+  const providerEntry = provider.loaderOptions(SettingsManager.inMemory(), home).additionalExtensionPaths[0]!;
+  const bytes = readFileSync(providerEntry);
   bytes[0] = bytes[0]! ^ 1;
-  writeFileSync(join(root, "index.js"), bytes);
+  writeFileSync(providerEntry, bytes);
   const agentDir = join(home, "agent");
   mkdirSync(agentDir);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
   expect(() => provider.loaderOptions(settings, agentDir)).toThrow(/installed closure mismatch/);
   expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/installed closure mismatch/);
-  expect(readFileSync(join(root, "index.js"))).toEqual(bytes);
+  expect(readFileSync(providerEntry)).toEqual(bytes);
   expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(root)]);
   const catalog = await loadSubagentCatalog({ agentDir, cwd: home, settingsManager: settings, managedSubagents: provider });
   expect(catalog.subagents).toEqual([]);

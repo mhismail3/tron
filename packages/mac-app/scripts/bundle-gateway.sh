@@ -483,11 +483,7 @@ stage_node() {
 
 # The staging root is fresh, so nothing here replaces earlier output.
 mkdir -p "$APP_DIR/scripts" "$RUNTIME_DIR" "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
-cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
-cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
-cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
-cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
-cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
+bash "$SCRIPT_DIR/stage-gateway-app.sh" "$GATEWAY_DIR" "$APP_DIR"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
