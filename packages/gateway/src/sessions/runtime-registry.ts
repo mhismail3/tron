@@ -803,6 +803,9 @@ export class RuntimeRegistry {
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
+  /** Drain admission is owned here; readers derive it from the canonical phase rather than mirroring a stop flag. */
+  get isAdministrativeDrainStarted(): boolean { return this.drainPhase !== "idle"; }
+
   /** Shared model recency for the model picker; newest first and bounded. */
   recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }
 
@@ -4326,13 +4329,16 @@ export class RuntimeRegistry {
 
   drainBusySessionCount(): number { return this.administrativeDrainSnapshot().blockerCount; }
 
-  async waitUntilIdle(): Promise<void> {
+  async waitUntilIdle(continueDrain?: (snapshot: AdministrativeDrainSnapshot) => boolean): Promise<boolean> {
     // Freeze slot/admin admissions synchronously, then wait for every operation
     // admitted before the cutoff. Graceful restart never cancels accepted work.
     this.beginAdministrativeDrain();
     try {
       while (this.slotAdmissionsInFlight > 0) {
-        this.administrativeDrainSnapshot();
+        if (continueDrain && !continueDrain(this.administrativeDrainSnapshot())) {
+          this.failAdministrativeDrain();
+          return false;
+        }
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       const slots = await this.mutex.run(() => [...this.slots.values()]);
@@ -4356,7 +4362,11 @@ export class RuntimeRegistry {
       let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
       this.setDrainPhase("waiting");
       while (!preparationSettled || this.workRegistry.size > 0 || slots.some((slot) => slot.isDrainBusy)) {
-        this.administrativeDrainSnapshot();
+        const snapshot = this.administrativeDrainSnapshot();
+        if (continueDrain && !continueDrain(snapshot)) {
+          this.failAdministrativeDrain();
+          return false;
+        }
         assertForegroundOwnersHaveSlots();
         const monotonic = performance.now();
         if (preparationSettled && preparationError === undefined
@@ -4371,6 +4381,10 @@ export class RuntimeRegistry {
       }
       if (preparationError !== undefined) throw preparationError;
       const finalWaiting = this.administrativeDrainSnapshot();
+      if (continueDrain && !continueDrain(finalWaiting)) {
+        this.failAdministrativeDrain();
+        return false;
+      }
       if (finalWaiting.blockerCount !== 0) {
         throw new Error("Administrative drain cannot complete while blockers remain");
       }
@@ -4380,11 +4394,18 @@ export class RuntimeRegistry {
       if (completed.blockerCount !== 0) {
         throw new Error("Administrative drain completion invariant was violated");
       }
+      return true;
     } catch (error) {
-      this.setDrainPhase("failed");
-      this.administrativeDrainSnapshot();
+      this.failAdministrativeDrain();
       throw error;
     }
+  }
+
+  /** Records an unproved process-retirement stage without reopening admission. */
+  failAdministrativeDrain(): void {
+    if (this.drainPhase === "idle") this.beginAdministrativeDrain();
+    this.setDrainPhase("failed");
+    this.administrativeDrainSnapshot();
   }
 
   async dispose(): Promise<void> {

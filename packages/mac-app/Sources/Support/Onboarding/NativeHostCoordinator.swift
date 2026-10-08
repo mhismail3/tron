@@ -21,6 +21,10 @@ enum NativeHostRegistrationPolicy {
 /// ServiceManagement status is not generic native-quiescence evidence. Only the
 /// existing no-registration policy skips a join; missing/unknown metadata refuses
 /// the operation rather than probing or implicitly enabling a helper to proceed.
+enum NativeHostStartupPolicy {
+    static func shouldRestore(state: NativeHostServiceState) -> Bool { state == .enabled }
+}
+
 enum NativeHostRetirementPolicy {
     static func drain(status: SMAppService.Status, join: () async throws -> Void) async throws {
         switch status {
@@ -56,7 +60,7 @@ actor NativeHostCoordinator {
     static let shared = NativeHostCoordinator(operations: .live)
     private let operations: NativeHostOperations
     private var pending: (id: UUID, permission: Permission, task: Task<PermissionStatus, Never>)?
-    private enum Command { case enable, refresh, unregister }
+    private enum Command { case enable, refresh, unregister, retireForQuit }
     private var lifecycle: (id: UUID, kind: Command, task: Task<NativeHostServiceState, Error>)?
     init(operations: NativeHostOperations) { self.operations = operations }
 
@@ -68,6 +72,7 @@ actor NativeHostCoordinator {
     func enable() async throws -> NativeHostServiceState { try await perform(.enable) }
     func refresh() async throws -> NativeHostServiceState { try await perform(.refresh) }
     func unregister() async throws { _ = try await perform(.unregister) }
+    func retireForQuit() async throws { _ = try await perform(.retireForQuit) }
 
     private func perform(_ kind: Command) async throws -> NativeHostServiceState {
         if let lifecycle {
@@ -87,6 +92,8 @@ actor NativeHostCoordinator {
             case .unregister:
                 try await operations.drain()
                 try await operations.unregister()
+            case .retireForQuit:
+                try await operations.drain()
             }
             return await operations.state()
         }

@@ -64,6 +64,7 @@ function gatewayRpc(service: IosDeviceInstallService, tronHome: string) {
   const gateway = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome },
     updateService: new GatewayUpdateService({ tronHome, updater: update }),
+    sessions: { isAdministrativeDrainStarted: false },
     iosDeviceInstallService: service,
     devices: {
       hasDevice: async (deviceId: string) => deviceId === "device-alpha",
