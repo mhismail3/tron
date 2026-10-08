@@ -257,6 +257,64 @@ const list = async (client: Client) => {
 };
 
 describe("receipt-backed mutations against their own session work entry", () => {
+  it("continues once with queued steering after Stop", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("stop-with-queued-steering");
+    await f.openSession(client, session.id);
+    const beforeModel = await f.snapshot(client, session.id);
+    const model = f.faux.models[0]!;
+    const configured = await client.request("steer-model", "session.setModel", {
+      sessionId: session.id, commandId: "steer-model", provider: model.provider, modelId: model.id,
+      expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
+    });
+    expect(configured.ok, JSON.stringify(configured)).toBe(true);
+    let providerStarted!: () => void;
+    const started = new Promise<void>((resolve) => { providerStarted = resolve; });
+    f.faux.setResponses([
+      async (_context, options) => {
+        providerStarted();
+        await new Promise<void>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new Error("aborted by Stop")), { once: true });
+        });
+        return fauxAssistantMessage("unexpected original completion");
+      },
+      async (context) => fauxAssistantMessage(`continued: ${JSON.stringify(context.messages.map((message: any) => message.content))}`),
+    ]);
+    const initial = await client.request("steer-start", "session.prompt", {
+      sessionId: session.id, commandId: "steer-start", text: "hold the current run",
+    });
+    expect(initial.ok, JSON.stringify(initial)).toBe(true);
+    await started;
+    const first = await client.request("steer-one", "session.prompt", {
+      sessionId: session.id, commandId: "steer-one", text: "first queued steer", behavior: "steer",
+    });
+    const second = await client.request("steer-two", "session.prompt", {
+      sessionId: session.id, commandId: "steer-two", text: "second queued steer", behavior: "steer",
+    });
+    expect(first.ok && second.ok).toBe(true);
+    const stopped = await client.request("steer-stop", "session.abort", {
+      sessionId: session.id, commandId: "steer-stop",
+    });
+    expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
+    await waitFor(async () => {
+      const snapshot = await f.snapshot(client, session.id);
+      const consumed = snapshot.transcript.filter((item: any) => item.kind === "message" && item.role === "user"
+        && item.content?.some((part: any) => ["first queued steer", "second queued steer"].includes(part.text)));
+      return snapshot.phase === "idle" && snapshot.queuedItems.length === 0 && consumed.length === 2;
+    }, "the stopped prompt and both queued steers consumed and idle");
+    const slot = await f.registry.acquire(session.id);
+    const users = slot.canonicalSessionEntries().filter((entry: any) => entry.type === "message" && entry.message.role === "user")
+      .map((entry: any) => entry.message.content.map((part: any) => part.text ?? "").join(""));
+    expect(users.filter((text: string) => text.includes("queued steer"))).toEqual(["first queued steer", "second queued steer"]);
+    const deliveredReceipts = slot.canonicalSessionEntries().filter((entry: any) => entry.customType === "tron.chat-invocation.v1"
+      && [first.result.operationId, second.result.operationId].includes(entry.data?.operationId));
+    expect(deliveredReceipts.filter((entry: any) => entry.data?.receiptKind === "terminal"
+      && entry.data?.lifecycle === "completed").map((entry: any) => entry.data.operationId).sort())
+      .toEqual([first.result.operationId, second.result.operationId].sort());
+    expect(f.faux.state.callCount).toBe(2);
+    record("Stop continues accepted steering exactly once", { delivered: users.filter((text: string) => text.includes("queued steer")), providerCalls: f.faux.state.callCount });
+  });
   it("publishes ready after real assistant completion without reopening the session", async () => {
     const f = await fixture();
     const client = await f.connect();
@@ -289,6 +347,9 @@ describe("receipt-backed mutations against their own session work entry", () => 
       commandId: "configuration-stop", sessionId: session.id,
     });
     expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
+    const stoppedSnapshot = await f.snapshot(client, session.id);
+    expect(stoppedSnapshot.phase).toBe("idle");
+    expect(f.faux.state.callCount).toBe(1);
     const slot = await f.registry.acquire(session.id);
     // Installed extension lifecycle is independent authority. Inject only its
     // admitted artifact, not the configuration admission or RPC under test.

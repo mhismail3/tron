@@ -7716,8 +7716,65 @@ export class RuntimeSlot {
       }
     }
 
+    const queuedAtStop = [...this.queuedMessages];
+    const queuedSteerCount = queuedAtStop.filter((item) => item.behavior === "steer").length;
     this.revision += 1;
     this.publishSnapshot();
+    if (queuedSteerCount > 0) this.continueQueuedSteeringAfterAbort(queuedAtStop, queuedSteerCount);
+  }
+
+  /** Restart Pi's aborted run through its public user-input API; abort intentionally
+   * prevents Pi's current run loop from consuming its queued steering. */
+  private continueQueuedSteeringAfterAbort(items: readonly RuntimeQueuedMessage[], queuedSteerCount: number): void {
+    const session = this.runtime.session;
+    const [first, ...remaining] = items;
+    if (!first) return;
+
+    this.suppressQueueEvents = true;
+    try {
+      session.clearQueue();
+    } finally {
+      this.suppressQueueEvents = false;
+    }
+
+    // Retain Gateway queue ownership until message_start proves consumption.
+    // Pi's queue_update is only a string projection and cannot carry images or
+    // the command identity, so restart with the Gateway's exact accepted item.
+    this.queuedMessages = this.queuedMessages.filter((item) => item.id !== first.id);
+    this.dequeuedSteeringOwners.push(first.id);
+    this.queueRevision += 1;
+    let continuationSettled = false;
+    const continuation = session.sendUserMessage([
+      { type: "text", text: first.runtimeText },
+      ...first.images,
+    ], { expandPromptTemplates: false }).finally(() => { continuationSettled = true; });
+    void (async () => {
+      try {
+        if (remaining.length > 0) {
+          while (!session.isStreaming && !continuationSettled) {
+            const changed = this.waitForStateChange();
+            if (!session.isStreaming && !continuationSettled) await changed;
+          }
+          for (const item of remaining) {
+            if (item.behavior === "steer") await session.steer(item.runtimeText, item.images);
+            else await session.followUp(item.runtimeText, item.images);
+          }
+        }
+        await continuation;
+        this.emit("session.diagnostic", safeJson({
+          code: "stop-steering-continuation",
+          queuedSteerCount,
+          outcome: "completed",
+        }));
+      } catch (error) {
+        this.emit("session.diagnostic", safeJson({
+          code: "stop-steering-continuation",
+          queuedSteerCount,
+          outcome: "failed",
+          message: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    })();
   }
 
   /** Republish this snapshot because the Gateway-owned archive projection

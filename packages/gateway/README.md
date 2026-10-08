@@ -1796,8 +1796,15 @@ Stop is scoped to one invocation, not to an extension workflow. A stopped run's 
 assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
 continuations can distinguish a user stop from a completed run and decide whether to
 continue; Tron never silently disables extension continuation on the user's behalf, and the
-Stop affordance must not claim that it does. A continuation that starts after a stop is a
-new invocation with its own identity, never a resurrection of the stopped one.
+Stop affordance must not claim that it does. Accepted steering is Gateway-owned through
+consumption: when Stop aborts a run with queued steering, RuntimeSlot waits for abort
+settlement, clears Pi's non-authoritative string queue, then starts one new run with the first
+accepted steer through the public user-message API and queues the rest in order. This retains
+the Gateway's exact command identities and image payloads; the queued-steer projection clears
+only as each item is consumed. Stop without queued steering leaves the session idle. The
+`stop-steering-continuation` diagnostic records the accepted steer count and continuation
+outcome. A continuation that starts after a stop is a new invocation with its own identity,
+never a resurrection of the stopped one.
 Extension commands are resolved before ordinary streaming rejection and still execute through
 Pi's prompt path. Tron registers its release-owned `ask_user` capability as one sequential
 semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
