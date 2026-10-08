@@ -7,6 +7,7 @@ import { resolveTronHome } from "../tron-home.js";
 import type { ContentPart, HomeContextProjection, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
+import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 
 export interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string; completionRevision?: number }
 interface SessionMutationEnvelope { sessionId: string }
@@ -411,13 +412,6 @@ export async function runHomeCommand(client: Pick<GatewayProtocolClient, "reques
   }
 }
 
-function operationNeedsSettlement(
-  operationId: string,
-  reconciledSettledOperation: string | undefined,
-): boolean {
-  return operationId !== reconciledSettledOperation;
-}
-
 async function runTerminalChat(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) usage();
   const tronHome = resolveTronHome();
@@ -458,46 +452,115 @@ async function runTerminalChat(): Promise<void> {
   let rendered = "";
   let renderedMessageId: string | undefined;
   let cursor!: { runtimeGeneration: string; eventSequence: number };
-  let awaitingOperation: string | undefined;
-  let reconciledSettledOperation: string | undefined;
-  let pendingCommand: { method: string; commandId: string } | undefined;
-  let settledResolve: (() => void) | undefined;
+  let acceptedOperation: {
+    sessionId: string; operationId: string; submissionLeaf: string | undefined;
+    settle: () => void; fail: (error: unknown) => void; reading?: Promise<void> | undefined;
+  } | undefined;
+  const settleAcceptedOperation = (): void => {
+    const accepted = acceptedOperation;
+    if (!accepted || !snapshot || snapshot.sessionId !== accepted.sessionId) return;
+    const finish = (): void => {
+      if (acceptedOperation !== accepted) return;
+      acceptedOperation = undefined;
+      process.stdout.write("\n");
+      accepted.settle();
+    };
+    // Foreground retirement only schedules an evidence read; phase can remain
+    // running while Home quiescence unwinds. Follow the exact branch cut back
+    // to the submission leaf (or this invocation's start in a new Home chapter),
+    // stopping at its terminal receipt. Canonical entries, not transcript rows,
+    // also cover inputs handled without a user message. No history-page scan.
+    if (accepted.reading || snapshot.operation || snapshot.pendingPrompt
+      || snapshot.queuedItems.some(item => item.id === accepted.operationId)) return;
+    const cut = snapshot;
+    const readingClient = client;
+    const stillOwned = (): boolean => acceptedOperation === accepted && client === readingClient
+      && snapshot?.sessionId === accepted.sessionId && snapshot?.runtimeGeneration === cut.runtimeGeneration
+      && snapshot?.leafEntryId === cut.leafEntryId;
+    accepted.reading = (async () => {
+      const history = await readingClient.request("session.history.list", {
+        sessionId: accepted.sessionId, runtimeGeneration: cut.runtimeGeneration,
+      }) as unknown as { totalEntries: number };
+      if (!stillOwned()) return;
+      if (!Number.isSafeInteger(history.totalEntries) || history.totalEntries < 0) {
+        throw new Error("Gateway returned an invalid invocation history bound");
+      }
+      let entryId = cut.leafEntryId;
+      for (let remaining = history.totalEntries; entryId && entryId !== accepted.submissionLeaf && remaining > 0; remaining -= 1) {
+        const entry = await readingClient.request("session.history.entry", {
+          sessionId: accepted.sessionId, runtimeGeneration: cut.runtimeGeneration, entryId,
+        }) as unknown as { text: string; nextOffset?: number; metadata: { type: string; customType?: string; parentId: string | null } };
+        if (!stillOwned()) return;
+        if (entry.metadata.type === "custom" && entry.metadata.customType === INVOCATION_RECEIPT_TYPE && entry.nextOffset === undefined) {
+          const receipt = parseInvocationReceipt(JSON.parse(entry.text));
+          if (receipt?.sessionId === accepted.sessionId && receipt.operationId === accepted.operationId) {
+            if (receipt.receiptKind === "terminal") { finish(); return; }
+            if (receipt.receiptKind === "start") return;
+          }
+        }
+        if (entry.metadata.parentId !== null && typeof entry.metadata.parentId !== "string") {
+          throw new Error("Gateway returned an invalid invocation history parent");
+        }
+        entryId = entry.metadata.parentId ?? undefined;
+      }
+    })().catch(error => {
+      if (acceptedOperation !== accepted || client !== readingClient) return;
+      if (error instanceof GatewayClientError && error.retryable) void reconnect("resync-required");
+      else accepted.fail(error);
+    }).finally(() => {
+      accepted.reading = undefined;
+      if (acceptedOperation === accepted && snapshot !== cut) settleAcceptedOperation();
+    });
+  };
   const installSnapshot = (installed: SnapshotEnvelope): void => {
     snapshot = installed.session;
     subscriptionToken = installed.subscriptionToken;
-    rendered = assistantText(snapshot);
-    renderedMessageId = assistantMessageId(snapshot);
+    const current = assistantText(snapshot);
+    const messageId = assistantMessageId(snapshot);
+    const delta = sessionId === snapshot.sessionId
+      ? renderDelta(rendered, current, messageId !== renderedMessageId)
+      : current;
+    sessionId = snapshot.sessionId;
+    rendered = current;
+    renderedMessageId = messageId;
     cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
-    if (rendered) process.stdout.write(rendered);
+    attachListeners();
+    if (delta) process.stdout.write(delta);
   };
-  if (sessionId) {
-    await synchronizeTerminalSession(client, sessionId, installSnapshot);
-    process.stdout.write(`Attached to Tron session ${sessionId} (${snapshot!.cwd})\n`);
-  } else if (logicalHome) {
-    process.stdout.write("Attached to Tron Home (logical route; the next prompt activates its reserved chapter).\n");
-  }
 
   let unsubscribers: Array<() => void> = [];
   let reconnecting: Promise<void> | undefined;
-  let reconnect: () => Promise<void>;
+  let reconnect: (reason?: "disconnected" | "resync-required" | "event-gap" | "command-recovery") => Promise<void>;
   const attachListeners = () => {
     unsubscribers.forEach((unsubscribe) => unsubscribe());
     unsubscribers = [
       client.onEvent((event) => {
         if (!sessionId || event.sessionId !== sessionId || !snapshot) return;
         if (event.topic === "transport.resyncRequired") {
-          void reconnect();
+          void reconnect("resync-required");
           return;
         }
-        if (event.topic === "session.snapshot") {
-          const next = event.payload as unknown as SessionSnapshot;
+        if (event.topic === "session.snapshot" || event.topic === "session.rebaseline") {
+          const rebaseline = event.topic === "session.rebaseline"
+            ? event.payload as unknown as { subscriptionToken: string; snapshot: SessionSnapshot }
+            : undefined;
+          // Queue coalescing replaces covered sequences with a token-bound
+          // authoritative snapshot, not an ordinary sequenced event.
+          if (rebaseline && rebaseline.subscriptionToken !== subscriptionToken) return;
+          const next = rebaseline?.snapshot ?? event.payload as unknown as SessionSnapshot;
           if (next.runtimeGeneration === cursor.runtimeGeneration && next.eventSequence <= cursor.eventSequence) return;
           snapshot = next;
           cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
         } else {
           const envelope = event.payload as unknown as SessionEventEnvelope;
           if (envelope.runtimeGeneration !== cursor.runtimeGeneration || envelope.eventSequence !== cursor.eventSequence + 1) {
-            void reconnect();
+            const topic = ["session.progress", "session.toolProgress", "session.configuration", "session.operationFailed",
+              "session.retry", "session.diagnostic", "session.extensionError", "session.extensionActivity",
+              "session.resourcesChanged", "session.structureChanged", "session.contextChanged", "session.rebaseline"].includes(event.topic)
+              ? event.topic : "unknown";
+            const received = Number.isSafeInteger(envelope.eventSequence) ? envelope.eventSequence : "unknown";
+            process.stderr.write(`[Tron resync required: reason=event-gap topic=${topic} expected=${cursor.eventSequence + 1} received=${received}]\n`);
+            void reconnect("event-gap");
             return;
           }
           cursor.eventSequence = envelope.eventSequence;
@@ -515,56 +578,28 @@ async function runTerminalChat(): Promise<void> {
         if (delta) process.stdout.write(delta);
         rendered = current;
         renderedMessageId = messageId;
-        if (snapshot.phase === "idle" && !snapshot.operation && settledResolve) {
-          process.stdout.write("\n");
-          awaitingOperation = undefined;
-          settledResolve();
-          settledResolve = undefined;
-        }
+        settleAcceptedOperation();
       }),
       client.onDisconnect(() => { void reconnect(); }),
     ];
   };
-  reconnect = (): Promise<void> => {
+  reconnect = (reason = "disconnected"): Promise<void> => {
     reconnecting ??= (async () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
       // Resync can replace a healthy transport too. Retire the connection and
       // all of its server-owned tokens before losing the only client reference.
       client.close();
-      process.stderr.write("\n[Tron disconnected; reconnecting…]\n");
+      process.stderr.write(`\n[Tron disconnected; reconnecting…] reason=${reason}\n`);
       while (true) {
         client = new GatewayProtocolClient(socketURL, await readLocalCredential(tronHome));
         try {
           await connectResilient(client);
           if (sessionId) {
-            await synchronizeTerminalSession(client, sessionId, (installed) => {
-              snapshot = installed.session;
-              subscriptionToken = installed.subscriptionToken;
-              cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
-              const current = assistantText(snapshot);
-              const messageId = assistantMessageId(snapshot);
-              const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
-              // Resync is authoritative presentation even before an accepted
-              // response identifies its operation. Never consume unseen text.
-              if (delta) process.stdout.write(delta);
-              rendered = current;
-              renderedMessageId = messageId;
-            });
+            await synchronizeTerminalSession(client, sessionId, installSnapshot);
           }
           attachListeners();
           process.stderr.write("[Tron synchronized]\n");
-          if (pendingCommand) {
-            const status = await client.request("command.status", pendingCommand) as unknown as { status: string; result?: { operationId?: string } };
-            if (status.status === "completed") awaitingOperation = status.result?.operationId ?? awaitingOperation;
-            else if (status.status === "missing") awaitingOperation = undefined;
-            pendingCommand = undefined;
-          }
-          if (awaitingOperation && snapshot?.phase === "idle" && !snapshot.operation) {
-            reconciledSettledOperation = awaitingOperation;
-            awaitingOperation = undefined;
-            settledResolve?.();
-            settledResolve = undefined;
-          }
+          settleAcceptedOperation();
           return;
         } catch (error) {
           if (error instanceof GatewayClientError && !error.retryable) throw error;
@@ -575,30 +610,46 @@ async function runTerminalChat(): Promise<void> {
     })().finally(() => { reconnecting = undefined; });
     return reconnecting;
   };
-  attachListeners();
+  if (sessionId) {
+    await synchronizeTerminalSession(client, sessionId, installSnapshot);
+    process.stdout.write(`Attached to Tron session ${sessionId} (${snapshot!.cwd})\n`);
+  } else if (logicalHome) {
+    process.stdout.write("Attached to Tron Home (logical route; the next prompt activates its reserved chapter).\n");
+    attachListeners();
+  }
 
   const confirmedRequest = async (method: string, params: Record<string, JsonValue>, commandId: string): Promise<JsonValue> => {
+    const submittedClient = client;
     try {
-      return await client.request(method, params);
+      return await submittedClient.request(method, params);
     } catch (error) {
       if (!(error instanceof GatewayClientError) || !error.retryable) throw error;
       const deadline = Date.now() + 90_000;
       let replayAllowed = false;
+      let failedClient: GatewayProtocolClient | undefined = submittedClient;
       while (Date.now() < deadline) {
-        await reconnect();
+        // A disconnect listener may already have replaced the failed transport.
+        // Join its recovery; never close the healthy successor to recover an
+        // older connection's command receipt.
+        if (reconnecting) await reconnecting;
+        else if (client === failedClient) await reconnect("command-recovery");
+        const recoveryClient = client;
         try {
-          const status = await client.request("command.status", { method, commandId }) as unknown as { status: string; result?: JsonValue };
+          const status = await recoveryClient.request("command.status", { method, commandId }) as unknown as { status: string; result?: JsonValue };
+          failedClient = undefined;
           if (status.status === "completed") return status.result ?? null;
           if (status.status === "missing") replayAllowed = true;
           if (replayAllowed) {
-            try { return await client.request(method, params); }
+            try { return await recoveryClient.request(method, params); }
             catch (retry) {
               if (!(retry instanceof GatewayClientError) || !retry.retryable) throw retry;
               replayAllowed = false;
+              failedClient = recoveryClient;
             }
           }
         } catch (statusError) {
           if (!(statusError instanceof GatewayClientError) || !statusError.retryable) throw statusError;
+          failedClient = recoveryClient;
         }
         await sleep(250);
       }
@@ -625,10 +676,8 @@ async function runTerminalChat(): Promise<void> {
       // or without an attached session's runtime being the Home one.
       if (await runHomeInput(client, prompt)) continue;
       const commandId = randomUUID();
-      const promptSnapshot = snapshot;
-      reconciledSettledOperation = undefined;
+      const submissionCut = snapshot;
       const method = logicalHome ? "home.prompt" : "session.prompt";
-      pendingCommand = { method, commandId };
       let result: { operationId: string; sessionId?: string };
       if (logicalHome) {
         result = await confirmedRequest(method, { text: prompt, commandId }, commandId) as unknown as typeof result;
@@ -642,33 +691,31 @@ async function runTerminalChat(): Promise<void> {
           commandId,
         }, commandId) as unknown as typeof result;
       }
-      pendingCommand = undefined;
       if (logicalHome && result.sessionId !== sessionId) {
         if (!result.sessionId) throw new Error("Home prompt returned no physical chapter identity");
         const previousSessionId = sessionId;
         const previousSubscriptionToken = subscriptionToken;
         const nextSessionId = result.sessionId;
         await synchronizeTerminalSession(client, nextSessionId, installSnapshot);
-        sessionId = nextSessionId;
-        attachListeners();
         if (previousSessionId && previousSubscriptionToken) {
           await client.request("session.close", {
             sessionId: previousSessionId, subscriptionToken: previousSubscriptionToken,
           }).catch(() => null);
         }
       }
-      // Only a new authoritative cut can settle this command, not the idle
-      // baseline that preceded its submission. Progress mutates streaming text
-      // in place; synchronized/snapshot cuts replace the object.
-      if (snapshot !== promptSnapshot && snapshot?.phase === "idle" && !snapshot.operation) reconciledSettledOperation = result.operationId;
-      if (!operationNeedsSettlement(result.operationId, reconciledSettledOperation)) {
-        reconciledSettledOperation = undefined;
-        continue;
-      }
-      awaitingOperation = result.operationId;
-      await new Promise<void>((resolve) => { settledResolve = resolve; });
+      if (!sessionId) throw new Error("Accepted prompt returned no terminal session identity");
+      // The command receipt identifies acceptance, never completion. Only this
+      // exact physical chapter's canonical invocation terminal cut retires it,
+      // even when reconnect recovered an outgoing idle chapter first.
+      const operationSessionId = sessionId;
+      const submissionLeaf = submissionCut?.sessionId === operationSessionId ? submissionCut.leafEntryId : undefined;
+      await new Promise<void>((settle, fail) => {
+        acceptedOperation = { sessionId: operationSessionId, operationId: result.operationId, submissionLeaf, settle, fail };
+        settleAcceptedOperation();
+      });
     }
   } finally {
+    acceptedOperation = undefined;
     unsubscribers.forEach((unsubscribe) => unsubscribe());
     readline.close();
     if (sessionId && subscriptionToken) await client.request("session.close", { sessionId, subscriptionToken }).catch(() => null);
