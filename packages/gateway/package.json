@@ -14,7 +14,7 @@
     "check:pi-sdk": "node scripts/check-pi-sdk.mjs",
     "check:pi-subagents": "node scripts/check-pi-subagents.mjs",
     "build:pi-subagents-closure": "python3 scripts/build-pi-subagents-closure.py",
-    "test:pi-subagents-scripts": "node --test scripts/check-pi-subagents.test.mjs",
+    "test:pi-subagents-scripts": "node --test scripts/check-pi-subagents.test.mjs scripts/build-pi-subagents-closure.test.mjs",
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
     "test:pi-sdk-scripts": "node --import ./test-support/tron-home-environment-preflight.mjs --test scripts/check-pi-sdk.test.mjs scripts/update-pi-sdk.test.mjs scripts/compare-pi-sdk-graph.test.mjs",
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",

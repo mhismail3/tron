@@ -60,11 +60,17 @@ def main():
         if not isinstance(locked_root, dict) or locked_root.get("dependencies") != declared:
             raise SystemExit("fork lockfile root dependencies do not match source manifest")
         manifest["bundledDependencies"] = sorted(declared)
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        canonical_manifest = (json.dumps(manifest, indent=2) + "\n").encode()
+        # npm ci validates even omitted development dependencies. Runtime-only
+        # predecessor locks must not resolve them; preserve them in the artifact.
+        install_manifest = {key: value for key, value in manifest.items() if key != "devDependencies"}
+        manifest_path.write_text(json.dumps(install_manifest, indent=2) + "\n")
         npm = shutil.which("npm")
         if not npm:
             raise SystemExit("npm is unavailable")
         subprocess.run([npm, "ci", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund"], cwd=root, check=True)
+        manifest_path.write_bytes(canonical_manifest)
+        assert manifest_path.read_bytes() == canonical_manifest, "packaged manifest must preserve source metadata and bundledDependencies"
         OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         temporary_output = OUTPUT.with_suffix(OUTPUT.suffix + ".tmp")
         with temporary_output.open("wb") as raw:

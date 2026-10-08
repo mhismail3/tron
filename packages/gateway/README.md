@@ -283,9 +283,20 @@ SHA-512 of the self-contained closure are bound together. `npm run
 check:pi-subagents` validates both immutable inputs, their package identity, and
 every bundled runtime dependency without registry access. A retained predecessor
 pin must bind its exact source archive, registry integrity, lock subtree, and
-self-contained closure; a partial rollback record is rejected. The source tarball and
-fork lockfile are retained under `artifacts/`; build the deterministic closure
-with `npm run build:pi-subagents-closure` using the pinned Node 22/npm toolchain.
+self-contained closure; a partial rollback record is rejected. The retained
+`0.59.0` predecessor uses the public npm registry archive, verified against its
+`dist.integrity`. Its vendored runtime lock preserves the coordinator-extracted
+dependency records and versions, with a root derived from that archive's manifest;
+no development dependency versions are inferred. Source archives and lockfiles
+are retained under `artifacts/`; build the deterministic closure with `npm run
+build:pi-subagents-closure` using the pinned Node 22/npm toolchain. The builder
+reads the top-level pin selection; rebuild a predecessor in a disposable copy
+with its version and artifact inputs selected, never by changing a live install.
+`npm ci` validates even omitted development dependencies, so the builder removes
+them only from its temporary install manifest. The packaged manifest preserves
+the source metadata, including development dependencies, and adds sorted
+`bundledDependencies`. `npm run test:pi-subagents-scripts` includes a real npm
+runtime-only-lock regression with an unavailable registry.
 The closure excludes Pi SDK peer dependencies so those resolve from the selected
 Gateway SDK, not from a user npm tree. Gateway payloads carry the pin, input
 archives, and closure as fingerprinted app inputs; bundling refuses an invalid

@@ -17,5 +17,19 @@
     "path": "artifacts/pi-subagents-0.76.1-tron.3-closure.tgz",
     "sha512": "0d67d180f9b1cd4accf54156926181ee495225e7b232e8933b2ec9bee83d20dcbdb51437187b3d0efc8df3c445ff01a7b531ecc47a3ae95b38734d1deae9ff24"
   },
-  "previous": null
+  "previous": {
+    "version": "0.59.0",
+    "sourceUrl": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.59.0.tgz",
+    "path": "artifacts/pi-subagents-0.59.0.tgz",
+    "sha512": "10ecc0acdd1f537014413f9b8edabff037d6f274b2493578dd0c3ded01720a1601157f867e63b76fb0a0b5e9547c1a9f83881899cab9d01e0c82e004c4860cd6",
+    "sourceIntegrity": "sha512-EOzArN0fU3AUQT+bjtq/8DfW8nSySTV43Qw97QFyChYBFX+GfmO3b7CgtelUfBqfg4gYmcq50B4MguAExIYM1g==",
+    "lockfile": {
+      "path": "artifacts/pi-subagents-0.59.0-package-lock.json",
+      "sha256": "be6905f60d119a052d2d0f015755ed060e1112213a16fb7cb8713582cd8ef715"
+    },
+    "closure": {
+      "path": "artifacts/pi-subagents-0.59.0-closure.tgz",
+      "sha512": "45ef15f35bc6756ce5dd7034fec3f8b956866201e634a18d34da9759fff84094f07300e59c6078dd5f8764928ed42630ae5910a8393cf09de52fd3952789ad03"
+    }
+  }
 }
