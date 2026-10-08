@@ -36,6 +36,28 @@ describe("terminal chat connection", () => {
 });
 
 describe("terminal chat synchronization", () => {
+  it.each(["sync", "install"])("retires only its candidate when %s fails after open", async failure => {
+    const owned = new Set(["prior-token"]);
+    const closed: unknown[] = [];
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === "session.open") {
+        owned.add("candidate-token");
+        return { session: { sessionId: "next" }, syncToken: "candidate-sync", subscriptionToken: "candidate-token" };
+      }
+      if (method === "session.sync" && failure === "sync") throw new Error("sync failed");
+      if (method === "session.close") {
+        closed.push(params);
+        owned.delete(params.subscriptionToken as string);
+      }
+      return {};
+    });
+    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
+    await expect(synchronizeTerminalSession(client, "next", () => {
+      if (failure === "install") throw new Error("install failed");
+    })).rejects.toThrow(`${failure} failed`);
+    expect([...owned]).toEqual(["prior-token"]);
+    expect(closed).toEqual([{ sessionId: "next", subscriptionToken: "candidate-token" }]);
+  });
   it("installs the synchronized baseline before a non-blocking transient attention retry", async () => {
     const order: string[] = [];
     let releaseAttention!: () => void;

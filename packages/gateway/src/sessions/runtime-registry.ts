@@ -75,6 +75,9 @@ import type { NotificationService } from "../notifications/notification-service.
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { scanReservedHomeSession } from "../home/home-session-recovery.js";
+import { readCanonicalSession } from "../episodic/episodic-source.js";
+import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
@@ -102,7 +105,8 @@ import {
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
+import { HomeOwner } from "../home/home-owner.js";
+import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
@@ -207,7 +211,7 @@ export type RuntimeLoadReason = "open" | "create" | "automation" | "import" | "o
  * `disposed` is the slot that was already disposed when a later open cleared it
  * from the live set, with no other reason recorded for it. */
 export type RuntimeEvictionReason =
-  | "idle" | "capacity" | "bytes" | "heap" | "closed" | "disposed" | "deleted" | "shutdown";
+  | "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain" | "closed" | "disposed" | "deleted" | "shutdown";
 
 export type RuntimeLifecycleReason = RuntimeLoadReason | RuntimeEvictionReason;
 
@@ -544,6 +548,21 @@ export class RuntimeRegistry {
     automationId: string;
   }>();
   private readonly mutex = new RequestSpanLane("registry.mutex");
+  private readonly sessionMutations = new Map<string, Promise<void>>();
+
+  /** Registry session ordering precedes the existing registry/slot/attention
+   * lanes; seal takes HomeOwner's recordMutex last, never in reverse. SDK work
+   * keeps its own slot lane. Only this boundary creates/retires queue entries. */
+  private async serializeSessionMutation<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionMutations.get(sessionId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(() => {}, () => {});
+    this.sessionMutations.set(sessionId, tail);
+    try { return await result; }
+    finally {
+      if (this.sessionMutations.get(sessionId) === tail) this.sessionMutations.delete(sessionId);
+    }
+  }
   /** One disposable flight per admission scope. All-scope work may wait for a
    * user cut, but a dashboard never inherits child-only delay or failure. */
   private readonly catalogMaterializations = new Map<"user" | "all", {
@@ -571,6 +590,9 @@ export class RuntimeRegistry {
   private knowledgeService: KnowledgeService | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
+  /** Global gate while a visible Home ledger write invalidates every live Home projection. */
+  private homePublicationUncertain = false;
+  private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
@@ -805,14 +827,41 @@ export class RuntimeRegistry {
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
-        replaceRuntimeForProfile: async (sessionId, commit) => {
+        chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
-          if (!slot || slot.isDisposed) {
-            await commit();
-            return;
-          }
-          await slot.replaceRuntimeForProfile(commit);
+          if (!slot) return this.coldHomeChapterMetrics(sessionId);
+          const path = slot.sessionFile;
+          const bytes = path ? await stat(path).then(info => info.size).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+            throw error;
+          }) : 0;
+          return { bytes, entries: slot.canonicalEntryCount, quiescent: !slot.isBusy };
         },
+        hasConversation: async (sessionId, expectedPath) => {
+          const slot = this.slots.get(sessionId);
+          if (!slot || slot.sessionFile !== expectedPath || slot.isDisposed) return false;
+          let fileInfo;
+          try { fileInfo = await lstat(expectedPath); }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+          }
+          if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) return false;
+          const cut = await readCanonicalSession({
+            path: expectedPath, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+          });
+          const hasConversation = cut.branch.some(entry => {
+            if (entry.type !== "message") return false;
+            const message = entry.raw.message as { role?: unknown } | undefined;
+            return message?.role === "user" || message?.role === "assistant";
+          });
+          return cut.tornBytes === 0 && hasConversation;
+        },
+
+        replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
+        serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
+        beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
+        retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
@@ -857,6 +906,173 @@ export class RuntimeRegistry {
 
   /** The Home designation owner for this installation. */
   homeOwner(): HomeOwner { return this.home; }
+
+  /**
+   * One reservation-scoped materialization promise. Callers await this before
+   * dispatching their own input, so joining never consumes or replays a command.
+   */
+  async materializeReservedHome(sessionId: string): Promise<RuntimeSlot> {
+    let existingSlot: RuntimeSlot | undefined;
+    let selected!: Promise<RuntimeSlot>;
+    await this.mutex.run(() => {
+      existingSlot = this.slots.get(sessionId);
+      if (existingSlot) return;
+      const existing = this.homeMaterializations.get(sessionId);
+      if (existing) selected = existing;
+      else {
+        selected = Promise.resolve().then(() => this.createReservedHomeRuntime(sessionId));
+        this.homeMaterializations.set(sessionId, selected);
+      }
+    });
+    if (existingSlot) {
+      const reservation = this.home.reservedChapter(sessionId);
+      if (reservation?.state === "materializing" && reservation.attemptId && reservation.expectedPath && reservation.expectedPath === existingSlot.sessionFile) {
+        await this.home.assertReservedChapterAttempt(sessionId, reservation.attemptId, reservation.expectedPath);
+      } else {
+        const path = existingSlot.sessionFile;
+        if (!path) throw new GatewayError("conflict", "Live Home chapter has no canonical path", true);
+        await this.home.assertPublishedHomeChapter(sessionId, path);
+      }
+      return existingSlot;
+    }
+    try {
+      return await selected;
+    } finally {
+      await this.mutex.run(() => {
+        if (this.homeMaterializations.get(sessionId) === selected) this.homeMaterializations.delete(sessionId);
+      });
+    }
+  }
+
+  async assertReservedHomeAttempt(sessionId: string): Promise<void> {
+    const slot = await this.mutex.run(() => this.slots.get(sessionId));
+    if (!slot || slot.isDisposed || !slot.sessionFile) throw new GatewayError("conflict", "No live Home reservation runtime exists", true);
+    const chapter = this.home.reservedChapter(sessionId);
+    if (chapter?.state === "materializing" && chapter.attemptId && chapter.expectedPath) {
+      if (slot.sessionFile !== chapter.expectedPath) throw new GatewayError("conflict", "Home runtime path differs from its reservation", true);
+      await this.home.assertReservedChapterAttempt(sessionId, chapter.attemptId, chapter.expectedPath);
+      return;
+    }
+    await this.home.assertPublishedHomeChapter(sessionId, slot.sessionFile);
+  }
+
+  private async createReservedHomeRuntime(sessionId: string): Promise<RuntimeSlot> {
+    const attemptId = randomUUID();
+    const chapter = await this.home.claimReservedChapter(sessionId, attemptId);
+    const cwd = await this.options.trust.requireResolved(this.home.homeWorkspacePath());
+    const sessionDirectory = this.sessionDirectoryFor(cwd.cwd);
+    let expectedPath = chapter.expectedPath ?? join(sessionDirectory, `.home-reservation-${sessionId}.jsonl`);
+    const scan = await scanReservedHomeSession({ directory: sessionDirectory, expectedPath, sessionId });
+    if (scan.action === "blocked") {
+      this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason: "uncertain-session-evidence" });
+      throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
+    }
+    this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
+    // Pi's public newSession API selects a timestamped path and writes its
+    // header immediately. Once a previous attempt durably named a different
+    // path, absence is not permission to silently replace that binding: no
+    // verified exact-path adapter exists in the pinned SDK, so preserve and
+    // block rather than create evidence outside the recorded attempt.
+    if (chapter.expectedPath && scan.action === "absent") {
+      throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
+    }
+
+    const finishAdmission = this.beginSlotAdmission();
+    let reserved = false;
+    let slot: RuntimeSlot | undefined;
+    try {
+      await this.evictIdle(true);
+      await this.mutex.run(() => {
+        this.assertSlotAdmissionOpen();
+        this.requireLiveSlotCapacity();
+        this.reservedSlotStarts += 1;
+        reserved = true;
+      });
+      let manager: SessionManager;
+      if (scan.action === "adopt") {
+        manager = SessionManager.open(scan.path, sessionDirectory, cwd.cwd);
+        if (manager.getSessionId() !== sessionId || manager.getSessionFile() !== scan.path) {
+          throw new GatewayError("conflict", "Home chapter recovery did not reopen the exact reserved session");
+        }
+      } else {
+        manager = SessionManager.create(cwd.cwd, sessionDirectory);
+        const createdPath = manager.newSession({ id: sessionId });
+        if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
+        await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
+        expectedPath = createdPath;
+      }
+      if (scan.action === "adopt" && chapter.expectedPath !== scan.path) {
+        throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
+      }
+      if (scan.action === "adopt" && !chapter.expectedPath) {
+        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
+      }
+      if (scan.action === "adopt" && chapter.expectedPath) {
+        // The durable path was recorded by the earlier process; this attempt
+        // rebinds it before any runtime can submit canonical input.
+        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
+      }
+      const chapterState = this.home.chapterStateFor(sessionId);
+      if (!chapterState.materializing || !chapterState.homeId || chapterState.ordinal !== chapter.ordinal
+        || chapterState.attemptId !== attemptId || chapterState.expectedPath !== expectedPath) {
+        throw new GatewayError("conflict", "Home materialization authority no longer matches its durable reservation", true);
+      }
+      slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, "home", {
+        homeId: chapterState.homeId,
+        ordinal: chapterState.ordinal,
+        sessionId,
+        attemptId,
+        expectedPath,
+      });
+      if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
+        throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
+      }
+      const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
+      await this.mutex.run(() => {
+        if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
+        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        reserved = false;
+        this.publishRuntime(sessionId, slot!, transcriptBytes, "create");
+        this.invalidateCatalogAdmission();
+        void this.sessionCatalog.refresh(slot!.persistedSessionFile);
+        this.revision += 1;
+        this.options.sessionListChanged();
+      });
+      await this.home.publishObservedMaterialization(sessionId, attemptId, expectedPath);
+      return slot;
+    } catch (error) {
+      this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason: "materialization-failed" });
+      if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
+      throw error;
+    } finally {
+      if (reserved) {
+        await this.mutex.run(() => { this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1); });
+      }
+      finishAdmission();
+    }
+  }
+
+  /** Join the existing writer construction owner before changing its profile.
+   * With no owner, commit under construction selection so a new start cannot
+   * latch the old ledger. Never hold that mutex while joining a constructor. */
+  private async replaceHomeRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void> {
+    const selected = await this.mutex.run(async () => {
+      const flight = this.homeMaterializations.get(sessionId) ?? this.pendingSlotStarts.get(sessionId)?.operation;
+      if (flight) return { flight };
+      const slot = this.slots.get(sessionId);
+      if (slot && !slot.isDisposed) return { slot };
+      await commit();
+      return {};
+    });
+    if (selected.flight) {
+      // Construction failure has already retired its candidate. Re-read the
+      // published owner even on failure; a durable profile change still applies.
+      await selected.flight.catch(() => {});
+      await this.replaceHomeRuntimeForProfile(sessionId, commit);
+    } else if (selected.slot) {
+      await selected.slot.replaceRuntimeForProfile(commit);
+    }
+  }
 
   /** Shared model recency for the model picker; newest first and bounded. */
   recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }
@@ -971,6 +1187,7 @@ export class RuntimeRegistry {
         const candidate = candidates[0]!;
         let manager: SessionManager;
         try {
+          await this.scanHomeBeforeManager(candidate.id, candidate.path);
           manager = SessionManager.open(candidate.path, this.sessionDirectoryFor(candidate.cwd));
           const current = await lstat(candidate.path);
           if (!current.isFile() || current.isSymbolicLink()
@@ -1079,7 +1296,10 @@ export class RuntimeRegistry {
       if (!candidates || candidates.length !== 1) continue;
       const path = candidates[0]!.path;
       let manager: SessionManager;
-      try { manager = SessionManager.open(path); }
+      try {
+        await this.scanHomeBeforeManager(sessionId, path);
+        manager = SessionManager.open(path);
+      }
       catch { continue; }
       for (const marker of markers) {
         const completion = completionOwnedByMarker(manager, marker);
@@ -1122,6 +1342,20 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      homeQuiescent: (sessionId: string) => this.home.chapterQuiescent(sessionId),
+      homeChapterRefused: (reason: "sealed-write") => {
+        this.options.homeDiagnostic?.({ outcome: "chapter-refused", reason });
+      },
+      homeChapterLimitStopped: (details: {
+        chapterOrdinal: number;
+        boundary: HomeHardBoundary;
+        crossingBytes: number;
+        crossingEntries: number;
+        settledBytes: number;
+        settledEntries: number;
+      }) => {
+        this.options.homeDiagnostic?.({ outcome: "chapter-limit-stop", ...details });
+      },
       turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
         // Admission is detached from inference, but RuntimeSlot invokes this
         // only after the terminal receipt and canonical attention barrier settle.
@@ -1503,6 +1737,10 @@ export class RuntimeRegistry {
   }
 
   async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
+    return this.serializeSessionMutation(sessionId, () => this.setAttentionSerialized(sessionId, unread, throughCompletionRevision));
+  }
+
+  private async setAttentionSerialized(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
     this.assertChapterWritable(sessionId);
     // Membership resolution is deliberately outside the attention lane. A cold
     // catalog read must not block completion/rekey/delete ordering for every
@@ -1676,6 +1914,7 @@ export class RuntimeRegistry {
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
+      homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
@@ -1928,7 +2167,10 @@ export class RuntimeRegistry {
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry || entry.structuralSubagent) return {};
     let manager: SessionManager;
-    try { manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd)); }
+    try {
+      await this.scanHomeBeforeManager(sessionId, entry.path);
+      manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd));
+    }
     catch { return {}; }
     const marker = (await this.markers.evidenceFor(sessionId)).find((candidate) => candidate.operationId === operationId);
     const invocation = invocationProjection(invocationReceipts(manager.getBranch(), sessionId))
@@ -2175,6 +2417,7 @@ export class RuntimeRegistry {
     // reader for its canonical leaf/branch. Physical line order is not branch
     // authority when sibling forks are present.
     const entries = parseStrictSessionJSONL(bytes);
+    await this.scanHomeBeforeManager(sessionId, info.path);
     const coldManager = SessionManager.open(info.path);
     const selectedEntries = coldManager.getBranch();
     // Full-file graph validation is an admission gate; retain the SDK-selected
@@ -2986,6 +3229,7 @@ export class RuntimeRegistry {
    * release uses the slot's shared automation/operation lease authority. */
   retainLiveSession(sessionId: string): (() => void) | undefined {
     this.assertSlotAdmissionOpen();
+    if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) return undefined;
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed || this.deletingSessionIds.has(sessionId)
       || this.ambiguousSessionIds.has(sessionId)) return undefined;
@@ -2997,6 +3241,9 @@ export class RuntimeRegistry {
 
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
+    if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) {
+      throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
+    }
     const existing = this.slots.get(sessionId);
     if (existing && !existing.isDisposed && !this.ambiguousSessionIds.has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
@@ -3113,6 +3360,23 @@ export class RuntimeRegistry {
     return pending.operation;
   }
 
+  private async scanHomeBeforeManager(sessionId: string, path: string): Promise<void> {
+    const chapter = this.home.chapterStateFor(sessionId);
+    if (!chapter.homeId) return;
+    if (chapter.sealed || chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
+      throw new GatewayError("conflict", "Home chapter cannot be opened as a writable runtime");
+    }
+    const canonicalPath = resolve(path);
+    // The exact file owns its evidence directory. Re-encoding cwd can select
+    // another folder after alias canonicalization, or encode a directory twice.
+    const scan = await scanReservedHomeSession({
+      directory: dirname(canonicalPath), expectedPath: canonicalPath, sessionId,
+    });
+    if (scan.action !== "adopt" || scan.path !== canonicalPath) {
+      throw new GatewayError("conflict", "Home chapter is blocked by uncertain canonical evidence");
+    }
+  }
+
   private async startAcquiredSlot(
     sessionId: string,
     entry: CatalogAcquisitionEntry,
@@ -3130,6 +3394,7 @@ export class RuntimeRegistry {
       if (resolve(canonicalPath) !== entry.path) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
+      await this.scanHomeBeforeManager(sessionId, canonicalPath);
       if (await this.projectTrustReloading(entry.canonicalCwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
@@ -3241,6 +3506,8 @@ export class RuntimeRegistry {
         }
         this.requireLiveSlotCapacity();
         const sessionDirectory = this.sessionDirectoryFor(trust.cwd);
+        // Generic imports preserve caller-path provenance and reach source
+        // construction only after capacity admission; Home scans own opens/searches.
         const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
         const importedId = manager.getSessionId();
         const importedPath = manager.getSessionFile();
@@ -3348,6 +3615,12 @@ export class RuntimeRegistry {
     archived: boolean,
     initiatingWorkToken?: string,
   ): Promise<{ archived: boolean; archivedAt?: string }> {
+    return this.serializeSessionMutation(sessionId, () => this.setArchivedSerialized(sessionId, archived, initiatingWorkToken));
+  }
+
+  private async setArchivedSerialized(
+    sessionId: string, archived: boolean, initiatingWorkToken?: string,
+  ): Promise<{ archived: boolean; archivedAt?: string }> {
     this.assertChapterWritable(sessionId);
     return this.mutex.run(async () => {
       // Archive state is written for an admitted canonical session, so it needs
@@ -3431,6 +3704,10 @@ export class RuntimeRegistry {
   }
 
   async delete(sessionId: string, initiatingWorkToken?: string): Promise<void> {
+    return this.serializeSessionMutation(sessionId, () => this.deleteSerialized(sessionId, initiatingWorkToken));
+  }
+
+  private async deleteSerialized(sessionId: string, initiatingWorkToken?: string): Promise<void> {
     this.assertChapterWritable(sessionId);
     await this.attentionLane.run(async () => {
       await this.flushPendingProjectionRemovals();
@@ -4252,7 +4529,7 @@ export class RuntimeRegistry {
   private async retireIdleRuntime(input: {
     sessionId: string;
     slot: RuntimeSlot;
-    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap">;
+    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain">;
     eligible: () => boolean;
   }): Promise<boolean> {
     const { sessionId: id, slot, eligible, reason } = input;
@@ -4294,6 +4571,55 @@ export class RuntimeRegistry {
     } finally {
       if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
     }
+  }
+
+  /** Drop every live Home projection after an uncertain ledger replacement.
+   * Acquisitions are globally stale-marked until every old slot is retired. */
+  private async retireUncertainHomeRuntimes(reloaded: boolean): Promise<void> {
+    const homes = [...this.slots].filter(([sessionId]) => this.home.chapterStateFor(sessionId).homeId);
+    for (const [sessionId, slot] of homes) {
+      await slot.retireAfterSettled();
+      const retired = await this.retireIdleRuntime({
+        sessionId,
+        slot,
+        reason: "publication-uncertain",
+        eligible: () => this.homePublicationUncertain
+          && this.slots.get(sessionId) === slot
+          && !slot.isBusy,
+      });
+      if (!retired && this.slots.get(sessionId) === slot && !slot.isDisposed) {
+        throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
+      }
+    }
+    this.homePublicationUncertain = !reloaded;
+  }
+
+  /** Cold admission measures the finite canonical file cut, not a zero-valued
+   * live projection. Streaming newline counts retain no transcript bodies; SDK
+   * construction separately validates the canonical graph before opening it. */
+  private async coldHomeChapterMetrics(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }> {
+    const path = await this.homeSessionFile(sessionId);
+    if (!path) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
+    const handle = await open(path, "r");
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size === 0) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
+      let lines = 0;
+      let lastByte: number | undefined;
+      const stream = handle.createReadStream({ autoClose: false, end: before.size - 1, highWaterMark: 64 * 1_024 });
+      for await (const chunk of stream) {
+        const bytes = chunk as Buffer;
+        for (let index = bytes.indexOf(0x0a); index !== -1; index = bytes.indexOf(0x0a, index + 1)) lines += 1;
+        lastByte = bytes.at(-1);
+      }
+      const after = await handle.stat();
+      const current = await lstat(path);
+      if (lastByte !== 0x0a || lines < 1 || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+        || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino || current.size !== before.size) {
+        throw new GatewayError("conflict", "Home chapter changed while measuring admission", true);
+      }
+      return { bytes: before.size, entries: lines - 1, quiescent: true };
+    } finally { await handle.close(); }
   }
 
   /** The canonical file behind one session id: the live runtime's when it has

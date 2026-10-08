@@ -12,7 +12,7 @@ import {
   trustedDelegatedController,
 } from "./delegated-provider.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,8 +36,9 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
-import { assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
+import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
+import type { HomeHardBoundary } from "../home/home-diagnostic.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
@@ -157,6 +158,7 @@ import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from 
 // named `lifecycleProjection` is presentation data until this private marker is
 // attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
+const canonicalAppendOwner = Symbol("canonical-append-owner");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
 
 function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
@@ -210,6 +212,14 @@ type PromptQueueDisplay = {
 };
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
+
+type HomeMaterializationAuthority = Readonly<{
+  homeId: string;
+  ordinal: number;
+  sessionId: string;
+  attemptId: string;
+  expectedPath: string;
+}>;
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
   resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
@@ -335,6 +345,9 @@ export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "trans
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
+/** Volatile cancellation attribution shares the invocation's receipt lifetime. */
+type LiveInvocation = InvocationProjection & { stopReason?: string };
+
 interface OperationObservation {
   cursor?: { entryIndex: number; branchId: string };
   observedCompletionId?: string;
@@ -390,6 +403,17 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
+  homeQuiescent?: (sessionId: string) => Promise<void>;
+  homeChapterRefused?: (reason: "sealed-write") => void;
+  homeChapterLimitStopped?: (details: {
+    chapterOrdinal: number;
+    boundary: HomeHardBoundary;
+    crossingBytes: number;
+    crossingEntries: number;
+    settledBytes: number;
+    settledEntries: number;
+  }) => void;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
   turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
@@ -470,6 +494,8 @@ export interface RuntimeSlotDependencies {
    * begins; a rejection aborts the run retryably. It must be a no-op with no
    * I/O while the session is not archived. */
   beforeRunAdmission: (sessionId: string) => Promise<void>;
+  /** HomeOwner policy, revalidated synchronously after prompt admission awaits. */
+  homeChapterAdmission?: (sessionId: string, metrics: { bytes: number; entries: number }) => void;
   /** Gateway-owned archive projection for one session, read at snapshot time.
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
@@ -666,7 +692,7 @@ export class RuntimeSlot {
   private pendingExtensionCommand: SessionOperationState | undefined;
   /** Gateway-owned causal graph. Canonical receipts remain the durable source;
    * these bounded maps are only the live projection used by snapshots. */
-  private readonly invocations = new Map<string, InvocationProjection>();
+  private readonly invocations = new Map<string, LiveInvocation>();
   private readonly invocationFailures = new Map<string, string>();
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
@@ -839,6 +865,8 @@ export class RuntimeSlot {
    * profile, before the Home record named it. One-shot: cleared by that first
    * runtime creation. */
   private explicitHomeSessionId: string | undefined;
+  private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
+  private homeLimitStop?: { operationId: string; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number };
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -850,8 +878,12 @@ export class RuntimeSlot {
     private readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
+    homeMaterializationAuthority?: HomeMaterializationAuthority,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
+    this.homeMaterializationAuthority = homeMaterializationAuthority
+      ? Object.freeze({ ...homeMaterializationAuthority })
+      : undefined;
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
@@ -861,6 +893,29 @@ export class RuntimeSlot {
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
     this.unregisterExtensionExpiry = dependencies.extensionActivityRecency.registerExpiryCallback((frame) => this.onExtensionActivityExpiry(frame));
     this.unregisterProcessExpiry = dependencies.processActivityRecency.registerExpiryCallback((frame) => this.onProcessActivityExpiry(frame));
+  }
+
+  private installCanonicalWriteGuard(sessionManager: SessionManager): void {
+    const manager = sessionManager as unknown as {
+      _appendEntry: ((entry: FileEntry) => void) & { [canonicalAppendOwner]?: RuntimeSlot };
+    };
+    // The guarded method belongs to the manager, not a runtime rebuild. Its
+    // immutable owner also rejects sharing one writer instance across slots.
+    const owner = manager._appendEntry[canonicalAppendOwner];
+    if (owner === this) return;
+    if (owner) throw new GatewayError("conflict", "Canonical session manager already has a runtime owner");
+    const appendEntry = manager._appendEntry.bind(manager);
+    const guardedAppend = (entry: FileEntry) => {
+      if (this.isHomeProfile(sessionManager)) {
+        const path = sessionManager.getSessionFile();
+        const fileExists = path ? existsSync(path) : false;
+        if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable(sessionManager);
+      }
+      appendEntry(entry);
+      if (sessionManager === this.sessionManager) this.observeHomeChapterGrowth();
+    };
+    Object.defineProperty(guardedAppend, canonicalAppendOwner, { value: this });
+    manager._appendEntry = guardedAppend;
   }
 
   private createSemanticBroker(): SemanticUIBroker {
@@ -1028,8 +1083,9 @@ export class RuntimeSlot {
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
+    homeMaterializationAuthority?: HomeMaterializationAuthority,
   ): Promise<RuntimeSlot> {
-    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile);
+    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority);
     try {
       await slot.initialize();
       return slot;
@@ -1532,6 +1588,15 @@ export class RuntimeSlot {
     return this.runtime.session.sessionFile;
   }
 
+  get canonicalEntryCount(): number {
+    return this.runtime.session.sessionManager.getEntries().length;
+  }
+
+  get hasConversationMessage(): boolean {
+    return this.runtime.session.sessionManager.getEntries().some(entry => entry.type === "message"
+      && (entry.message.role === "user" || entry.message.role === "assistant"));
+  }
+
   /** Pi may reserve a future JSONL path before writing its first user or
    * assistant message. Catalog membership treats only an existing file as persisted. */
   get persistedSessionFile(): string | undefined {
@@ -1606,7 +1671,7 @@ export class RuntimeSlot {
    * names it, and never a fork or a reset (which produce a new session id). */
   private isHomeProfile(sessionManager: SessionManager): boolean {
     const sessionId = sessionManager.getSessionId();
-    const decision = this.dependencies.homeProfile?.(sessionId, this.cwd) ?? "unnamed";
+    const decision = this.dependencies.homeProfile?.(sessionId, sessionManager.getCwd()) ?? "unnamed";
     if (decision === "home") return true;
     if (decision === "ordinary") return false;
     return this.explicitHomeSessionId === sessionId;
@@ -1619,6 +1684,7 @@ export class RuntimeSlot {
 
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
     return async ({ cwd, sessionManager, sessionStartEvent }) => {
+      this.installCanonicalWriteGuard(sessionManager);
       const trust = await this.dependencies.trust.requireResolved(cwd);
       // A ModelRuntime is scoped to one Pi session runtime. Extension provider
       // registration is mutable, so sharing one instance across projects would
@@ -1957,6 +2023,10 @@ export class RuntimeSlot {
     disposition: SessionAttentionRebindDisposition,
     operation: () => Promise<T>,
   ): Promise<T> {
+    this.assertChapterWritable();
+    if (this.dependencies.homeChapterState?.(this.id).homeId || this.liveProfile() === "home") {
+      throw new HomeChapterIdentityReplacementError(this.id);
+    }
     const previous = this.rebindAttentionDisposition;
     this.rebindAttentionDisposition = disposition;
     try {
@@ -3312,7 +3382,7 @@ export class RuntimeSlot {
     return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
   }
 
-  private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
+  private invocationForOperation(operationId: string | undefined): LiveInvocation | undefined {
     if (!operationId) return undefined;
     const live = [...this.invocations.values()]
       .filter(invocation => invocation.operationId === operationId)
@@ -3351,6 +3421,12 @@ export class RuntimeSlot {
     this.assertOwnershipPersistence();
     const invocation = this.invocationForOperation(operationId);
     if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
+    // Stop records attribution before cancellation yields. All terminal
+    // observers, including successful completion, publish that same fact.
+    if (invocation.stopReason) {
+      lifecycle = "interrupted";
+      errorCode = invocation.stopReason;
+    }
     // SDK append is synchronous, but receipt acknowledgement and live-map
     // retirement yield. A second terminal observer must join the first exact
     // receipt, not manufacture a second timestamp/lifecycle while that live map
@@ -3617,6 +3693,7 @@ export class RuntimeSlot {
         return;
       }
       this.hooks.settled(this.id);
+      await this.hooks.homeQuiescent?.(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
       this.operation ??= this.compactionOperation;
       this.revision += 1;
@@ -6969,7 +7046,7 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
-    this.assertChapterWritable();
+    this.assertHomePromptAdmission();
     if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
@@ -7140,7 +7217,7 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
-      this.assertChapterWritable();
+      this.assertHomePromptAdmission();
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -7208,7 +7285,7 @@ export class RuntimeSlot {
       const invocationName = isExactExtensionCommand
         ? extensionCommandName
         : queueDisplay?.resourceInvocation?.name;
-      const invocation: InvocationProjection = {
+      const invocation: LiveInvocation = {
         version: 1,
         invocationId,
         operationId,
@@ -7271,6 +7348,9 @@ export class RuntimeSlot {
         // above. A prompt can therefore never start while the session is hidden
         // from the dashboard, and a store failure rejects the prompt retryably.
         await this.dependencies.beforeRunAdmission(this.id);
+        // Attention, settings and archive I/O can yield to canonical writes or
+        // a seal. Recheck the physical target before invocation/SDK effects.
+        this.assertHomePromptAdmission();
         this.invocations.set(invocationId, invocation);
         while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
         operationWork = this.beginOperationWork(operationId);
@@ -7304,6 +7384,7 @@ export class RuntimeSlot {
         // never emit output before Gateway has recorded its invocation owner.
         await this.persistInvocationReceipt(startReceipt, operationWork);
         startPersisted = true;
+        this.assertHomePromptAdmission();
 
         // Receipt persistence and extension hooks may outlive the run that was
         // active at RPC entry. Re-evaluate at the last Gateway-owned boundary,
@@ -7401,7 +7482,8 @@ export class RuntimeSlot {
             }
             // agent_start can fire synchronously before this Gateway promise
             // resumes. Record the SDK's disposition now, not one turn later.
-            this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            invocation.lifecycle = "accepted";
+            this.invocations.set(invocationId, invocation);
             acceptedResolve(true);
           },
         }));
@@ -7662,11 +7744,11 @@ export class RuntimeSlot {
           message: error instanceof Error ? error.message : String(error),
         }));
       }
-      this.invocations.set(invocationId, {
-        ...invocation,
-        lifecycle: queuesIntoActiveRun ? "queued" : "accepted",
-        updatedAt: new Date().toISOString(),
-      });
+      // Admission and Stop retain the same invocation object across receipt
+      // awaits; a late accepted transition cannot replace its recorded reason.
+      invocation.lifecycle = queuesIntoActiveRun ? "queued" : "accepted";
+      invocation.updatedAt = new Date().toISOString();
+      this.invocations.set(invocationId, invocation);
       finalizeAdmission();
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
@@ -7796,6 +7878,7 @@ export class RuntimeSlot {
   async abort(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
     expectedOperationId?: string,
+    terminalErrorCode = "user-abort",
   ): Promise<void> {
     // A persistence blocker must not disable the owner's Stop route. Stop still
     // proves exact operation identity and reports any unresolved receipt after
@@ -7815,7 +7898,14 @@ export class RuntimeSlot {
     const agentOperationId = this.activeOperationId;
     const invocationOperationId = agentOperationId
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
-    if (invocationOperationId) this.abortedOperations.add(invocationOperationId);
+    if (invocationOperationId) {
+      const invocation = this.invocationForOperation(invocationOperationId);
+      if (invocation) {
+        // A limit crossing is authoritative even if a user Stop races it.
+        if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
+      }
+      this.abortedOperations.add(invocationOperationId);
+    }
     if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
     const session = this.runtime.session;
@@ -7839,7 +7929,7 @@ export class RuntimeSlot {
         throw new GatewayError("conflict", "Foreground work did not stop", true);
       }
       if (invocationOperationId) {
-        await this.terminalizeInvocation(invocationOperationId, "interrupted", "user-abort");
+        await this.terminalizeInvocation(invocationOperationId, "interrupted", terminalErrorCode);
         interruptionPersisted = true;
       }
     } finally {
@@ -9012,6 +9102,13 @@ export class RuntimeSlot {
     }
   }
 
+  /** Queue a retirement barrier behind admitted lane work without disposing the
+   * slot. The Registry remains the sole owner of disposal and publication. Work
+   * running on this lane must never await this barrier. */
+  async retireAfterSettled(): Promise<void> {
+    await this.lane.run(() => {});
+  }
+
   async dispose(exceptWorkToken?: string): Promise<void> {
     if (this.disposed) return;
     this.assertOwnershipPersistence();
@@ -9318,9 +9415,78 @@ export class RuntimeSlot {
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
-  private assertChapterWritable(): void {
-    const state = this.dependencies.homeChapterState?.(this.id);
-    if (state) assertChapterWritable(state);
+  private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
+    const state = this.dependencies.homeChapterState?.(manager.getSessionId());
+    if (!state) return;
+    const authority = this.homeMaterializationAuthority;
+    const ownsMaterialization = Boolean(authority
+      && state.materializing
+      && state.homeId === authority.homeId
+      && state.ordinal === authority.ordinal
+      && state.sessionId === authority.sessionId
+      && state.attemptId === authority.attemptId
+      && state.expectedPath === authority.expectedPath
+      && manager.getSessionId() === authority.sessionId
+      && manager.getSessionFile() === authority.expectedPath);
+    try { assertChapterWritable(state, ownsMaterialization); }
+    catch (error) {
+      if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
+      throw error;
+    }
+  }
+
+  private assertHomePromptAdmission(): void {
+    this.assertHomeLimitNotStopping();
+    this.assertChapterWritable();
+    if (!this.dependencies.homeChapterState?.(this.id).homeId) return;
+    const path = this.sessionFile;
+    let bytes = 0;
+    if (path) {
+      try { bytes = statSync(path).size; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+    this.dependencies.homeChapterAdmission?.(this.id, { bytes, entries: this.canonicalEntryCount });
+  }
+
+  private assertHomeLimitNotStopping(): void {
+    if (this.homeLimitStop) throw new GatewayError("conflict", "Home stopped this activation at its chapter limit", true, {
+      reason: "chapter-limit-stop",
+    });
+  }
+
+  private observeHomeChapterGrowth(): void {
+    if (!this.isHomeProfile(this.sessionManager) || this.homeLimitStop) return;
+    const operationId = this.activeOperationId;
+    if (!operationId) return;
+    const path = this.sessionManager.getSessionFile();
+    let bytes = 0;
+    if (path) {
+      try { bytes = statSync(path).size; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+      }
+    }
+    const entries = this.canonicalEntryCount;
+    const boundary = bytes >= HOME_HARD_BYTES ? "hard-bytes"
+      : entries >= HOME_HARD_ENTRIES ? "hard-entries" : undefined;
+    if (!boundary) return;
+    const crossing = { operationId, boundary, crossingBytes: bytes, crossingEntries: entries } as const;
+    this.homeLimitStop = crossing;
+    void this.abort("agent", operationId, "chapter-limit").then(() => {
+      const settledBytes = path ? statSync(path).size : 0;
+      const settledEntries = this.canonicalEntryCount;
+      this.hooks.homeChapterLimitStopped?.({
+        chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
+        boundary,
+        crossingBytes: crossing.crossingBytes,
+        crossingEntries: crossing.crossingEntries,
+        settledBytes,
+        settledEntries,
+      });
+      if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+    }, error => {
+      // If exact-operation Stop could not settle, preserve the admission fence.
+      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
+    });
   }
 
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {

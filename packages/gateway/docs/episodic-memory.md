@@ -1,13 +1,13 @@
 # Episodic memory owner
 
 `EpisodicMemory` (`packages/gateway/src/episodic/`) keeps a binary summary tree
-over ONE canonical session's history: a "memory" of that session that a request
+over one canonical source identity: a "memory" that a request
 layer can read at a constant size. The algorithms are the public OptChat
 recipe's (its sections are cited as `gist §N` in the code); Tron's departures
 are listed below with their reasons.
 
 This document owns the module's own contract. Home is its one live caller today:
-the Home owner holds one memory over the Home session's canonical entries, feeds
+the Home owner holds one memory keyed by stable `homeId` across physical chapters, feeds
 it the commits the runtime reports, and sends each activation the view it renders
 ([home.md](home.md)).
 
@@ -54,6 +54,22 @@ it the commits the runtime reports, and sends each activation the view it render
   file still blocks as `source-unavailable`. The session file remains append-only
   under its owner; the reader neither repairs nor migrates it, and whole-file
   reads are bounded per line.
+- Home supplies two distinct source contracts: an async chapter-delta stream
+  for ingestion, and a cursor-scoped compact ID/parent index for exact cuts.
+  Ingestion projects and caps one line at a time, commits one chapter cursor at
+  a time, and does not retain raw JSONL arrays. Unchanged sealed files are checked
+  by identity/size/mtime/ctime without reopening; first sealing acknowledges any
+  final active writes. Navigation/context edits refresh only their chapter.
+  Restart repeats an interrupted chapter idempotently using permanent catalog
+  indices and physical session provenance. Exact cuts separately verify each
+  ingested prefix digest and membership; later appends/navigation are excluded.
+  This lookup can read sealed bytes, but retains only compact topology, not raw
+  messages. The raw transient bound is per line; retained chapter work is capped
+  projection plus ID/parent topology, not aggregate transcript bytes.
+- The strict Home cursor is version 2. Every chapter requires file-change
+  metadata, sealed state and a complete-prefix digest; older Home formats are
+  preserved and refused before cleanup. No dual reader or migration is provided.
+  Ordinary single-session cursors and legacy timestamp lookup are unchanged.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
@@ -145,6 +161,20 @@ state/episodic/<sourceSessionId>/
   strict field sets; there is no migration path. A store this owner cannot read
   is refused rather than guessed at.
 
+Home state is rewritten whole and scales with the chapter count. Its shared
+read/write byte limit is `HOME_MAX_CHAPTERS * EPISODIC_HOME_CURSOR_MAX_BYTES +
+64 KiB`: 100,000 chapters × 640 bytes (nested JSON per strict chapter cursor),
+plus fixed-state overhead. Writers validate both the schema and exact encoded
+size **before** replacing either live state or checkpoint state. An oversized
+state preserves the last readable file and stops the memory owner with
+`permanent-failure`; it is never published and then rejected on restart. The
+per-cursor bound covers the pinned SDK identity fields, two hashes, numeric file
+metadata and JSON syntax; oversized identities refuse rather than producing an
+unreadable cursor. `home-state.e2e.test.ts` proves maximum-count round-trip,
+oversized-write refusal with prior bytes preserved, and ordinary small state.
+The whole-state rewrite/serialization cost is not claimed constant-time; the
+Home hardening audit (#555) owns its measurement.
+
 ## Projection (departure 1: source projection before compression)
 
 Each canonical session entry **on the session's current branch** becomes at
@@ -164,6 +194,17 @@ Everything else — a `custom_message` with `display: false`, a system message, 
 (for example a `tron.*` receipt), a compaction or branch summary, session info —
 is not a message. A null context edit only omits an entry that held a slot in
 its own right; it never invents one for a hidden custom message or a state entry.
+
+Home receipts bind a command to its exact physical chapter before effects.
+Completed replay returns that result without ingesting or submitting the input
+again, even after rollover or disable; pending uncertainty does not authorize
+resubmission. A running chapter-limit Stop keeps every SDK emission through abort
+settlement canonical, so projectable partial assistant/tool output is ingested
+normally under the same `homeId`. The hidden terminal receipt records the
+stopped-at-limit outcome but is not a memory message. Crossing/settled counts and
+fresh/replay route categories are bounded operational signals, never memory
+source data; their privacy contract is owned by `home/home-diagnostic.ts` and the
+[observability catalog](observability.md).
 
 - **No renumbering, ever.** Indices are assigned to entries in branch order and
   never reassigned. An entry the branch no longer holds (a navigation) keeps its
@@ -241,16 +282,20 @@ text.
   `id + n > T`. A child whose node is not built right now renders the
   placeholder, and a revoked node's text is gone from the map, so a stale child
   cannot be served.
-- **`entryTimestamp(id)`** returns the catalog record's own instant, or — for a
-  record written before the optional field — the instant the canonical source
-  proves for that entry id. That read is the bounded canonical reader the owner
+- **`entryTimestamp(id)`** returns the catalog record's own instant. Ordinary
+  single-file memory also supports records written before the optional field:
+  it returns the instant the canonical source proves for that entry id. That read is the bounded canonical reader the owner
   already uses, it is not `SessionManager`, and it covers **every parsed entry of
   the file, not only the branch the last entry follows**: a record that has since
   left the branch is still an entry the source can date. It happens at most once
   per memory and is remembered, because an entry's instant never changes —
   including across a navigation, since the map is keyed by entry id.
   `unavailable` is the source's answer that it holds no such entry, or that it
-  cannot read the file at all — the memory never invents a time.
+  cannot read the file at all — the memory never invents a time. Home's strict
+  chapter projection records carry instants and do not use legacy backfill;
+  malformed Home projection evidence missing an instant reports `unavailable`.
+  `episodic-memory-recovery.test.ts` retains the ordinary restart/navigation proof
+  at `test-results/episodic-memory/ordinary-instants.json`.
 - **`searchMessages(query, from, to)`** is Tron's addition to the recipe's tools:
   one case-insensitive substring pass over the projected catalog, bounded by
   `EPISODIC_SEARCH_HITS` (20) lines whose snippets are bounded by

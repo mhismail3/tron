@@ -50,7 +50,7 @@ import {
   projectIosDeviceInstallConfig,
 } from "../admin/ios-device-install-service.js";
 import type { GatewayLogger } from "./logger.js";
-import type { CommandReceiptStore } from "./command-receipts.js";
+import type { CommandReceiptBinding, CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
@@ -208,7 +208,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context", "home.open",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -467,6 +467,13 @@ export class GatewayService {
       case "home.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
         return safeJson(await this.requireHome().status());
+      }
+      case "home.open": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
+        const home = this.requireHome();
+        const binding = home.open();
+        home.noteRouteBound("open");
+        return safeJson(binding);
       }
       case "home.designate":
         return this.mutation(client, method, params, async () => {
@@ -1448,6 +1455,51 @@ export class GatewayService {
           }
           return { deleted: true };
         });
+      case "home.prompt": {
+        rejectUnknownFields(params, ["commandId", "text"], method);
+        if (typeof params.text !== "string") throw new GatewayError("invalid_request", "Home prompt requires text");
+        const text = admitPromptText(params.text);
+        let binding: CommandReceiptBinding | undefined;
+        return this.mutation(client, method, params, async () => {
+          if (!binding) throw new GatewayError("internal", "Home route binding was not persisted before dispatch");
+          this.requireHome().assertRouteBinding({
+            homeId: binding.homeId,
+            bindingRevision: binding.bindingRevision,
+            physicalSessionId: binding.physicalSessionId,
+          });
+          const reserved = this.requireHome().reservedChapter(binding.physicalSessionId);
+          const slot = reserved
+            ? await this.dependencies.sessions.materializeReservedHome(binding.physicalSessionId)
+            : await this.dependencies.sessions.acquire(binding.physicalSessionId);
+          if (reserved) await this.dependencies.sessions.assertReservedHomeAttempt(binding.physicalSessionId);
+          this.requireHome().assertRouteBinding({
+            homeId: binding.homeId,
+            bindingRevision: binding.bindingRevision,
+            physicalSessionId: binding.physicalSessionId,
+          });
+          let resolveAdmission!: (result: { operationId: string }) => void;
+          let rejectAdmission!: (error: unknown) => void;
+          const admission = new Promise<{ operationId: string }>((resolve, reject) => {
+            resolveAdmission = resolve;
+            rejectAdmission = reject;
+          });
+          const execution = slot.prompt(text, [], undefined, {
+            text, attachmentEnvelope: "", attachmentCount: 0,
+          }, resolveAdmission);
+          void execution.then(resolveAdmission, rejectAdmission);
+          const accepted = await admission;
+          return safeJson({
+            logicalSessionId: "home", homeId: binding.homeId, bindingRevision: binding.bindingRevision,
+            sessionId: binding.physicalSessionId, operationId: accepted.operationId,
+          });
+        }, false, true, async () => {
+          const home = this.requireHome();
+          await home.ensureChapterBelowHardLimit();
+          const route = home.routeBinding();
+          binding = { homeId: route.homeId, bindingRevision: route.bindingRevision, physicalSessionId: route.physicalSessionId };
+          return binding;
+        });
+      }
       case "session.prompt": {
         // Pin before receipt I/O, but defer rejection to its operation callback:
         // an existing receipt remains readable without a live subscription.
@@ -2320,6 +2372,7 @@ export class GatewayService {
     operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
     respondBeforeReceiptCompletion = false,
+    resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
     // The entry spans the whole receipt-backed operation (a compaction or a
@@ -2354,7 +2407,11 @@ export class GatewayService {
         knowledgeMutation
           ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
           : () => offLoop(() => operation(work?.token)),
-        respondBeforeReceiptCompletion ? {
+        (respondBeforeReceiptCompletion || resolveBinding) ? {
+          ...(resolveBinding ? { resolveBinding,
+            onRouteBound: category => this.requireHome().noteRouteBound(category),
+          } : {}),
+          ...(respondBeforeReceiptCompletion ? {
           respondBeforeCompletion: true,
           onCompletion: completion => {
             if (!work) return;
@@ -2373,6 +2430,7 @@ export class GatewayService {
               },
             );
           },
+          } : {}),
         } : undefined,
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;

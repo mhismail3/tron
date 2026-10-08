@@ -1,6 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
+import type { HomeHardBoundary } from "../home/home-diagnostic.js";
+import type { CommandReceiptRouteCategory } from "./command-receipts.js";
 
 /*
  * Level policy (owned by packages/gateway/docs/observability.md): error means
@@ -48,6 +50,14 @@ export interface LogRecord {
   outcome?: string;
   code?: string;
   reason?: string;
+  /** Home chapter diagnostics: approved enums and non-negative safe counters. */
+  category?: "open" | CommandReceiptRouteCategory;
+  boundary?: HomeHardBoundary;
+  chapterOrdinal?: number;
+  crossingBytes?: number;
+  crossingEntries?: number;
+  settledBytes?: number;
+  settledEntries?: number;
   durationMs?: number;
   /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
@@ -77,7 +87,7 @@ export interface LogRecord {
   error?: LogError;
 }
 
-export interface LogMetadata {
+export interface LogMetadata extends Pick<LogRecord, "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries"> {
   event?: string;
   source?: string;
   sessionId?: string;
@@ -121,6 +131,10 @@ export interface LogMetadata {
   counts?: Readonly<Record<string, number>>;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
+}
+
+function counterField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 /** One duration field: finite, non-negative, rounded, never NaN in a record. */
@@ -271,6 +285,13 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
     ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
+    ...(value.category === "open" || value.category === "fresh" || value.category === "replay" ? { category: value.category } : {}),
+    ...(value.boundary === "hard-bytes" || value.boundary === "hard-entries" ? { boundary: value.boundary } : {}),
+    ...(counterField(value.chapterOrdinal) !== undefined ? { chapterOrdinal: value.chapterOrdinal } : {}),
+    ...(counterField(value.crossingBytes) !== undefined ? { crossingBytes: value.crossingBytes } : {}),
+    ...(counterField(value.crossingEntries) !== undefined ? { crossingEntries: value.crossingEntries } : {}),
+    ...(counterField(value.settledBytes) !== undefined ? { settledBytes: value.settledBytes } : {}),
+    ...(counterField(value.settledEntries) !== undefined ? { settledEntries: value.settledEntries } : {}),
     ...(typeof value.cause === "string" ? { cause: boundedDiagnosticID(value.cause).slice(0, 64) } : {}),
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),

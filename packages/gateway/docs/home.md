@@ -15,16 +15,210 @@ edits, branch changes, bash, and extension-driven session replacement. Registry
 owners also preflight attention, archive and delete mutations against that same
 provider. A sealed result is a
 typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
-The version-2 Home record carries an ordered chapter ledger. At this step Home
-operates on one active physical session; no rollover path creates a successor.
-An active chapter is writable; a sealed chapter remains readable but refuses
+Every bound Home slot also refuses physical identity/path replacement (RPC fork,
+extension newSession/fork/switchSession), including active and disabled chapters,
+with typed `conflict` (`details.reason: "home-identity-replacement"`). One slot
+replacement boundary rejects before SDK effects; HomeOwner alone transfers the
+logical binding to a separately Registry-owned chapter. Ordinary slot replacement
+is unchanged.
+The canonical append guard is installed before SDK runtime bootstrap, once per
+SessionManager instance. The manager's append method carries its immutable slot
+owner; reloads and profile rebuilds reuse it, never stack wrappers. A different
+manager gets its own guard at construction, and manager retirement retires it.
+`home-request-seam.integration.test.ts` retains identity/path/byte refusal and
+five rebuilds plus five reloads per ordinary/Home manager in
+`test-results/home-activation/seam-report.json`.
+The version-2 Home record carries an ordered chapter ledger. At a quiescent
+turn boundary, crossing either the 24 MiB canonical-byte or 50,000-entry soft
+limit seals the active chapter and durably reserves its successor; this writes
+only bounded metadata. Before a new `home.prompt` receipt binds its physical
+target, Home checks canonical bytes and entries; a chapter already at or above
+200 MiB or 100,000 entries is sealed and its successor reserved before any
+activation effect. The next `home.prompt` activation is the only path that
+materializes that reservation. A sealed chapter remains readable but refuses
 mutation regardless of Home's enabled state or the runtime's ordinary/Home
 profile. The chapter-state check is physical-session-owned and is not bypassed
-when Home is disabled. If a future SDK operation fails
-after staging canonical entries, RuntimeSlot retains the existing uncertain-
-outcome fence rather than treating the staged mutation as a clean refusal. A
-sealed check before a custom-entry append is a clean typed refusal: it exits the
-bounded ownership-write retry path without draining or fencing the runtime.
+when Home is disabled. Registry serializes attention set/acknowledge, archive,
+delete and sealing per physical session: admitted mutation work settles before
+seal; seal-first refuses later mutations. The session serializer precedes the
+existing Registry/slot/attention lanes; HomeOwner takes its record lock only for
+the final ledger replacement, never before the session serializer. Queue tails
+retire at settlement and a failed mutation cannot poison the next one.
+The Registry materializer claims one attempt per reserved
+chapter, scans every candidate before adoption or creation. The same strict
+complete-file scan runs before a cold Home runtime is opened or searched.
+Generic JSONL import is a separate Registry admission followed by an SDK fork:
+it preserves the caller's source path in `parentSession` and checks capacity
+before source construction, without Home chapter scanning. The Home scan uses
+the exact canonical file's owning directory, not a directory re-encoded from cwd:
+workspace aliases must not change evidence ownership, including cold search.
+The version-3 scanner validates the header, supported entry/message content and
+usage shapes, unique IDs, and one
+append-ordered parent chain beginning with a null parent. Cycles, forward or
+missing parents, duplicate IDs, extra roots and branches refuse before SDK
+construction; parent validation is one pass, never a graph traversal. Unknown
+entry shapes and non-newline-terminated evidence block before Pi's loader can
+repair it. Evidence is streamed one line at a time under an unchanged-file stat
+fence. The 200 MiB scan bound applies only to the matching identity or expected
+path being adopted: a retained oversized stopped predecessor cannot block its
+successor. No arbitrary per-entry cap discards valid abort settlement evidence.
+Sealed chapter memory reads use
+the read-only canonical JSONL projection, never a writer-capable SessionManager.
+`home-session-recovery.test.ts` covers malformed graphs and supported entry
+shapes. The real-byte-stop and cyclic-cold cases in `home-activation.e2e.test.ts`
+retain rows in `test-results/home-activation/report.json`: real SDK appends stop
+a running operation over 200 MiB, preserve its oversized chapter and prompt a
+successor; malformed cold evidence reaches zero writer-capable constructions.
+The materializer durably records
+the exact SDK path and attempt ID before the caller can receive the runtime.
+The constructed RuntimeSlot owns immutable authority for that exact Home chapter,
+attempt, and path through its disposal; receipt persistence and the first
+conversation append use that same owner. Authority is checked against the live
+ledger and exact session identity, not granted by an individual operation or
+receipt lifetime. Unreadable, malformed, torn, duplicate, symlinked, or
+path-mismatched evidence blocks recovery without changing canonical bytes. If a
+durable prior attempt names a path that is now absent, recovery also preserves
+and blocks: the pinned SDK has no verified exact-path constructor, and its
+ordinary new-session API selects a different timestamped path. A post-rename
+ledger publication error fences all Home admissions and profile transitions.
+The owner securely reloads the visible record, and Registry retires every live
+Home slot through its existing disposal path after that slot's current operation
+settles. The writer does not await retirement from inside that operation's lane.
+Home remains unavailable until both reload and retirement complete; the next
+acquisition constructs a fresh slot from the reloaded ledger and canonical
+transcript. A failed reload or retirement keeps the fence closed rather than
+trusting stale memory. Gateway JSONL and HTML exports
+are noncanonical destination writes owned by RuntimeSlot's existing temporary-
+artifact export boundary: it snapshots the canonical source into a fresh temporary
+directory, then registers that artifact. Home does not expose arbitrary SDK export
+destinations, and export leaves the chapter path unchanged.
+
+`home-materialization-crash.e2e.test.ts` freezes the actual old ledger writer at
+claim, path-record, first conversation flush, and post-rename/pre-directory-fsync
+cuts, then opens a fresh Registry over the same files without disposing the old
+owner. It also exercises a live Registry's visible-publication error fence,
+`publication-uncertain` retirement, and fresh disabled-profile reconstruction.
+Run the focused file with `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` to
+retain its JSON report. The separate `home-ledger-crash.e2e.test.ts` exercises
+seal/reserve with a real child process and SIGKILL; frozen-owner cuts prove
+process-abandonment recovery, not power-loss durability.
+
+`home.open` returns Home's logical route and current binding. `home.prompt`
+persists an idempotency receipt containing the Home identity, binding revision,
+and selected physical chapter before materialization or dispatch, then verifies
+that binding again before sending the input. A stale binding cannot silently
+redirect a command. Completed receipt replay returns the original result and
+physical target, even after rollover or disable, without resolving a new route,
+materializing a chapter, or dispatching the input again. Pending or uncertain
+receipts remain outcome-unknown fences; a reconnect never resends accepted input.
+The receipt owner emits `home.route-bound` with `category=fresh|replay` at its
+durable-target/replay decision. `home.open` emits `category=open` and is not an
+activation or receipt. Registry shares only reserved-chapter construction, never
+command input or receipts. Every distinct joined command has its own durable
+target and slot admission: accepted input is submitted once; a busy contender is
+explicitly refused before SDK submission. A duplicate command joins/replays its
+receipt lane, not another input. The joined user/terminal cases in
+`home-activation.e2e.test.ts` hold claim, scan, recorded-path and first-flush
+boundaries and retain their outcomes in `test-results/home-activation/report.json`.
+Their soft-rollover setup injects metrics; these cases prove submission/receipt
+ownership, not chapter-size thresholds.
+
+`home-receipt-crash.e2e.test.ts` retains
+`test-results/home-receipt-crash/report.json`. Its child fixture,
+`test-support/home-receipt-crash-child.ts`, uses the real receipt atomic writer and
+pinned SDK canonical flush, reusing `home-ledger-crash-preload.mjs` and the ledger
+harness's parent-owned pipe lifetime. SIGKILL cuts after durable binding, during
+SDK effects before completion, and after durable completion before response
+prove pending fences and exact completed replay without rerouting or effects.
+These are receipt/SDK persistence-boundary tests, not a live-provider Gateway
+process or power-loss test. Regenerate with the named Vitest file.
+
+Terminal chat uses these logical RPCs when Home is enabled and subscribes to the
+physical runtime only after a chapter is active. Ordinary session routes are
+unchanged.
+
+Home transition signals are typed in `home/home-diagnostic.ts` and go through
+one privacy-preserving logger boundary. Recovery uses `absent|adopt` (not
+`create`) and `conversation-published`. Hard admission refusal uses
+`home.chapter-refused` with `hard-bytes|hard-entries` and the measured chapter
+ordinal, before rollover or a busy response awaiting settlement. A running
+crossing instead emits `home.chapter-limit-stop` at warning level after exact
+Stop settlement: chapter ordinal, boundary, crossing bytes/entries and settled
+bytes/entries survive both JSONL persistence and tail reload. No canonical IDs,
+paths, transcript, credentials or free-text owner failure explanation belong in
+these signals; owner unavailability is the bounded reason `owner-fenced`.
+The observability catalog owns the complete emitted reason vocabulary.
+`home-activation.e2e.test.ts` retains `test-results/home-activation/report.json`
+for exact receipt replay and signal privacy. Threshold diagnostic tests inject
+measurements at the owning metrics seam; they are not actual large-file proofs.
+The canonical-admission and response/input-crossing cases instead append real SDK
+entries and lower only the shared hard constants in the test module (64 KiB / 100
+entries); their artifact records measured bytes/entries and the test thresholds.
+They prove cold logical rollover, immutable physical refusal, post-await
+revalidation before canonical effects, a pre-provider input crossing, and both
+completion-first and abort-first settlement of a successful assistant crossing.
+They do not prove the unrelated full writer/crash matrix.
+
+HomeOwner owns one hard-admission policy for both logical routes and physical
+prompt targets. Cold Registry metrics stream the actual canonical file under a
+stat fence, excluding its header from the entry count; missing, torn or changing
+metrics refuse rather than pretending the chapter is empty. Logical admission
+rolls over before binding its command receipt. Every physical prompt (including
+explicit terminal targets, held prompts and steer/follow-up admissions) rechecks
+the policy in its slot lane after admission awaits, before invocation/SDK effects;
+a full physical target refuses without silently redirecting. Ordinary sessions
+are not subject to Home thresholds. The exact Stop owner synchronously records
+its reason on the live invocation before cancellation yields. Every terminal
+observer reads that reason at the common receipt boundary, so a successful
+assistant crossing is interrupted with `chapter-limit`, never `user-abort`,
+regardless of completion/abort settlement ordering. Receipt retirement owns
+retirement of that volatile reason; no parallel cancellation-reason map exists.
+
+Home memory remains one bounded projection keyed by stable `homeId`, not by a
+physical chapter. Its canonical source reads active, sealed, and materializing
+chapters in ledger order and retains each physical session ID as provenance.
+Delta ingestion streams and caps each entry before retaining a chapter projection;
+it never concatenates raw chapter histories. Per-chapter cursors continue linear
+active appends (including non-message entries) and stat-check, rather than reopen,
+unchanged sealed files. A navigation or context edit rebuilds only the active
+chapter's capped branch; it cannot omit earlier chapters. The last writes before
+sealing are ingested before that chapter's cursor becomes immutable. Missing or
+changed sealed identity, size, modification time or change time blocks ingestion
+before updating the projection.
+
+Historical-cut lookup is a separate contract: it streams a compact ID/parent
+index only through each chapter's **ingested** byte offset and verifies the full
+prefix digest and physical provenance. It may read sealed bytes for this proof,
+never later active appends. Message and non-message boundaries resolve to the
+permanent logical indices at that exact cursor; off-branch entries have no cut.
+The Home source cursor format is version 2 and requires its sealed-file metadata.
+Older Home cursors are preserved and refused, with memory unavailable; there is
+no migration or automatic rebuild. Ordinary session formats are unchanged.
+
+`home-source.e2e.test.ts` retains `test-results/home-memory/continuity.json` for
+cross-chapter replay, restart, navigation and frozen-cut proof.
+`home-source.scale.test.ts` retains `test-results/home-memory/heap.json` for four
+chapters containing at least 64 MiB of canonical payload, with post-GC live heap
+samples at ingestion cuts and a retained heap sample. Regenerate with the named
+file and `vitest.scale.config.ts`; the heap report does not claim an allocation
+peak or power-loss proof.
+
+A reserved chapter contributes nothing until canonical evidence exists. If an SDK
+operation fails after staging canonical entries, RuntimeSlot retains the existing
+uncertain-outcome fence rather than treating the staged mutation as a clean
+refusal. A sealed check before a custom-entry append is a clean typed refusal: it
+exits the bounded ownership-write retry path without draining or fencing the
+runtime.
+
+A running activation's canonical writes are never refused at the hard limit.
+RuntimeSlot observes successful canonical growth and, on the first crossing,
+requests Stop for that exact operation. The crossing entry and all writes needed
+to settle that abort remain canonical. No new turn, tool dispatch, steering, or
+follow-up is admitted while that stop settles. The bounded
+`home.chapter-limit-stop` signal records the chapter ordinal, hard boundary, and
+canonical byte/entry counts at crossing and after settlement. The activation
+receipt is terminalized as interrupted with error code `chapter-limit`; the next
+admission rolls over to the successor.
 
 ## The record
 
@@ -36,8 +230,8 @@ record per installation:
 | --- | --- |
 | `version` | `2`; other versions, unknown fields, and invalid chapter topology are preserved and refused |
 | `homeId` | Stable identity of this installation's Home, generated once |
-| `chapters` | Ordered, unique physical sessions; step 3 starts with exactly one `active` chapter |
-| `bindingRevision` | Advances when designation binds Home to a different physical session |
+| `chapters` | Ordered, unique physical sessions; designation starts with one `active` chapter, then quiescent rollover appends one `reserved` successor |
+| `bindingRevision` | Advances when designation or reserved-chapter activation binds Home to a different physical session |
 | `generation` | Advances on every profile change (designate, re-enable, disable) |
 | `policyRevision` | The curated-profile revision in force; a re-enable writes this build's |
 | `enabled` | Whether Home is currently designated |
@@ -74,8 +268,9 @@ owner's answer for that session id: `home` when the enabled record names it as a
 chapter, `ordinary` when a disabled record names it, and `unnamed` when the
 record names another session. A new Home's *first* runtime is already the Home profile:
 `RuntimeRegistry.create(cwd, "home")` carries an explicit creation profile,
-which applies only to that session and only while the record does not name it —
-so a fork or a reset, which produce a new session id, is never Home.
+which applies only to that session and only while the record does not name it.
+Bound Home slots cannot fork/reset/switch their physical identity; a separately
+imported Registry target is ordinary unless the ledger names it.
 
 | | Home | Ordinary |
 | --- | --- | --- |
@@ -158,7 +353,8 @@ owner.
 - `home.status` is one bounded read that composes the record, memory status and
   `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
   enabled, homeId?, sessionId?, generation?, model?, live, sessionPresent,
-  memory }`. `phase` and the recovery action are derived on each read; they are
+  chapter?, memory }`. `chapter` contains a bounded ledger count, current canonical
+  byte/entry measurements when available, and the current recovery decision. `phase` and the recovery action are derived on each read; they are
   not additional lifecycle state. Readiness gaps identify an unavailable record,
   missing/disabled designation, unconfigured memory or blocked memory. `activation`
   is the same body-free projection returned by `home.context`. The memory
@@ -171,6 +367,11 @@ owner.
   all — live, or still a canonical session in the catalog. A Gateway whose first
   catalog cut has not completed reports `sessionPresent: true`, because an
   unread catalog cannot prove absence.
+- `home.open` returns the logical Home route and current binding without
+  creating a runtime or materializing a reserved successor. `home.prompt` binds
+  one command receipt to that route before effects, materializes a reserved
+  chapter only when needed, rechecks the exact binding, and returns the physical
+  session and operation identity.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
@@ -179,9 +380,12 @@ owner.
   model matches the recorded model. A different explicit model is refused with
   a typed conflict directing callers to `session.setModel`; designation enables
   Home but does not own changes to its enabled session's model. A disabled record
-  re-enables the same session with `generation + 1`. A record whose session is
-  **gone** (a session that was never written, or was deleted) is kept and given
-  a fresh session with `generation + 1`, whether it was enabled or disabled: the record is the only
+  re-enables the same session with `generation + 1`. If rollover left a durable
+  `reserved` or `materializing` successor, re-enable preserves that exact
+  reservation; the next `home.prompt` recovers/materializes it rather than
+  replacing it with a new chapter. A record whose session is **gone** (a session
+  that was never written, or was deleted) is kept and given a fresh session with
+  `generation + 1`, whether it was enabled or disabled: the record is the only
   evidence of the designation, and the dangling id must not be re-enabled.
 - `home.disable` is a mutation. It sets `enabled: false` with `generation + 1`;
   the session stays an ordinary session afterwards. A record whose session is
@@ -197,14 +401,26 @@ owner.
   Home's current or last activation (see [Activations](#activations)), never a
   message body.
 
-A profile change must take effect before the session's next prompt, so the live
+Enable, disable and profile/model changes use the same serialized profile owner.
+A profile change must take effect before the session's next prompt, so a live
 runtime is **replaced in place** inside the slot's own serialized lane: the idle
 check, the durable record write and the rebuild are one critical section, and
-prompt admission uses the same lane. The session identity, its subscribers, its
-presentation and its (possibly never-persisted) in-memory session manager all
-survive. If the session is not idle the mutation is refused with a retryable
-`busy` error and nothing changes. A session with no live runtime needs no
-rebuild: the next runtime creation reads the record, including its model.
+prompt admission uses the same lane. This includes a live runtime for a `reserved`
+or `materializing` chapter; re-enabling preserves its chapter, attempt and exact
+path while rebuilding the runtime before routing is exposed. The session identity,
+its subscribers, its presentation and its (possibly never-persisted) in-memory
+session manager all survive. If the session is not idle the mutation is refused
+with a retryable `busy` error and nothing changes. A session with no live runtime
+and no construction in flight needs no rebuild: Registry commits under its
+construction-selection mutex so the next constructor reads the new record,
+including its model. When reserved materialization or a cold load is in flight,
+the profile owner joins that existing single-flight before selecting the
+published slot and rebuilding it. A failed constructor settles first, then the
+profile change re-reads current ownership; no stale candidate is published under
+the changed ledger. Disable always enters this owner, even when the catalog has
+not seen the reserved session. The four reserved/cold disable/re-enable orderings
+and failed-construction case in `home-activation.e2e.test.ts` retain their final
+profile/identity evidence in `test-results/home-activation/report.json`.
 Lifecycle updates merge against the current record at the serialized profile
 commit boundary. Durable record commits use one serialization authority for
 memory and model updates; it is separate from the lifecycle mutex so a model
@@ -212,10 +428,43 @@ callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 
 ## The terminal client
 
-`tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the session-based
-terminal client, and today it is the only surface that can designate Home,
-configure its memory and recover it. Its `/home` line is resolved without
-touching the Gateway, so a bad argument is answered before any RPC. Malformed
+`tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the terminal
+client, and today it is the only surface that can designate Home, configure its
+memory and recover it. With no explicit `--session`, it first asks for the
+logical Home route; while Home is enabled, ordinary input goes through
+`home.prompt` even as physical chapters change. A reserved successor is not
+opened just to attach the terminal: its first runtime is created only when a
+prompt activates it. `--session` remains an explicit physical-session route.
+
+The connection owns one installed chapter attachment. The synchronization
+boundary owns a candidate token until sync and installation succeed, and closes
+that exact token on failure; failed transfer leaves the prior attachment owned
+by the terminal. Successful transfer installs the successor snapshot/listeners
+before closing the exact outgoing token. Exit closes the current token. Resync
+and disconnect both retire the previous protocol client before replacement,
+including a still-connected resync client: otherwise its server subscriptions
+would survive without a terminal owner and prevent idle eviction.
+
+An accepted operation can settle before its response. A new authoritative idle
+snapshot settles it immediately, whether it arrives on the same chapter,
+reconnect or successor transfer. The idle cut preceding prompt submission is
+not proof of that operation's settlement. Reconnect reconciles the receipt and
+snapshot without replaying accepted input. New assistant text in that authoritative
+snapshot is rendered even while the command response is pending; consuming it
+silently would lose a settled refusal before its operation ID arrives.
+
+The real terminal child cases in `home-activation.e2e.test.ts` retain
+`test-results/terminal-chat-home/attachments-rollover.json` and
+`attachments-failed-sync.json` (run that file with `-t 'owns exact Home attachments'`).
+They cover response loss after acceptance, same-chapter settlement, a still-running
+operation whose response precedes presentation events, repeated idle-baseline
+rollover, actual outgoing-runtime eviction, exact-token retirement, and failed
+candidate sync. The fixture injects soft-limit metrics to request rollover and
+holds selected presentation broadcasts to isolate snapshot/response orderings;
+it is not a large-chapter or Gateway-process-crash proof.
+
+Its `/home` line is resolved without touching the Gateway, so a bad argument is
+answered before any RPC. Malformed
 arguments are caught within the command loop, and assistant refusals are rendered
 from the canonical message's `errorMessage`, even when it has no content text:
 
@@ -233,21 +482,15 @@ read — a model that is not spelled `provider/id`, a budget that is not a whole
 number of tokens — is reported with its own reason. A refused RPC is printed and
 the chat continues.
 
-## Fork and disable both keep the transcript's tool loadout
-
-Designation is keyed by session id, so forking the Home session yields an
-ordinary session: it registers the ordinary extensions and tools, uses the
-canonical compaction budget, and is not cache-warming excluded.
+## Disable keeps the transcript's tool loadout
 
 A profile change does not rewrite the chat's tool loadout, because Pi replays
 the *declared* loadout from the canonical transcript at every runtime creation.
-So both a fork of Home and a disabled Home start with the Home tools this
-profile can activate — `ask_user`, `display`, `notify` — while the ordinary
-tools are merely registered, exactly as every other session keeps the loadout
-its chat declared (`runtime-tool-loadout.integration.test.ts`). The three memory
-tools belong to the Home-only module, so an ordinary profile neither registers
-nor activates them: a fork of Home can never read Home's memory, and its memory
-tool accessor answers `undefined` for that session id. The user restores the
+A disabled Home starts with the Home tools its ordinary profile can activate —
+`ask_user`, `display`, `notify` — while the ordinary tools are merely registered,
+exactly as every other session keeps the loadout its chat declared
+(`runtime-tool-loadout.integration.test.ts`). The three memory tools belong to
+the Home-only module, so an ordinary profile neither registers nor activates them. The user restores the
 ordinary tools with `session.setTools`, which is the same control every session
 has; the integration suite asserts the active set across a disable and that
 `setTools` restores it.
@@ -300,8 +543,8 @@ images with Pi's disabled-image placeholder without triggering a false refusal,
 including when the setting changes between turns. Non-system context mutation
 and subsequent outgoing message mutation still fail closed.
 
-Only a runtime whose profile is Home's gets them. A fork of the Home session is a
-different session id, hence an ordinary session with no seam and no activation.
+Only a runtime whose profile is Home's gets them. A separate ordinary Registry
+target has no Home seam or activation; bound Home slot replacement is refused.
 
 ### Prompt caching
 

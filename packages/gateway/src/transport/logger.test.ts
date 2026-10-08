@@ -28,6 +28,38 @@ afterEach(() => {
 });
 
 describe("GatewayLogger", () => {
+  it("retains Home crossing and settlement evidence across persisted-tail reload", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    const evidence = { chapterOrdinal: 2, boundary: "hard-entries", crossingBytes: 800_000,
+      crossingEntries: 100_000, settledBytes: 800_512, settledEntries: 100_003 };
+    logger.log("warning", "Tron Home chapter-limit-stop", {
+      event: "home.chapter-limit-stop", source: "home", ...evidence,
+    });
+    expect(lines(path)[0]).toMatchObject(evidence);
+    expect(new GatewayLogger(path).recent(1)[0]).toMatchObject(evidence);
+  });
+
+  it("does not persist invalid Home counters or unbounded category values", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("info", "Tron Home route-bound", {
+      event: "home.route-bound", category: "replay", boundary: "hard-bytes",
+      chapterOrdinal: -1, crossingBytes: Infinity, crossingEntries: 2.5,
+      settledBytes: Number.MAX_SAFE_INTEGER + 1, settledEntries: -2,
+    });
+    logger.log("info", "Tron Home route-bound", {
+      event: "home.route-bound", category: "private-transcript", boundary: "/private/path",
+    });
+    const [valid, invalid] = lines(path);
+    expect(valid).toMatchObject({ category: "replay", boundary: "hard-bytes" });
+    for (const key of ["chapterOrdinal", "crossingBytes", "crossingEntries", "settledBytes", "settledEntries"]) {
+      expect(valid).not.toHaveProperty(key);
+    }
+    expect(invalid).not.toHaveProperty("category");
+    expect(invalid).not.toHaveProperty("boundary");
+  });
+
   it("stamps process identity and bounded correlation fields in the shared record format", () => {
     const path = logPath();
     const logger = new GatewayLogger(path, { runtimeEpoch: "epoch-1", payloadVersion: "1.2.3" });
