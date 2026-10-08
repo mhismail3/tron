@@ -743,6 +743,16 @@ copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests
 
+Gateway payload deployment checks run with pinned Node 22:
+`node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs`.
+The live-source-staging retention regression observes directory creation through
+scoped fs/promises interception (restored in `finally`) and runs real retention
+before the build continues. Compilation precedes source staging, so its injected
+command is not a live-staging observation point. Do not replace this lifecycle
+check with `fs.watch`: filesystem notifications can be missed, leaving a test
+waiting indefinitely. Drain-order assertions likewise run inside the injected
+process probe, without a manually released promise or sleep.
+
 ```bash
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \

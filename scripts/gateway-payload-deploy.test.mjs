@@ -1,5 +1,4 @@
 import { strict as assert } from "node:assert";
-import { watch } from "node:fs";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
@@ -822,30 +821,36 @@ test("concurrent retention ignores a live source staging directory", async () =>
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-staging-retention-")));
   try {
     const { store, sourceRoot } = await makeSourceBuildFixture(root);
-    let retained;
-    const retentionDone = new Promise((resolve, reject) => {
-      const watcher = watch(store.channelRoot, async (_event, name) => {
-        if (!String(name).startsWith(".source-staging-")) return;
-        watcher.close();
-        const staging = join(store.channelRoot, String(name));
-        try {
-          await cleanupPayloadVersions(store);
-          retained = await stat(staging);
-          resolve();
-        } catch (error) { reject(error); }
+    const fsPromises = createRequire(import.meta.url)("node:fs/promises");
+    const createTemporaryDirectory = fsPromises.mkdtemp;
+    let retentionChecks = 0;
+    // Like withMacOS15DirectoryRename, observe the operation itself rather than
+    // an OS notification. Compilation finishes before source staging exists.
+    fsPromises.mkdtemp = async (prefix, ...options) => {
+      const directory = await createTemporaryDirectory(prefix, ...options);
+      if (prefix === join(store.channelRoot, ".source-staging-")) {
+        await cleanupPayloadVersions(store);
+        assert.ok((await stat(directory)).isDirectory(), "retention must preserve live source staging");
+        retentionChecks += 1;
+      }
+      return directory;
+    };
+    syncBuiltinESMExports();
+    try {
+      const result = await buildSourcePayload({
+        paths: store, config: { sourceRoot }, candidateVersion: "retention-candidate",
+        runCommand: async (tool, args) => {
+          await mkdir(args.at(-1), { recursive: true });
+          await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
+        },
       });
-    });
-    const build = buildSourcePayload({
-      paths: store, config: { sourceRoot }, candidateVersion: "retention-candidate",
-      runCommand: async (tool, args) => {
-        await mkdir(args.at(-1), { recursive: true });
-        await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
-      },
-    });
-    await retentionDone;
-    assert.ok(retained.isDirectory());
-    const result = await build;
-    assert.equal(result.manifest.version, "retention-candidate");
+      assert.equal(retentionChecks, 1);
+      assert.equal(result.manifest.version, "retention-candidate");
+      assert.deepEqual((await readdir(store.channelRoot)).filter((name) => name.startsWith(".source-staging-")), []);
+    } finally {
+      fsPromises.mkdtemp = createTemporaryDirectory;
+      syncBuiltinESMExports();
+    }
   } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1242,15 +1247,19 @@ test("planned drain polls the exact old PID after its listener disappears", asyn
 test("startup timing and kickstart do not begin while the exact old process remains", async () => {
   const oldProcess = { pid: 10, startIdentity: "old" };
   const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
-  let releaseDrain; let launches = 0; let clockReads = 0;
-  const drained = new Promise((resolve) => { releaseDrain = resolve; });
-  const pending = waitForDrainedReplacement({
+  let launches = 0; let clockReads = 0; let processReads = 0;
+  await waitForDrainedReplacement({
     oldProcess,
     expected,
     oldEpoch: "old-epoch",
     relaunchLimitMs: 2_000, startupLimitMs: 2_000,
     replacement: {
-      readExactProcess: async () => { await drained; return undefined; },
+      readExactProcess: async () => {
+        processReads += 1;
+        assert.equal(clockReads, 0, "startup timing must wait for exact old-process absence");
+        assert.equal(launches, 0, "kickstart must wait for exact old-process absence");
+        return undefined;
+      },
       readListener: async () => ({ pid: 11, startIdentity: "new" }),
       readHealth: async () => ({
         status: "ok",
@@ -1263,11 +1272,7 @@ test("startup timing and kickstart do not begin while the exact old process rema
       sleep: async () => {},
     },
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(clockReads, 0);
-  assert.equal(launches, 0);
-  releaseDrain();
-  await pending;
+  assert.equal(processReads, 1);
   assert.equal(launches, 0);
 
   clockReads = 0;
