@@ -6,6 +6,7 @@ import { gunzipSync } from "node:zlib";
 import type { Extension, SettingsManager, PackageSource } from "@earendil-works/pi-coding-agent";
 import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
+import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
@@ -115,8 +116,9 @@ function validateSdkPeers(entries: Entry[]): void {
  * never a user package declaration, network fallback or in-place replacement. */
 export class ManagedSubagents {
   readonly root: string;
-  constructor(tronHome: string, private readonly logger?: Pick<GatewayLogger, "log">) {
-    let ancestor = resolve(tronHome);
+  constructor(private readonly tronHome: string, private readonly logger?: Pick<GatewayLogger, "log">) {
+    this.tronHome = resolve(tronHome);
+    let ancestor = this.tronHome;
     const missing: string[] = [];
     while (!existsSync(ancestor)) {
       missing.unshift(relative(dirname(ancestor), ancestor));
@@ -235,11 +237,25 @@ export class ManagedSubagents {
     });
   }
 
+  /** The registry supplies its own home; the selection cannot be transferred
+   * to another home merely by keeping this process's existing binding. */
+  requireBoundArtifactRoot(tronHome: string): void {
+    const boundRoot = process.env[DELEGATED_PROVIDER_ROOT_ENV];
+    if (resolve(tronHome) !== resolve(this.tronHome)
+      || !boundRoot?.trim() || resolve(boundRoot) !== delegatedArtifactRoot(tronHome)) {
+      throw new GatewayError("conflict", "managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT bound to this Tron home's delegated artifact root before loading");
+    }
+  }
+
   loaderOptions(settings: SettingsManager): { settingsManager: SettingsManager; additionalExtensionPaths: string[] } {
+    // Check before executing extension code; admission repeats it for reloads
+    // and to refuse a process binding changed while the loader was awaiting I/O.
+    this.requireBoundArtifactRoot(this.tronHome);
     return { settingsManager: managedProviderSettingsView(settings), additionalExtensionPaths: existsSync(this.root) ? this.extensionPaths() : [] };
   }
 
   admit(extensions: readonly Extension[]): void {
+    this.requireBoundArtifactRoot(this.tronHome);
     const paths = existsSync(this.root) ? this.extensionPaths() : [];
     for (const extension of extensions) {
       if (paths.includes(extension.resolvedPath)) managedExtensions.add(extension);

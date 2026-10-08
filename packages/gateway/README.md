@@ -398,6 +398,18 @@ every installed closure file against the pinned archive; a receipt alone cannot
 bless changed bytes. SDK peer ranges are checked against the selected Gateway payload. Pi's extension
 loader aliases their imports to its own host SDK exports; no SDK peer copies or
 links are installed, so a new Gateway payload can reuse the same immutable root.
+Before any managed extension load (including reload and session-free loads),
+`ManagedSubagents` requires `PI_SUBAGENTS_TEMP_ROOT` to resolve exactly to
+`delegatedArtifactRoot(tronHome)` for its explicitly supplied home. The registry
+also passes its home to this owner before constructing runtime dependencies,
+refusing a selection belonging to another home. Admission
+rechecks the binding after loading; an absent, blank or foreign binding fails
+with `conflict` rather than allowing the provider's system-temp fallback.
+In-process hosts and test fixtures must bind through
+`delegatedProviderEnvironment` before loading, and fixtures restore the previous
+environment only after runtime disposal and remove their own temporary homes.
+The real execution integration test asserts that no default
+`<os.tmpdir()>/pi-subagents-uid-<uid>` root was created.
 Before provider initialization, the delegated-provider environment owner also
 sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the running payload's own
 resolved `@earendil-works/pi-coding-agent` package root, replacing any inherited

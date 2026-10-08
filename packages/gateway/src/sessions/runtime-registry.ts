@@ -1567,6 +1567,7 @@ export class RuntimeRegistry {
   }
 
   private dependencies() {
+    this.options.managedSubagents?.requireBoundArtifactRoot(this.options.tronHome);
     return {
       agentDir: this.options.agentDir,
       ...(this.options.managedSubagents ? { managedSubagents: this.options.managedSubagents } : {}),

@@ -1,5 +1,6 @@
 import { ManagedSubagents } from "./managed-subagents.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,10 +21,26 @@ import {
  */
 
 const roots: string[] = [];
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+let previousEnvironment: NodeJS.ProcessEnv;
+beforeEach(() => {
+  previousEnvironment = {
+    [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
+    PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT,
+  };
+});
+afterEach(async () => {
+  try { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); }
+  finally {
+    for (const [name, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
 async function fixture(installed = true) {
   const root = await mkdtemp(join(tmpdir(), "tron-subagents-"));
   roots.push(root);
+  delegatedProviderEnvironment(delegatedArtifactRoot(root));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
