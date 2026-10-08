@@ -21,7 +21,13 @@ packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push
 
 Staging resolves the exact Node version in the repository's `.node-version`
 before installing anything, then derives `npm` from that Node's sibling `bin`
-directory. Candidate admission proves the complete pair: a wrong-version Node
+directory. The launcher and npm shell checks install the official archive into
+`.ci-tools` using the pinned archive checksum and the vendor's `SHASUMS256.txt`,
+then verify the complete npm tree against `config/ci-toolchain.env`; the cache is
+reused only while both checksums remain valid. Those checks default to
+`${TRON_CI_TOOLS_DIR:-.ci-tools}` instead of the developer's Node on `PATH`;
+`TRON_NODE_ROOT` remains an explicit fixture/toolchain override. Candidate
+admission proves the complete pair: a wrong-version Node
 or a pinned-version payload alias without sibling npm is skipped before the
 exact `$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew
 candidates are considered. `TRON_NODE_BIN` may explicitly name an absolute
@@ -532,14 +538,16 @@ the old app, machine-group file and separately owned default browser config
 (including explicit absence). The command never reads Keychain stores or copies
 browser profiles/cookies. POSIX modes, ACLs, extended attributes, file contents
 and symbolic-link text are checked; special files and unsafe root links stop
-preparation. A copied tree may have different `com.apple.provenance` values:
-macOS assigns the copying process's attribution even when `copyfile` reports
-successful metadata preservation. The helper leaves that OS-owned attribute
-alone and retains its observed source digest in the inventory. This is the only
-copy-comparison exception; ACLs, link modes, quarantine and every other xattr
-must still match. Live-source comparisons remain exact, including provenance.
+preparation. A copied tree may have different `com.apple.provenance` or
+`com.apple.quarantine` values: macOS assigns copying-process provenance and may
+rewrite a download quarantine marker even when `copyfile` reports successful
+metadata preservation. Both attributes must still be present on source and copy;
+the helper retains their observed source digests in the inventory but allows
+only their copied values to differ. ACLs, link modes, mode bits and every other
+xattr remain exact. Live-source comparisons remain exact, including both
+attributes.
 Exclusive Stable-channel retirement may also reassign provenance on the renamed
-root directory only; every nested entry and all other root metadata must match.
+root directory only; quarantine and every other root metadata value must match.
 The original source inventory is retained unchanged, and an interrupted rename
 resumes through the same selection command. Link modes are applied without
 following targets.
@@ -549,8 +557,20 @@ settings or browser overrides requires its own operator-managed backup.
 
 One stable cross-process lock serializes both commands. Repeated invocations
 resume the recorded operation; partial backups only accept already copied bytes
-that still match the frozen source inventory. Source changes, corrupt receipts,
-metadata loss, insufficient space and collisions stop without deleting evidence.
+that still match the frozen source inventory. If an operation cannot be resumed
+because its frozen source inventory is stale, use `scripts/tron mac reinstall
+--restart` to begin a fresh inventory without editing maintenance state. Restart
+is refused for an incomplete step (for example, finish an interrupted bundled
+selection with `--select-bundled-offline` first), an unexpected installed app,
+or a verified operation (use `--finish` for the latter). A partial backup is
+reversible and may be restarted; its partial copy remains untouched as evidence
+in the predecessor. The predecessor's old-app backup remains the rollback
+authority after Finder replacement; the new operation records the currently
+installed candidate as its original app. A completed bundled selection remains
+linked directly to its original journal and retired payload evidence, including
+for recovery-archive verification. After restart, stop writers and run
+`--confirm-offline` to take the new snapshot. Source changes, corrupt
+receipts, metadata loss, insufficient space and collisions stop without deleting evidence.
 Before offering either Finder replacement or Resume, every offline retry verifies
 the backups and unchanged data again. An already-replaced app exempts only that
 installed app from comparison with the old-app manifest; its exact candidate
@@ -665,8 +685,12 @@ that owned orphan through `stopping` → `stopped`; a listener without that exac
 identity remains foreign and is never killed.
 
 The handoff proves the selected Debug fingerprint/revision/epoch before and
-after copying, rejects runtime drift that requires a manual `Tron.app` update,
-and never changes Stable `current.json` or restarts 9847. The confirmed iOS
+after copying, and compares the Node version plus the complete `runtime/` subtree
+byte-for-byte with installed Stable. Debug staging validates the installed app's
+bundled Gateway and uses its signed runtime only when its Node version matches
+the candidate. Otherwise it keeps the official runtime, so changed runtime bytes
+or version refuse handoff and require a manual signed `Tron.app` update. The handoff never changes Stable `current.json`
+or restarts 9847. The confirmed iOS
 **Promote Debug Gateway to Stable** action pins both candidate version and
 fingerprint and invokes the existing asynchronous Stable deployment core.
 

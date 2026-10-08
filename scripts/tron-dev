@@ -239,7 +239,7 @@ build_candidate() {
   else
     TRON_NODE_BIN="$NODE_BIN" "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" --skip-install >&2
   fi
-  result="$("$NODE_BIN" "$DEPLOY" stage --channel dev --home "$HOME/.tron-dev" --source "$ROOT/packages/mac-app/Sources/Resources/Gateway" --version "$version" --source-revision "$revision")"
+  result="$("$NODE_BIN" "$DEPLOY" stage --channel dev --home "$HOME/.tron-dev" --source "$ROOT/packages/mac-app/Sources/Resources/Gateway" --runtime-source "/Applications/Tron.app/Contents/Resources/Gateway" --version "$version" --source-revision "$revision")"
   printf '%s' "$result" | "$NODE_BIN" -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log(`${x.manifest.version} ${x.manifest.payloadFingerprint} ${x.manifest.runtimeEpoch}`)})'
 }
 

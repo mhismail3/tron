@@ -1,5 +1,4 @@
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { resolveTronHomePath } from "./tron-home-environment-policy.mjs";
 import { GatewayError } from "./errors.js";
 
 /**
@@ -8,17 +7,10 @@ import { GatewayError } from "./errors.js";
  * failures of the Gateway's own module graph.
  */
 export function resolveTronHome(environment = process.env): string {
-  const explicit = environment.TRON_DATA_DIR;
-  if (explicit) {
-    if (!isAbsolute(explicit)) throw new GatewayError("invalid_request", "TRON_DATA_DIR must be absolute");
-    return resolve(explicit);
+  try {
+    return resolveTronHomePath(environment);
+  } catch (error) {
+    if (error instanceof Error) throw new GatewayError("invalid_request", error.message);
+    throw error;
   }
-  const homeName = environment.TRON_HOME_NAME;
-  if (homeName) {
-    if (homeName === "." || homeName === ".." || homeName.includes("/")) {
-      throw new GatewayError("invalid_request", "TRON_HOME_NAME must be one home-relative directory name");
-    }
-    return join(homedir(), homeName);
-  }
-  return join(homedir(), ".tron");
 }

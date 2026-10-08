@@ -10,16 +10,21 @@ Run: python3 -m unittest discover -s tools/work
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import io
 import json
 import os
+import select
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
+import zlib
 from pathlib import Path
 
 import acceptance
@@ -70,12 +75,19 @@ FAKE_JOURNEY = textwrap.dedent(
         os.kill(os.getppid(), signal.SIGINT)
         time.sleep(spec.get("wound_down_after", 1.0))
         note("wound down")
+    if spec.get("trap_sigint"):
+        def wind_down(*_):
+            note("cleanup")
+            sys.exit(130)
+        signal.signal(signal.SIGINT, wind_down)
+    if spec.get("handler_signal"):
+        os.kill(os.getppid(), signal.SIGUSR2)
+    if spec.get("delay_ready"):
+        signal.pause()
+    if spec.get("ready_signal"):
+        # The parent test forces timeout only after SIGINT is known to be handled.
+        os.kill(os.getppid(), signal.SIGUSR1)
     if spec.get("sleep"):
-        if spec.get("trap_sigint"):
-            def wind_down(*_):
-                note("cleanup")
-                sys.exit(130)
-            signal.signal(signal.SIGINT, wind_down)
         time.sleep(spec["sleep"])
         note("wound down")
     if spec.get("report", True):
@@ -329,6 +341,270 @@ def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+@contextlib.contextmanager
+def _owned_test_processes(disable_automatic_maintenance: bool = True):
+    saved = {key: value for key, value in os.environ.items() if key.startswith("GIT_CONFIG_")}
+    for key in tuple(os.environ):
+        if key.startswith("GIT_CONFIG_"):
+            os.environ.pop(key)
+    if disable_automatic_maintenance:
+        os.environ.update({"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "gc.auto",
+                           "GIT_CONFIG_VALUE_0": "0", "GIT_CONFIG_KEY_1": "maintenance.auto",
+                           "GIT_CONFIG_VALUE_1": "false"})
+    original_popen = subprocess.Popen
+    processes = []
+
+    def owned_popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    subprocess.Popen = owned_popen
+    try:
+        yield
+    finally:
+        subprocess.Popen = original_popen
+        try:
+            for process in processes:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+        finally:
+            for key in tuple(os.environ):
+                if key.startswith("GIT_CONFIG_"):
+                    os.environ.pop(key)
+            os.environ.update(saved)
+
+
+def _release_child_and_close(release_child, process_owner, fifo_descriptors):
+    try:
+        release_child()
+    finally:
+        try:
+            process_owner.__exit__(None, None, None)
+        finally:
+            for fd in fifo_descriptors:
+                os.close(fd)
+
+
+class GitMaintenanceCleanupTests(unittest.TestCase):
+    def test_child_release_failure_still_restores_process_owner_and_closes_fifos(self):
+        temporary = tempfile.TemporaryDirectory()
+        with temporary:
+            fifo = Path(temporary.name) / "cleanup.fifo"
+            os.mkfifo(fifo)
+            fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+            original_popen = subprocess.Popen
+            original_git_config = os.environ.get("GIT_CONFIG_COUNT")
+            owner = _owned_test_processes()
+            owner.__enter__()
+
+            def fail_release():
+                raise RuntimeError("injected child-release failure")
+
+            with self.assertRaisesRegex(RuntimeError, "injected child-release failure"):
+                _release_child_and_close(fail_release, owner, (fd,))
+
+            self.assertIs(subprocess.Popen, original_popen)
+            self.assertEqual(os.environ.get("GIT_CONFIG_COUNT"), original_git_config)
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+
+    def _auto_gc_cleanup(self, disable_automatic_maintenance: bool):
+        temporary_directory = tempfile.TemporaryDirectory()
+        temporary = temporary_directory.name
+        with temporary_directory:
+            process_owner = _owned_test_processes(disable_automatic_maintenance)
+            process_owner.__enter__()
+            owner_closed = False
+
+            def close_process_owner():
+                nonlocal owner_closed
+                if not owner_closed:
+                    owner_closed = True
+                    process_owner.__exit__(None, None, None)
+
+            original_cleanup = temporary_directory.cleanup
+            cleanup_body = None
+
+            def owned_cleanup():
+                if cleanup_body is None:
+                    close_process_owner()
+                    original_cleanup()
+                else:
+                    cleanup_body()
+
+            temporary_directory.cleanup = owned_cleanup
+            root = Path(temporary)
+            remote = root / "remote.git"
+            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            subprocess.run(["git", "config", "gc.auto", "1"], cwd=remote, check=True)
+            subprocess.run(["git", "config", "maintenance.auto", "true"], cwd=remote, check=True)
+            subprocess.run(["git", "config", "core.hooksPath", str(remote / "hooks")],
+                           cwd=remote, check=True)
+            # The owned writer waits until cleanup has enumerated remote.git, then writes before rmdir.
+            objects = remote / "objects"
+            for index in range(7001):
+                content = f"loose-object-{index}".encode()
+                data = f"blob {len(content)}\0".encode() + content
+                oid = hashlib.sha1(data).hexdigest()
+                object_path = objects / oid[:2] / oid[2:]
+                object_path.parent.mkdir(parents=True, exist_ok=True)
+                object_path.write_bytes(zlib.compress(data))
+
+            ready, trigger = (root / name for name in ("ready", "trigger"))
+            for fifo in (ready, trigger):
+                os.mkfifo(fifo)
+            writer = root / "writer.py"
+            writer.write_text(
+                f"#!{sys.executable}\n"
+                "import pathlib, sys\n"
+                "remote = pathlib.Path(sys.argv[1])\n"
+                "trigger = pathlib.Path(sys.argv[2])\n"
+                "with trigger.open('rb') as wait_handle:\n"
+                "    wait_handle.read(1)\n"
+                "(remote / 'late-writer').write_text('concurrent child\\n')\n")
+            writer.chmod(0o755)
+            hook = remote / "hooks" / "pre-auto-gc"
+            hook.write_text(
+                f"#!{sys.executable}\n"
+                "import os\n"
+                f"fd = os.open({str(ready)!r}, os.O_WRONLY)\n"
+                "os.write(fd, b'hook')\n"
+                "os.close(fd)\n")
+            hook.chmod(0o755)
+            ready_fd = os.open(ready, os.O_RDWR | os.O_NONBLOCK)
+            trigger_fd = os.open(trigger, os.O_RDWR | os.O_NONBLOCK)
+            child_started = False
+            child_released = False
+            writer_process = None
+            original_scandir = shutil.os.scandir
+
+            def release_child():
+                nonlocal child_released
+                if child_released:
+                    return
+                child_released = True
+                os.write(trigger_fd, b"x")
+                try:
+                    writer_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    writer_process.terminate()
+                    try:
+                        writer_process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        writer_process.kill()
+                        writer_process.wait()
+                    raise AssertionError("Git's background hook writer did not terminate")
+                finally:
+                    if writer_process.poll() is None:
+                        writer_process.terminate()
+                        try:
+                            writer_process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            writer_process.kill()
+                            writer_process.wait()
+
+            class CleanupScandir:
+                def __init__(self, iterator):
+                    self.iterator = iterator
+                    self.triggered = False
+
+                def __enter__(self):
+                    self.iterator.__enter__()
+                    return self
+
+                def __exit__(self, *args):
+                    return self.iterator.__exit__(*args)
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    try:
+                        return next(self.iterator)
+                    except StopIteration:
+                        if not self.triggered:
+                            self.triggered = True
+                            release_child()
+                            close_process_owner()
+                        raise
+
+            def cleanup_scandir(path):
+                iterator = original_scandir(path)
+                if isinstance(path, int) and os.fstat(path).st_ino == remote.stat().st_ino:
+                    return CleanupScandir(iterator)
+                return iterator
+
+            cleanup_error = None
+
+            def controlled_cleanup():
+                nonlocal cleanup_error
+                if child_started:
+                    shutil.os.scandir = cleanup_scandir
+                if not child_started:
+                    close_process_owner()
+                try:
+                    original_cleanup()
+                except OSError as error:
+                    cleanup_error = error
+                finally:
+                    shutil.os.scandir = original_scandir
+                    if child_started and not child_released:
+                        _release_child_and_close(release_child, process_owner, (ready_fd, trigger_fd))
+                        owner_closed = True
+                    else:
+                        try:
+                            close_process_owner()
+                        finally:
+                            for fd in (ready_fd, trigger_fd):
+                                os.close(fd)
+                if Path(temporary).exists():
+                    shutil.rmtree(temporary)
+
+            cleanup_body = controlled_cleanup
+            try:
+                effective_auto = subprocess.run(["git", "config", "--get", "gc.auto"],
+                                                cwd=root, capture_output=True, text=True)
+                effective_maintenance = subprocess.run(["git", "config", "--get", "maintenance.auto"],
+                                                       cwd=root, capture_output=True, text=True)
+                if disable_automatic_maintenance:
+                    self.assertEqual(effective_auto.stdout.strip(), "0")
+                    self.assertEqual(effective_maintenance.stdout.strip(), "false")
+                else:
+                    self.assertEqual(effective_auto.returncode, 1)
+                    self.assertEqual(effective_maintenance.returncode, 1)
+                if not disable_automatic_maintenance:
+                    writer_process = subprocess.Popen(
+                        [sys.executable, str(writer), str(remote), str(trigger)],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True)
+                    child_started = True
+                subprocess.run(["git", "-c", "gc.autoDetach=false", "--git-dir", str(remote),
+                                "gc", "--auto"], cwd=root, check=True, capture_output=True)
+                if disable_automatic_maintenance:
+                    readable, _, _ = select.select([ready_fd], [], [], 0.1)
+                    self.assertFalse(readable, "automatic GC unexpectedly ran its writer hook")
+                else:
+                    readable, _, _ = select.select([ready_fd], [], [], 10)
+                    self.assertTrue(readable, "eligible Git auto-GC did not run its hook")
+                    self.assertEqual(os.read(ready_fd, 4), b"hook")
+            except OSError as error:
+                cleanup_error = error
+        return cleanup_error
+
+    def test_auto_gc_writer_racing_temporary_directory_cleanup_is_prevented(self):
+        control_error = self._auto_gc_cleanup(disable_automatic_maintenance=False)
+        self.assertIsNotNone(control_error)
+        self.assertEqual(control_error.errno, errno.ENOTEMPTY)
+        self.assertEqual(Path(control_error.filename).name, "remote.git")
+        self.assertIsNone(self._auto_gc_cleanup(disable_automatic_maintenance=True))
+
+
 class LandFixture(unittest.TestCase):
     def setUp(self):
         quiet = contextlib.redirect_stdout(io.StringIO())
@@ -336,6 +612,9 @@ class LandFixture(unittest.TestCase):
         self.addCleanup(quiet.__exit__, None, None, None)
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
+        process_owner = _owned_test_processes()
+        process_owner.__enter__()
+        self.addCleanup(process_owner.__exit__, None, None, None)
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
         git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
@@ -396,6 +675,13 @@ class LandFixture(unittest.TestCase):
         self.addCleanup(self._restore, saved)
         self.sleeps = []
         self.now = 0.0
+
+    @staticmethod
+    def _restore_git_config(saved: dict) -> None:
+        for key in tuple(os.environ):
+            if key.startswith("GIT_CONFIG_"):
+                os.environ.pop(key)
+        os.environ.update(saved)
 
     @staticmethod
     def _restore(saved: dict) -> None:
@@ -985,17 +1271,94 @@ class AcceptanceLandingTests(LandFixture):
         self.assertIn("failed (exit 3)", str(raised.exception))
         self.assert_nothing_published()
 
+    def _journey_wait_seam(self, ready, *, force_not_ready=False, handler_installed=None):
+        popen = acceptance.subprocess.Popen
+        self.controlled_journeys = []
+
+        def spawn(*args, **kwargs):
+            process = popen(*args, **kwargs)
+            wait = process.wait
+
+            def wait_for_bound(timeout=None):
+                if timeout != 1:
+                    return wait(timeout=timeout)
+                self.controlled_journeys.append(process)
+                if force_not_ready:
+                    if handler_installed is not None:
+                        handler_installed.wait(timeout=5)
+                    readiness_failed = True
+                else:
+                    readiness_failed = not ready.wait(timeout=5)
+                if readiness_failed:
+                    try:
+                        process.send_signal(signal.SIGINT)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        wait()
+                    raise AssertionError("journey did not become ready before the test bound")
+                raise subprocess.TimeoutExpired(process.args, timeout)
+
+            process.wait = wait_for_bound
+            return process
+
+        return popen, spawn
+
     def test_a_journey_that_passes_its_bound_is_interrupted_and_winds_down_itself(self):
         self.journey_timeout(PAIR, 1)
-        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "report": False}})
-        with self.assertRaises(acceptance.AcceptanceError) as raised:
-            self.land(acceptance=PAIR)
+        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "ready_signal": True, "report": False}})
+        ready = threading.Event()
+        previous_handler = signal.getsignal(signal.SIGUSR1)
+        signal.signal(signal.SIGUSR1, lambda *_: ready.set())
+        popen, wait_seam = self._journey_wait_seam(ready)
+        try:
+            acceptance.subprocess.Popen = wait_seam
+            with self.assertRaises(acceptance.AcceptanceError) as raised:
+                self.land(acceptance=PAIR)
+        finally:
+            acceptance.subprocess.Popen = popen
+            signal.signal(signal.SIGUSR1, previous_handler)
         message = str(raised.exception)
         self.assertIn("passed its 1s bound", message)
         self.assertIn("interrupted (exit 130)", message)
         # SIGINT reached the journey and its own wind-down ran; land never killed it.
         self.assertIn(f"{PAIR} cleanup", self.journey_runs())
         self.assertNotIn(f"{PAIR} wound down", self.journey_runs())
+        [journey_process] = self.controlled_journeys
+        self.assertEqual(journey_process.returncode, 130)
+        self.assert_nothing_published()
+
+    def test_a_journey_readiness_failure_stops_and_joins_the_exact_child(self):
+        self.journey_timeout(PAIR, 1)
+        self.spec({PAIR: {"sleep": 60, "trap_sigint": True, "handler_signal": True,
+                          "delay_ready": True, "ready_signal": True, "report": False}})
+        ready = threading.Event()
+        handler_installed = threading.Event()
+        previous_ready_handler = signal.getsignal(signal.SIGUSR1)
+        previous_installed_handler = signal.getsignal(signal.SIGUSR2)
+        signal.signal(signal.SIGUSR1, lambda *_: ready.set())
+        signal.signal(signal.SIGUSR2, lambda *_: handler_installed.set())
+        popen, wait_seam = self._journey_wait_seam(ready, force_not_ready=True,
+                                                   handler_installed=handler_installed)
+        try:
+            acceptance.subprocess.Popen = wait_seam
+            with self.assertRaisesRegex(AssertionError, "did not become ready"):
+                self.land(acceptance=PAIR)
+        finally:
+            acceptance.subprocess.Popen = popen
+            signal.signal(signal.SIGUSR1, previous_ready_handler)
+            signal.signal(signal.SIGUSR2, previous_installed_handler)
+        [journey_process] = self.controlled_journeys
+        self.assertIsNotNone(journey_process.returncode)
+        self.assertFalse(ready.is_set(), "a late readiness signal survived child cleanup")
+        if handler_installed.is_set():
+            self.assertEqual(journey_process.returncode, 130)
+            self.assertIn(f"{PAIR} cleanup", self.journey_runs())
+        else:
+            self.assertEqual(journey_process.returncode, -signal.SIGINT)
         self.assert_nothing_published()
 
     def test_an_interrupted_land_waits_for_the_journey_to_wind_down(self):

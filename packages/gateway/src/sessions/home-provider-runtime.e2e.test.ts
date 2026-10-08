@@ -14,6 +14,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { installOpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 
 // #480 A1-A4, found live: Home's chat reached Pi's built-in Anthropic provider
 // instead of the user's CortexKit package. A user package registers its provider
@@ -35,6 +36,7 @@ const report: { generatedAt: string; cases: CaseReport[] } = { generatedAt: new 
   { name: "provider lifecycle reaches the Gateway-wide runtime", status: "not-run" },
   { name: "context-window override remains session-local", status: "not-run" },
   { name: "unregistered provider remains unreachable", status: "not-run" },
+  { name: "shared eligibility survives Home rebuild and disposal", status: "not-run" },
 ] };
 function trackCase(index: number): void {
   onTestFinished(({ task }) => {
@@ -164,6 +166,33 @@ describe.sequential("Home's chat runtime", () => {
     report.cases[1]!.observations = { ...report.cases[1]!.observations, restoredWindow, sharedWindowAfterRestore };
     expect(restoredWindow).toBe(catalogWindow);
     expect(sharedWindowAfterRestore).toBe(catalogWindow);
+  });
+
+  it("borrows shared model eligibility without replacing filters across Home rebuild and disposal", async () => {
+    trackCase(3);
+    const f = await fixture({ shareGatewayRuntime: true });
+    const eligibility = installOpenAIModelEligibility(f.gateway);
+    const provider = f.gateway.getProvider("openai")!;
+    expect(provider.filterModels).toBeTypeOf("function");
+    await f.service.invoke(client, "home.designate", { commandId: "eligibility-designate", model: PACKAGE });
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    for (let rebuild = 0; rebuild < 3; rebuild += 1) {
+      const home = await f.registry.acquire(status.sessionId!);
+      expect(f.gateway.getProvider("openai")).toBe(provider);
+      expect(openAIModelEligibility(sessionOf(home).modelRuntime)).toBe(eligibility);
+      await f.service.invoke(client, "home.disable", { commandId: `eligibility-disable-${rebuild}` });
+      await f.service.invoke(client, "home.designate", { commandId: `eligibility-redesignate-${rebuild}`, model: PACKAGE });
+    }
+    const ordinary = await f.registry.create(f.root);
+    const ordinaryRuntime = sessionOf(ordinary).modelRuntime;
+    expect(openAIModelEligibility(ordinaryRuntime)).toBeDefined();
+    await ordinary.setModel(BUILTIN.provider, BUILTIN.id);
+    expect(ordinary.snapshot().model).toMatchObject(BUILTIN);
+    await f.registry.dispose();
+    expect(openAIModelEligibility(f.gateway)).toBe(eligibility);
+    expect(f.gateway.getProvider("openai")).toBe(provider);
+    expect(openAIModelEligibility(ordinaryRuntime)).toBeUndefined();
+    report.cases[3]!.observations = { rebuilds: 3, sharedProviderUnchanged: true, sharedEligibilitySurvived: true, ordinaryDetached: true };
   });
 
   // A1's negative control: the same Home on a runtime without the package provider cannot reach it.
