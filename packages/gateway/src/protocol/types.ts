@@ -1026,6 +1026,50 @@ export type HooksProjection = HookRegistrationProjection;
 
 /** The capability string `hello`/`system.info` advertise for Tron Home. */
 export const HOME_CAPABILITY = "home.v1";
+/** Native browser reads are separately gated; older home.v1 servers lack them. */
+export const HOME_MEMORY_BROWSER_CAPABILITY = "home-memory-browser.v1";
+
+/** Physical canonical identity, never a projected memory line address. */
+export interface HomeMemoryEvidence {
+  index: number;
+  sessionId: string;
+  entryId: string;
+  sourceDigest: string;
+}
+
+export interface HomeMemoryItem {
+  index: number;
+  kind: "user" | "talk" | "echo" | "event";
+  attribution: "user" | "assistant" | "tool" | "event";
+  timestamp?: string;
+  evidence: HomeMemoryEvidence;
+  projection: { format: "memory-projection"; text: string; omitted: boolean; omissions: string[] };
+  /** A leaf summary, not canonical evidence; null while unbuilt/invalidated. */
+  summary: { format: "memory-summary"; text: string; truncated: boolean } | null;
+}
+
+/** home.memory.page: at most 50 rows and 128 KiB encoded JSON. */
+export interface HomeMemoryPage {
+  homeId: string;
+  revision: string;
+  totalItems: number;
+  items: HomeMemoryItem[];
+  nextCursor?: string;
+}
+
+/** home.memory.evidence: the shared history owner's bounded content rendering.
+ * Not raw JSONL or attachment bytes. Off-branch/context-edited originals remain
+ * canonical facts; their projected exclusions do not erase the source. */
+export interface HomeMemoryEvidencePage {
+  format: "canonical-history";
+  evidence: HomeMemoryEvidence;
+  text: string;
+  offset: number;
+  nextOffset?: number;
+  previousOffset?: number;
+  totalCharacters: number;
+  metadata: Record<string, JsonValue>;
+}
 
 /** `home.status`: the one bounded Home projection. It is a read and performs no
  * inference. `available` is false only when a stored record exists but cannot be

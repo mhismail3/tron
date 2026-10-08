@@ -348,7 +348,8 @@ session's change and does not touch the record.
 ## RPCs and capability
 
 `home.v1` is advertised in `hello`/`system.info` when the Gateway has a Home
-owner.
+owner. `home-memory-browser.v1` additionally gates the typed native memory
+browser endpoints below; `home.v1` alone does not promise a browser contract.
 
 - `home.status` is one bounded read that composes the record, memory status and
   `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
@@ -408,6 +409,82 @@ owner.
 - `home.context` is a read with no parameters: the bounded request context of
   Home's current or last activation (see [Activations](#activations)), never a
   message body.
+
+### Typed memory browser
+
+`home.memory.page` and `home.memory.evidence` are disposable authenticated reads,
+not receipted mutations. Their types live in `src/protocol/types.ts`; parameter
+admission and row bounds live in `src/home/home-memory-browser.ts`. They read the
+existing configured memory, including a disabled/paused Home. They may open its
+store and refresh the catalog through the episodic ingestion owner, but **never
+admit compactor calls, resume a block, send a prompt, or materialize a chapter**.
+Already-running compactor work may finish concurrently. Unconfigured memory
+refuses with `conflict`; no provable canonical cut refuses with retryable `busy`.
+
+- `home.memory.page` accepts only `{ limit?, cursor? }`. `limit` is a safe integer
+  from 1 through 50 (default 20). The response is `{ homeId, revision,
+  totalItems, items, nextCursor? }`, oldest stable catalog index first, at most
+  `limit` rows and **128 KiB encoded JSON**. A byte-limited page continues at the
+  first unreturned index, not past it. Each row contains `index`, `kind`, semantic
+  `attribution` (`user`, `assistant`, `tool`, `event`), canonical `timestamp` when
+  known, `evidence`, `projection`, and `summary`.
+- `projection` is `{ format: "memory-projection", text, omitted, omissions }`.
+  It is capped/redacted catalog text, **never exact evidence**. The browser keeps
+  at most 4,096 UTF-16 characters without splitting a surrogate pair; additional
+  clipping adds `browser-cap` to the original omissions. Context replacements
+  carry `context-edit`, including non-null replacements. An omitted/off-branch
+  slot remains explicitly visible instead of silently renumbering later rows.
+- `summary` is a leaf summary `{ format: "memory-summary", text, truncated }`
+  under the same 4,096-character bound, or `null` if unbuilt/invalidated. It is
+  not an exact transcript, even when a short free node quotes projected text.
+- `evidence` is `{ index, sessionId, entryId, sourceDigest }`: physical chapter,
+  canonical entry identity, and SHA-256 of its original JSONL line. It is not a
+  filesystem path or a projected/summary address. Identity strings are bounded
+  to 200 UTF-8 bytes at admission, the digest is exactly 64 lowercase hex digits,
+  and `index` is a nonnegative safe integer. References must match the current
+  catalog; arbitrary/cross-session identities refuse with `conflict`.
+- Continuations are canonical base64url JSON `{ revision, offset, limit }`, at
+  most 1,024 characters. Repeat the same `limit` when continuing. Replay returns
+  the same page while unchanged. The content-derived revision covers stable
+  Home identity, generation, committed catalog/node revision and per-chapter
+  source cuts. Append, context/branch invalidation, summary settlement or a
+  changed chapter cut invalidates the continuation with retryable `conflict`,
+  reason `home-memory-revision-changed`. Reload page one; no hidden cursor cache
+  or automatic retry exists. An unchanged durable cut may retain its revision
+  across restart. Cursor offsets beyond the catalog and changed page limits
+  refuse, rather than clamping to unrelated data.
+- `home.memory.evidence` accepts only `{ evidence, offset? }`, with a nonnegative
+  safe integer content offset (default 0). It returns `{ format:
+  "canonical-history", evidence, text, offset, nextOffset?, previousOffset?,
+  totalCharacters, metadata }`. The shared canonical-history owner renders at
+  most **24,000 UTF-16 characters** per page, with surrogate-safe offsets and
+  bounded scalar metadata. Text comes from the original canonical entry, not
+  the redacted/capped catalog or a context replacement. This is canonical
+  **history content**, not raw JSONL, attachment bytes, or a lossless encoding
+  of every SDK field; images/structured parts use the existing history renderer.
+  Exact content can include credentials originally written into history: it is
+  for the authenticated reader, never a diagnostic payload. An out-of-range or
+  surrogate-interior offset is `invalid_request`.
+
+Every browser read proves the complete frozen Home cut through the canonical
+per-chapter index before returning anything, then fences the exact ledger,
+binding and memory revision after its awaits. The evidence reader retains only
+the selected bounded canonical line and proves its chapter prefix again at use;
+it never opens a writer-capable `SessionManager`. Missing/changed/malformed
+sources yield no partial successful page or evidence, even if an earlier chapter
+was readable (`busy`, reason `home-memory-source-unavailable`). Unknown fields,
+malformed bounds and malformed cursors are `invalid_request`. Source details,
+references and content are not logged. Both endpoints use the shared disposable
+read deadline/cancellation owner; cancellation never cancels a prompt or accepted
+mutation. Proof work streams raw lines but traverses the admitted compact index,
+so its cost scales with the Home history, not just the returned page size.
+
+The real-source Gateway journey in `src/sessions/home-activation.e2e.test.ts`
+(`memory browser contract`) covers two physical chapters, canonical evidence,
+byte-limited continuation, edits/append/summary invalidation, restart, cancellation,
+concurrent summary settlement, disabled no-spend reads and partial source failure.
+It retains `test-results/home-activation/report.json`. No persisted Home/episodic
+format or client cache is introduced by this contract.
 
 Enable, disable and profile/model changes use the same serialized profile owner.
 A profile change must take effect before the session's next prompt, so a live

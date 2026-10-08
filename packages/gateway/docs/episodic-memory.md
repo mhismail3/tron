@@ -26,6 +26,20 @@ it the commits the runtime reports, and sends each activation the view it render
   Ingestion, invalidation and `resume()` are serialized behind one mutex; the
   pump is not, so a build may still be running when the next commit invalidates
   nodes (see **Concurrency** below).
+- `ingestForRead(sessionId)` refreshes only the catalog/cursor through that same
+  ingestion mutex, without admitting compactor work. Home's native browser uses
+  it so opening a paused or disabled Home's memory cannot create provider spend.
+  `withBrowserRead` shares the mutex through canonical proof, preventing a reader
+  from copying a partially appended catalog/invalidation batch. The pump can
+  still settle; the Home binding fences the exact committed revision afterwards.
+  Catalog equality includes canonical line digest, timestamp and omission
+  attribution, not only projected text: same-text canonical revisions still
+  refresh evidence references and dates. Text-identical nodes are retained,
+  so metadata-only changes do not cause new summary spend.
+  Browser page identity/data are derived from this memory's current catalog,
+  nodes and chapter cursor, not from tool-output strings or a second cache. The
+  typed formats, bounds and exact-history distinction are owned by
+  [Home's browser contract](home.md#typed-memory-browser).
 - `dispose()` sets this memory closed, aborts in-flight compactor calls, **waits
   for the mutex** — so an ingest already appending to the store finishes before
   the opener is released — then awaits the pump, releases the waiter list and
@@ -187,7 +201,7 @@ holds only the projection, never canonical text:
 | `message` role `assistant` | `talk` | text parts, plus `[call <name> <JSON args>]` per tool call; thinking parts are excluded and recorded as an omission |
 | `message` role `toolResult` | `echo` | `tool <name>: <content>`, capped at `CAP` characters with head and tail kept |
 | `custom_message` with `display: true` | `event` | its text |
-| `context_edit` | — | not a message: it replaces its target's content, or makes it `[omitted]` when the replacement is null |
+| `context_edit` | — | not a message: it replaces its target's content (with a `context-edit` omission marker), or makes it `[omitted]` when the replacement is null |
 
 Everything else — a `custom_message` with `display: false`, a system message, a
 `model_change`, a `thinking_level_change`, a label, a `custom` bookkeeping entry

@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
+import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryPage, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { historyEntry } from "../sessions/history.js";
+import type { EpisodicMemory } from "../episodic/episodic-memory.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryPageRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
-import { EpisodicMemoryError, type EpisodicDiagnostic } from "../episodic/episodic-contract.js";
-import type { EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
-import { readCanonicalHomeDeltas, readCanonicalHomeIndex, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
+import { EPISODIC_DEFAULTS, EpisodicMemoryError, type EpisodicDiagnostic } from "../episodic/episodic-contract.js";
+import { EpisodicSourceChangedError, type EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
+import { readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durablePublishBoundedJson, isDurablePublicationUncertain } from "../util/durable-json.js";
@@ -676,6 +680,61 @@ export class HomeOwner {
       spentTokens: persisted.spend,
       ...(persisted.blocked ? { blocked: persisted.blocked.reason } : {}),
     };
+  }
+
+  async memoryPage(request: HomeMemoryPageRequest, signal?: AbortSignal): Promise<HomeMemoryPage> {
+    return this.browserRead(async memory => memory.browserPage(request), signal);
+  }
+
+  async memoryEvidence(evidence: HomeMemoryEvidence, offset: number, signal?: AbortSignal): Promise<HomeMemoryEvidencePage> {
+    return this.browserRead(async (memory, source) => {
+      // Refuse arbitrary/cross-chapter references before opening evidence.
+      memory.browserEvidence(evidence);
+      const cursor = memory.browserCursor();
+      if (!cursor) throw homeMemorySourceUnavailable();
+      const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal);
+      signal?.throwIfAborted();
+      const { runtimeGeneration: _generation, entryId: _entryId, ...content } = historyEntry(
+        { getEntry: id => id === entry.id ? entry.raw as unknown as SessionEntry : undefined },
+        memory.browserRevision(), evidence.entryId, offset,
+      );
+      return { format: "canonical-history", evidence: { ...evidence }, ...content };
+    }, signal);
+  }
+
+  /** One read boundary proves every admitted chapter and fences both ledger
+   * and memory revisions. No partial success, cursor registry or transcript cache. */
+  private async browserRead<T>(read: (memory: EpisodicMemory, source: HomeSourceSnapshot) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.mutex.run(async () => {
+      signal?.throwIfAborted();
+      this.assertAvailable();
+      const record = this.record;
+      if (!record?.memory) throw new GatewayError("conflict", "Home memory is not configured");
+      const owner = this.ownerFor(record.homeId);
+      try {
+        await owner.configure(record.memory);
+        signal?.throwIfAborted();
+        return await owner.browserRead(async memory => {
+          const cursor = memory.browserCursor();
+          if (!cursor) throw homeMemorySourceUnavailable();
+          const source = await this.readHomeSource();
+          signal?.throwIfAborted();
+          // Consume to completion: a late chapter failure cannot publish an
+          // earlier chapter as a complete page or exact evidence.
+          for await (const _entry of readCanonicalHomeIndex(source, cursor, EPISODIC_DEFAULTS, signal)) { /* proof only */ }
+          signal?.throwIfAborted();
+          const result = await read(memory, source);
+          signal?.throwIfAborted();
+          if (this.record !== record || this.memory?.owner !== owner) throw homeMemoryRevisionChanged();
+          return result;
+        }, signal);
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof GatewayError) throw error;
+        if (error instanceof EpisodicMemoryError || error instanceof EpisodicSourceChangedError || error instanceof HomeMemoryRefusal) throw homeMemorySourceUnavailable();
+        throw error;
+      }
+    }, signal);
   }
 
   /**

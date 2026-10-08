@@ -6,6 +6,7 @@ import {
 } from "../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable } from "./home-memory-browser.js";
 import { localTimestampText } from "../util/timestamp.js";
 import type { HomeMemoryStatus, ModelRef } from "../protocol/types.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -374,6 +375,28 @@ export class HomeMemory {
     await this.mutex.run(() => this.closeLocked());
     this.config = undefined;
     this.summarizer = undefined;
+  }
+
+  /** Browser reads share the binding's lifetime, but never wait for summaries.
+   * Ingestion stays with its existing owner; canonical proof happens before the
+   * final exact revision fence, so a concurrent commit cannot publish old data. */
+  async browserRead<T>(read: (memory: EpisodicMemory) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.mutex.run(async () => {
+      signal?.throwIfAborted();
+      const binding = await this.bindingForViewLocked();
+      signal?.throwIfAborted();
+      await binding.memory.ingestForRead(this.options.sessionId, signal);
+      signal?.throwIfAborted();
+      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable();
+      return binding.memory.withBrowserRead(async () => {
+        signal?.throwIfAborted();
+        const revision = binding.memory.browserRevision();
+        const result = await read(binding.memory);
+        signal?.throwIfAborted();
+        if (this.binding !== binding || revision !== binding.memory.browserRevision()) throw homeMemoryRevisionChanged();
+        return result;
+      }, signal);
+    }, signal);
   }
 
   // ---- the agent-facing tools (docs/home.md) -----------------------------------

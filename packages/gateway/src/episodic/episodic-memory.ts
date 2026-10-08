@@ -1,4 +1,7 @@
 import { join } from "node:path";
+import { GatewayError } from "../errors.js";
+import type { HomeMemoryEvidence, HomeMemoryPage } from "../protocol/types.js";
+import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryRevisionChanged, type HomeMemoryPageRequest } from "../home/home-memory-browser.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -245,13 +248,19 @@ export class EpisodicMemory {
    * not need its output.
    */
   async entriesIngested(sessionId: string): Promise<void> {
+    await this.ingestForRead(sessionId);
+    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
+  }
+
+  /** Projection refresh without admitting compactor work. Native reads must
+   * not create provider spend merely by opening a browser (including disabled Home). */
+  async ingestForRead(sessionId: string, signal?: AbortSignal): Promise<void> {
     this.assertOpen();
     if (sessionId !== this.dependencies.sessionId) throw new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session");
     await this.mutex.run(async () => {
       if (this.blocked) return;
       await this.ingest();
-    });
-    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
+    }, signal);
   }
 
   /** Resolves when every part of the view covering messages before `cut` is a
@@ -348,6 +357,55 @@ export class EpisodicMemory {
     const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${viewLine(this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
     const text = lines.join("\n");
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
+  }
+
+  /** A browser cannot observe a partly appended catalog/invalidation batch.
+   * The pump may settle concurrently; HomeMemory fences that node revision. */
+  async withBrowserRead<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.mutex.run(read, signal);
+  }
+
+  /** Content-derived page identity belongs to this memory, not an RPC cache.
+   * No await separates copying a row, its summary and the cursor revision. */
+  browserRevision(): string {
+    this.assertOpen();
+    return episodicDigest(JSON.stringify([this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor]));
+  }
+
+  browserCursor(): EpisodicSourceCursor | null {
+    this.assertOpen();
+    return this.sourceCursor ? structuredClone(this.sourceCursor) : null;
+  }
+
+  browserEvidence(evidence: HomeMemoryEvidence): EpisodicMessageRecord {
+    this.assertOpen();
+    const message = this.messages.get(evidence.index);
+    if (!message || message.sessionId !== evidence.sessionId || message.entryId !== evidence.entryId
+      || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
+    return { ...message, omissions: [...message.omissions] };
+  }
+
+  browserPage(request: HomeMemoryPageRequest): HomeMemoryPage {
+    this.assertOpen();
+    const revision = this.browserRevision();
+    if (request.cursor && request.cursor.revision !== revision) throw homeMemoryRevisionChanged();
+    const offset = request.cursor?.offset ?? 0;
+    if (offset > this.messages.size || request.cursor && offset === this.messages.size) throw homeMemoryRevisionChanged();
+    const result: HomeMemoryPage = { homeId: this.dependencies.sessionId, revision, totalItems: this.messages.size, items: [] };
+    let position = offset;
+    // Leave room for the largest cursor and page metadata. Each row is bounded
+    // independently, so one row always fits and no cursor can strand a row.
+    let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
+    for (; position < this.messages.size && result.items.length < request.limit; position += 1) {
+      const message = this.messages.get(position)!;
+      const item = homeMemoryItem(message, this.nodes.get(nodeAddress(0, position)));
+      const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+      if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
+      bytes += size; result.items.push(item);
+    }
+    if (!result.items.length && position < this.messages.size) throw new GatewayError("unsupported", "Home memory row exceeds the browser bound");
+    if (position < this.messages.size) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: position, limit: request.limit });
+    return result;
   }
 
   /**
@@ -627,14 +685,19 @@ export class EpisodicMemory {
           await this.block("source-unavailable", "Canonical entry ID belongs to another physical chapter");
           return;
         }
-        if (current && current.text === message.text && current.omitted === message.omitted && current.kind === message.kind) continue;
+        const sameContent = current?.text === message.text && current.omitted === message.omitted && current.kind === message.kind;
+        // Canonical identity/date and omission attribution can change without
+        // changing projected text. Keep the catalog's evidence current while
+        // retaining text-identical summary nodes (no new provider spend).
+        if (sameContent && current.sourceDigest === message.sourceDigest && current.timestamp === message.timestamp
+          && JSON.stringify(current.omissions) === JSON.stringify(message.omissions)) continue;
         const record: EpisodicMessageRecord = {
           revision: this.takeRevision(), index: existing, ...message,
           sessionId: message.sourceSessionId ?? this.dependencies.sessionId,
         };
         await this.appendCatalog(record);
         this.setMessage(record);
-        changed.push(existing);
+        if (!sameContent) changed.push(existing);
       }
 
       if (!cut.incremental) {

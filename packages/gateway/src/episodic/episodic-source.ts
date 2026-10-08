@@ -593,6 +593,7 @@ export function projectBranch(cut: EpisodicCanonicalCut, limits: EpisodicLimits)
       if (!content) continue;
       kind = content.kind;
       omissions.push(...content.omissions);
+      if (edit !== undefined) omissions.push("context-edit");
       text = content.text;
     }
     // A projectable entry always holds a message slot, even when its own text
