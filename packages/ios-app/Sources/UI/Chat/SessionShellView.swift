@@ -1072,7 +1072,11 @@ struct SessionShellView: View {
             openingSessionID = "home:\(profileID)"
             let navigationIntent = navigationOwner.begin()
             let presentationToken = homeStatusSurfaceToken
-            let ownsUnresolvedCommand = model.homeDesignation.ownsUnresolvedCommand(profileID: profileID)
+            guard let authority = try? model.homeMutations.authority(profileID: profileID) else {
+                openingSessionID = nil
+                return
+            }
+            let ownsUnresolvedCommand = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
             let action = HomePinnedRowPolicy.action(
                 for: model.homeStatus.status,
                 hasUnresolvedCommand: ownsUnresolvedCommand
@@ -1085,8 +1089,11 @@ struct SessionShellView: View {
                     case .open:
                         guard let currentStatus = model.homeStatus.status else { return }
                         status = currentStatus
-                    case .checkReceipt, .designate:
-                        status = try await model.designateHomeAndRefreshStatus()
+                    case .checkReceipt:
+                        try await model.checkHomeControlCompletion(authority: authority)
+                        return
+                    case .designate:
+                        status = try await model.designateHomeAndRefreshStatus(authority: authority)
                     case .unavailable:
                         return
                     }
@@ -1108,8 +1115,8 @@ struct SessionShellView: View {
         } label: {
             HomePinnedRow(
                 status: model.homeStatus.status,
-                isDesignating: model.homeDesignation.isDesignating,
-                hasUnresolvedCommand: model.homeDesignation.ownsUnresolvedCommand(
+                isDesignating: model.homeMutations.isRunning,
+                hasUnresolvedCommand: model.homeMutations.ownsUnresolvedCommand(
                     profileID: model.profiles.selected?.id ?? ""
                 )
             )
@@ -1119,9 +1126,9 @@ struct SessionShellView: View {
             HomePinnedRowPolicy.action(
                 for: model.homeStatus.status,
                 hasUnresolvedCommand: model.profiles.selected.map {
-                    model.homeDesignation.ownsUnresolvedCommand(profileID: $0.id)
+                    model.homeMutations.ownsUnresolvedCommand(profileID: $0.id)
                 } ?? false
-            ) == .unavailable || model.homeDesignation.isDesignating
+            ) == .unavailable || model.homeMutations.isRunning
         )
         .accessibilityIdentifier("home-pinned-row")
         .listRowBackground(Color.clear)

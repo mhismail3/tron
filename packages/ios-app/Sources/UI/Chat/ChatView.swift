@@ -146,6 +146,18 @@ struct ChatView: View {
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if model.homeStatus.isCapabilityEnabled,
+                   let status = model.homeStatus.status,
+                   status.sessionId == sessionID,
+                   status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: model.profiles.selected?.id ?? "") {
+                    HomeChatHeader(
+                        status: status,
+                        canStop: admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil,
+                        onStop: abortCurrentOperation
+                    )
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -2748,18 +2760,7 @@ struct ChatView: View {
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: { sessionPresentation.showContext = true },
             onSend: { behavior in send(behavior: behavior) },
-            onAbort: {
-                // Command identity is canonical authority, not delayed render state.
-                let operation = selectedAuthoritativeSnapshot?.operation
-                let kind = ChatComposerPolicy.abortKind(operation: operation)
-                Task {
-                    await model.abort(
-                        sessionID: sessionID,
-                        kind: kind,
-                        operationID: operation?.id
-                    )
-                }
-            },
+            onAbort: abortCurrentOperation,
             onSelectAttachmentDestination: requestAttachmentPresentation,
             onPasteImages: importPastedImages,
             onCatchUp: catchUpToTail,
@@ -2767,6 +2768,14 @@ struct ChatView: View {
             onComposerHeightSettled: composerHeightSettled
         )
         .environment(\.chatOwnsStatusBar, true)
+    }
+
+    private func abortCurrentOperation() {
+        // Both Home's menu and the composer stop the current authoritative
+        // operation, never an ID captured by a delayed render or Home status.
+        let operation = selectedAuthoritativeSnapshot?.operation
+        let kind = ChatComposerPolicy.abortKind(operation: operation)
+        Task { await model.abort(sessionID: sessionID, kind: kind, operationID: operation?.id) }
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {

@@ -249,7 +249,7 @@ final class AppModel {
     /// Focused-profile, disposable Home status; never a mirror of Home storage.
     let homeStatus = HomeStatusPresentationOwner()
     /// Owns idempotent Home designation receipts independently of dashboard reads.
-    let homeDesignation: HomeDesignationCoordinator
+    let homeMutations: HomeMutationCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
     /// The Library's bounded first-page projection and its preview images. Both
@@ -561,7 +561,7 @@ final class AppModel {
             clock: clock,
             performanceSignposts: appLogSignposts
         )
-        let homeDesignation = HomeDesignationCoordinator(
+        let homeMutations = HomeMutationCoordinator(
             client: client,
             lifecycle: lifecycle,
             mutationExecutor: mutationExecutor,
@@ -738,7 +738,7 @@ final class AppModel {
         self.knowledgeLibraryCache = knowledgeLibraryCache
         self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
-        self.homeDesignation = homeDesignation
+        self.homeMutations = homeMutations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -4751,12 +4751,23 @@ final class AppModel {
         )
     }
 
+    /// Home control effects belong to the receipt owner, not the mounted read.
+    /// A fresh projection is requested only after accepted terminal completion.
+    func performHomeControl(_ command: HomeMutationCoordinator.Command, authority: HomeMutationCoordinator.Authority) async throws {
+        guard command != .designate else { throw CancellationError() }
+        _ = try await homeMutations.perform(command, authority: authority)
+        await homeStatus.refreshMounted()
+    }
+
+    func checkHomeControlCompletion(authority: HomeMutationCoordinator.Authority) async throws {
+        _ = try await homeMutations.checkCompletion(authority: authority)
+        await homeStatus.refreshMounted()
+    }
+
     /// Designates Home through the mutation receipt owner, then requires a fresh
     /// mounted `home.status` projection before exposing its session route.
-    func designateHomeAndRefreshStatus() async throws -> HomeStatusDTO {
-        guard let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
-        let designation = try await homeDesignation.designate(profileID: profileID)
-        guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+    func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatusDTO {
+        let designation = try await homeMutations.designate(authority: authority)
         await homeStatus.refreshMounted()
         guard let status = homeStatus.status,
               status.enabled,

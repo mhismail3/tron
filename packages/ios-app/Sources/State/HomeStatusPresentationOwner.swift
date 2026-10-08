@@ -6,7 +6,8 @@ import TronMobileCore
 /// Required structural sections and closed enums make protocol drift fail closed.
 struct HomeStatusDTO: Decodable, Equatable, Sendable {
     enum Phase: String, Decodable, Sendable {
-        case unavailable, undesignated, disabled, missingSession = "missing-session", blocked, active, ready
+        case unavailable, undesignated, disabled, missingSession = "missing-session"
+        case rolloverPending = "rollover-pending", blocked, paused, active, ready
     }
 
     struct Activation: Decodable, Equatable, Sendable {
@@ -58,6 +59,7 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     struct Memory: Decodable, Equatable, Sendable {
         let configured: Bool
         let open: Bool
+        let paused: Bool?
         let blocked: String?
         let reason: String?
     }

@@ -94,6 +94,8 @@ struct HostedHomeDashboardFixture: View {
     @State private var ready = false
     @State private var error: String?
     @State private var homeStatusCount = 0
+    @State private var controlCount = 0
+    @State private var abortCount = 0
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
     private let gateway: HostedHomeShellGateway
     private let homeActivity = PresentationActivityCoordinator()
@@ -102,7 +104,9 @@ struct HostedHomeDashboardFixture: View {
         let arguments = ProcessInfo.processInfo.arguments
         let capabilityEnabled = !arguments.contains("-home-capability-absent")
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
-        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState)
+        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
+            headerState: arguments.first(where: { $0.hasPrefix("-home-header-state-") })?.replacingOccurrences(of: "-home-header-state-", with: ""),
+            unresolved: arguments.contains("-home-control-unresolved"))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -123,6 +127,8 @@ struct HostedHomeDashboardFixture: View {
                     .tronSettingsLayout()
                     .overlay(alignment: .top) {
                         VStack {
+                            Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
+                            Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
                                 .accessibilityIdentifier("fixture.home-status-count")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.isCapabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
@@ -150,6 +156,7 @@ struct HostedHomeDashboardFixture: View {
             guard ready else { return }
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
+                (controlCount, abortCount) = await gateway.controlCounts()
                 do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             }
         }
@@ -257,12 +264,25 @@ private actor HostedHomeShellGateway {
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
-    init(capabilityEnabled: Bool, initialState: String) {
+    private var controlCount = 0
+    private var abortCount = 0
+    private var phase: String
+    private var paused = false
+    private var configured = true
+    private let unresolved: Bool
+    private var acceptedControl: JSONValue?
+    private var receiptChecks = 0
+    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false) {
         self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
         designated = initialState == "ready"
+        phase = headerState ?? "ready"
+        paused = headerState == "paused"
+        configured = headerState != "unconfigured"
+        self.unresolved = unresolved
     }
     func statusCount() -> Int { homeStatusCount }
+    func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
@@ -279,15 +299,41 @@ private actor HostedHomeShellGateway {
         case "home.designate":
             designated = true
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
+        case "home.pauseMemory", "home.resumeMemory", "home.configureMemory", "home.disable":
+            controlCount += 1
+            if method == "home.pauseMemory" { paused = true; if phase != "active" { phase = "paused" } }
+            if method == "home.resumeMemory" { paused = false; phase = "ready" }
+            if method == "home.configureMemory" { configured = true; phase = "ready" }
+            if method == "home.disable" { designated = false; phase = "disabled" }
+            let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
+            if unresolved {
+                acceptedControl = result
+                return (nil, .object(["code": .string("response_too_large"), "message": .string("Completion unavailable"), "retryable": .bool(false)]))
+            }
+            return (result, nil)
+        case "command.status":
+            receiptChecks += 1
+            if receiptChecks == 1 { return (.object(["status": .string("pending")]), nil) }
+            return (.object(["status": .string("completed"), "result": acceptedControl ?? .null]), nil)
+        case "session.abort":
+            if params["sessionId"]?.stringValue == "home-session", params["operationId"]?.stringValue == "home-operation",
+               params["kind"]?.stringValue == "agent", params["commandId"]?.stringValue != nil {
+                abortCount += 1
+                phase = paused ? "paused" : "ready"
+            }
+            return (.object(["aborted": .bool(abortCount > 0)]), nil)
         case "session.open":
             let sessionID = params["sessionId"]?.stringValue ?? "home-session"
             let snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
-                phase: .idle, name: sessionID == "home-session" ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
+                phase: phase == "active" ? .running : .idle, name: sessionID == "home-session" ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
                 parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
                 stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                     tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
                 queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: nil,
-                transcriptTotal: nil, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
+                transcriptTotal: nil, streaming: nil, leafEntryId: nil,
+                operation: phase == "active" ? try! JSONValue.object(["id": .string("home-operation"), "kind": .string("prompt"),
+                    "startedAt": .string("2026-01-01T00:00:00Z"), "lifecycle": .string("running")]).decode(SessionOperationState.self) : nil,
+                retry: nil, toolExecutions: [],
                 extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "fixture", revision: 1, capabilities: [], diagnostics: [],
                     semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
                     surfaces: [], pendingInteractions: []), diagnostics: [])
@@ -302,19 +348,20 @@ private actor HostedHomeShellGateway {
     }
 
     private func homeStatus() -> JSONValue {
-        let phase = designated ? "ready" : initialState == "disabled" ? "disabled"
+        let phase = designated ? (phase == "unconfigured" ? "blocked" : phase) : self.phase == "disabled" || initialState == "disabled" ? "disabled"
             : initialState == "missing-session" ? "missing-session" : "undesignated"
-        let sessionPresent = designated || initialState == "disabled"
+        let sessionPresent = designated || initialState == "disabled" || phase == "disabled"
         let enabled = designated || initialState == "missing-session"
         return .object(["phase": .string(phase),
-            "activation": .object(["available": .bool(false)]),
-            "readiness": .object(["ready": .bool(designated), "gaps": .array([])]),
+            "activation": .object(["available": .bool(true), "activationOpen": .bool(phase == "active")]),
+            "readiness": .object(["ready": .bool(designated && phase == "ready"), "gaps": .array([])]),
             "recovery": .object(["action": .string(designated ? "none" : "designate")]),
             "available": .bool(true), "enabled": .bool(enabled),
             "homeId": designated || initialState == "disabled" || initialState == "missing-session" ? .string("home-fixture") : .null,
             "sessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
-            "memory": .object(["configured": .bool(false), "open": .bool(false)])])
+            "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
+                "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null])])
     }
 }
 

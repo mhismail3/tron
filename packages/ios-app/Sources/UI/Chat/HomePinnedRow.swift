@@ -22,7 +22,7 @@ enum HomePinnedRowPolicy {
             return .designate
         case .unavailable:
             return .unavailable
-        case .ready, .active, .blocked:
+        case .ready, .active, .blocked, .paused, .rolloverPending:
             guard status.enabled, status.sessionPresent,
                   let sessionID = status.sessionId, !sessionID.isEmpty else { return .unavailable }
             return .open(sessionID: sessionID)
@@ -50,7 +50,9 @@ struct HomePinnedRow: View {
             let explanation = status.memory.blocked ?? status.memory.reason
                 ?? status.recovery.reason ?? status.readiness.gaps.first
             return explanation.map { "Blocked · \($0)" } ?? "Blocked · Open chat to inspect"
-        case .active: return "Active"
+        case .paused: return "Memory paused · Open chat to resume"
+        case .rolloverPending: return "Recovery needed · Chapter transition pending"
+        case .active: return "Working"
         case .ready: return "Ready"
         case .unavailable: return status.reason ?? "Home is unavailable"
         }
@@ -64,7 +66,9 @@ struct HomePinnedRow: View {
         case .designate: return "Set up"
         case .open:
             switch status?.phase {
-            case .active: return "Active"
+            case .active: return "Working"
+            case .paused: return "Paused"
+            case .rolloverPending: return "Recovery needed"
             case .blocked: return "Blocked"
             default: return "Ready"
             }
