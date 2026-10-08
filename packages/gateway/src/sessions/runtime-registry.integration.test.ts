@@ -7559,26 +7559,22 @@ export default function (pi) {
     try {
       await followUpStart;
       // Canonical receipt ordering cannot depend on the delayed attention store:
-      // the prior completion owns its receipt before the next operation appends.
+      // ownership transfer settles the predecessor before the next input appends.
       const entries = slot.canonicalSessionEntries();
       const completionIndex = entries.findIndex(entry => entry.type === "message"
         && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"));
       expect(completionIndex).toBeGreaterThanOrEqual(0);
       const followUpIndex = entries.findIndex(entry => entry.type === "message" && entry.message.role === "user"
         && contentText(entry.message.content).includes("queued follow-up"));
-      if (appendOutcome === "successful append") {
-        expect(entries[completionIndex + 1]).toMatchObject({
-          type: "custom",
-          customType: INVOCATION_RECEIPT_TYPE,
-          data: { receiptKind: "terminal", operationId: initialOperationId, lifecycle: "completed" },
-        });
-        expect(followUpIndex).toBeGreaterThan(completionIndex + 1);
-      } else {
-        // A rejected append stages nothing; its existing retry may honestly land
-        // after the already-accepted next operation's entries.
-        expect(failed).toBe(true);
-        expect(entries[completionIndex + 1]).toMatchObject({ type: "message", message: { role: "user" } });
-      }
+      if (appendOutcome === "pre-staging append failure") expect(failed).toBe(true);
+      // Transfer ends the predecessor, not completion admission. The next
+      // canonical input must wait even when its receipt needs a bounded retry.
+      expect(entries[completionIndex + 1]).toMatchObject({
+        type: "custom",
+        customType: INVOCATION_RECEIPT_TYPE,
+        data: { receiptKind: "terminal", operationId: initialOperationId, lifecycle: "completed" },
+      });
+      expect(followUpIndex).toBeGreaterThan(completionIndex + 1);
     } catch (error) {
       releaseAttention();
       throw error;

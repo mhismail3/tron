@@ -467,7 +467,6 @@ class CanonicalCustomEntryConflictError extends Error {}
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
-  terminal?: Promise<AutomationOperationTerminal | undefined>;
   observationSettled: boolean;
   observationCursor?: { entryIndex: number; branchId: string };
   fallbackWork?: GatewayWorkHandle;
@@ -1580,6 +1579,20 @@ export class RuntimeSlot {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
+            {
+              name: "tron-invocation-settlement",
+              factory: (pi) => {
+                // Pi awaits these public hooks before the next run/input can
+                // append. Join receipt I/O only: attention must not hold up
+                // already accepted follow-ups or extension continuations.
+                pi.on("turn_start", async () => {
+                  await this.joinTerminalReceiptWrites();
+                });
+                pi.on("message_end", async (event) => {
+                  if (event.message.role === "user") await this.joinTerminalReceiptWrites();
+                });
+              },
+            },
             ...tronModuleFactories({
               sessionId: () => this.id,
               cwd: () => this.cwd,
@@ -3204,6 +3217,37 @@ export class RuntimeSlot {
     };
   }
 
+  /** A distinct successor ends the predecessor; another assistant turn or
+   * automatic compaction does not. Capture exact completion evidence before
+   * the transfer retires its operation observation. */
+  private terminalizeTransferredOperation(operationId: string | undefined): void {
+    if (!operationId) return;
+    const completionId = this.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
+      ?? this.operationObservations.get(operationId)?.observedCompletionId;
+    if (!completionId) return;
+    const interrupted = this.abortedOperations.has(operationId);
+    const attention = this.attentionBarrier;
+    void this.persistInvocationTerminal(
+      operationId, interrupted ? "interrupted" : "completed", interrupted ? "user-abort" : undefined,
+      this.operationWork.get(operationId), completionId,
+    ).then(async terminal => {
+      if (attention) await attention;
+      if (terminal) await this.notifyAutomationTerminal(terminal);
+      this.abortedOperations.delete(operationId);
+    }).catch(() => {});
+  }
+
+  private async joinTerminalReceiptWrites(): Promise<void> {
+    // Guarantees receipt order against the next admitted user input, not
+    // SDK-owned between-turn entries (such as tool-loadout system messages)
+    // emitted before that exact boundary. Their relative order proves nothing.
+    const prefix = `canonical:${INVOCATION_RECEIPT_TYPE}:terminal:`;
+    await Promise.all([...this.durableWrites.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, write]) => write.waiter));
+    this.assertOwnershipPersistence();
+  }
+
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
     // An existing operation token already owns this marker write. Avoid spending
     // derived capacity for a second representation of the same accepted work.
@@ -3279,22 +3323,6 @@ export class RuntimeSlot {
         }),
       };
       this.completionOwnershipQueue.push(item);
-    }
-    if (!item.terminal && item.completion.operationId) {
-      const interrupted = this.abortedOperations.has(item.completion.operationId);
-      // A successful first append fixes the receipt's canonical position at
-      // completion admission, before any await returns control to Pi's loop.
-      // A pre-staging failure retains the existing asynchronous retry: receipt
-      // position then reflects recovery, not completion order. Acknowledgement
-      // stays on this owner; attention I/O and notification cannot move the append.
-      item.terminal = this.persistInvocationTerminal(
-        item.completion.operationId,
-        interrupted ? "interrupted" : "completed",
-        interrupted ? "user-abort" : undefined,
-        item.fallbackWork,
-        item.completion.id,
-      );
-      void item.terminal.catch(() => {});
     }
     void this.startCompletionStamp(item).catch(() => {});
     return item;
@@ -3413,9 +3441,6 @@ export class RuntimeSlot {
         }
       }
       if (lastError !== undefined) throw lastError;
-      const terminal = await item.terminal;
-      if (terminal) await this.notifyAutomationTerminal(terminal);
-      if (completion.operationId) this.abortedOperations.delete(completion.operationId);
       if (!completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
@@ -3560,6 +3585,7 @@ export class RuntimeSlot {
           // `message_end` may still be waiting for Pi's canonical append. Its
           // callback-turn binding owns the preceding operation even before a
           // completion object exists, so the new run must rotate now.
+          this.terminalizeTransferredOperation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
@@ -3596,6 +3622,7 @@ export class RuntimeSlot {
         this.notificationRun = {};
         if (dequeuedOwner && preflightOwner === dequeuedOwner) this.dequeuedFollowUpOwners.shift();
         if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
+          this.terminalizeTransferredOperation(this.activeOperationId);
           this.retireOperationObservation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
@@ -3705,10 +3732,12 @@ export class RuntimeSlot {
               // An earlier success can still await attention while a queued
               // follow-up fails. Its receipt cannot stand in for this exact
               // terminal owner (or overwrite its failure when owners coincide).
-              if (terminalLifecycle !== "completed") {
-                await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
-              }
+              const terminal = await this.persistInvocationTerminal(
+                settledOperationId, terminalLifecycle, terminalErrorCode, undefined,
+                settledOperationId === completion.operationId ? completion.id : undefined,
+              );
               await this.beginAttentionSettlement(completion);
+              if (terminal) await this.notifyAutomationTerminal(terminal);
               const completionOperationId = completion.operationId ?? this.completionOperationId(completion.id);
               if (completionOperationId) this.retireOperationObservation(completionOperationId);
               // A successful earlier completion is admitted by its exact
@@ -3720,9 +3749,9 @@ export class RuntimeSlot {
               this.retireOperationObservation(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
-                this.abortedOperations.delete(settledOperationId);
                 this.settleOperationWork(settledOperationId);
               }
+              if (settledOperationId) this.abortedOperations.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
             })().catch(() => {});
             break;
@@ -3733,6 +3762,8 @@ export class RuntimeSlot {
               settledOperationId,
               terminalLifecycle,
               terminalErrorCode,
+              undefined,
+              this.operationObservations.get(settledOperationId)?.observedCompletionId,
             ).then(async () => {
               const alreadyObservedCompletion = terminalNotification !== undefined
                 && this.operationObservations.get(settledOperationId)?.observedCompletionId === terminalNotification.sourceId;
@@ -3965,7 +3996,10 @@ export class RuntimeSlot {
               this.pendingQueueAdmission = undefined;
               reclassifiedAdmission.resolveDisposition("foreground");
               const displacedOwner = this.activeOperationId;
-              if (displacedOwner !== reclassifiedAdmission.id) this.retireOperationObservation(displacedOwner);
+              if (displacedOwner !== reclassifiedAdmission.id) {
+                this.terminalizeTransferredOperation(displacedOwner);
+                this.retireOperationObservation(displacedOwner);
+              }
               this.activeOperationId = reclassifiedAdmission.id;
               const invocation = this.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
@@ -6185,6 +6219,7 @@ export class RuntimeSlot {
           // follow-up then retrospectively transfers its pre-cutoff token into
           // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.activeOperationId;
+          this.terminalizeTransferredOperation(syntheticOwner);
           if (syntheticOwner !== item.id) this.retireOperationObservation(syntheticOwner);
           this.activeOperationId = item.id;
           this.operation = {
