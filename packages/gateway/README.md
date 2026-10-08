@@ -418,8 +418,10 @@ leaves delegated discovery unavailable in read-only/unactivated fixtures; manage
 startup activates it before discovery. Corrupt bytes or receipts fail closed. Catalog and package reads retain their
 bounded unavailable diagnostic. `managed-subagents.test.ts` installs one real
 immutable closure per file and shares it among admission/discovery cases;
-destructive byte/receipt cases own separate state. Only the two cold real-loader
-cases have measured, explicit deadlines for parallel verification.
+destructive byte/receipt cases own separate state. The two cold real-loader
+cases and `package-provides.test.ts`'s single real-closure attribution case have
+measured, explicit deadlines for parallel verification; synthetic cases retain
+the default bound.
 It exercises the real
 closure and SDK loader/discovery in an isolated empty home, plus exact host SDK
 export identity across two payload paths sharing one install.

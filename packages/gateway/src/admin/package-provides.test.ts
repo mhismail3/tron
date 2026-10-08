@@ -182,6 +182,8 @@ describe("package provides attribution", () => {
     }
   });
 
+  // This case alone installs and cold-loads the real closure; shared-host
+  // qualification measured 35s, unlike the synthetic packages in this file.
   it("attributes real reserved provider tools and discovered agents to the managed package", async () => {
     const value = await fixture([{ directory: "package-beta", manifest: { prompts: ["./prompts"] }, files: { "prompts/beta-prompt.md": prompt("beta-prompt") } }]);
     try {
@@ -199,7 +201,7 @@ describe("package provides attribution", () => {
       expect(providesFor(entries, "package-beta").subagents).toEqual([]);
       expect(diagnostic).toBeUndefined();
     } finally { await rm(value.root, { recursive: true, force: true }); }
-  });
+  }, 60_000);
 
   it("keeps the kinds that resolved when the extension load fails, plus one bounded diagnostic", async () => {
     const value = await fixture(twinPackages());
