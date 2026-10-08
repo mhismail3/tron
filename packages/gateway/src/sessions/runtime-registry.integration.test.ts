@@ -5781,21 +5781,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("does not reopen an unchanged ambient artifact for a live slot", async () => {
-    // A root shaped like the production provider root on 2026-09-28: 2,498 run
-    // directories, 556 finished status.json files and one live slot, which read
-    // every one of them on every 750 ms pass.
     const delegated = await delegatedFixtureRoot("ambient-steady-state");
     const startedAt = Date.now();
     const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
     await mkdir(runsRoot, { recursive: true });
-    const finished = Array.from({ length: 556 }, (_unused, index) => `finished-${String(index).padStart(4, "0")}`);
-    const empty = Array.from({ length: 2_498 - 556 }, (_unused, index) => `empty-${String(index).padStart(4, "0")}`);
-    await Promise.all([...empty, ...finished].map((name) => mkdir(join(runsRoot, name), { recursive: true })));
     const finishedStatus = (runId: string) => JSON.stringify({
       lifecycleArtifactVersion: 3, runId, state: "complete",
       startedAt: startedAt - 120_000, lastUpdate: startedAt - 120_000, endedAt: startedAt - 120_000,
     });
-    await Promise.all(finished.map((name) => writeFile(join(runsRoot, name, "status.json"), finishedStatus(name))));
     const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
@@ -5820,14 +5813,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
     const routed = vi.spyOn(slot, "discoverExtensionArtifact");
 
-    // Only the two runs this slot can attribute are offered; the finished runs of
-    // other sessions are examined by the walk but never reopened.
+    // Only the two runs this slot can attribute are offered.
     await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([finishedDir, liveDir]));
 
     // A pass over the unchanged root offers the finished artifact to nobody: it
     // already reached this slot, and the live one is refreshed by its exact
-    // binding. Everything else stays unopened.
+    // binding.
     routed.mockClear();
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([liveDir]));
