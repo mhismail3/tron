@@ -5,6 +5,170 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testHomeMemorySettingsSelectsPhysicalModel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-header-state-unconfigured", "-home-sheet-delayed-status"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        app.buttons["home-controls"].tap()
+        XCTAssertTrue(app.buttons["Memory settings"].waitForExistence(timeout: 3))
+        app.buttons["Memory settings"].tap()
+        XCTAssertTrue(app.staticTexts["Choose a memory model before sending"].waitForExistence(timeout: 5))
+        app.buttons["Memory model"].tap()
+        let provider = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Fixture, 2 models")).firstMatch
+        XCTAssertTrue(provider.waitForExistence(timeout: 5))
+        if provider.value as? String == "collapsed" { provider.tap() }
+        let choice = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Memory Model B")).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Virtual model")).firstMatch.exists)
+        choice.tap()
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
+        choice.tap() // Receipt is terminal while the fresh canonical status is still loading.
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: choice)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 5), .completed)
+        choice.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        let done = try? XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
+        XCTAssertNotNil(done)
+        done?.tap()
+        XCTAssertTrue(app.buttons["home-sheet-done-settings"].waitForExistence(timeout: 5))
+        let modelRow = app.descendants(matching: .any)["home-memory-model-row"]
+        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model B"), object: modelRow)
+        XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
+        keepScreenshot(named: "home-memory-settings-configured")
+    }
+
+    @MainActor
+    func testHomeContextShowsEffectiveMetadataOnly() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        app.buttons["home-controls"].tap()
+        XCTAssertTrue(app.buttons["Home context"].waitForExistence(timeout: 3))
+        app.buttons["Home context"].tap()
+        XCTAssertTrue(app.staticTexts["Effective activation context"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["320 tokens"].exists)
+        XCTAssertTrue(app.staticTexts["12 lines · 480 bytes"].exists)
+        keepScreenshot(named: "home-context-populated")
+    }
+
+    @MainActor
+    func testHomeMemoryBrowserAttributesProjectionAndPagesCanonicalEvidence() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        app.buttons["home-controls"].tap()
+        XCTAssertTrue(app.buttons["Browse memory"].waitForExistence(timeout: 3))
+        app.buttons["Browse memory"].tap()
+        XCTAssertTrue(app.staticTexts["Projected user memory"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["user · 2026-01-01T00:00:00Z"].exists)
+        XCTAssertTrue(app.staticTexts["Omissions: browser-cap"].exists)
+        XCTAssertTrue(app.staticTexts["Condensed memory summary"].exists)
+        XCTAssertTrue(app.staticTexts["Memory summary · Truncated"].exists)
+        keepScreenshot(named: "home-memory-projection")
+        app.buttons["Exact evidence"].tap()
+        XCTAssertTrue(app.staticTexts["Canonical original, not the memory projection"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["source-session · source-entry"].exists)
+        XCTAssertFalse(app.staticTexts["Projected user memory"].isHittable)
+        app.buttons["Next evidence page"].tap()
+        XCTAssertTrue(app.staticTexts["Canonical continuation"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-memory-canonical-continuation")
+        app.buttons["home-sheet-done-evidence"].tap()
+        XCTAssertTrue(app.buttons["Next memory page"].waitForExistence(timeout: 5))
+        app.buttons["Next memory page"].tap()
+        XCTAssertTrue(app.staticTexts["Projected assistant memory"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-memory-next-page")
+    }
+
+    @MainActor
+    func testHomeSheetsLoadingEmptyBlockedErrorAndReload() {
+        continueAfterFailure = false
+        for state in ["loading", "empty", "error", "blocked"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-browser-\(state)"]
+            if state == "blocked" { app.launchArguments.append("-home-header-state-blocked") }
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            app.buttons["home-controls"].tap()
+            app.buttons[state == "blocked" ? "Memory settings" : "Browse memory"].tap()
+            if state == "loading" {
+                XCTAssertTrue(app.descendants(matching: .any)["home-sheet-loading"].waitForExistence(timeout: 2))
+                keepScreenshot(named: "home-memory-loading")
+                XCTAssertTrue(app.staticTexts["Projected user memory"].waitForExistence(timeout: 10))
+            } else if state == "empty" {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No memory yet")).firstMatch.waitForExistence(timeout: 5))
+            } else if state == "error" {
+                XCTAssertTrue(app.buttons["Reload"].waitForExistence(timeout: 5))
+                keepScreenshot(named: "home-memory-error")
+                app.buttons["Reload"].tap()
+                XCTAssertTrue(app.staticTexts["Projected user memory"].waitForExistence(timeout: 5))
+            } else {
+                XCTAssertTrue(app.staticTexts["Memory blocked"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["source-unavailable"].exists)
+            }
+            keepScreenshot(named: "home-sheet-\(state)")
+            app.terminate()
+        }
+        let empty = XCUIApplication()
+        empty.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-context-empty"]
+        empty.launch()
+        defer { empty.terminate() }
+        XCTAssertTrue(empty.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        empty.buttons["home-pinned-row"].tap()
+        empty.buttons["home-controls"].tap()
+        empty.buttons["Home context"].tap()
+        XCTAssertTrue(empty.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No activation context yet")).firstMatch.waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-context-empty")
+    }
+
+    @MainActor
+    func testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability() {
+        continueAfterFailure = false
+        for state in ["empty-models", "configure-refused", "browser-unsupported"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-\(state)"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            app.buttons["home-controls"].tap()
+            if state == "browser-unsupported" {
+                XCTAssertFalse(app.buttons["Browse memory"].exists)
+                XCTAssertTrue(app.buttons["Home context"].exists)
+            }
+            app.buttons["Memory settings"].tap()
+            if state == "empty-models" {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No available memory models")).firstMatch.waitForExistence(timeout: 5))
+            } else if state == "configure-refused" {
+                app.buttons["Memory model"].tap()
+                let provider = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Fixture, 2 models")).firstMatch
+                XCTAssertTrue(provider.waitForExistence(timeout: 5))
+                if provider.value as? String == "collapsed" { provider.tap() }
+                app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Memory Model B")).firstMatch.tap()
+                XCTAssertTrue(app.alerts["Home change"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.alerts.staticTexts["Memory configuration refused"].exists)
+                XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "none", timeout: 3))
+            }
+            keepScreenshot(named: "home-settings-\(state)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testHomeHeaderRejectsStaleRouteAction() {
         continueAfterFailure = false
         let app = XCUIApplication()

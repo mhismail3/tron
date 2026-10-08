@@ -62,6 +62,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let paused: Bool?
         let blocked: String?
         let reason: String?
+        let model: ModelRef?
+        let spentTokens: Int?
     }
 
     let phase: Phase
@@ -83,6 +85,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         guard status.readiness.gaps.count <= 128,
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
+              status.memory.spentTokens.map({ $0 >= 0 }) ?? true,
+              status.memory.model.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true,
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
                status.activation.lastRefusalReason, status.activation.lastRefusalDetail]
                 .compactMap({ $0 }).allSatisfy({ $0.utf8.count <= 1_024 }),

@@ -104,6 +104,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var ready = false
     @State private var error: String?
     @State private var homeStatusCount = 0
+    @State private var configuredModel = "none"
     @State private var controlCount = 0
     @State private var abortCount = 0
     @State private var staleActionFinished = false
@@ -120,7 +121,10 @@ struct HostedHomeDashboardFixture: View {
         let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
             headerState: arguments.first(where: { $0.hasPrefix("-home-header-state-") })?.replacingOccurrences(of: "-home-header-state-", with: ""),
             unresolved: arguments.contains("-home-control-unresolved"),
-            delayed: arguments.contains("-home-control-delayed"))
+            delayed: arguments.contains("-home-control-delayed"),
+            browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
+            emptyContext: arguments.contains("-home-context-empty"),
+            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -148,6 +152,7 @@ struct HostedHomeDashboardFixture: View {
                             Text(model.homeMutations.isRunning ? "running" : model.homeMutations.hasUnresolvedCommand ? "unresolved" : "idle")
                                 .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
+                            Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
                             Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
                                 .accessibilityIdentifier("fixture.home-status-count")
@@ -198,6 +203,7 @@ struct HostedHomeDashboardFixture: View {
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
+                configuredModel = await gateway.configuredModelIdentity()
                 do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             }
         }
@@ -314,7 +320,15 @@ private actor HostedHomeShellGateway {
     private let delayed: Bool
     private var acceptedControl: JSONValue?
     private var receiptChecks = 0
-    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false) {
+    private let browserState: String?
+    private let emptyContext: Bool
+    private let sheetState: String?
+    private var browserReads = 0
+    private var configuredModel: ModelRef?
+    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
+        self.sheetState = sheetState
+        self.browserState = browserState
+        self.emptyContext = emptyContext
         self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
         designated = initialState == "ready"
@@ -326,7 +340,8 @@ private actor HostedHomeShellGateway {
     }
     func statusCount() -> Int { homeStatusCount }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] : ["sessions.v1"] }
+    func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
         switch method {
@@ -336,17 +351,49 @@ private actor HostedHomeShellGateway {
                 firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
             return (.object(["sessions": .array([try! JSONValue.encode(row)]), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
+        case "provider.list":
+            return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
+                "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])]), nil)
+        case "model.list":
+            return (.object(["models": .array(sheetState == "empty-models" ? [] : [model("memory-a", name: "Memory Model A"), model("memory-b", name: "Memory Model B"),
+                model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
+        case "model.recent": return (.object(["models": .array([])]), nil)
+        case "home.memory.page":
+            browserReads += 1
+            if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
+            if browserState == "error", browserReads == 1 {
+                return (nil, .object(["code": .string("busy"), "message": .string("Canonical source unavailable"), "retryable": .bool(true)]))
+            }
+            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty"), nil)
+        case "home.memory.evidence":
+            let offset = params["offset"]?.intValue ?? 0
+            let first = "Canonical original, not the memory projection"
+            let second = "Canonical continuation"
+            let text = offset == 0 ? first : second
+            var result: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": evidence(),
+                "text": .string(text), "offset": .number(Double(offset)),
+                "totalCharacters": .number(Double(first.utf16.count + second.utf16.count)), "metadata": .object(["role": .string("user")])]
+            if offset == 0 { result["nextOffset"] = .number(Double(first.utf16.count)) }
+            else { result["previousOffset"] = .number(0) }
+            return (.object(result), nil)
         case "home.status":
             homeStatusCount += 1
+            if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":
             designated = true
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
         case "home.pauseMemory", "home.resumeMemory", "home.configureMemory", "home.disable":
             controlCount += 1
+            if method == "home.configureMemory", sheetState == "configure-refused" {
+                return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
+            }
             if method == "home.pauseMemory" { paused = true; if phase != "active" { phase = "paused" } }
             if method == "home.resumeMemory" { paused = false; phase = "ready" }
-            if method == "home.configureMemory" { configured = true; phase = "ready" }
+            if method == "home.configureMemory" {
+                configured = true; phase = "ready"
+                configuredModel = try? params["model"]?.decode(ModelRef.self)
+            }
             if method == "home.disable" { designated = false; phase = "disabled" }
             let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
             if delayed {
@@ -394,13 +441,37 @@ private actor HostedHomeShellGateway {
         }
     }
 
+    private func model(_ id: String, name: String, virtual: Bool = false) -> JSONValue {
+        .object(["provider": .string("fixture"), "id": .string(id), "name": .string(name), "reasoning": .bool(false),
+                 "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
+                 "available": .bool(true), "virtual": .bool(virtual)])
+    }
+    private func evidence(index: Int = 0) -> JSONValue {
+        .object(["index": .number(Double(index)), "sessionId": .string("source-session"), "entryId": .string("source-entry"),
+                 "sourceDigest": .string(String(repeating: "a", count: 64))])
+    }
+    private func memoryPage(next: Bool, empty: Bool) -> JSONValue {
+        let index = next ? 1 : 0
+        let item: JSONValue = .object(["index": .number(Double(index)), "kind": .string(next ? "talk" : "user"),
+            "attribution": .string(next ? "assistant" : "user"), "timestamp": .string("2026-01-01T00:00:00Z"),
+            "evidence": evidence(index: index), "projection": .object(["format": .string("memory-projection"),
+                "text": .string(next ? "Projected assistant memory" : "Projected user memory"), "omitted": .bool(false),
+                "omissions": .array([.string("browser-cap")])]), "summary": next ? .null : .object([
+                    "format": .string("memory-summary"), "text": .string("Condensed memory summary"), "truncated": .bool(true)])])
+        var page: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
+            "totalItems": .number(empty ? 0 : 2), "items": .array(empty ? [] : [item])]
+        if !next && !empty { page["nextCursor"] = .string("fixture-next") }
+        return .object(page)
+    }
+
     private func homeStatus() -> JSONValue {
         let phase = designated ? (phase == "unconfigured" ? "blocked" : phase) : self.phase == "disabled" || initialState == "disabled" ? "disabled"
             : initialState == "missing-session" ? "missing-session" : "undesignated"
         let sessionPresent = designated || initialState == "disabled" || phase == "disabled"
         let enabled = designated || initialState == "missing-session"
         return .object(["phase": .string(phase),
-            "activation": .object(["available": .bool(true), "activationOpen": .bool(phase == "active")]),
+            "activation": emptyContext ? .object(["available": .bool(false)]) : .object(["available": .bool(true), "activationOpen": .bool(phase == "active"),
+                "effectiveTokens": .number(320), "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
             "readiness": .object(["ready": .bool(designated && phase == "ready"), "gaps": .array([])]),
             "recovery": .object(["action": .string(designated ? "none" : "designate")]),
             "available": .bool(true), "enabled": .bool(enabled),
@@ -408,7 +479,8 @@ private actor HostedHomeShellGateway {
             "sessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
-                "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null])])
+                "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
+                "spentTokens": .number(42), "model": configuredModel.map { try! JSONValue.encode($0) } ?? .null])])
     }
 }
 

@@ -188,6 +188,29 @@ changed revisions still force fresh canonical occurrence reads. The dashboard ha
 `automation.changed`. No second mutation-reconciliation algorithm or Automation event journal exists.
 `HomeStatusPresentationOwner` is an observable owner of only the focused Gateway's in-memory Home status projection. `SessionShellView` registers its exact `PresentationSurfaceToken` with the shared `PresentationActivityCoordinator`; every status read and post-await publication checks that token's current managed activity, profile, authenticated connection and latest read generation. Retirement must name the exact token, so a delayed callback from an older dashboard cannot clear a replacement. The owner does not persist status, session identity, or memory data. Its typed DTO requires phase, activation, readiness, recovery, and memory structure, and rejects unknown phase/recovery enums rather than guessing. `AppModel` retires status with lifecycle connection ownership, clears it on loss, then admits a fresh status read from the authenticated reconnect callback only if the current profile advertises `home.v1`. Backgrounding suspends the read and clears status; foreground reconciliation re-admits it. Matching Home-session summaries and session-list invalidations trigger an immediate refresh, while the active Home dashboard or its mounted chat route runs one sequential fallback no more frequently than every five seconds. Cover/uncover activity is observed on the exact mounted surface so covering sheets retire disposable reads and dismissal resumes convergence.
 
+`HomeSheetReadOwner` owns one disposable settings/context/browser/evidence read
+per managed sheet. Its idle/loading/loaded/failed state carries the request's
+identity and the caller's request-intent ID; changing intent invalidates success,
+error and loading even before SwiftUI starts the replacement task.
+`AppModel.readHomeSheet` admits only the typed status, memory-page and canonical-
+evidence queries, capturing and rechecking the focused profile, connection and
+lifecycle generation. The sheet additionally checks its exact managed token and
+current activity across every await. Cover/background retires pending reads;
+uncover/reconnect starts a fresh request. Installed parent frames can remain
+while a picker or evidence child is mounted, without polling the covered chat.
+The picker preserves its installed frame while receipt-triggered status is read.
+Disposal retires the whole owner; no page, cursor, model or memory body is persisted.
+
+Browser requests retain only one bounded page, not an accumulated mirror. A
+continuation carries cursor, Home ID, revision and last catalog index; a mixed
+revision, different Home, repeated cursor or non-advancing row fails closed and
+Reload returns to page one. Evidence has a separate managed child lifetime and
+carries exact source session/entry/digest/index plus offset through every page.
+The DTO admits only `canonical-history`, matching identity and UTF-16 positions,
+with a 24,000-character page and explicit continuation for remaining content.
+The memory page admits at most 50 rows and 128 KiB encoded JSON, enforcing the
+Gateway's attribution/kind mapping and 4,096-character summary/projection caps.
+
 When `home.v1` is authenticated, the Sessions list prepends a pinned Home row without inserting Home into the ordinary session catalogue. `HomePinnedRowPolicy` routes only the enabled, present session ID in the current `home.status`; undesignated, disabled, and missing-session states call `home.designate` through `HomeMutationCoordinator` and the shared confirmed-mutation receipt owner. Designation and Home controls share one mutation authority; duplicate in-flight admission is refused. Every user action captures its exact profile/lifecycle authority synchronously before starting asynchronous work. Home commands use a receipt-only policy: `missing` and `pending` receipts never replay the mutation, and an unresolved command ID remains owned by the mutation coordinator until an explicit completion check resolves that same receipt. A single idle/running/unresolved state owns the command method, ID and profile; no parallel receipt map or per-control cleanup exists. Only `outcome_unknown` retains receipt ownership; the executor's non-Codable definitely-not-sent provenance is preserved so a pre-transmission failure leaves no unresolved command and a later explicit attempt creates a new command ID. For the profile that owns an unresolved command, the pinned row checks that receipt before considering any status-based chat route, including when status is unavailable; a completed check stays on the dashboard (it can also be a Disable receipt), and the next explicit tap uses current status; a fresh mounted `home.status` is required after the receipt resolves before the UI uses its session ID for the existing profile-qualified `ChatView` route. While that exact Home chat route is mounted, the status owner follows its managed surface token; retiring the route restores the dashboard token. Capability-absent profiles show no Home row, and ordinary Sessions filtering, sorting, row state and navigation remain unchanged. The route opens the current Home chat as an ordinary session; the logical cross-chapter Home route remains deferred to issue #418.
 
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
@@ -1491,6 +1514,24 @@ completion control even after authoritative status says Disabled; confirmed
 Disable removes the header without replacing chat. App restart reads current
 Gateway status, without claiming or replaying an old command. Memory model
 configuration uses the same receipt path; its settings UI is a separate sheet.
+The Home menu opens Memory Settings, Home Context and Browse Memory through the
+shared managed-sheet chrome. The browser additionally requires authenticated
+`home-memory-browser.v1`; settings/context require only `home.v1`. Memory Settings
+uses the existing progressive model-selection row and ModelPicker, filtered to
+registered, available physical models. Selection captures the mounted picker
+profile/lifecycle before sending `configureMemory` through the existing receipt
+owner. Choices stay Applying until the exact latest canonical status read
+converges, not merely until the configure receipt is terminal; an old installed
+model frame cannot admit a duplicate choice during that gap. It shows spend as
+information, configuration/pause/block state and explicit
+unresolved receipt checks, never budgets or cache/storage controls. The context
+inspector shows the activation's effective token/window, memory line/byte counts,
+start entry and refusal metadata from `home.status`, not SDK canonical usage or
+prompt/memory bodies. Browser cards distinguish summary, capped/omitted projection
+and canonical evidence, label attribution/date/omissions and expose source
+session/entry identity. Pagination replaces one page; canonical text is selectable.
+Loading, empty, blocked and retryable error states use shared presentation owners.
+
 
 
 The gateway migration does not define a new visual language. The pre-migration

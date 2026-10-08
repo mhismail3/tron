@@ -4727,6 +4727,47 @@ final class AppModel {
         }
     }
 
+    /// Sheet reads share lifecycle authority, but not the covered chat's status
+    /// cadence. Each managed sheet owns and retires its bounded page.
+    func homeSheetReadIdentity(profileID: String, surfaceToken: PresentationSurfaceToken?) -> HomeSheetReadIdentity? {
+        guard let surfaceToken, lifecycle.selectedProfileID == profileID,
+              let admission = lifecycle.admission, lifecycle.admits(admission),
+              let connectionID = admission.connectionID,
+              lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return nil }
+        return HomeSheetReadIdentity(profileID: profileID, connectionID: connectionID,
+                                     lifecycleGeneration: lifecycle.currentLifecycleGeneration, surfaceToken: surfaceToken)
+    }
+
+    func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity) async throws -> HomeSheetContent {
+        guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+              !Task.isCancelled else { throw CancellationError() }
+        let method: String
+        let params: JSONValue
+        switch query {
+        case .status: method = "home.status"; params = .object([:])
+        case .memory(let continuation):
+            method = "home.memory.page"
+            var values: [String: JSONValue] = ["limit": .number(20)]
+            if let continuation { values["cursor"] = .string(continuation.cursor) }
+            params = .object(values)
+        case .evidence(let source, let offset):
+            method = "home.memory.evidence"
+            params = .object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
+        }
+        if query != .status, lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") != true {
+            throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
+        }
+        let value = try await lifecycle.client.requestValue(method, params,
+            expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
+        guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+              !Task.isCancelled else { throw CancellationError() }
+        switch query {
+        case .status: return .status(try HomeStatusDTO.decode(value))
+        case .memory(let continuation): return .memory(try HomeMemoryPageDTO.decode(value, continuation: continuation))
+        case .evidence(let source, let offset): return .evidence(try HomeMemoryEvidencePageDTO.decode(value, evidence: source, offset: offset))
+        }
+    }
+
     func unmountHomeStatus(surfaceToken: PresentationSurfaceToken) {
         homeStatus.retireSurface(surfaceToken)
     }

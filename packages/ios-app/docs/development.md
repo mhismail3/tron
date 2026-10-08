@@ -54,13 +54,52 @@ controls fail bounded assertions rather than hanging on unanswered responses.
 Run these with `TRON_IOS_TEST_TIER=ui-validation` through `scripts/tron-ios-test`;
 screenshots are xcresult attachments, not public source.
 These fixtures prove native wiring, not durable Gateway pause semantics (owned
-by Gateway Home activation E2E) or physical iPhone behavior. Configuring the model
-from a sheet and preparing/task-state contracts remain separate work.
+by Gateway Home activation E2E) or physical iPhone behavior. Preparing/task-state
+contracts remain separate work.
 `testHomeHeaderLightDarkAndAccessibilityCaptures` mounts the production chat in
 light/dark at normal and accessibility Dynamic Type, captures its wrapping memory
 copy, and checks menu/composer reachability. Export its attachments with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
 These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
+
+The three Home sheets are covered by `HomeSheetTests` (bounded DTOs, exact
+canonical evidence identity/offsets, latest-request and managed-lifecycle
+publication) and these focused hosted journeys:
+
+```bash
+scripts/tron-ios-test run --only-testing TronMobileTests/HomeSheetTests
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemorySettingsSelectsPhysicalModel \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeContextShowsEffectiveMetadataOnly \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryBrowserAttributesProjectionAndPagesCanonicalEvidence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability
+```
+
+The hosted Gateway fixture uses the real `home.status`, `home.memory.page` and
+`home.memory.evidence` DTO shapes; it proves native navigation, physical-model
+selection/refusal, empty/blocked/loading/error/reload states, distinct summary/
+projection/canonical labeling, attribution and page replacement. Its model
+provider disclosure is driven by native touch; the virtual model must not appear.
+Selecting the current model again sends no second configure command, including
+while a delayed status read is still converging after the terminal receipt. Results and
+screenshots are retained as xcresult attachments; export them using the command
+above into private evidence, not source. The fixture does not prove canonical
+source correctness. Before using it as presentation evidence, run the real
+Gateway owner suite in an isolated HOME/TMPDIR with pinned Node:
+
+```bash
+cd packages/gateway
+npx vitest run src/sessions/home-activation.e2e.test.ts \
+  -t 'memory browser contract' --maxWorkers=2
+```
+
+That suite retains `test-results/home-activation/report.json`, exercising actual
+cross-chapter source identity, exact canonical text versus context-edited
+projection, continuation invalidation, byte bounds, partial source failures,
+summary settlement, cancellation and disabled/restarted read-only behavior.
+Neither suite claims live Gateway/physical-iPhone validation or VoiceOver proof.
 
 To inspect the Home row visual fixture, run `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowLightDarkAndAccessibilityCaptures`. The four retained XCTest screenshot attachments are private simulator captures; export them from that command's `.xcresult` to a private evidence directory with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`. Do not add captures to the public source tree.
 
