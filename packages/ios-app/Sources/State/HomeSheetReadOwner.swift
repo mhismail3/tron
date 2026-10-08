@@ -72,8 +72,10 @@ struct HomeMemoryPageDTO: Decodable, Equatable, Sendable {
     }
 
     static func decode(_ value: JSONValue, revision expectedRevision: String?) throws -> Self {
-        let data = try JSONEncoder().encode(value)
-        let page = try JSONDecoder().decode(Self.self, from: data)
+        // Byte admission uses the wire encoder: Foundation's default escapes
+        // slashes and can reject a valid page that the Gateway kept below its cap.
+        let data = try JSONEncoder.gateway.encode(value)
+        let page = try JSONDecoder.gateway.decode(Self.self, from: data)
         guard data.count <= 128 * 1024, !page.homeId.isEmpty, page.homeId.utf8.count <= 200,
               isDigest(page.revision), expectedRevision == nil || expectedRevision == page.revision,
               page.totalItems >= 0, page.items.count <= 50, page.items.count <= page.totalItems,

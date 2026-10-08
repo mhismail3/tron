@@ -33,6 +33,25 @@ final class HomeSheetTests: XCTestCase {
         XCTAssertNil(decoded.items[0].summary)
     }
 
+    func testMemoryByteAdmissionUsesGatewayJSONEncoding() throws {
+        var value = page().objectValue!
+        let template = value["items"]!.arrayValue!.first!.objectValue!
+        value["totalItems"] = .number(20)
+        value["items"] = .array((0..<20).map { index in
+            var row = template
+            row["index"] = .number(Double(index))
+            var source = evidence(index: index).objectValue!
+            source["entryId"] = .string("entry-\(index)")
+            row["evidence"] = .object(source)
+            row["projection"] = .object(["format": .string("memory-projection"),
+                "text": .string(String(repeating: "/", count: 4096)), "omitted": .bool(false), "omissions": .array([])])
+            return .object(row)
+        })
+        let wirePage = JSONValue.object(value)
+        XCTAssertLessThan(try JSONEncoder.gateway.encode(wirePage).count, 128 * 1024)
+        XCTAssertEqual(try HomeMemoryPageDTO.decode(wirePage, revision: nil).items.count, 20)
+    }
+
     func testContinuationCannotReplayAnotherHomeOrEarlierRows() throws {
         XCTAssertThrowsError(try HomeMemoryPageDTO.decode(page(), continuation: .init(cursor: "cursor", revision: digest, homeId: "other", afterIndex: -1)))
         XCTAssertThrowsError(try HomeMemoryPageDTO.decode(page(), continuation: .init(cursor: "cursor", revision: digest, homeId: "home", afterIndex: 0)))
