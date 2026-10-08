@@ -282,8 +282,9 @@ source archive SHA-256, fork lockfile SHA-256, Node/npm build versions, and
 SHA-512 of the self-contained closure are bound together. `npm run
 check:pi-subagents` validates both immutable inputs, their package identity, and
 every bundled runtime dependency without registry access. A retained predecessor
-pin must bind its exact source archive, registry integrity, lock subtree, and
-self-contained closure; a partial rollback record is rejected. The retained
+pin must bind its exact source archive, lockfile, and self-contained closure;
+a fork predecessor carries the complete prior build provenance, while a registry
+predecessor also binds registry integrity. A partial rollback record is rejected. The retained
 `0.59.0` predecessor uses the public npm registry archive, verified against its
 `dist.integrity`. Its vendored runtime lock preserves the coordinator-extracted
 dependency records and versions, with a root derived from that archive's manifest;
@@ -297,6 +298,30 @@ them only from its temporary install manifest. The packaged manifest preserves
 the source metadata, including development dependencies, and adds sorted
 `bundledDependencies`. `npm run test:pi-subagents-scripts` includes a real npm
 runtime-only-lock regression with an unavailable registry.
+
+Prepare a new reviewed commit with `npm run update:pi-subagents -- --fork-repo
+<path-or-url> <full-fork-commit>`. The pin's `fork.repository` is null until a
+public fork URL is recorded; offline consumers never require that repository.
+Once recorded, the URL is the updater default and a different override is refused.
+The updater checks the exact pinned upstream release/tag and the fork's ancestry
+online, reports latest upstream for information only, and exports immutable git
+objects into a disposable tree. It uses the recorded Node/npm to install build
+dependencies, run `npm pack` (including the fork's packaging scripts), and build
+the closure. The candidate must have a new exact upstream-based `-tron.N` version.
+Only after staged offline validation does it exclusively create new immutable
+artifacts and atomically rename the pin, retaining current as previous. A final
+`npm run check:pi-subagents` failure restores the original pin and removes only
+newly created files. The private `.pi-subagents-update-staging` directory is
+also the exclusive invocation lease; overlapping updates are refused. An
+uncatchable termination leaves it in place: inspect the interrupted owner before
+manually removing staging, never sweep another update's files. Dirty owned
+inputs, reused artifact paths, and mismatched provenance are refused. The updater never edits fork refs/working-tree files or
+Gateway homes, deploys, or starts a service. `test:pi-subagents-scripts` covers
+real local-git export/pack/build/check and late-failure restoration; the online
+metadata boundary is faked in those tests. Work verification selects the offline
+checker and script suite for provider pin/artifacts/scripts, package manifests,
+and Node pin changes, not unrelated runtime sources.
+
 The closure excludes Pi SDK peer dependencies so those resolve from the selected
 Gateway SDK, not from a user npm tree. Gateway payloads carry the pin, input
 archives, and closure as fingerprinted app inputs; bundling refuses an invalid

@@ -8,7 +8,7 @@ import { GatewayError } from "../errors.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
-  version: string; forkCommit: string; closure: { path: string; sha512: string };
+  version: string; fork: { commit: string }; closure: { path: string; sha512: string };
 };
 export const MANAGED_SUBAGENTS_SOURCE = `tron:pi-subagents@${pin.version}#${pin.closure.sha512}`;
 const receiptName = "tron-install-receipt.json";
@@ -106,7 +106,7 @@ export class ManagedSubagents {
         else if (entry.type === "2") symlinkSync(entry.target, path);
         else writeFileSync(path, entry.bytes, { mode: entry.mode & 0o111 ? 0o700 : 0o600 });
       }
-      writeFileSync(join(staging, receiptName), JSON.stringify({ version: pin.version, forkCommit: pin.forkCommit, sha512: pin.closure.sha512 }), { mode: 0o600 });
+      writeFileSync(join(staging, receiptName), JSON.stringify({ version: pin.version, forkCommit: pin.fork.commit, sha512: pin.closure.sha512 }), { mode: 0o600 });
       this.verifyRoot(staging, entries);
       try { renameSync(staging, this.root); }
       catch (error) {
@@ -131,7 +131,7 @@ export class ManagedSubagents {
     const receiptPath = join(root, receiptName);
     if (!existsSync(receiptPath) || (!lstatSync(receiptPath).isFile() || lstatSync(receiptPath).size > 1024)) throw new GatewayError("conflict", "managed pi-subagents install receipt mismatch");
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
-    if (receipt.version !== pin.version || receipt.forkCommit !== pin.forkCommit || receipt.sha512 !== pin.closure.sha512) throw new GatewayError("conflict", "managed pi-subagents install receipt mismatch");
+    if (receipt.version !== pin.version || receipt.forkCommit !== pin.fork.commit || receipt.sha512 !== pin.closure.sha512) throw new GatewayError("conflict", "managed pi-subagents install receipt mismatch");
     const expected = new Map(entries.map((entry) => [entry.name, entry]));
     validateSdkPeers(entries);
     const check = (directory: string): void => {

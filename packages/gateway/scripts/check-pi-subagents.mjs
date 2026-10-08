@@ -35,10 +35,13 @@ function safeArtifact(relativePath) {
   return path;
 }
 
-try {
-  const pin = JSON.parse(regular(pinPath, "pin").toString("utf8"));
+function checkBuild(pin) {
   if (pin.schemaVersion !== 1 || pin.name !== "pi-subagents" || !/^0\.\d+\.\d+-tron\.\d+$/u.test(pin.version)
-    || !/^[0-9a-f]{40}$/u.test(pin.forkCommit) || pin.nodeVersion !== "22.22.0" || pin.npmVersion !== "10.9.4") {
+    || !/^[0-9a-f]{40}$/u.test(pin.fork?.commit)
+    || !(pin.fork.repository === null || (typeof pin.fork.repository === "string" && /^https:\/\//u.test(pin.fork.repository)))
+    || pin.upstream?.package !== "pi-subagents" || !/^v0\.\d+\.\d+$/u.test(pin.upstream.release)
+    || !/^[0-9a-f]{40}$/u.test(pin.upstream.tagCommit) || !pin.version.startsWith(`${pin.upstream.release.slice(1)}-tron.`)
+    || pin.nodeVersion !== "22.22.0" || pin.npmVersion !== "10.9.4") {
     throw new Error("pin identity/schema is invalid");
   }
   const sourcePath = safeArtifact(pin.sourceArchive?.path);
@@ -67,29 +70,38 @@ try {
     const actual = archiveJson(closurePath, entry);
     if (actual.name !== dependency || actual.version !== manifest.dependencies[dependency]) throw new Error(`bundled dependency mismatch for ${dependency}`);
   }
+}
+
+try {
+  const pin = JSON.parse(regular(pinPath, "pin").toString("utf8"));
+  checkBuild(pin);
   if (pin.previous !== null) {
     const previous = pin.previous;
-    if (typeof previous !== "object" || !/^0\.\d+\.\d+$/u.test(previous.version ?? "")
-      || !/^[0-9a-f]{128}$/u.test(previous.sha512 ?? "")
-      || typeof previous.path !== "string" || typeof previous.lockfile !== "object"
-      || typeof previous.closure !== "object" || typeof previous.sourceIntegrity !== "string") {
-      throw new Error("previous pin record must bind version, source archive, lockfile, and closure");
+    if (previous?.fork) {
+      checkBuild(previous);
+    } else {
+      if (typeof previous !== "object" || !/^0\.\d+\.\d+$/u.test(previous.version ?? "")
+        || !/^[0-9a-f]{128}$/u.test(previous.sha512 ?? "")
+        || typeof previous.path !== "string" || typeof previous.lockfile !== "object"
+        || typeof previous.closure !== "object" || typeof previous.sourceIntegrity !== "string") {
+        throw new Error("previous pin record must bind version, source archive, lockfile, and closure");
+      }
+      const previousPath = safeArtifact(previous.path);
+      const previousBytes = regular(previousPath, "previous source archive");
+      if (hash(previousBytes, "sha512") !== previous.sha512) throw new Error("previous source archive SHA-512 mismatch");
+      if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(previous.sourceIntegrity)
+        || `sha512-${Buffer.from(sha512Bytes(previousBytes)).toString("base64")}` !== previous.sourceIntegrity) {
+        throw new Error("previous source archive registry integrity mismatch");
+      }
+      const previousLockPath = safeArtifact(previous.lockfile.path);
+      const previousLock = regular(previousLockPath, "previous lockfile");
+      if (hash(previousLock, "sha256") !== previous.lockfile.sha256) throw new Error("previous lockfile SHA-256 mismatch");
+      const previousClosurePath = safeArtifact(previous.closure.path);
+      const previousClosure = regular(previousClosurePath, "previous closure");
+      if (hash(previousClosure, "sha512") !== previous.closure.sha512) throw new Error("previous closure SHA-512 mismatch");
+      const previousManifest = archiveJson(previousPath, "package/package.json");
+      if (previousManifest.name !== pin.name || previousManifest.version !== previous.version) throw new Error("previous source archive package identity mismatch");
     }
-    const previousPath = safeArtifact(previous.path);
-    const previousBytes = regular(previousPath, "previous source archive");
-    if (hash(previousBytes, "sha512") !== previous.sha512) throw new Error("previous source archive SHA-512 mismatch");
-    if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(previous.sourceIntegrity)
-      || `sha512-${Buffer.from(sha512Bytes(previousBytes)).toString("base64")}` !== previous.sourceIntegrity) {
-      throw new Error("previous source archive registry integrity mismatch");
-    }
-    const previousLockPath = safeArtifact(previous.lockfile.path);
-    const previousLock = regular(previousLockPath, "previous lockfile");
-    if (hash(previousLock, "sha256") !== previous.lockfile.sha256) throw new Error("previous lockfile SHA-256 mismatch");
-    const previousClosurePath = safeArtifact(previous.closure.path);
-    const previousClosure = regular(previousClosurePath, "previous closure");
-    if (hash(previousClosure, "sha512") !== previous.closure.sha512) throw new Error("previous closure SHA-512 mismatch");
-    const previousManifest = archiveJson(previousPath, "package/package.json");
-    if (previousManifest.name !== pin.name || previousManifest.version !== previous.version) throw new Error("previous source archive package identity mismatch");
   }
   console.log(`pi-subagents ${pin.version}: source, lockfile, and self-contained closure verified`);
 } catch (error) {

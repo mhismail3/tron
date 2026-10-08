@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "name": "pi-subagents",
   "version": "0.76.1-tron.3",
-  "forkCommit": "bc56dd08de1f7e3d6d6da7f076fef6d38133d764",
   "nodeVersion": "22.22.0",
   "npmVersion": "10.9.4",
   "sourceArchive": {
@@ -31,5 +30,14 @@
       "path": "artifacts/pi-subagents-0.59.0-closure.tgz",
       "sha512": "45ef15f35bc6756ce5dd7034fec3f8b956866201e634a18d34da9759fff84094f07300e59c6078dd5f8764928ed42630ae5910a8393cf09de52fd3952789ad03"
     }
+  },
+  "fork": {
+    "repository": null,
+    "commit": "bc56dd08de1f7e3d6d6da7f076fef6d38133d764"
+  },
+  "upstream": {
+    "package": "pi-subagents",
+    "release": "v0.76.1",
+    "tagCommit": "7d072b91dca7e1aa915282f0159cec0175d65efa"
   }
 }

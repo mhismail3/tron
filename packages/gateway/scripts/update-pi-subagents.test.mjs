@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const gateway = dirname(dirname(fileURLToPath(import.meta.url)));
+const updater = join(gateway, "scripts/update-pi-subagents.mjs");
+function command(bin, args, options = {}) {
+  const result = spawnSync(bin, args, { encoding: "utf8", timeout: 30_000, ...options });
+  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+function fixture(run) {
+  const root = mkdtempSync(join(tmpdir(), "tron-subagents-update-"));
+  try {
+    const target = join(root, "gateway");
+    const fork = join(root, "fork");
+    for (const path of [target, fork, join(target, "scripts"), join(root, "home"), join(root, "tmp")]) mkdirSync(path, { recursive: true });
+    cpSync(join(gateway, "artifacts"), join(target, "artifacts"), { recursive: true });
+    copyFileSync(join(gateway, "pi-subagents-pin.json"), join(target, "pi-subagents-pin.json"));
+    for (const file of ["check-pi-subagents.mjs", "build-pi-subagents-closure.py"]) copyFileSync(join(gateway, "scripts", file), join(target, "scripts", file));
+    const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1" };
+    const git = (cwd, ...args) => command("git", ["-C", cwd, ...args], { env });
+    for (const repo of [target, fork]) {
+      git(repo, "init", "-q"); git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "fixture@example.invalid");
+    }
+    writeFileSync(join(fork, "base"), "upstream\n");
+    git(fork, "add", "."); git(fork, "commit", "-qm", "upstream");
+    const ancestor = git(fork, "rev-parse", "HEAD");
+    const pin = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
+    pin.fork = { repository: null, commit: pin.fork.commit };
+    pin.upstream = { package: "pi-subagents", release: "v0.76.1", tagCommit: ancestor };
+    writeFileSync(join(target, "pi-subagents-pin.json"), JSON.stringify(pin, null, 2) + "\n");
+    writeFileSync(join(target, "package.json"), JSON.stringify({ scripts: { "check:pi-subagents": "node scripts/check-pi-subagents.mjs" } }));
+    git(target, "add", "."); git(target, "commit", "-qm", "initial pin");
+    const version = "0.76.1-tron.99";
+    const manifest = { name: "pi-subagents", version, dependencies: {}, scripts: { prepack: "node build.mjs" } };
+    writeFileSync(join(fork, "package.json"), JSON.stringify(manifest));
+    writeFileSync(join(fork, "build.mjs"), 'import { writeFileSync } from "node:fs"; writeFileSync("index.js", "export default () => {};\\n");\n');
+    writeFileSync(join(fork, "package-lock.json"), JSON.stringify({ name: manifest.name, version, lockfileVersion: 3, packages: { "": { name: manifest.name, version, dependencies: {} } } }));
+    git(fork, "add", "."); git(fork, "commit", "-qm", "candidate");
+    const commit = git(fork, "rev-parse", "HEAD");
+    // Network is the only fake boundary; source-object export, npm packing,
+    // closure construction, offline checks and repository mutations are real.
+    const spawn = (bin, args, options) => {
+      if (bin === "git" && args[0] === "ls-remote") return { status: 0, stdout: `${ancestor}\trefs/tags/v0.76.1\n`, stderr: "" };
+      if (bin === "npm" && args[0] === "view") return { status: 0, stdout: JSON.stringify(args[1] === "pi-subagents" ? "0.77.0" : { version: "0.76.1", gitHead: ancestor, "dist.integrity": `sha512-${Buffer.alloc(64).toString("base64")}` }), stderr: "" };
+      return spawnSync(bin, args, { ...options, env: { ...env, ...options?.env }, timeout: 30_000 });
+    };
+    return run({ target, fork, git, commit, pin, spawn, env, root });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
+function snapshot(root) {
+  return Object.fromEntries(readdirSync(join(root, "artifacts")).map((name) => [name, readFileSync(join(root, "artifacts", name))]));
+}
+
+test("packs committed objects, builds a closure and retains current as previous", async () => {
+  // fixture must outlive this async import.
+  const { runUpdate } = await import(updater);
+  fixture(({ target, fork, commit, pin, spawn, env, git }) => {
+    writeFileSync(join(fork, "package.json"), "dirty working tree must not be read");
+    const unrelated = join(target, "unrelated.txt"); writeFileSync(unrelated, "keep");
+    const original = snapshot(target);
+    const result = runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn });
+    const candidate = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
+    assert.equal(candidate.version, "0.76.1-tron.99");
+    assert.deepEqual(candidate.fork, { repository: null, commit });
+    assert.equal(candidate.previous?.version, pin.version);
+    assert.deepEqual(candidate.previous.fork, pin.fork);
+    assert.deepEqual(candidate.previous.closure, pin.closure);
+    assert.equal(result.latestUpstream, "0.77.0");
+    assert.equal(readFileSync(unrelated, "utf8"), "keep");
+    for (const [name, bytes] of Object.entries(original)) assert.deepEqual(readFileSync(join(target, "artifacts", name)), bytes);
+    const packed = command("tar", ["-xOzf", join(target, candidate.closure.path), "package/index.js"], { env });
+    assert.match(packed, /export default/);
+    command(process.execPath, [join(target, "scripts/check-pi-subagents.mjs")], { env });
+    assert.deepEqual(readdirSync(join(target, "scripts")), ["build-pi-subagents-closure.py", "check-pi-subagents.mjs"]);
+    assert.equal(git(fork, "rev-parse", "HEAD"), commit);
+    assert.deepEqual(readdirSync(join(env.TMPDIR)), []);
+    assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
+  });
+});
+
+test("one staging owner excludes overlapping updates without changing its candidate", async () => {
+  const { runUpdate } = await import(updater);
+  fixture(({ target, fork, commit, spawn }) => {
+    let overlapped = false;
+    const duringBuild = (bin, args, options) => {
+      if (!overlapped && bin === "npm" && args[0] === "ci") {
+        overlapped = true;
+        assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn }), /already running|staging owner/);
+      }
+      return spawn(bin, args, options);
+    };
+    runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: duringBuild });
+    assert.equal(overlapped, true);
+    assert.equal(JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8")).version, "0.76.1-tron.99");
+    assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
+  });
+});
+
+for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-check", "build"]) {
+  test(`refuses ${failure} and restores only invocation-owned files`, async () => {
+    const { runUpdate } = await import(updater);
+    fixture(({ target, fork, commit, spawn, git, env }) => {
+      if (failure === "ancestor") {
+        const files = Object.fromEntries(["package.json", "package-lock.json", "build.mjs"].map((name) => [name, readFileSync(join(fork, name))]));
+        git(fork, "checkout", "--orphan", "unrelated"); git(fork, "rm", "-rf", ".");
+        for (const [name, bytes] of Object.entries(files)) writeFileSync(join(fork, name), bytes);
+        git(fork, "add", "."); git(fork, "commit", "-qm", "unrelated");
+        commit = git(fork, "rev-parse", "HEAD");
+      }
+      if (failure === "version") {
+        const manifest = JSON.parse(readFileSync(join(fork, "package.json"), "utf8")); manifest.version = "0.76.1";
+        writeFileSync(join(fork, "package.json"), JSON.stringify(manifest));
+        const lock = JSON.parse(readFileSync(join(fork, "package-lock.json"), "utf8")); lock.version = manifest.version; lock.packages[""].version = manifest.version;
+        writeFileSync(join(fork, "package-lock.json"), JSON.stringify(lock));
+        git(fork, "add", "."); git(fork, "commit", "-qm", "not a Tron build"); commit = git(fork, "rev-parse", "HEAD");
+      }
+      if (failure === "build") {
+        writeFileSync(join(fork, "build.mjs"), "process.exit(1);"); git(fork, "add", "."); git(fork, "commit", "-qm", "broken build"); commit = git(fork, "rev-parse", "HEAD");
+      }
+      const unrelated = join(target, "unrelated.txt"); writeFileSync(unrelated, "keep");
+      if (failure === "dirty") writeFileSync(join(target, "pi-subagents-pin.json"), readFileSync(join(target, "pi-subagents-pin.json"), "utf8") + " ");
+      const originalPin = readFileSync(join(target, "pi-subagents-pin.json")); const originalArtifacts = snapshot(target);
+      const injected = (bin, args, options) => {
+        if (failure === "late-check" && bin === "npm" && args.join(" ") === "run check:pi-subagents") {
+          assert.equal(JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8")).version, "0.76.1-tron.99");
+          return { status: 1, stderr: "injected offline check failure" };
+        }
+        return spawn(bin, args, options);
+      };
+      assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: failure === "missing-source" ? undefined : fork, commit, spawn: injected }), {
+        message: failure === "ancestor" ? /ancestor/ : failure === "version" ? /-tron/ : failure === "missing-source" ? /--fork-repo/ : failure === "dirty" ? /uncommitted|dirty/ : failure === "build" ? /pack/ : /offline check failure/,
+      });
+      assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
+      assert.deepEqual(snapshot(target), originalArtifacts);
+      assert.equal(readFileSync(unrelated, "utf8"), "keep");
+      assert.deepEqual(readdirSync(env.TMPDIR), []);
+      assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
+      assert.equal(existsSync(join(target, "pi-subagents-pin.json.tmp")), false);
+    });
+  });
+}
