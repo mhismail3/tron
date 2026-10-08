@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { attributeExtensions } from "../extensions/owner-attribution.js";
-import { delegatedProviderOrigin } from "./delegated-provider.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, delegatedProviderOrigin, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { ManagedSubagents } from "./managed-subagents.js";
 
@@ -20,8 +20,39 @@ beforeAll(() => {
   root = provider.install();
 });
 afterAll(() => { if (installHome) rmSync(installHome, { recursive: true, force: true }); });
-beforeEach(() => { home = mkdtempSync(join(tmpdir(), "tron-managed-subagents-")); });
-afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+let previousEnvironment: NodeJS.ProcessEnv;
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), "tron-managed-subagents-"));
+  previousEnvironment = {
+    [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
+    PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT,
+  };
+  delegatedProviderEnvironment(delegatedArtifactRoot(installHome));
+});
+afterEach(() => {
+  for (const [name, value] of Object.entries(previousEnvironment)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  rmSync(home, { recursive: true, force: true });
+});
+
+it.each([undefined, "", "another-home"])("refuses missing or foreign artifact binding %s before load and admission", (binding) => {
+  if (binding === undefined) delete process.env[DELEGATED_PROVIDER_ROOT_ENV];
+  else process.env[DELEGATED_PROVIDER_ROOT_ENV] = binding === "another-home" ? delegatedArtifactRoot(home) : binding;
+  expect(() => provider.loaderOptions(SettingsManager.inMemory())).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
+  expect(() => provider.admit([])).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
+});
+
+it("revalidates artifact ownership on admission and reload after the process binding changes", () => {
+  const settings = SettingsManager.inMemory();
+  expect(provider.loaderOptions(settings).additionalExtensionPaths.length).toBeGreaterThan(0);
+  delegatedProviderEnvironment(delegatedArtifactRoot(home));
+  expect(() => provider.admit([])).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
+  expect(() => provider.loaderOptions(settings)).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
+  delegatedProviderEnvironment(join(delegatedArtifactRoot(installHome), "..", "subagents"));
+  expect(() => provider.admit([])).not.toThrow();
+});
 
 it("installs the real pinned closure in an empty home, admits its tool, and discovers its agents", async () => {
   const agentDir = join(home, "agent");
@@ -77,7 +108,9 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
     symlinkSync(join(gatewayRoot, "node_modules"), join(payload, "node_modules"));
     const output = execFileSync(process.execPath, [script, join(sdkRoot, "dist", "index.js"), payload, providerEntry, probe], {
       // Cold host-loader I/O exceeded 8s under parallel verification.
-      timeout: 24_000, encoding: "utf8", env: { PATH: process.env.PATH!, HOME: home, TMPDIR: home },
+      timeout: 24_000, encoding: "utf8", env: { PATH: process.env.PATH!, HOME: home, TMPDIR: home,
+        [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
+        PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT },
     });
     expect(JSON.parse(output.trim())).toEqual({ moduleIdentity: true, providerTool: true, networkAttempts: 0 });
   }
@@ -121,6 +154,7 @@ it("refuses an unknown loaded extension registering the reserved subagent tool",
 it("refuses a tampered installed byte for both admission and discovery", async () => {
   // Only this destructive case owns a copy; admission cases share immutable bytes.
   const provider = new ManagedSubagents(home);
+  delegatedProviderEnvironment(delegatedArtifactRoot(home));
   cpSync(root, provider.root, { recursive: true, verbatimSymlinks: true });
   const privateRoot = provider.root;
   const providerEntry = provider.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths[0]!;

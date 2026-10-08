@@ -23,6 +23,8 @@ it("activates a real staged Mac app offline without checkout pin or artifact acc
     const script = `import net from 'node:net';
       net.Socket.prototype.connect = function () { throw new Error('network denied'); };
       const { ManagedSubagents } = await import('./dist/sessions/managed-subagents.js');
+      const { delegatedArtifactRoot, delegatedProviderEnvironment } = await import('./dist/sessions/delegated-provider.js');
+      delegatedProviderEnvironment(delegatedArtifactRoot(${JSON.stringify(join(root, "home"))}));
       const { SettingsManager } = await import('@earendil-works/pi-coding-agent');
       const managed = ManagedSubagents.activateForStartup(${JSON.stringify(join(root, "home"))});
       console.log(JSON.stringify({ root: managed.verify(), entries: managed.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths }));`;
