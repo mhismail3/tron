@@ -7,7 +7,7 @@ import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { HomeTaskAuthorization, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
+import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
 import { HomeTaskStore, HomeTaskStoreError, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
@@ -276,6 +276,22 @@ export class HomeTaskDispatcher {
     const task = await this.store.read(value.taskId);
     if (!task || task.sessionId !== sessionId || task.operationId !== value.operationId || task.intent.revision !== value.intentRevision
       || task.homeId !== value.homeId || task.generation !== value.generation || value.receiptId !== `task:${task.operationId}`) throw new GatewayError("conflict", "Referenced task is missing or contradictory");
+  }
+
+  async permissions() { await this.assertAvailable(); return this.authorization.list(); }
+  async revokeScope(scopeId: string) { await this.assertAvailable(); await this.authorization.revokeScope(scopeId); }
+  async revokeGrant(grantId: string) { await this.assertAvailable(); await this.authorization.revokeGrant(grantId); }
+  async decideGrant(requestId: string, input: { decisionId: string; approved: boolean; expiresAt: number }) {
+    await this.assertAvailable();
+    return this.setup.run(async () => {
+      const restoreEpoch = await this.store.restoreEpoch();
+      const result = await this.authorization.recordDecisionAndGrant(requestId, { ...input, restoreEpoch }).catch(error => {
+        if (error instanceof HomeTaskAuthorizationError) throw new GatewayError("conflict", error.code);
+        throw error;
+      });
+      if (restoreEpoch !== await this.store.restoreEpoch()) throw new GatewayError("conflict", "Task namespace changed during decision");
+      return result;
+    });
   }
 
   async reconfirmPermissions(): Promise<void> {

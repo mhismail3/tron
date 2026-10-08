@@ -25,6 +25,8 @@ export interface HomeTaskAuthorizationDecision {
   id: string;
   decidedAt: number;
   approved: boolean;
+  requestId: string;
+  expiresAt: number;
 }
 
 export interface HomeTaskOneUseGrant {
@@ -45,6 +47,7 @@ export interface HomeTaskAuthorizationState {
   /** Durable compare-and-replace revision, advanced only by the store. */
   revision: number;
   scopes: HomeTaskAuthorizationScope[];
+  requests: Array<{ id: string; request: HomeTaskAuthorizationRequest }>;
   decisions: HomeTaskAuthorizationDecision[];
   grants: HomeTaskOneUseGrant[];
 }
@@ -64,7 +67,7 @@ export interface HomeTaskAuthorizationOptions {
 
 export interface HomeTaskAuthorizationDiagnostic {
   event: "home.task.authorization";
-  outcome: "scope-enabled" | "scope-revoked" | "permissions-reconfirmed" | "decision-recorded" | "grant-consumed" | "refused";
+  outcome: "scope-enabled" | "scope-revoked" | "permissions-reconfirmed" | "request-recorded" | "decision-recorded" | "grant-revoked" | "grant-consumed" | "refused";
   reason?: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required";
   referenceHash?: string;
 }
@@ -74,8 +77,8 @@ export type HomeTaskAuthorizationResult =
   | { kind: "one-use-grant"; grantId: string };
 
 export class HomeTaskAuthorizationError extends Error {
-  constructor(readonly code: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required") {
-    super(code);
+  constructor(readonly code: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required", readonly requestId?: string) {
+    super(requestId ? `${code}: ${requestId}` : code);
     this.name = "HomeTaskAuthorizationError";
   }
 }
@@ -136,54 +139,46 @@ export class HomeTaskAuthorization {
     });
   }
 
+  async list(): Promise<HomeTaskAuthorizationState> {
+    return this.mutex.run(() => this.options.store.load());
+  }
+
   async recordDecisionAndGrant(
-    request: HomeTaskAuthorizationRequest,
-    input: { decisionId: string; approved?: boolean; expiresAt: number },
-  ): Promise<HomeTaskOneUseGrant> {
-    const target = await this.resolveTarget(request.target);
-    if (!input.decisionId || !Number.isFinite(input.expiresAt) || input.expiresAt <= this.now()) {
-      this.diagnostic("refused", undefined, "invalid-decision");
-      throw new HomeTaskAuthorizationError("invalid-decision");
-    }
+    requestId: string,
+    input: { decisionId: string; approved: boolean; expiresAt: number; restoreEpoch: string },
+  ): Promise<{ decision: HomeTaskAuthorizationDecision; grant: HomeTaskOneUseGrant | null }> {
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
-      if (state.decisions.some((decision) => decision.id === input.decisionId)) {
-        this.diagnostic("refused", undefined, "invalid-decision");
+      const pending = state.requests.find(candidate => candidate.id === requestId);
+      if (!pending || state.decisions.some(decision => decision.requestId === requestId || decision.id === input.decisionId)
+        || !input.decisionId || typeof input.approved !== "boolean" || !Number.isSafeInteger(input.expiresAt)
+        || input.expiresAt <= this.now() || pending.request.restoreEpoch !== input.restoreEpoch) {
+        this.diagnostic("refused", requestId, "invalid-decision");
         throw new HomeTaskAuthorizationError("invalid-decision");
       }
+      const request = pending.request;
+      if (await this.resolveTarget(request.target) !== request.target) throw new HomeTaskAuthorizationError("invalid-decision");
       const decision: HomeTaskAuthorizationDecision = {
-        id: input.decisionId, decidedAt: this.now(), approved: input.approved ?? true,
+        id: input.decisionId, requestId, decidedAt: this.now(), approved: input.approved, expiresAt: input.expiresAt,
       };
-      if (!decision.approved) {
-        await this.options.store.save({ ...state, decisions: [...state.decisions, decision] });
-        this.diagnostic("decision-recorded", decision.id);
-        this.diagnostic("refused", undefined, "grant-required");
-        throw new HomeTaskAuthorizationError("grant-required");
-      }
-      const grant: HomeTaskOneUseGrant = {
-        id: randomUUID(), decisionId: decision.id,
-        intentRevision: request.intentRevision, intentDigest: request.intentDigest,
-        target, authorizationScope: request.authorizationScope,
-        workerProfile: request.workerProfile, policyRevision: request.policyRevision,
-        restoreEpoch: request.restoreEpoch, expiresAt: input.expiresAt, state: "available",
-      };
-      await this.options.store.save({
-        ...state, decisions: [...state.decisions, decision], grants: [...state.grants, grant],
-      });
+      const grant: HomeTaskOneUseGrant | null = decision.approved ? {
+        id: randomUUID(), decisionId: decision.id, ...request, expiresAt: input.expiresAt, state: "available",
+      } : null;
+      await this.options.store.save({ ...state, decisions: [...state.decisions, decision],
+        grants: grant ? [...state.grants, grant] : state.grants });
       this.diagnostic("decision-recorded", decision.id);
-      return grant;
+      return { decision, grant };
     });
   }
 
   async revokeGrant(grantId: string): Promise<void> {
     await this.mutex.run(async () => {
       const state = await this.options.store.load();
-      await this.options.store.save({
-        ...state,
-        grants: state.grants.map((grant) => grant.id === grantId && grant.state === "available"
-          ? { ...grant, state: "revoked" }
-          : grant),
-      });
+      const grant = state.grants.find(candidate => candidate.id === grantId);
+      if (!grant || grant.state !== "available") return;
+      await this.options.store.save({ ...state,
+        grants: state.grants.map(candidate => candidate.id === grantId ? { ...candidate, state: "revoked" } : candidate) });
+      this.diagnostic("grant-revoked", grantId);
     });
   }
 
@@ -209,8 +204,16 @@ export class HomeTaskAuthorization {
           this.diagnostic("refused", undefined, "scope-reconfirmation-required");
           throw new HomeTaskAuthorizationError("scope-reconfirmation-required");
         }
-        this.diagnostic("refused", undefined, "grant-required");
-        throw new HomeTaskAuthorizationError("grant-required");
+        // The exact binding owns request identity across refusals/restart. A
+        // decided request cannot mint a second grant by asking again.
+        const binding = { ...request, target };
+        const requestId = authorizationRequestId(binding);
+        if (!state.requests.some(candidate => candidate.id === requestId)) {
+          await this.options.store.save({ ...state, requests: [...state.requests, { id: requestId, request: binding }] });
+          this.diagnostic("request-recorded", requestId);
+        }
+        this.diagnostic("refused", requestId, "grant-required");
+        throw new HomeTaskAuthorizationError("grant-required", requestId);
       }
       await this.options.store.save({
         ...state,
@@ -243,4 +246,10 @@ export class HomeTaskAuthorization {
       }),
     });
   }
+}
+
+/** Explicit key order makes identity independent of transport object order. */
+export function authorizationRequestId(request: HomeTaskAuthorizationRequest): string {
+  return createHash("sha256").update(JSON.stringify([request.intentRevision, request.intentDigest, request.target,
+    request.authorizationScope, request.workerProfile, request.policyRevision, request.restoreEpoch])).digest("hex");
 }

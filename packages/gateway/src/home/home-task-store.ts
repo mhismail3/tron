@@ -5,7 +5,7 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
-import type { HomeTaskAuthorizationState, HomeTaskAuthorizationStore } from "./home-task-authorization.js";
+import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -112,7 +112,7 @@ export class HomeTaskStore {
       });
       await assertDirectory(this.home);
       await mkdir(this.directory, { mode: 0o700 });
-      await this.publish(this.authorizationPath, { version: 1, revision: 1, scopes: [], decisions: [], grants: [] }, AUTHORIZATION_BYTES);
+      await this.publish(this.authorizationPath, { version: 1, revision: 1, scopes: [], requests: [], decisions: [], grants: [] }, AUTHORIZATION_BYTES);
       // The init marker must not outlive a directory entry still in a volatile
       // parent cache, including the newly created Home directory.
       for (const path of [this.home, join(this.tronHome, "gateway")]) {
@@ -382,9 +382,9 @@ function validateTask(value: unknown): HomeTaskRecord {
 }
 
 function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
-  if (!keys(value, ["version", "revision", "scopes", "decisions", "grants"]) || value.version !== 1 || !positive(value.revision)
-    || !Array.isArray(value.scopes) || !Array.isArray(value.decisions) || !Array.isArray(value.grants)
-    || [value.scopes, value.decisions, value.grants].some(records => records.length > 10_000)) invalid();
+  if (!keys(value, ["version", "revision", "scopes", "requests", "decisions", "grants"]) || value.version !== 1 || !positive(value.revision)
+    || !Array.isArray(value.scopes) || !Array.isArray(value.requests) || !Array.isArray(value.decisions) || !Array.isArray(value.grants)
+    || [value.scopes, value.requests, value.decisions, value.grants].some(records => records.length > 10_000)) invalid();
   for (const scope of value.scopes) {
     if (!keys(scope, ["id", "kind", "active", "restoreEpoch", "createdAt"], ["revokedAt"])
       || !identifier(scope.id) || scope.kind !== "all-trusted-projects" || typeof scope.active !== "boolean"
@@ -393,9 +393,18 @@ function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
       || (scope.revokedAt !== undefined && (scope.revokedAt as number) < (scope.createdAt as number))) invalid();
   }
   if (value.scopes.filter(scope => scope.active).length > 1) invalid();
-  for (const decision of value.decisions) {
-    if (!keys(decision, ["id", "decidedAt", "approved"]) || !identifier(decision.id) || !timestamp(decision.decidedAt) || typeof decision.approved !== "boolean") invalid();
+  for (const pending of value.requests) {
+    if (!keys(pending, ["id", "request"]) || !identifier(pending.id)
+      || !keys(pending.request, ["intentRevision", "intentDigest", "target", "authorizationScope", "workerProfile", "policyRevision", "restoreEpoch"])
+      || !validAuthorizationBinding(pending.request)
+      || pending.id !== authorizationRequestId(pending.request as unknown as import("./home-task-authorization.js").HomeTaskAuthorizationRequest)) invalid();
   }
+  for (const decision of value.decisions) {
+    if (!keys(decision, ["id", "requestId", "decidedAt", "approved", "expiresAt"]) || !identifier(decision.id)
+      || !timestamp(decision.decidedAt) || typeof decision.approved !== "boolean" || !timestamp(decision.expiresAt)
+      || !value.requests.some(pending => pending.id === decision.requestId)) invalid();
+  }
+  if (new Set(value.decisions.map(decision => decision.requestId)).size !== value.decisions.length) invalid();
   const approvedDecisions = new Set(value.decisions.filter(decision => decision.approved).map(decision => decision.id));
   for (const grant of value.grants) {
     if (!keys(grant, ["id", "decisionId", "intentRevision", "intentDigest", "target", "authorizationScope", "workerProfile", "policyRevision", "restoreEpoch", "expiresAt", "state"])
@@ -404,9 +413,17 @@ function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
       || !positive(grant.policyRevision) || !identifier(grant.restoreEpoch) || !timestamp(grant.expiresAt)
       || !["available", "consumed", "revoked"].includes(grant.state as string)
       || !approvedDecisions.has(grant.decisionId)) invalid();
+    const decision = value.decisions.find(decision => decision.id === grant.decisionId)!;
+    const pending = value.requests.find(pending => pending.id === decision.requestId)!;
+    if (grant.expiresAt !== decision.expiresAt || authorizationRequestId(grant as unknown as import("./home-task-authorization.js").HomeTaskAuthorizationRequest) !== pending.id) invalid();
   }
-  if (![value.scopes, value.decisions, value.grants].every(unique)
+  if (![value.scopes, value.requests, value.decisions, value.grants].every(unique)
     || new Set(value.grants.map(grant => grant.decisionId)).size !== value.grants.length) invalid();
   const { version: _version, ...state } = value;
   return state as unknown as HomeTaskAuthorizationState;
+}
+
+function validAuthorizationBinding(value: Record<string, unknown>): boolean {
+  return positive(value.intentRevision) && text(value.intentDigest, 128) && text(value.target, 4_096) && isAbsolute(value.target as string)
+    && identifier(value.authorizationScope) && identifier(value.workerProfile) && positive(value.policyRevision) && identifier(value.restoreEpoch);
 }

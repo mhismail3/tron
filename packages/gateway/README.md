@@ -838,7 +838,12 @@ the next start, exposed by `home.status.taskRecovery`; ordinary Gateway sessions
 still work. Recreated task directory
 identity requires explicit `home.reconfirmPermissions` (terminal
 `/home reconfirm-permissions`); this renews active standing scopes only, never
-revoked scopes or one-use grants. `home.taskStatus`, `home.steerTask` and
+revoked scopes or one-use grants. Maintainer-only `home.taskPermissions`,
+`home.revokeTaskScope`, `home.revokeTaskGrant` and `home.decideTaskGrant` list
+and revoke authority or approve/deny an exact durable request with one-use
+expiry-bound permission. Terminal `/home permissions`, `/home revoke-scope`,
+`/home revoke-grant`, `/home approve-grant` and `/home deny-grant` route through
+command receipts; Home cannot approve its own requests. `home.taskStatus`, `home.steerTask` and
 `home.stopTask` expose durable spend and shared control; terminal `/home task`,
 `/home steer` and `/home stop` target one task. Steering shares the session lane;
 Stop persists exact intent and cancels outside blocked admission. Canonical usage

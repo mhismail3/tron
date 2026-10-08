@@ -480,6 +480,26 @@ export class GatewayService {
             homeId: string(params.homeId, "homeId", { max: 200 }), routeGeneration: params.routeGeneration as number,
           }));
         });
+      case "home.taskPermissions": {
+        rejectUnknownFields(params, [], method);
+        return safeJson(await this.requireHome().taskPermissions());
+      }
+      case "home.revokeTaskScope":
+      case "home.revokeTaskGrant":
+        return this.mutation(client, method, params, async () => {
+          const field = method === "home.revokeTaskScope" ? "scopeId" : "grantId";
+          rejectUnknownFields(params, ["commandId", field], method);
+          const id = string(params[field], field, { max: 160 });
+          return safeJson(method === "home.revokeTaskScope" ? await this.requireHome().revokeTaskScope(id) : await this.requireHome().revokeTaskGrant(id));
+        });
+      case "home.decideTaskGrant":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "requestId", "approved", "expiresAt"], method);
+          if (typeof params.approved !== "boolean" || !Number.isSafeInteger(params.expiresAt)) throw new GatewayError("invalid_request", "Decision requires approved and an integer expiresAt");
+          return safeJson(await this.requireHome().decideTaskGrant(string(params.requestId, "requestId", { max: 160 }), {
+            decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
+          }));
+        });
       case "home.reconfirmPermissions":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);

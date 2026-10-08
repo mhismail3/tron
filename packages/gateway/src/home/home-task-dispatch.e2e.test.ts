@@ -103,16 +103,177 @@ async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-o
   return f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
 }
 
+async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
+  request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
+  input: { decisionId: string; approved?: boolean; expiresAt: number }) {
+  const { authorizationRequestId, HomeTaskAuthorizationError } = await import("./home-task-authorization.js");
+  let requestId = authorizationRequestId(request);
+  await owner.authorize(request).catch(error => { if (error instanceof HomeTaskAuthorizationError && error.requestId) requestId = error.requestId; });
+  const result = await owner.recordDecisionAndGrant(requestId, { ...input, approved: input.approved ?? true, restoreEpoch: request.restoreEpoch });
+  return result.grant!;
+}
+
+describe("Home task authorization RPC", () => {
+  async function controls() {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f, "scope-setup")).completion;
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "authorization-terminal", identity: "device:authorization-test", isLocal: true } as unknown as ClientContext;
+    const rpc = async (method: string, params: unknown = {}) => await service.invoke(client, method, params) as any;
+    const list = () => rpc("home.taskPermissions");
+    const scope = (await list()).scopes.find((scope: any) => scope.active);
+    await rpc("home.revokeTaskScope", { commandId: "revoke-initial-scope", scopeId: scope.id });
+    return { f, rpc, list, scope };
+  }
+  async function refused(f: Awaited<ReturnType<typeof fixture>>, taskId: string, intent = "Finite work") {
+    let refusal: any;
+    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd }); await run.completion; }
+    catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ code: "grant-required", requestId: expect.any(String) });
+    expect(refusal.requestId.length).toBeGreaterThan(0);
+    return refusal.requestId as string;
+  }
+  it("revokes standing scope through terminal RPC and prevents the next dispatch", async () => {
+    const { f, rpc, list, scope } = await controls();
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runHomeInput({ request: rpc } as any, "/home permissions");
+    expect(stdout.mock.calls.map(call => call[0]).join("")).toContain(scope.id);
+    await runHomeInput({ request: rpc } as any, `/home revoke-scope ${scope.id}`);
+    const requestId = await refused(f, "scope-refused");
+    const permissions = await list();
+    expect(permissions.scopes).toMatchObject([{ id: scope.id, active: false }]);
+    expect(permissions.requests).toMatchObject([{ id: requestId, request: { target: await fileSystem.realpath(f.cwd), authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1 } }]);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.authorization", outcome: "request-recorded", referenceHash: expect.any(String) }));
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const home = await f.registry.acquire(f.home.sessionId);
+    let modelRefusal: unknown;
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("delegate", { taskId: "model-grant-request", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" }), context => {
+      const refusal = context.messages.find(message => message.role === "toolResult" && message.toolName === "delegate") as any;
+      modelRefusal = refusal;
+
+      return fauxAssistantMessage("Maintainer approval required");
+    }]);
+    await home.prompt("Try the finite work");
+    await waitFor(() => !home.isBusy, "Home authorization refusal terminal");
+    expect(modelRefusal).toMatchObject({ isError: true });
+    expect(JSON.stringify(modelRefusal)).toContain(requestId);
+    expect(JSON.stringify(modelRefusal)).toContain("grant-required");
+    evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal });
+  });
+  it("approves an exact one-use grant through RPC and refuses mismatches expiry and reuse", async () => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "grant-request");
+    const command = { commandId: "approve-exact-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 };
+    let decision: any;
+    await runHomeInput({ request: async (method, params) => { const result = await rpc(method, params); if (method === "home.decideTaskGrant") decision = result; return result; } }, `/home approve-grant ${requestId} ${command.expiresAt}`);
+    expect(decision.grant).toMatchObject({ state: "available", decisionId: decision.decision.id, expiresAt: command.expiresAt,
+      ...(await list()).requests.find((pending: any) => pending.id === requestId).request });
+    await refused(f, "grant-mismatch", "Different intent");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f, "grant-admitted")).completion;
+    expect(task.grantRef).toBe(decision.grant.id);
+    expect(await refused(f, "grant-reuse")).toBe(requestId);
+    const otherId = await refused(f, "expiry-request", "Expired work");
+    await expect(rpc("home.decideTaskGrant", { ...command, commandId: "expired-grant-input", requestId: otherId, expiresAt: Date.now() - 1 })).rejects.toThrow(/invalid-decision/);
+    const expiringId = await refused(f, "expiring-request", "Expiring work");
+    const expiresAt = Date.now() + 60_000;
+    await rpc("home.decideTaskGrant", { ...command, commandId: "approve-expiring-grant", requestId: expiringId, expiresAt });
+    const authority = (f.registry.homeOwner() as any).tasks.authorization;
+    const clock = vi.spyOn(authority, "now").mockReturnValue(expiresAt);
+    try { expect(await refused(f, "expired-admission", "Expiring work")).toBe(expiringId); }
+    finally { clock.mockRestore(); }
+    const owner = f.registry.homeOwner();
+    await expect(owner.taskTool(f.home.sessionId, { action: "approve", taskId: task.taskId } as any)).rejects.toThrow();
+    evidence.push({ case: "rpc-one-use-grant", task, permissions: await list() });
+  });
+  it("records a deny durably through RPC without a grant", async () => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "deny-request");
+    let decision: any;
+    await runHomeInput({ request: async (method, params) => { const result = await rpc(method, params); if (method === "home.decideTaskGrant") decision = result; return result; } }, `/home deny-grant ${requestId} ${Date.now() + 60_000}`);
+    expect(decision).toMatchObject({ decision: { requestId, approved: false }, grant: null });
+    const before = await list();
+    f.registry = await f.restart();
+    // A fresh production RPC owner must read the same durable decision.
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      receipts: new CommandReceiptStore(join(f.root, "authorization-receipts")) } as unknown as GatewayServiceDependencies);
+    expect(await service.invoke({ identity: "device:authorization-test", isLocal: true } as ClientContext, "home.taskPermissions", {})).toEqual(before);
+    expect(await refused(f, "after-deny")).toBe(requestId);
+    expect(before.decisions).toMatchObject([{ requestId, approved: false }]);
+    expect(before.grants).toHaveLength(0);
+    evidence.push({ case: "rpc-durable-deny", permissions: before });
+  });
+  it("replays the original decision receipt and rejects stale new decisions", async () => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "replay-request");
+    const command = { commandId: "replay-exact-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 };
+    const first = await rpc("home.decideTaskGrant", command);
+    await runHomeInput({ request: rpc } as any, `/home revoke-grant ${first.grant.id}`);
+    expect(await rpc("home.decideTaskGrant", command)).toEqual(first);
+    expect(await rpc("home.decideTaskGrant", { ...command, approved: false })).toEqual(first);
+    await expect(rpc("home.decideTaskGrant", { ...command, commandId: "stale-new-command" })).rejects.toThrow(/invalid-decision/);
+    await expect(rpc("home.decideTaskGrant", { ...command, commandId: "missing-new-command", requestId: "missing-request" })).rejects.toThrow(/invalid-decision/);
+    const permissions = await list();
+    expect(permissions.decisions).toHaveLength(1);
+    expect(permissions.grants).toMatchObject([{ id: first.grant.id, state: "revoked" }]);
+    await refused(f, "revoked-grant-refused");
+    evidence.push({ case: "rpc-receipt-stale-decision", permissions });
+  });
+  it.each(["revoke-first", "consume-first"])("orders revoke versus consumption at the owner mutex: %s", async order => {
+    const { f, rpc, list } = await controls();
+    const requestId = await refused(f, "race-request");
+    const { grant } = await rpc("home.decideTaskGrant", { commandId: "approve-racing-grant", requestId, approved: true, expiresAt: Date.now() + 60_000 });
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const save = store.authorization.save.bind(store.authorization);
+    let reached = false;
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(store.authorization, "save").mockImplementation(async state => {
+      if (!reached && state.grants.find(item => item.id === grant.id)?.state === (order === "revoke-first" ? "revoked" : "consumed")) {
+        reached = true; await barrier;
+      }
+      await save(state);
+    });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const revoke = () => rpc("home.revokeTaskGrant", { commandId: "revoke-racing-grant", grantId: grant.id });
+    const consume = () => dispatch(f, "race-admission").then(async run => ({ task: await run.completion }), error => ({ error }));
+    const first = order === "revoke-first" ? revoke().catch(error => ({ error })) : consume();
+    let secondSettled = false;
+    let blocked = false;
+    let second: Promise<any> | undefined;
+    try {
+      await waitFor(() => reached, "authorization write held");
+      second = (order === "revoke-first" ? consume() : revoke()).then(value => { secondSettled = true; return value; }, error => { secondSettled = true; return { error }; });
+      // Join queued work only after confirming that it cannot cross the held durable write.
+      await new Promise(resolve => setTimeout(resolve, 20));
+      blocked = !secondSettled;
+    } finally { release(); await first; await second; }
+    expect(blocked).toBe(true);
+    const results = await Promise.all([first, second]);
+    expect(results[order === "revoke-first" ? 0 : 1]).toEqual({ accepted: true });
+    const consumed = results[order === "revoke-first" ? 1 : 0];
+    if (order === "revoke-first") expect(consumed.error).toMatchObject({ code: "grant-required" });
+    else expect(consumed.task).toMatchObject({ grantRef: grant.id, lifecycle: "terminal" });
+    const permissions = await list();
+    expect(permissions.grants[0].state).toBe(order === "revoke-first" ? "revoked" : "consumed");
+    await refused(f, "race-reuse");
+    evidence.push({ case: `rpc-authorization-race-${order}`, permissions });
+  });
+});
+
 describe("Home task cold reconciliation", () => {
   it.each(["before-report", "after-report", "after-terminal"])("recovers %s without replay and keeps terminal outbox/authorization", async cut => {
     const f = await fixture();
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
     const authorization = (f.registry.homeOwner() as any).tasks.authorization;
     await store.initialize();
-    await authorization.enableInitialScope(await store.restoreEpoch());
-    await authorization.recordDecisionAndGrant({ intentRevision: 1, intentDigest: "a".repeat(64), target: f.cwd,
+    await issueGrant(authorization, { intentRevision: 1, intentDigest: "a".repeat(64), target: f.cwd,
       authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: await store.restoreEpoch() },
       { decisionId: "unspent", expiresAt: Date.now() + 60_000 });
+    await authorization.enableInitialScope(await store.restoreEpoch());
     const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
     const beforeAuthority = await readFile(authorizationPath, "utf8");
     let providers = 0;
@@ -294,7 +455,7 @@ describe("Home task cold reconciliation", () => {
     const epoch = await store.restoreEpoch();
     const intent = { revision: 1, text: "Finite work" };
     const { createHash } = await import("node:crypto");
-    await tasks.authorization.recordDecisionAndGrant({ intentRevision: 1, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
+    await issueGrant(tasks.authorization, { intentRevision: 1, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
       target: f.cwd, authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: epoch },
       { decisionId: "single-use", expiresAt: Date.now() + 60_000 });
     const put = store.put.bind(store);

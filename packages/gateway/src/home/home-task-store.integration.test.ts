@@ -62,6 +62,16 @@ async function listed(store: HomeTaskStore): Promise<HomeTaskRecord[]> {
   return records;
 }
 
+async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
+  request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
+  input: { decisionId: string; approved?: boolean; expiresAt: number }) {
+  const { authorizationRequestId, HomeTaskAuthorizationError } = await import("./home-task-authorization.js");
+  let requestId = authorizationRequestId(request);
+  await owner.authorize(request).catch(error => { if (error instanceof HomeTaskAuthorizationError && error.requestId) requestId = error.requestId; });
+  const result = await owner.recordDecisionAndGrant(requestId, { ...input, approved: input.approved ?? true, restoreEpoch: request.restoreEpoch });
+  return result.grant!;
+}
+
 describe("HomeTaskStore durable namespace", () => {
   it("keeps physical authority through restart and atomic writes but refuses restored spent-grant snapshots", async () => {
     const f = await fixture();
@@ -77,7 +87,7 @@ describe("HomeTaskStore durable namespace", () => {
     await f.store.put({ ...task(), revision: 2, controllerGeneration: 1 }, 1);
     expect(await f.store.restoreEpoch()).toBe(epoch);
     await owner.revokeScope(scope.id);
-    await owner.recordDecisionAndGrant(current, { decisionId: "physical-grant", expiresAt: 2_000 });
+    await issueGrant(owner, current, { decisionId: "physical-grant", expiresAt: 2_000 });
     const snapshot = join(f.root, "snapshot");
     await cp(f.directory, snapshot, { recursive: true, preserveTimestamps: true });
     await expect(owner.authorize(current)).resolves.toMatchObject({ kind: "one-use-grant" });
@@ -140,7 +150,7 @@ describe("HomeTaskStore durable namespace", () => {
     await expect(authorization(restarted).authorize(request)).resolves.toEqual({ kind: "standing-scope", scopeId: scope.id });
     await expect(authorization(restarted).authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
     await authorization(restarted).revokeScope(scope.id);
-    const grant = await authorization(restarted).recordDecisionAndGrant(request, { decisionId: "decision-1", expiresAt: 2_000 });
+    const grant = await issueGrant(authorization(restarted), request, { decisionId: "decision-1", expiresAt: 2_000 });
     const afterGrant = new HomeTaskStore(f.root, f.workspace);
     const before = await afterGrant.authorization.load();
     expect(before.grants[0]).toMatchObject({ id: grant.id, state: "available", restoreEpoch: "epoch-1" });
@@ -171,8 +181,8 @@ describe("HomeTaskStore durable namespace", () => {
   it("fills initially null task authority once without allowing a later reference swap", async () => {
     const f = await fixture();
     await f.store.initialize();
+    const grant = await issueGrant(authorization(f.store), request, { decisionId: "decision-1", expiresAt: 2_000 });
     const scope = await authorization(f.store).enableInitialScope("epoch-1");
-    const grant = await authorization(f.store).recordDecisionAndGrant(request, { decisionId: "decision-1", expiresAt: 2_000 });
     await f.store.put(task(), null);
     const bound = { ...task(), revision: 2, scopeRef: scope.id };
     await f.store.put(bound, 1);
@@ -271,7 +281,7 @@ describe("HomeTaskStore durable namespace", () => {
     await writeFile(f.taskPath, JSON.stringify({ ...task(), intentDigest: "0".repeat(64) }));
     await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await writeFile(f.taskPath, before);
-    await authorization(f.store).recordDecisionAndGrant(request, { decisionId: "decision-1", expiresAt: 2_000 });
+    await issueGrant(authorization(f.store), request, { decisionId: "decision-1", expiresAt: 2_000 });
     const valid = JSON.parse(await readFile(f.authPath, "utf8"));
     for (const broken of [
       { ...valid, grants: [...valid.grants, valid.grants[0]] },

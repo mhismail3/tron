@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationState } from "./home-task-authorization.js";
 
 function fixture() {
-  let state: HomeTaskAuthorizationState = { revision: 1, scopes: [], grants: [], decisions: [] };
+  let state: HomeTaskAuthorizationState = { revision: 1, scopes: [], requests: [], grants: [], decisions: [] };
   const diagnostics: Array<{ event: string; outcome: string; reason?: string }> = [];
   const store = {
     load: async () => structuredClone(state),
@@ -29,13 +29,23 @@ function fixture() {
   return { owner, store, request, diagnostics, advance: (delta: number) => { now += delta; }, revokeTrust: (path: string) => trusted.delete(path) };
 }
 
+async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
+  request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
+  input: { decisionId: string; approved?: boolean; expiresAt: number }) {
+  const { authorizationRequestId, HomeTaskAuthorizationError } = await import("./home-task-authorization.js");
+  let requestId = authorizationRequestId(request);
+  await owner.authorize(request).catch(error => { if (error instanceof HomeTaskAuthorizationError && error.requestId) requestId = error.requestId; });
+  const result = await owner.recordDecisionAndGrant(requestId, { ...input, approved: input.approved ?? true, restoreEpoch: request.restoreEpoch });
+  return result.grant!;
+}
+
 describe("HomeTaskAuthorization", () => {
   it("explicitly reconfirms only active standing scopes, never revoked scopes or restored grants", async () => {
     const { owner, request, store } = fixture();
     const revoked = await owner.enableInitialScope("older-epoch");
     await owner.revokeScope(revoked.id);
+    const grant = await issueGrant(owner, request, { decisionId: "restored-grant", expiresAt: 2_000 });
     const active = await owner.enableInitialScope(request.restoreEpoch);
-    const grant = await owner.recordDecisionAndGrant(request, { decisionId: "restored-grant", expiresAt: 2_000 });
     await expect(owner.authorize({ ...request, restoreEpoch: "restored-epoch" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
     await owner.reconfirmPermissions("restored-epoch");
     const state = await store.load();
@@ -81,7 +91,7 @@ describe("HomeTaskAuthorization", () => {
 
   it("stores a human decision separately and atomically consumes an exact one-use grant", async () => {
     const { owner, request, store } = fixture();
-    const grant = await owner.recordDecisionAndGrant(request, { decisionId: "decision-1", expiresAt: 2_000 });
+    const grant = await issueGrant(owner, request, { decisionId: "decision-1", expiresAt: 2_000 });
     const saved = await store.load();
     expect(saved.decisions).toHaveLength(1);
     expect(saved.grants).toHaveLength(1);
@@ -93,27 +103,29 @@ describe("HomeTaskAuthorization", () => {
 
   it("records denied decisions and emits bounded diagnostics for denied, invalid, and duplicate decisions", async () => {
     const { owner, request, store, diagnostics } = fixture();
-    await expect(owner.recordDecisionAndGrant(request, {
+    await expect(issueGrant(owner, request, {
       decisionId: "denied", approved: false, expiresAt: 2_000,
-    })).rejects.toMatchObject({ code: "grant-required" });
+    })).resolves.toBeNull();
     expect(await store.load()).toMatchObject({
       decisions: [{ id: "denied", approved: false }], grants: [],
     });
     expect(diagnostics).toEqual([
+      { event: "home.task.authorization", outcome: "request-recorded", referenceHash: expect.any(String) },
+      { event: "home.task.authorization", outcome: "refused", reason: "grant-required", referenceHash: expect.any(String) },
       { event: "home.task.authorization", outcome: "decision-recorded", referenceHash: expect.any(String) },
-      { event: "home.task.authorization", outcome: "refused", reason: "grant-required" },
     ]);
 
     diagnostics.length = 0;
-    await expect(owner.recordDecisionAndGrant(request, {
+    await expect(issueGrant(owner, request, {
       decisionId: "expired-input", expiresAt: 1_000,
     })).rejects.toMatchObject({ code: "invalid-decision" });
-    await owner.recordDecisionAndGrant(request, { decisionId: "duplicate", expiresAt: 2_000 });
-    await expect(owner.recordDecisionAndGrant(request, {
+    const duplicateRequest = { ...request, intentDigest: "other-intent" };
+    await issueGrant(owner, duplicateRequest, { decisionId: "duplicate", expiresAt: 2_000 });
+    await expect(issueGrant(owner, duplicateRequest, {
       decisionId: "duplicate", expiresAt: 2_000,
     })).rejects.toMatchObject({ code: "invalid-decision" });
     expect(diagnostics).toContainEqual({
-      event: "home.task.authorization", outcome: "refused", reason: "invalid-decision",
+      event: "home.task.authorization", outcome: "refused", reason: "invalid-decision", referenceHash: expect.any(String),
     });
     expect(diagnostics.filter((record) => record.event === "home.task.authorization"
       && record.outcome === "refused" && record.reason === "invalid-decision")).toHaveLength(2);
@@ -124,21 +136,21 @@ describe("HomeTaskAuthorization", () => {
 
   it("rejects expired, mismatched, revoked, spent and restore-epoch-stale grants", async () => {
     const expired = fixture();
-    await expired.owner.recordDecisionAndGrant(expired.request, { decisionId: "expired", expiresAt: 2_000 });
+    await issueGrant(expired.owner, expired.request, { decisionId: "expired", expiresAt: 2_000 });
     expired.advance(1_000);
     await expect(expired.owner.authorize(expired.request)).rejects.toMatchObject({ code: "grant-required" });
 
     const mismatched = fixture();
-    await mismatched.owner.recordDecisionAndGrant(mismatched.request, { decisionId: "mismatch", expiresAt: 2_000 });
+    await issueGrant(mismatched.owner, mismatched.request, { decisionId: "mismatch", expiresAt: 2_000 });
     await expect(mismatched.owner.authorize({ ...mismatched.request, authorizationScope: "read-only" })).rejects.toMatchObject({ code: "grant-required" });
 
     const revoked = fixture();
-    const grant = await revoked.owner.recordDecisionAndGrant(revoked.request, { decisionId: "revoked", expiresAt: 2_000 });
+    const grant = await issueGrant(revoked.owner, revoked.request, { decisionId: "revoked", expiresAt: 2_000 });
     await revoked.owner.revokeGrant(grant.id);
     await expect(revoked.owner.authorize(revoked.request)).rejects.toMatchObject({ code: "grant-required" });
 
     const restored = fixture();
-    await restored.owner.recordDecisionAndGrant(restored.request, { decisionId: "stale-epoch", expiresAt: 2_000 });
+    await issueGrant(restored.owner, restored.request, { decisionId: "stale-epoch", expiresAt: 2_000 });
     await expect(restored.owner.authorize({ ...restored.request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
   });
 });

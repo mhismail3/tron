@@ -293,10 +293,13 @@ strict v1 format requires exactly these keys:
 
 `authorization.json` is independently owned by `HomeTaskAuthorization` through
 the store's durable adapter. Its exact v1 keys are `version`, `revision`,
-`scopes`, `decisions`, `grants`; it is at most 4 MiB, with at most 10,000 records
-in each array. Scope/decision/grant fields are strict, IDs unique, each grant
-names one approved human decision, and every scope/grant carries its restore
-epoch. Only the adapter advances revision. Concurrent saves based on the same
+`scopes`, `requests`, `decisions`, `grants`; it is at most 4 MiB, with at most 10,000 records
+in each array. Scope/request/decision/grant fields are strict and IDs unique.
+Each request owns an exact authorization binding and a stable SHA-256 identity
+(key order is defined by `authorizationRequestId`). Each decision names one
+request and records its approval and expiry; one request can be decided only
+once. Each grant names one approved decision, must match its request binding
+and expiry, and carries that request's restore epoch. Only the adapter advances revision. Concurrent saves based on the same
 revision cannot overwrite each other. Command payloads are snapshotted before
 queuing, so later caller edits cannot change an accepted write.
 
@@ -368,8 +371,18 @@ scope, worker profile, policy revision, expiry, and restore epoch; admission
 atomically consumes it. Revoked,
 expired, spent, mismatched, or stale-epoch grants do not authorize work. HomeTaskStore supplies the physical-directory epoch; authorization never infers
 restore from ordinary startup. Dispatch uses this owner before prompt admission;
-explicit permission reconfirmation is available, while creating/revoking scopes
-and issuing grants through user-facing controls remains a later slice.
+authenticated maintainer RPC/terminal controls list authority, revoke scopes or
+grants, and decide pending requests. Home's model tools cannot approve grants.
+A `grant-required` refusal durably records the canonical binding before returning
+its stable `requestId` (also visible in the real delegate tool error). Repeated
+refusals across restart refer to that same request. Decisions are not dialogs:
+approval atomically records the human decision and a separate one-use grant;
+denial records the decision without a grant and returns a successful receipt.
+A decided request cannot mint a second grant after denial, expiry, consumption
+or revocation. Approval never replays the refused task: delegate the exact intent
+and target with a new task ID. Revocation and grant consumption serialize under
+the same authorization mutex; whichever enters first wins. Revocation does not
+stop already-admitted work (use Stop for that).
 
 The shared `OwnedSessionDispatch` seam contains a fixed 24-hour wall-time
 ceiling. Only a caller that opts in owns that deadline; ordinary sessions and
@@ -584,7 +597,7 @@ operation/controller generation, cumulative token spend and immutable result.
 Status/viewing never changes control. Terminal `/home task <id>` shows lifecycle,
 result outcome, input/cache and output tokens, and explicit unpriced money.
 Home's `task` tool exposes `status`, `steer` and `stop`; it can only control tasks
-bound to the enabled Home's exact identity/generation, never reconfirm permissions.
+bound to the enabled Home's exact identity/generation, never reconfirm permissions, revoke authority or decide grants.
 Read-only status follows Home identity across disable/re-enable; it does not
 transfer executable control.
 
@@ -622,6 +635,29 @@ escape hatch, without rewriting an already immutable terminal task.
 `/home reconfirm-permissions` is its terminal spelling. It is not a model tool,
 startup refresh, grant renewal or recovery replay. It fails closed if the physical
 namespace identity changes during the command. No iOS task surface is added here.
+
+### Maintainer authorization RPC and terminal controls
+
+These controls share the existing authenticated maintainer transport and mutation
+receipts, not the Home model's `task`/`delegate` tools. The task namespace is
+created by the first dispatch, never by startup or listing.
+
+| RPC parameters | Terminal spelling | Contract |
+| --- | --- | --- |
+| `home.taskPermissions {}` | `/home permissions` | Read strict durable scopes, requests, decisions and grants plus revision; no authority renewal. Before first dispatch, the uninitialized namespace refuses rather than granting permission. |
+| `home.revokeTaskScope { commandId, scopeId }` | `/home revoke-scope <id>` | Revoke the standing scope; repeated/already-revoked or missing references are harmless no-ops. The next dispatch cannot recreate a revoked initial scope. |
+| `home.revokeTaskGrant { commandId, grantId }` | `/home revoke-grant <id>` | Revoke only an available grant. Consumed/revoked or missing grants are no-ops, never resurrected. |
+| `home.decideTaskGrant { commandId, requestId, approved, expiresAt }` | `/home approve-grant <request-id> <expiry-ms>` or `/home deny-grant <request-id> <expiry-ms>` | Decide the exact pending request, with future Unix-millisecond expiry and explicit boolean approval. The command ID is the decision ID. Return `{ decision, grant }` (`grant: null` for deny). A missing/already-decided request, stale physical epoch, expired input or lost trust refuses; the caller cannot substitute intent/target/scope/profile/policy. |
+
+Replaying a mutation's command ID returns its original receipt, even after grant
+consumption/revocation; it does not re-decide the request. After the bounded receipt
+horizon, the durable once-decided request still prevents a new grant. Restart
+preserves denied decisions and grant state. A copied namespace never renews grants
+or old pending requests; a decision must match the current physical epoch.
+`home.task.authorization` diagnoses request, decision and revocation transitions
+with hashed references only. RPC E2Es in `home-task-dispatch.e2e.test.ts` exercise
+all terminal spellings, exact one-use admission, expiry/mismatch refusal, durable
+deny, receipt replay/stale commands and both revoke/consume orderings.
 
 Regenerate task E2E evidence with the named `home-task-dispatch.e2e.test.ts` file
 and `HOME_TASK_REPORT=<artifact-path>`. It includes the actual Home delegate tool,

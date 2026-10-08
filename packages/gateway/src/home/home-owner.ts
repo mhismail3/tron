@@ -228,6 +228,17 @@ export class HomeOwner {
     return this.tasks;
   }
 
+  async taskPermissions() { return (await this.taskOwner()).permissions(); }
+  async revokeTaskScope(scopeId: string): Promise<{ accepted: true }> {
+    await (await this.taskOwner()).revokeScope(scopeId); return { accepted: true };
+  }
+  async revokeTaskGrant(grantId: string): Promise<{ accepted: true }> {
+    await (await this.taskOwner()).revokeGrant(grantId); return { accepted: true };
+  }
+  async decideTaskGrant(requestId: string, input: { decisionId: string; approved: boolean; expiresAt: number }) {
+    return (await this.taskOwner()).decideGrant(requestId, input);
+  }
+
   async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
     await (await this.taskOwner()).reconfirmPermissions();
     return { reconfirmed: true };
@@ -249,6 +260,7 @@ export class HomeOwner {
     const task = await this.tasks.store.read(request.taskId);
     if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
     if (request.action === "status") return this.taskResult(request.taskId);
+    if (request.action !== "steer" && request.action !== "stop") throw new GatewayError("invalid_request", "Unknown Home task action");
     if (task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
     if (request.action === "steer") await this.steerTask(sessionId, request);
     else await this.stopTask(request);
