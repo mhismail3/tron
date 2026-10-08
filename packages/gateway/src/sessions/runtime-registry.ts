@@ -781,6 +781,7 @@ export class RuntimeRegistry {
       gatewayModelRuntime?: ModelRuntime;
       /** Where Home's memory reports its bounded records. */
       homeMemoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
+      homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
       /** Where Home's request seam reports one record per activation and per
        * refusal. */
       homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
@@ -868,6 +869,8 @@ export class RuntimeRegistry {
       memorySummarizer: options.homeMemorySummarizer ?? (() => ({ refusal: "unavailable" })),
       ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
       ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
+      taskSessions: this,
+      ...(options.homeTaskDiagnostic ? { taskDiagnostic: options.homeTaskDiagnostic } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
@@ -1917,6 +1920,9 @@ export class RuntimeRegistry {
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
+      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.home.dispatchTask(sessionId, request),
+      validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
+      ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
         this.options.persistenceDiagnostic?.(sessionId, "home-model-record-failed");
       }),
@@ -2941,7 +2947,13 @@ export class RuntimeRegistry {
     }
   }
 
-  async create(cwdInput: string, profile: RuntimeProfile = "ordinary"): Promise<RuntimeSlot> {
+  async canonicalTaskTarget(target: string): Promise<string> {
+    const inspection = await this.options.trust.inspect(target);
+    if (inspection.effectiveDecision !== true) throw new GatewayError("trust_required", "Home tasks require a trusted project");
+    return inspection.cwd;
+  }
+
+  async create(cwdInput: string, profile: RuntimeProfile = "ordinary", taskWorker?: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -2966,7 +2978,7 @@ export class RuntimeRegistry {
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
       slot = await stage(
         "session.create.runtime",
-        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, profile),
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, profile, undefined, taskWorker),
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {

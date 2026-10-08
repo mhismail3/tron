@@ -205,6 +205,19 @@ export function delegatedProviderOrigin(extensions: readonly Extension[]): Exten
   return { source: DELEGATED_PROVIDER_SOURCE };
 }
 
+/** Version of the finalized installed owner of this tool, never a same-named
+ * project extension. Task policy must fail closed on missing/unknown versions. */
+export function delegatedProviderToolVersion(extensions: readonly Extension[], toolName: string): string | undefined {
+  const installed = delegatedProviderOrigin(extensions).owner;
+  if (!installed) return undefined;
+  const extension = extensions.find(candidate => attributedToolOwner(candidate.tools.get(toolName))?.id === installed.id);
+  if (!extension || !hasProviderPackageManifest(extension)) return undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(join(extension.sourceInfo.baseDir!, "package.json"), "utf8")) as { version?: unknown };
+    return typeof manifest.version === "string" ? manifest.version : undefined;
+  } catch { return undefined; }
+}
+
 /** True only for the exact installed provider owner, never a same-named tool. */
 export function isInstalledDelegatedTool(
   toolName: string,

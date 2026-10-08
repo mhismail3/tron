@@ -34,7 +34,7 @@ describe("HomeTaskAuthorization", () => {
     const { owner, request, diagnostics } = fixture();
     const scope = await owner.enableInitialScope(request.restoreEpoch);
     await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "standing-scope", scopeId: scope.id });
-    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
     diagnostics.length = 0;
     const confirmed = await owner.enableInitialScope("epoch-2");
     expect(confirmed.id).not.toBe(scope.id);
@@ -44,7 +44,7 @@ describe("HomeTaskAuthorization", () => {
       { event: "home.task.authorization", outcome: "scope-enabled", referenceHash: hash(confirmed.id) },
     ]);
     await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).resolves.toMatchObject({ kind: "standing-scope", scopeId: confirmed.id });
-    await expect(owner.authorize(request)).rejects.toMatchObject({ code: "grant-required" });
+    await expect(owner.authorize(request)).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
   });
 
   it("allows all currently trusted project targets under a same-epoch standing scope and rechecks trust at admission", async () => {
@@ -122,6 +122,6 @@ describe("HomeTaskAuthorization", () => {
 
     const restored = fixture();
     await restored.owner.recordDecisionAndGrant(restored.request, { decisionId: "stale-epoch", expiresAt: 2_000 });
-    await expect(restored.owner.authorize({ ...restored.request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(restored.owner.authorize({ ...restored.request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
   });
 });

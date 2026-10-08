@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { HomeTaskStore } from "./home-task-store.js";
+import { HomeTaskAuthorization } from "./home-task-authorization.js";
+import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest } from "./home-task-dispatcher.js";
 import { chmod, mkdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
@@ -125,6 +129,8 @@ export interface HomeOwnerOptions {
   /** Where Home's request seam reports one record per activation and per
    * refusal: the effective size of a turn and the readiness wait it took. */
   requestDiagnostic?: (record: HomeRequestRecord) => void;
+  taskSessions?: RuntimeRegistry;
+  taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
 }
 
 /**
@@ -163,11 +169,42 @@ export class HomeOwner {
   private unavailable: string | undefined;
   /** The fenced owner retains retirement work; a slot-lane writer must not await work queued on that same lane. */
   private publicationRetirement: Promise<void> | undefined;
+  private readonly tasks: HomeTaskDispatcher | undefined;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
     this.recordPath = join(this.directory, "home.json");
     this.workspacePath = join(this.directory, "workspace");
+    if (options.taskSessions) {
+      const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
+      const authorization = new HomeTaskAuthorization({ store: store.authorization,
+        ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
+        resolveTrustedTarget: async target => {
+          const inspection = await options.trust.inspect(target);
+          return inspection.effectiveDecision === true ? inspection.cwd : undefined;
+        } });
+      this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic);
+    }
+  }
+
+  /** Delegate authority is sampled for the exact enabled Home, never a fork or
+   * disabled chapter. Home does not inherit a project's executable resources. */
+  dispatchTask(sessionId: string, request: HomeTaskDispatchRequest) {
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) {
+      throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
+    }
+    return this.tasks.start({ homeId: record.homeId, generation: record.generation }, request);
+  }
+
+  async validateTaskMarker(sessionId: string, marker: unknown): Promise<void> {
+    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
+    await this.tasks.validateWorkerMarker(sessionId, marker);
+  }
+
+  taskResult(taskId: string) {
+    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
+    return this.tasks.result(taskId);
   }
 
   /** Load the durable record once, before any runtime can ask for a profile. */

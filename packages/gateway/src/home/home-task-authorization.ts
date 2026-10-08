@@ -65,7 +65,7 @@ export interface HomeTaskAuthorizationOptions {
 export interface HomeTaskAuthorizationDiagnostic {
   event: "home.task.authorization";
   outcome: "scope-enabled" | "scope-revoked" | "decision-recorded" | "grant-consumed" | "refused";
-  reason?: "untrusted-target" | "grant-required" | "invalid-decision";
+  reason?: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required";
   referenceHash?: string;
 }
 
@@ -74,7 +74,7 @@ export type HomeTaskAuthorizationResult =
   | { kind: "one-use-grant"; grantId: string };
 
 export class HomeTaskAuthorizationError extends Error {
-  constructor(readonly code: "untrusted-target" | "grant-required" | "invalid-decision") {
+  constructor(readonly code: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required") {
     super(code);
     this.name = "HomeTaskAuthorizationError";
   }
@@ -182,7 +182,7 @@ export class HomeTaskAuthorization {
       const state = await this.options.store.load();
       const scope = state.scopes.find((candidate) => candidate.kind === "all-trusted-projects"
         && candidate.active && candidate.restoreEpoch === request.restoreEpoch);
-      if (scope) return { kind: "standing-scope", scopeId: scope.id }
+      if (scope) return { kind: "standing-scope", scopeId: scope.id };
       const grant = state.grants.find((candidate) => candidate.state === "available"
         && candidate.expiresAt > this.now()
         && candidate.intentRevision === request.intentRevision
@@ -193,6 +193,11 @@ export class HomeTaskAuthorization {
         && candidate.policyRevision === request.policyRevision
         && candidate.restoreEpoch === request.restoreEpoch);
       if (!grant) {
+        if (state.scopes.some(candidate => candidate.active && candidate.restoreEpoch !== request.restoreEpoch)
+          || state.grants.some(candidate => candidate.state === "available" && candidate.restoreEpoch !== request.restoreEpoch)) {
+          this.diagnostic("refused", undefined, "scope-reconfirmation-required");
+          throw new HomeTaskAuthorizationError("scope-reconfirmation-required");
+        }
         this.diagnostic("refused", undefined, "grant-required");
         throw new HomeTaskAuthorizationError("grant-required");
       }

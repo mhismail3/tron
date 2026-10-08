@@ -5,7 +5,7 @@ import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
-import type { AutomationOperationTerminal } from "../sessions/runtime-slot.js";
+import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
 import {
   AutomationAdmissionError,
   type AutomationExecutionHandle,
@@ -15,7 +15,7 @@ import {
 } from "./automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "./types.js";
 
-function terminalResult(terminal: AutomationOperationTerminal): AutomationExecutionResult {
+function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionResult {
   if (terminal.lifecycle === "completed") {
     return {
       state: "succeeded",
@@ -138,7 +138,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       });
       let terminalObserved = false;
       let observedResult: AutomationExecutionResult | undefined;
-      const onTerminal = async (terminal: AutomationOperationTerminal): Promise<void> => {
+      const onTerminal = async (terminal: OwnedOperationTerminal): Promise<void> => {
         if (terminalObserved) return;
         terminalObserved = true;
         work.transition("automation-terminal-persistence");

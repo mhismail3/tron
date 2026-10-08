@@ -245,7 +245,7 @@ const HOME_EXTENSIONS = [
 ];
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
-const HOME_TOOLS = ["ask_user", "date", "display", "memory_search", "notify", "zoom"];
+const HOME_TOOLS = ["ask_user", "date", "delegate", "display", "memory_search", "notify", "zoom"];
 
 describe("Tron Home designation", () => {
   homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile, open, rename } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile, open, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,6 +62,41 @@ async function listed(store: HomeTaskStore): Promise<HomeTaskRecord[]> {
 }
 
 describe("HomeTaskStore durable namespace", () => {
+  it("keeps physical authority through restart and atomic writes but refuses restored spent-grant snapshots", async () => {
+    const f = await fixture();
+    await f.store.initialize();
+    const epoch = await f.store.restoreEpoch();
+    const current = { ...request, restoreEpoch: epoch };
+    const owner = authorization(f.store);
+    const scope = await owner.enableInitialScope(epoch);
+    const restarted = new HomeTaskStore(f.root, f.workspace);
+    expect(await restarted.restoreEpoch()).toBe(epoch);
+    await expect(authorization(restarted).authorize(current)).resolves.toMatchObject({ kind: "standing-scope" });
+    await f.store.put(task(), null);
+    await f.store.put({ ...task(), revision: 2, controllerGeneration: 1 }, 1);
+    expect(await f.store.restoreEpoch()).toBe(epoch);
+    await owner.revokeScope(scope.id);
+    await owner.recordDecisionAndGrant(current, { decisionId: "physical-grant", expiresAt: 2_000 });
+    const snapshot = join(f.root, "snapshot");
+    await cp(f.directory, snapshot, { recursive: true, preserveTimestamps: true });
+    await expect(owner.authorize(current)).resolves.toMatchObject({ kind: "one-use-grant" });
+    await rm(f.directory, { recursive: true }); await rename(snapshot, f.directory);
+    const restoredEpoch = await f.store.restoreEpoch();
+    expect(restoredEpoch).not.toBe(epoch);
+    await expect(authorization(f.store).authorize({ ...current, restoreEpoch: restoredEpoch })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
+    expect((await f.store.authorization.load()).grants[0].state).toBe("available");
+    await chmod(f.directory, 0o000);
+    try { await expect(f.store.restoreEpoch()).rejects.toMatchObject({ code: "unsafe-state" }); }
+    finally { await chmod(f.directory, 0o700); }
+  });
+
+  it("never replaces an already terminal immutable result", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const terminal: HomeTaskRecord = { ...task(), lifecycle: "terminal", terminalEvidence: { outcome: "unknown", sessionId: null, entryIds: [], reason: "no-report" } };
+    await f.store.put(terminal, null);
+    await expect(f.store.put({ ...terminal, revision: 2, terminalEvidence: { ...terminal.terminalEvidence!, reason: "edited" } }, 1)).rejects.toMatchObject({ code: "invalid-record" });
+    expect(await f.store.read(terminal.taskId)).toEqual(terminal);
+  });
   it("requires explicit initialization before any write and publishes owner-only files", async () => {
     const f = await fixture();
     await expect(f.store.put(task(), null)).rejects.toMatchObject({ code: "not-initialized" });
@@ -102,13 +137,13 @@ describe("HomeTaskStore durable namespace", () => {
     const scope = await owner.enableInitialScope("epoch-1");
     const restarted = new HomeTaskStore(f.root, f.workspace);
     await expect(authorization(restarted).authorize(request)).resolves.toEqual({ kind: "standing-scope", scopeId: scope.id });
-    await expect(authorization(restarted).authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(authorization(restarted).authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
     await authorization(restarted).revokeScope(scope.id);
     const grant = await authorization(restarted).recordDecisionAndGrant(request, { decisionId: "decision-1", expiresAt: 2_000 });
     const afterGrant = new HomeTaskStore(f.root, f.workspace);
     const before = await afterGrant.authorization.load();
     expect(before.grants[0]).toMatchObject({ id: grant.id, state: "available", restoreEpoch: "epoch-1" });
-    await expect(authorization(afterGrant).authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(authorization(afterGrant).authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
     await authorization(afterGrant).authorize(request);
     await expect(afterGrant.authorization.save(before)).rejects.toMatchObject({ code: "revision-conflict" });
     const afterConsumption = new HomeTaskStore(f.root, f.workspace);

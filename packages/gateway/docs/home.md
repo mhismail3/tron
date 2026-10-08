@@ -4,8 +4,10 @@ Tron Home is an opt-in persistent conversation, one per Gateway installation:
 `~/.tron` and `~/.tron-dev` each own their own Home. This document owns what
 Home does today: its designation record, its curated runtime, its memory, and the
 request seam that sends each activation the memory's view instead of the
-canonical transcript. The separate task persistence/authorization contract exists;
-task dispatch, the wake inbox and Home's own client surface are later slices. Ordinary sessions are unaffected by every rule here.
+canonical transcript. Home delegates finite project work through `delegate` into
+ordinary worker sessions with explicit immutable reports. Task status/control,
+wake delivery and Home's own client surface are later slices. Ordinary sessions
+are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
 
@@ -281,9 +283,9 @@ strict v1 format requires exactly these keys:
 | `target`, `workerProfile`, `policyRevision` | Immutable absolute target (at most 4 KiB UTF-8), qualified worker-profile identity and positive policy revision; storage is not trust/admission authority |
 | `grantRef`, `scopeRef` | Nullable authority references; at most one, must name an existing authorization record, fill once then cannot swap |
 | `lifecycle` | `pending`, `active`, or `terminal`; active requires authority and session/operation/controller identity; terminal requires terminal evidence |
-| `sessionId`, `operationId`, `controllerGeneration` | Nullable execution identity, populated by the later dispatch/control owner |
+| `sessionId`, `operationId`, `controllerGeneration` | Nullable execution identity, populated by dispatch; shared control is a later slice |
 | `spend` | Null or exact `{ inputTokens, outputTokens, knownCostUSD, pricingProvenance, unpriced }`; safe nonnegative token counts, finite nonnegative known cost only with bounded price provenance, and an explicit unpriced flag |
-| `reportRefs` | Null or at most 256 unique result references, each exact `{ resultId, sessionId, entryId }`; later result owner must verify canonical evidence |
+| `reportRefs` | Null or at most 256 unique result references, each exact `{ resultId, sessionId, entryId, digest }`; SHA-256 pins the exact canonical report payload, which the result owner verifies |
 | `terminalEvidence` | Null or exact `{ outcome, sessionId, entryIds, reason }`; outcome is `progress`, `needs-input`, `final`, `limited`, `interrupted`, or `unknown`, at most 256 unique entry IDs and a bounded coded reason; `final` requires a report reference, never a last-reply substitution |
 
 `authorization.json` is independently owned by `HomeTaskAuthorization` through
@@ -306,22 +308,28 @@ Enumeration streams bounded directory entries and validates every file: no
 second task catalog, growing task snapshot, total task-count cap, or silent
 pruning. A listing that later refuses is not a publishable complete projection.
 
-There is deliberately no task-membership index. Future result, inbox, and
-canonical worker-marker owners must preserve and block on a missing/invalid
-referenced task; they may not recreate it or ignore the reference. An absent
-unreferenced task is indistinguishable from one never created and has no
-consumer. Results and inbox files arrive with their respective owners, not as
-empty speculative stores in this slice.
+There is deliberately no task-membership index. The result and canonical
+worker-marker owners preserve and block on missing/invalid referenced tasks;
+future inbox consumers must do the same. An absent unreferenced task is
+indistinguishable from one never created and has no consumer. Immutable reports
+live in the worker's canonical history, pinned by task references and payload
+digests, not in a second transcript store. Terminal task records cannot be
+replaced. Inbox persistence arrives with its owner, not as an empty store.
 
 Ordinary restart reloads scopes and unused grants unchanged; consumed grants
-stay consumed. Backup restore is different: the explicit restore owner must
-advance an authority epoch outside the restored snapshot. Epoch mismatch
-requires maintainer reconfirmation; dispatch must fail closed when that authority
-cannot be established. Startup must never infer a restore or rotate the epoch.
-The restore workflow is not implemented here. Future deletion may atomically
-retire terminal acknowledged task/result/event evidence only 90 days after ack;
-pending, unacknowledged, blocked and outcome-unknown evidence is never age-pruned.
-There is no deletion or dispatch API in this slice.
+stay consumed. HomeTaskStore derives authority from the physical task directory's
+`dev`, `ino` and birthtime, not a persisted document or a startup-minted epoch.
+Restart and atomic file replacement retain that identity. A restore, copy or
+migration of the Tron home requires reconfirming Home task permissions: directory
+recreation changes the epoch, and old scopes/grants are preserved but refused
+with `scope-reconfirmation-required`. An unreadable identity fails closed.
+In-place overwrite that preserves the physical directory is not distinguishable
+from ordinary file replacement; this is not protection against a privileged
+actor restoring files into the live directory. Explicit reconfirmation controls
+arrive in the control slice. Future deletion may atomically retire terminal
+acknowledged task/result/event evidence only 90 days after ack; pending,
+unacknowledged, blocked and outcome-unknown evidence is never age-pruned.
+There is no deletion API yet.
 
 **Rollback target:** the held pre-task Home-capable build already reads the same
 strict v2 ledger. It entirely ignores `gateway/home/tasks/` and its setup marker,
@@ -333,10 +341,11 @@ compares Home behavior and all namespace/marker bytes before and after. This is
 an owner-level rollback integration proof, not a full installed older Gateway
 binary or power-loss test.
 
-Production construction is deferred to task dispatch: HomeOwner and Gateway
-startup do not construct these owners, initialize the namespace, or enable a
-scope. Integration tests wire the existing authorization owner to its durable
-adapter. No new RPC or automatic task activation is exposed.
+HomeOwner constructs the store, its authorization adapter and dispatcher beside
+Home's memory. Startup does not initialize the task namespace or enable a scope:
+first dispatch explicitly initializes it and enables the initial trusted-project
+scope. Existing/revoked/stale authority is never silently renewed. No task RPC or
+automatic Home activation is exposed.
 
 ## Task authorization foundation
 
@@ -349,10 +358,9 @@ one-use grant recorded separately from the human decision. The grant binds the
 intent revision and digest, canonical trusted target, requested authorization
 scope, worker profile, policy revision, expiry, and restore epoch; admission
 atomically consumes it. Revoked,
-expired, spent, mismatched, or stale-epoch grants do not authorize work. The
-restore authority supplies the epoch; this owner does not infer restore from
-ordinary startup. This owner is not wired to task dispatch in this slice, and
-there is no user-facing task authorization control yet.
+expired, spent, mismatched, or stale-epoch grants do not authorize work. HomeTaskStore supplies the physical-directory epoch; authorization never infers
+restore from ordinary startup. Dispatch uses this owner before prompt admission;
+user-facing authorization controls are a later slice.
 
 The shared `OwnedSessionDispatch` seam contains a fixed 24-hour wall-time
 ceiling. Only a caller that opts in owns that deadline; ordinary sessions and
@@ -361,9 +369,73 @@ its terminal completion before reporting a joined stop. The
 `owned-operation.deadline-stop` diagnostic records only an opaque operation
 hash, elapsed time and whether cancellation joined. The step-4 faux-provider
 RuntimeSlot integration cases exercise both nonproductive and successful tool
-loops, blocked provider I/O, and foreground-process join. This helper is not task
-dispatch; a later task-dispatch acceptance test must prove the same contract
-through task reports and task spend.
+loops, blocked provider I/O, and foreground-process join. Task dispatch applies
+this same seam before asynchronous prompt preflight. The task-level faux-provider
+E2E repeats those adversaries through durable task settlement and spend, with a
+test-only controlled expiry of the fixed timer. No user-configurable limit or
+pause-to-raise-limit exists.
+
+## Dispatch and immutable reports
+
+Only the enabled Home's active chapter may call `delegate` with a stable `taskId`,
+bounded finite `intent` and trusted `target`. The dispatcher records pending intent
+before worker effects, authorizes the exact snapshot, creates an ordinary worker
+through `OwnedSessionDispatch`, and binds its exact operation before prompt
+admission. Task IDs never replay an accepted prompt. A task worker has normal
+project tools/resources plus `report`, but cannot replace its owned session.
+The worker's canonical `tron-home-task` marker binds the task, originating Home
+identity/generation, intent revision, worker session and exact operation. Cold
+runtime construction checks the reference before loading executable resources;
+missing/contradictory tasks are not recreated.
+
+In v1, Home task workers cannot run subagents; this preserves the 24-hour
+termination guarantee for operation-owned work. A provider-supported
+foreground-only contract will lift this. The first-party task extension refuses
+subagent executions (even `async:false`, whose pinned provider configuration can
+force async), revival/mutating management, and the schedule tool. Only proven
+read-only management from the verified `0.76.1-tron.4` provider is admitted:
+`guide`, `children.list`, `status`, `list`, `get`, `models`, plus supervisor
+`status`, `pending`, `list`. The same provider's blocking `bg_wait` is allowed
+and is aborted/joined with the operation; `nonBlocking: true` is refused because
+its durable subscription can wake the session after report. Unknown versions or
+owners refuse all subagent, supervisor and `bg_wait` calls. Nested codemode
+calls cross the same gate and explicit report/Stop boundary. Ordinary chats do
+not load this gate. Trusted extensions are not a sandbox:
+if the existing detached-work tracking still sees task-session work after
+foreground settlement, outcome is `unknown`, reason
+`detached-work-outlived-task`, never a claim of clean termination. Untracked
+third-party side effects are outside the proven operation-owned guarantee.
+
+`report` takes `resultId`, claimed `outcome` (`progress`, `needs-input`, `final`),
+`text` (at most 64 KiB UTF-8), and separate `evidence` (at most 64 bounded strings;
+the whole payload is at most 128 KiB). The worker cannot supply task/Home/session
+identity or cost. Acceptance appends one immutable `tron-home-task-report` with
+those owner identities and accepted time, seals it, and requests exact Stop
+without awaiting that Stop from the tool it is joining. Task settlement joins
+Stop before publishing the result. Identical duplicates reuse the same entry;
+conflicts refuse. References include the exact entry ID and payload digest,
+never a latest-assistant pointer.
+
+A normal final reply without report is `unknown`; a provider length stop or a
+joined deadline stop without report is `limited`. The last canonical assistant
+entry is attached only as evidence. A failed exact stop is `unknown`, with
+`deadline-stop-failed` or `report-stop-failed`, not a false successful join.
+Canonical provider usage is summed once for this exact operation's branch and
+persisted in its terminal task record; monetary cost remains explicitly unpriced.
+`home.task.transition`, `home.task.spend` and `home.task.runaway-stop` emit only
+bounded/hash references after durable settlement. Reports are stored but are
+not yet delivered: no task status/control RPC, wake inbox, task push or
+result-triggered Home model call is added in this slice. Restart never replays
+accepted work; reconciliation of abandoned active tasks is a later recovery
+slice, so this change does not claim crash-cut task recovery.
+
+Regenerate task E2E evidence with the named `home-task-dispatch.e2e.test.ts` file
+and `HOME_TASK_REPORT=<artifact-path>`. It includes the actual Home delegate tool,
+exact report addresses/digests, duplicate refusal, length/no-report outcomes,
+ordinary-chat isolation and four deadline adversaries. The producer tests use
+an installed fixture package at the verified identity/version and an injected
+detached tracking projection, not the external provider's complete execution
+suite.
 
 ## The neutral working directory
 
@@ -390,7 +462,7 @@ imported Registry target is ordinary unless the ledger names it.
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles` | agent directory and trusted project resources |
 | System prompt | the agent directory's `SYSTEM.md` and `APPEND_SYSTEM.md` are dropped through `systemPromptOverride`/`appendSystemPromptOverride` | loaded |
-| Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search` | the SDK defaults plus Tron's direct bash tool |
+| Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | a session-local view of the Gateway-wide user-scope runtime | one per session runtime |

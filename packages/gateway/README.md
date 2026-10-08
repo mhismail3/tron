@@ -810,7 +810,7 @@ model; there is no budget to manage (memory spend is bounded by construction and
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
-`ask_user`/`display`/`notify` executable allowlist, per-session compaction
+`ask_user`/`display`/`notify`/memory-tools/`delegate` executable allowlist, per-session compaction
 disabled, a fixed physical model, and zero cache-warming requests), and its
 designation is keyed by session id, so a fork is ordinary. A profile change
 replaces the live runtime in place inside the session's own lane, and a record
@@ -821,6 +821,19 @@ re-sent, the view is never persisted, and a request waits for the lines it will
 send (abortably) before it is made. Ordinary sessions are byte-for-byte
 unaffected. The record, the profile, the RPCs, fork and loadout semantics and
 what is not built yet are owned by [`docs/home.md`](docs/home.md).
+
+Home is delegate-only for project work: `delegate` admits finite work once in a
+trusted project through the neutral owned-session boundary. Workers retain normal
+project capabilities plus the explicit `report` tool; v1 refuses subagent
+execution/revival, scheduled work and durable `bg_wait` wake subscriptions because
+these can outlive the operation.
+Reports seal exact canonical evidence, never the latest assistant reply; absent
+report is limited/unknown. A fixed internal 24-hour deadline cancels and joins
+operation-owned work, and terminal usage remains explicitly unpriced. Unknown
+tracked detached work yields unknown, not a clean stop claim. Separate strict
+Home task state is initialized on first dispatch; recreated task directory
+identity requires permission reconfirmation. Status/control, wake delivery and
+task push are subsequent slices, not automatically triggered Home calls.
 
 ## Runtime and state
 

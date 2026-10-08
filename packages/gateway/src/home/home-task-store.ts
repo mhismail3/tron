@@ -37,7 +37,7 @@ export interface HomeTaskRecord {
     pricingProvenance: string | null;
     unpriced: boolean;
   } | null;
-  reportRefs: Array<{ resultId: string; sessionId: string; entryId: string }> | null;
+  reportRefs: Array<{ resultId: string; sessionId: string; entryId: string; digest: string }> | null;
   terminalEvidence: {
     outcome: typeof OUTCOMES[number];
     sessionId: string | null;
@@ -99,9 +99,9 @@ export class HomeTaskStore {
 
   /** Explicit setup only. A partial prior setup is evidence, not permission to
    * finish or repair it. Marker publication follows durable namespace creation. */
-  async initialize(): Promise<void> {
-    await this.run(async () => {
-      if (await this.inspect()) return;
+  async initialize(): Promise<boolean> {
+    return this.run(async () => {
+      if (await this.inspect()) return false;
       await mkdir(this.home, { mode: 0o700 }).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       });
@@ -115,6 +115,18 @@ export class HomeTaskStore {
         try { await syncDurably(handle); } finally { await handle.close(); }
       }
       await this.workspace.markFeatureInitialized("home-tasks");
+      return true;
+    });
+  }
+
+  /** Physical namespace identity is outside the restored document authority.
+   * Restart and atomic file replacement retain it; directory recreation does not. */
+  async restoreEpoch(): Promise<string> {
+    return this.run(async () => {
+      if (!(await this.inspect())) throw new HomeTaskStoreError("not-initialized");
+      const info = await lstat(this.directory, { bigint: true });
+      if (!info.isDirectory() || info.isSymbolicLink() || info.birthtimeNs <= 0n) throw new HomeTaskStoreError("unsafe-state");
+      return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
     });
   }
 
@@ -148,6 +160,7 @@ export class HomeTaskStore {
       const current = await this.readTask(next.taskId);
       if ((current?.revision ?? null) !== expectedRevision
         || next.revision !== (expectedRevision ?? 0) + 1) throw new HomeTaskStoreError("revision-conflict");
+      if (current?.lifecycle === "terminal") throw new HomeTaskStoreError("invalid-record");
       if (current && (immutableTask(current) !== immutableTask(next)
         || ((current.grantRef !== null || current.scopeRef !== null)
           && (current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef)))) throw new HomeTaskStoreError("invalid-record");
@@ -280,7 +293,7 @@ function validateTask(value: unknown): HomeTaskRecord {
     || (value.spend.pricingProvenance !== null && !text(value.spend.pricingProvenance, 512))
     || ((value.spend.knownCostUSD === null) !== (value.spend.pricingProvenance === null)))) invalid();
   if (value.reportRefs !== null && (!Array.isArray(value.reportRefs) || value.reportRefs.length > 256
-    || value.reportRefs.some(ref => !keys(ref, ["resultId", "sessionId", "entryId"]) || !identifier(ref.resultId) || !identifier(ref.sessionId) || !identifier(ref.entryId))
+    || value.reportRefs.some(ref => !keys(ref, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(ref.resultId) || !identifier(ref.sessionId) || !identifier(ref.entryId) || typeof ref.digest !== "string" || !/^[a-f0-9]{64}$/u.test(ref.digest))
     || new Set(value.reportRefs.map(ref => ref.resultId)).size !== value.reportRefs.length)) invalid();
   const evidence = value.terminalEvidence;
   if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"])

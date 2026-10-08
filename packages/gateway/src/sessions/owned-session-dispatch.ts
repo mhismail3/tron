@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
+import type { HomeTaskReportOwner } from "../home/home-task-report.js";
 
 /** Internal runaway ceiling for callers that explicitly opt into deadline ownership. */
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
@@ -42,6 +43,11 @@ export class OwnedSessionDispatch {
     this.now = now;
   }
 
+  async createWorker(cwd: string, report: HomeTaskReportOwner): Promise<OwnedLease> {
+    const slot = await this.sessions.create(cwd, "ordinary", report);
+    return { slot, release: slot.retainLease() };
+  }
+
   lease(sessionId: string): Promise<OwnedLease> {
     return this.sessions.acquireOwnedSessionLease(sessionId);
   }
@@ -72,9 +78,8 @@ export class OwnedSessionDispatch {
   > {
     const startedAt = this.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let deadlineFired = false;
     const deadline = new Promise<"deadline">((resolve) => {
-      timer = setTimeout(() => { deadlineFired = true; resolve("deadline"); }, OWNED_OPERATION_DEADLINE_MS);
+      timer = setTimeout(() => resolve("deadline"), OWNED_OPERATION_DEADLINE_MS);
     });
     try {
       const first = await Promise.race([
@@ -89,6 +94,8 @@ export class OwnedSessionDispatch {
         await handle.acknowledgeTerminal?.();
         joined = true;
         return { state: "deadline-stopped", terminal };
+      } catch {
+        return { state: "deadline-stop-failed" };
       } finally {
         this.options.diagnostic?.({
           event: "owned-operation.deadline-stop", level: "warning",
@@ -99,9 +106,7 @@ export class OwnedSessionDispatch {
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);
-      // Keep the flag read to make the branch's purpose explicit and avoid an
-      // unhandled completion rejection after the timeout race.
-      void deadlineFired;
+
     }
   }
 }

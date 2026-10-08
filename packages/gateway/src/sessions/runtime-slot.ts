@@ -8,6 +8,7 @@ import {
   DELEGATED_SUPERVISOR_TOOL_NAME,
   delegatedArtifactPathAllowed,
   delegatedProviderOrigin,
+  delegatedProviderToolVersion,
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
@@ -43,6 +44,8 @@ import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
@@ -390,7 +393,7 @@ export function completionOwnedByMarker(
   return completion ? { ...completion, operationId: marker.operationId } : undefined;
 }
 
-export interface AutomationOperationTerminal {
+export interface OwnedOperationTerminal {
   lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
   operationId: string;
   invocationId: string;
@@ -439,11 +442,14 @@ interface PromptOwnership {
   signal?: AbortSignal;
   origin: ChatOrigin;
   onAdmitted?: (invocationId: string) => void;
-  onTerminal: (terminal: AutomationOperationTerminal) => Promise<void> | void;
+  onTerminal: (terminal: OwnedOperationTerminal) => Promise<void> | void;
 }
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  validateTaskMarker?: (sessionId: string, marker: unknown) => Promise<void>;
+  homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
@@ -627,7 +633,7 @@ export class RuntimeSlot {
   private published = false;
   private readonly stateChangeWaiters = new Set<() => void>();
   private retainedLeaseCount = 0;
-  private readonly automationTerminalObservers = new Map<string, (terminal: AutomationOperationTerminal) => Promise<void> | void>();
+  private readonly ownedTerminalObservers = new Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
   /** The latest cumulative SDK message is projected only at the wire flush boundary. */
@@ -879,6 +885,7 @@ export class RuntimeSlot {
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
     homeMaterializationAuthority?: HomeMaterializationAuthority,
+    private readonly taskWorker?: HomeTaskReportOwner,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
     this.homeMaterializationAuthority = homeMaterializationAuthority
@@ -1084,8 +1091,9 @@ export class RuntimeSlot {
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
     homeMaterializationAuthority?: HomeMaterializationAuthority,
+    taskWorker?: HomeTaskReportOwner,
   ): Promise<RuntimeSlot> {
-    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority);
+    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority, taskWorker);
     try {
       await slot.initialize();
       return slot;
@@ -1102,6 +1110,13 @@ export class RuntimeSlot {
   }
   hasBuiltinMcpCommand(): boolean {
     return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
+  }
+
+  /** Immutable task addresses are file-wide evidence, not the selected model
+   * branch. Harmless tree viewing must never lose an already sealed result. */
+  canonicalTaskEvidence(): FileEntry[] {
+    return this.sessionManager.getEntries().filter(entry => entry.type === "custom"
+      && (entry.customType === HOME_TASK_MARKER || entry.customType === HOME_TASK_REPORT));
   }
 
   /** Read-only owner seam for bounded derived projections; callers never
@@ -1742,6 +1757,7 @@ export class RuntimeSlot {
         // Home's memory tools are answered per call, because the memory a
         // running Home reads can be reconfigured, blocked or released.
         homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools?.(sessionId),
+        ...(this.dependencies.homeDelegate ? { homeDelegate: this.dependencies.homeDelegate } : {}),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
@@ -1762,6 +1778,11 @@ export class RuntimeSlot {
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
             ...tronModuleFactories(tronModuleHost),
+            ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
+              providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
+              refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
+                taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
+            }) }] : []),
           ];
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
@@ -1837,7 +1858,18 @@ export class RuntimeSlot {
         ...(home ? { tools: [...HOME_TOOL_NAMES] } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
-        ...(directBashProcesses ? { customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition] } : {}),
+        ...(directBashProcesses ? { customTools: [
+          directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
+          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.activeOperationId : undefined,
+            async report => {
+              await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,
+                this.operationWork.get(report.operationId));
+              const entry = this.sessionManager.getBranch().find(candidate => candidate.type === "custom"
+                && candidate.customType === HOME_TASK_REPORT && (candidate.data as { receiptId?: string }).receiptId === report.receiptId);
+              if (!entry) throw new GatewayError("conflict", "Canonical task report is missing");
+              return entry.id;
+            }, () => this.taskWorker!.requestStop(() => this.abort("agent", this.taskWorker!.identity.operationId, "task-report")))] : []),
+        ] } : {}),
       });
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
       // passes its configured defaults, which skips AgentSession's own transcript
@@ -1880,6 +1912,12 @@ export class RuntimeSlot {
   }
 
   private async initialize(): Promise<void> {
+    const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+    if (markers.length > 1) throw new GatewayError("conflict", "Conflicting canonical task markers");
+    if (markers.length) {
+      if (!this.dependencies.validateTaskMarker || markers[0]?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
+      await this.dependencies.validateTaskMarker(this.id, markers[0].data);
+    }
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
       cwd: this.sessionManager.getCwd(),
       agentDir: this.dependencies.agentDir,
@@ -1898,7 +1936,7 @@ export class RuntimeSlot {
   }
 
   private assertAutomationMayNotReplaceSession(): void {
-    if (currentInvocationContext()?.operationId?.startsWith("automation:")) {
+    if (this.taskWorker || currentInvocationContext()?.operationId?.startsWith("automation:")) {
       throw new GatewayError("conflict", "Scheduled automation turns cannot replace or navigate their target session");
     }
   }
@@ -2024,6 +2062,9 @@ export class RuntimeSlot {
     operation: () => Promise<T>,
   ): Promise<T> {
     this.assertChapterWritable();
+    if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
+      throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
+    }
     if (this.dependencies.homeChapterState?.(this.id).homeId || this.liveProfile() === "home") {
       throw new HomeChapterIdentityReplacementError(this.id);
     }
@@ -3066,6 +3107,8 @@ export class RuntimeSlot {
   }
 
   private async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
+    // A task's durable result owner, never generic chat completion, decides push.
+    if (this.taskWorker) return;
     const notifications = this.dependencies.notifications;
     if (!notifications) return;
     try {
@@ -3396,10 +3439,10 @@ export class RuntimeSlot {
     return canonical;
   }
 
-  private async notifyAutomationTerminal(terminal: AutomationOperationTerminal): Promise<void> {
-    const observer = this.automationTerminalObservers.get(terminal.operationId);
+  private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
+    const observer = this.ownedTerminalObservers.get(terminal.operationId);
     if (!observer) return;
-    this.automationTerminalObservers.delete(terminal.operationId);
+    this.ownedTerminalObservers.delete(terminal.operationId);
     await observer(terminal);
   }
 
@@ -3453,7 +3496,7 @@ export class RuntimeSlot {
       createdAt: new Date().toISOString(),
     }), owner ?? this.operationWork.get(invocation.operationId));
     this.invocations.delete(invocation.invocationId);
-    await this.notifyAutomationTerminal({
+    await this.notifyOwnedTerminal({
       lifecycle,
       operationId: invocation.operationId,
       invocationId: invocation.invocationId,
@@ -3667,7 +3710,7 @@ export class RuntimeSlot {
         completion.id,
       );
       if (completion.operationId) this.abortedOperations.delete(completion.operationId);
-      if (!completion.operationId?.startsWith("automation:")) {
+      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.taskWorker?.identity.operationId) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       this.admitCompletionObservation(item);
@@ -7228,6 +7271,13 @@ export class RuntimeSlot {
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
+      if (this.taskWorker) {
+        const trust = await this.dependencies.trust.requireResolved(this.cwd);
+        if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
+        if (ownership?.operationId !== this.taskWorker.identity.operationId) throw new GatewayError("conflict", "Task worker admission requires its exact operation");
+        await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
+          JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
+      }
       while (this.isAgentAdmissionSettling) {
         await this.waitForStateChange();
         this.assertUsable();
@@ -7275,7 +7325,7 @@ export class RuntimeSlot {
         this.contextPolicies.get(session)?.apply();
       }
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-      if (ownership && this.automationTerminalObservers.has(operationId)) {
+      if (ownership && this.ownedTerminalObservers.has(operationId)) {
         throw new GatewayError("conflict", "Automation operation is already registered", true);
       }
       const invocationId = randomUUID();
@@ -7330,7 +7380,7 @@ export class RuntimeSlot {
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
 
-      if (ownership) this.automationTerminalObservers.set(operationId, ownership.onTerminal);
+      if (ownership) this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -7521,7 +7571,7 @@ export class RuntimeSlot {
             sequence: this.revision + 1,
             createdAt: new Date().toISOString(),
           }), operationWork);
-          await this.notifyAutomationTerminal({
+          await this.notifyOwnedTerminal({
             lifecycle: "outcomeUnknown",
             operationId,
             invocationId,
@@ -7529,7 +7579,7 @@ export class RuntimeSlot {
         }
         this.invocations.delete(invocationId);
         this.settleOperationWork(operationId);
-        if (!startPersisted) this.automationTerminalObservers.delete(operationId);
+        if (!startPersisted) this.ownedTerminalObservers.delete(operationId);
         // Once the canonical start receipt is durable the prompt may already
         // have reached extension hooks or the provider. Report its failure as an
         // unknown outcome so the idempotency receipt cannot be replayed, matching
@@ -7574,7 +7624,7 @@ export class RuntimeSlot {
           terminalLifecycle === "failed" ? "runtime-prompt-failed" : undefined,
         );
         this.lifecycle.cancelPreflight(operationId);
-        if (!operationId.startsWith("automation:")) {
+        if (!operationId.startsWith("automation:") && operationId !== this.taskWorker?.identity.operationId) {
           await this.clearMarkerOwnership(operationId);
         }
         // Marker I/O may suspend behind a newer run. Clear only this run's live
@@ -7692,7 +7742,7 @@ export class RuntimeSlot {
           sequence: this.revision + 1,
           createdAt: new Date().toISOString(),
         }), operationWork);
-        await this.notifyAutomationTerminal({
+        await this.notifyOwnedTerminal({
           lifecycle: terminalLifecycle,
           operationId,
           invocationId,
@@ -9267,12 +9317,12 @@ export class RuntimeSlot {
     // An admitted automation must never lose its terminal waiter when runtime
     // teardown wins a callback race. Persist uncertainty while the canonical
     // manager is still writable; recovery can then block instead of replaying.
-    for (const operationId of [...this.automationTerminalObservers.keys()]) {
+    for (const operationId of [...this.ownedTerminalObservers.keys()]) {
       const invocation = this.invocationForOperation(operationId);
       if (invocation) {
         await this.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
       } else {
-        await this.notifyAutomationTerminal({
+        await this.notifyOwnedTerminal({
           lifecycle: "outcomeUnknown",
           operationId,
           invocationId: operationId,

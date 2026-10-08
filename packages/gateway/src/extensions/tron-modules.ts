@@ -46,6 +46,7 @@ export interface TronModuleHost {
    * here is what keeps the wiring honest: the only Home runtime is built by a
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
+  homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -192,16 +193,20 @@ export const HOME_MODULE_NAMES: readonly string[] = [
 export const TRON_HOME_MODULE: TronModule = {
   name: "tron-home",
   purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-  tools: ["zoom", "date", "memory_search"],
+  tools: ["zoom", "date", "memory_search", "delegate"],
   commands: [],
-  factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId())),
+  factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
+    request => {
+      if (!host.homeDelegate) throw new Error("Home dispatch is unavailable");
+      return host.homeDelegate(host.sessionId(), request);
+    }),
 };
 
 /** The executable tool ceiling for a Home runtime, passed to the SDK as its
  * registration allowlist. MCP is excluded structurally: no MCP extension is
  * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
  * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search"];
+export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate"];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */
