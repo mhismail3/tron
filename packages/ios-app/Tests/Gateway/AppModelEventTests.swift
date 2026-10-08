@@ -749,21 +749,21 @@ struct AppModelEventTests {
         #expect(model.visibleNotices.allSatisfy { $0.title != "Caught up" })
     }
 
-    @Test("configured default model is preferred over catalog order")
+    @Test("available catalog order, not a legacy provider preference, determines fallback")
     func configuredDefaultModel() async {
         let model = AppModel()
         model.installHostedProviderCatalog(ProviderCatalog(providers: [], models: [
-            ModelSummary(provider: "openai-codex", id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
+            ModelSummary(provider: "openai", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
             ModelSummary(provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
         ]), for: .global)
         model.installHostedSettings(.object([
             "effective": .object([
-                "defaultModel": .object(["provider": .string("openai-codex"), "id": .string("gpt-5.6-sol")]),
+                "defaultModel": .object(["provider": .string("openai"), "id": .string("gpt-5.6-sol")]),
             ]),
         ]), for: .global)
 
-        #expect(model.configuredDefaultModel(for: .global)?.id == "gpt-5.6-sol")
-        #expect(model.preferredAvailableModel(for: .global)?.id == "gpt-5.6-sol")
+        #expect(model.configuredDefaultModel(for: .global)?.provider == "openai")
+        #expect(model.preferredAvailableModel(for: .global)?.provider == "openai")
     }
 
     @Test("global configuration invalidations are accepted without session sequencing")

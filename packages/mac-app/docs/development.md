@@ -43,8 +43,12 @@ fingerprints them under `Gateway/runtime/xcodegen`. Bundle writers serialize
 before touching the shared dependency tree, assemble and verify generated
 resources under a private source-local staging root, and publish the payload,
 launcher, and icon through bounded backup renames. Failure or interruption
-restores the prior generated projection; `ensure-gateway-bundle.sh` never erases
-that projection before a replacement is ready. The completed app uses only those
+restores the prior generated projection, removes invocation-owned staging and
+backup roots, and releases its build lock; `ensure-gateway-bundle.sh` never erases
+that projection before a replacement is ready. Download and compiler scratch
+roots share the staging owner's lifetime. Disposal closes each directory
+enumeration before descending, opens immutable directories only for removal,
+and unlinks symlinks without following their targets. The completed app uses only those
 embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
 destination checkout's `.ci-tools` cache.
 
@@ -174,10 +178,14 @@ packages/mac-app/scripts/test-tron-gateway-npm.sh
 packages/mac-app/scripts/test-update-payload-fingerprint.sh
 
 # Two real builds in this checkout, the second with --skip-download; Node/npm
-# pin violations and symlinks refused without changing published bytes or modes.
+# pin violations and symlinks refused without changing published bytes or modes,
+# with no private staging/backup roots or build lock remaining after each refusal.
 # Downloads Node and rebuilds the payload; retains the log at
 # packages/mac-app/test-results/bundle-gateway-rebuild.log.
 packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
+# Focused disposal regression: immutable nested tree, bounded descriptors,
+# external symlink target preserved; no download or build.
+packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --cleanup-only
 ```
 
 ## Generate and build
@@ -655,12 +663,31 @@ lifecycle or handoff command. Repository agents report the needed command but do
 execute it:
 
 ```bash
-scripts/tron dev start       # build, immutable-stage, and start 9848
+scripts/tron dev start       # build, immutable-stage, offline provider activation, start 9848
 scripts/tron dev restart     # stage and authentically drain/restart
 scripts/tron dev status
 scripts/tron dev stop
 scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable candidate
 ```
+
+The bundler's `stage-gateway-app.sh` step copies the Tron-owned `pi-subagents`
+pin, both selections' source archives/locks/closures, and the activation installer
+and checker into the existing fingerprinted `app` tree. It checks those staged
+inputs before dependency installation; the payload verifier independently uses
+the trusted source checker against that app root, rejecting missing or invalid
+current/retained provider inputs. This step never installs into a Gateway home.
+The owning regression is `managed-subagents.payload.test.ts` (build the Gateway
+first): it runs this real staging step, imports its compiled startup boundary
+with TCP denied, and verifies activation plus retained-closure refusal.
+
+Startup installs it offline into the home-owned versioned reserved root before
+extension discovery, or verifies and reuses an existing exact install; damaged
+bytes/receipts refuse startup. Debug uses `~/.tron-dev/internal/pi-subagents/`.
+Stable receives this build only when the maintainer updates/promotes its reviewed
+payload (or performs the Release reinstall runbook above). No user npm manifest
+or Stable package tree is modified by Debug staging. The
+[Gateway install contract](../../gateway/README.md#tron-owned-pi-subagents-build)
+owns provider activation and rollback.
 
 Fresh starts default to loopback; pass `--tailscale` when iOS must connect.
 Status, restart, handoff, and stop without a host flag inherit a live

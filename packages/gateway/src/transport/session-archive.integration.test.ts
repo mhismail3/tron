@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -106,6 +107,8 @@ async function fixture(options: {
   });
   const listChanged = vi.fn();
   const archiveDiagnostic = vi.fn();
+  const logs: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
+  const captureLog = (level: string, message: string, metadata: Record<string, unknown>) => logs.push({ level, message, metadata });
   const sockets: WebSocket[] = [];
   const devices = new DeviceStore(root, "fixture-machine");
   await devices.initialize();
@@ -161,7 +164,7 @@ async function fixture(options: {
       receipts,
       uploads,
       terminals: { belongsToSession: () => false },
-      logger: { log: () => {} },
+      logger: { log: captureLog },
       sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
       ...(searchService ? { sessionSearch: searchService } : {}),
     } as never);
@@ -174,7 +177,7 @@ async function fixture(options: {
       service,
       uploads: uploads as never,
       auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
-      logger: { log: () => {} } as never,
+      logger: { log: captureLog } as never,
     });
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
@@ -271,18 +274,21 @@ async function fixture(options: {
     await settle();
     return { id, file, entryId };
   };
-  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, rawSession, settle, restart, current: () => current! };
+  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, logs, connect, coldSession, rawSession, settle, restart, current: () => current! };
 }
 
 /** An extension-owned trigger that starts a turn of its own. */
 const wakeExtension = (root: string) => `
-        import { existsSync } from "node:fs";
+        import { existsSync, unlinkSync, writeFileSync } from "node:fs";
         import { setTimeout as delay } from "node:timers/promises";
         export default function (pi) {
+          writeFileSync(${JSON.stringify(join(root, "wake-polling"))}, "polling");
           void (async () => {
             for (;;) {
               if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
                 pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
+                writeFileSync(${JSON.stringify(join(root, "wake-sent"))}, "sent");
+                unlinkSync(${JSON.stringify(join(root, "wake-polling"))});
                 return;
               }
               await delay(5);
@@ -717,6 +723,59 @@ describe("session archive over the real Gateway", () => {
       excludeTraversal: received,
       mismatchedFilterRejected: mismatched.error.code,
     };
+  });
+
+  archiveCase("logs the exact operation and age for attention-pending RPC refusals", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("attention-pending-log");
+    await openSession(client, session.id);
+    const slot = await f.current().registry.acquire(session.id);
+    const completion = {
+      id: "synthetic-completion-id",
+      completedAt: new Date(Date.now() - 2_500).toISOString(),
+      operationId: "synthetic-pending-operation",
+    };
+    const barrier = Promise.reject(new Error("injected pending-attention failure"));
+    void barrier.catch(() => {});
+    const internals = slot as unknown as {
+      attentionBarrier: Promise<void> | undefined;
+      pendingAssistantCompletion: typeof completion | undefined;
+    };
+    const previousBarrier = internals.attentionBarrier;
+    const previousCompletion = internals.pendingAssistantCompletion;
+    internals.attentionBarrier = barrier;
+    internals.pendingAssistantCompletion = completion;
+    try {
+      const response = await client.request("attention-pending-rpc", "session.prompt", {
+        commandId: "attention-pending-command",
+        sessionId: session.id,
+        text: "must be held behind pending attention",
+      });
+      expect(response).toMatchObject({
+        ok: false,
+        error: {
+          code: "busy",
+          details: { reason: "attention-pending", operationId: "synthetic-pending-operation", ageMs: expect.any(Number) },
+        },
+      });
+      await waitFor(() => f.logs.some(({ metadata }) => metadata.event === "rpc.error"
+        && metadata.method === "session.prompt" && metadata.reason === "attention-pending"),
+      "the attention-pending RPC error log");
+      const log = f.logs.find(({ metadata }) => metadata.event === "rpc.error"
+        && metadata.method === "session.prompt" && metadata.reason === "attention-pending");
+      expect(log?.metadata).toMatchObject({
+        code: "busy",
+        reason: "attention-pending",
+        operationId: "synthetic-pending-operation",
+        ageMs: expect.any(Number),
+      });
+      expect(log?.metadata.ageMs).toBeGreaterThanOrEqual(2_500);
+      return { reason: log?.metadata.reason, operationId: log?.metadata.operationId, ageMs: log?.metadata.ageMs };
+    } finally {
+      internals.attentionBarrier = previousBarrier;
+      internals.pendingAssistantCompletion = previousCompletion;
+    }
   });
 
   archiveCase("rejects archiving a session that is running or working through detached subagents", async () => {
@@ -1766,10 +1825,21 @@ describe("session archive over the real Gateway", () => {
     const inWrite = new Promise<void>((resolve) => { enteredWrite = resolve; });
     let releaseWrite!: () => void;
     const writeBarrier = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let archiveWriteHeld = false;
     store.archive = async (sessionId) => {
+      archiveWriteHeld = true;
       enteredWrite();
       await writeBarrier;
+      archiveWriteHeld = false;
       return durableArchive(sessionId);
+    };
+    const stallState = () => `archive stall: watcherPolling=${existsSync(join(f.root, "wake-polling"))}, externalRunSubmitted=${existsSync(join(f.root, "wake-sent"))}, archiveWriteHeld=${archiveWriteHeld}`;
+    const waitWithStallState = async (condition: () => boolean, label: string) => {
+      try {
+        await waitFor(condition, label);
+      } catch (error) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; ${stallState()}`);
+      }
     };
     let releaseRun!: () => void;
     const runBarrier = new Promise<void>((resolve) => { releaseRun = resolve; });
@@ -1778,13 +1848,15 @@ describe("session archive over the real Gateway", () => {
       const archiving = client.request("started-during-write-request", "session.archive.set", {
         commandId: "started-during-write-command", sessionId: session.id, archived: true,
       });
+      void archiving.catch(() => {});
       await inWrite;
       // The extension's turn never passes Gateway run admission, so only the
       // active projection the commit rechecks can notice it. Its frames arrive
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
-      await waitFor(() => snapshotFrames(client, session.id).some(
+      await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
+      await waitWithStallState(() => snapshotFrames(client, session.id).some(
         (frame) => frame.payload?.phase === "running"), "externally started run");
       releaseWrite();
       const response = await archiving;

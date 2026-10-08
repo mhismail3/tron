@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
@@ -30,12 +31,15 @@ import {
   type ModelRuntime,
   type ToolDefinition,
   SessionManager,
+  SettingsManager,
   type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -322,6 +326,12 @@ export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "trans
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
+interface OperationObservation {
+  cursor?: { entryIndex: number; branchId: string };
+  observedCompletionId?: string;
+  pendingCompletionId?: string;
+}
+
 interface CommandReplacement {
   /** Set once Pi commits the replacement and the command is settled in its origin. */
   settlement?: Promise<void>;
@@ -401,10 +411,12 @@ interface PromptOwnership {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
+  openAIModelEligibility: OpenAIModelEligibility;
   trust: TrustService;
   blobs: BlobStore;
   exports: BlobStore;
@@ -434,6 +446,7 @@ export interface RuntimeSlotDependencies {
   runtimeDisposalTimedOut?: (graceMs: number) => void;
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
+  manualCompactionAdopted?: (diagnostic: { sessionId: string; operationId: string; reason: "manual" | "threshold" | "overflow" }) => void;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
@@ -458,6 +471,8 @@ class CanonicalCustomEntryConflictError extends Error {}
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
+  observationSettled: boolean;
+  observationCursor?: { entryIndex: number; branchId: string };
   fallbackWork?: GatewayWorkHandle;
 };
 
@@ -520,6 +535,7 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
+  private detachOpenAIEligibility: (() => void) | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
@@ -580,7 +596,6 @@ export class RuntimeSlot {
    * are started independently so a failed projection head cannot hide a newer
    * continuation from restart reconciliation. */
   private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
-  private readonly completionWorkOwners = new Map<string, string>();
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** The session replacement a running extension command requested. */
@@ -770,6 +785,7 @@ export class RuntimeSlot {
   private compactionOperation: SessionOperationState | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
+  private adoptedManualCompaction: PendingManualCompaction | undefined;
   private unregisterConfigurationWork: (() => void) | undefined;
   private publishedConfigurationBlocker: SessionConfigurationBlocker | null | undefined;
   private shuttingDown = false;
@@ -964,8 +980,15 @@ export class RuntimeSlot {
     interrupted: boolean,
   ): Promise<RuntimeSlot> {
     const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted);
-    await slot.initialize();
-    return slot;
+    try {
+      await slot.initialize();
+      return slot;
+    } catch (error) {
+      slot.detachOpenAIEligibility?.();
+      slot.detachOpenAIEligibility = undefined;
+      await slot.runtime?.dispose().catch(() => {});
+      throw error;
+    }
   }
 
   get id(): string {
@@ -1006,10 +1029,10 @@ export class RuntimeSlot {
     return this.observationBranchId(this.canonicalSessionEntries());
   }
 
-  private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {
+  private observationEntries(operationId: string, endEntryId?: string, cursorOverride?: OperationObservation["cursor"]): { entries: readonly FileEntry[]; branchId: string } {
     const entries = this.canonicalSessionEntries();
     const branchId = this.observationBranchId(entries);
-    const start = this.observationStarts.get(operationId);
+    const start = cursorOverride ?? this.operationObservations.get(operationId)?.cursor;
     // Observation admission must use the operation's immutable cut. A missing
     // start marker is an unavailable range, never permission to expose the
     // entire session history to a background model.
@@ -1205,7 +1228,9 @@ export class RuntimeSlot {
       this.pendingAssistantCompletion?.operationId,
       this.pendingQueueAdmission?.id,
       ...this.completionOwnershipQueue.map((item) => item.completion.operationId),
-      ...this.completionWorkOwners.values(),
+      ...[...this.operationObservations.entries()]
+        .filter(([, observation]) => observation.pendingCompletionId !== undefined)
+        .map(([operationId]) => operationId),
       ...this.queuedMessages.map((item) => item.id),
       ...this.heldPrompts.map((item) => item.id),
       ...this.dequeuedFollowUpOwners,
@@ -1532,6 +1557,9 @@ export class RuntimeSlot {
       // leak project providers between concurrent Tron sessions. Credentials and
       // model files remain canonical through their shared file paths.
       const modelRuntime = await this.dependencies.createModelRuntime();
+      const detachOpenAIEligibility = this.dependencies.openAIModelEligibility.attachRuntime(modelRuntime);
+      this.detachOpenAIEligibility?.();
+      this.detachOpenAIEligibility = detachOpenAIEligibility;
       let contextPolicy: SessionContextWindowPolicy | undefined;
       let compactionPolicy: CompactionOperationPolicy | undefined;
       this.resourceReloadOptions = {
@@ -1539,11 +1567,15 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
+      const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      const managedLoaderOptions = this.dependencies.managedSubagents?.loaderOptions(settingsManager);
       const services = await createAgentSessionServices({
+        settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
+          ...(managedLoaderOptions ?? {}),
           extensionFactories: [
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
@@ -1572,6 +1604,7 @@ export class RuntimeSlot {
               compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
+              joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
               ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
               jev: new JevDecisionClient(modelRuntime),
               ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
@@ -1585,21 +1618,47 @@ export class RuntimeSlot {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
-          } : undefined, { requireTronAskUser: true }),
+          } : undefined, { requireTronAskUser: true, ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}) }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
+      // Only the loader keeps the read-only package view. Session settings
+      // mutations keep their canonical owner, never the filtered projection.
+      services.settingsManager = settingsManager;
+      this.dependencies.managedSubagents?.reportIgnoredPackages(settingsManager);
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
       // owner handoff is the independent fail-safe when that signal was stale.
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
+      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
+      let initialModel: Model<never> | undefined;
+      if (sessionManager.getEntryCount() === 0) {
+        const eligibility = openAIModelEligibility(modelRuntime);
+        await eligibility?.refresh();
+        const defaultProvider = services.settingsManager.getDefaultProvider();
+        const defaultModelId = services.settingsManager.getDefaultModel();
+        if ((defaultProvider === "openai" || defaultProvider === "openai-codex") && defaultModelId) {
+          const savedDefault = modelRuntime.getModel(defaultProvider, defaultModelId);
+          if (savedDefault && eligibility) {
+            const available = await modelRuntime.getAvailable();
+            if (!eligibility.isEligibleInRuntime(modelRuntime, savedDefault.provider, savedDefault.id)) {
+              // Pi reads a saved default directly, independently of its filtered
+              // available-model snapshot. Only brand-new sessions may replace
+              // that stale preference; existing transcript identities stay intact.
+              const fallback = available[0];
+              if (!fallback) throw new GatewayError("invalid_request", "Your saved default model is no longer available and no eligible model was found; choose a model or check your provider sign-in.");
+              initialModel = fallback as Model<never>;
+            }
+          }
+        }
+      }
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
+        ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
@@ -1690,6 +1749,7 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
+    this.dependencies.managedSubagents?.reportIgnoredPackages(session.settingsManager);
   }
 
   /** Pi's replacement hooks for each runtime this slot constructs. */
@@ -2702,8 +2762,11 @@ export class RuntimeSlot {
             ...(binding.operationId ? { operationId: binding.operationId } : {}),
           });
           this.pendingAssistantCompletion = item.completion;
-          // Pi has synchronously appended the canonical entry. Its exact durable
-          // stamp has started; truthful agent settlement still gates projection.
+          // Pi has synchronously appended the canonical entry. Settle this exact
+          // completion immediately: a queued follow-up can start inside the same
+          // agent loop without a continuation/agent-settled boundary in between.
+          void this.beginAttentionSettlement(item.completion).catch((error) =>
+            this.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork));
         }
         if (presentationID && this.streamPresentationId === presentationID) {
           this.latestStreamingMessage = undefined;
@@ -2720,7 +2783,28 @@ export class RuntimeSlot {
     });
   }
 
-  private readonly observationStarts = new Map<string, { entryIndex: number; branchId: string }>();
+  /** Observation cursor and terminal-callback deduplication share the operation lifetime. */
+  private readonly operationObservations = new Map<string, OperationObservation>();
+
+  private observationFor(operationId: string): OperationObservation {
+    let observation = this.operationObservations.get(operationId);
+    if (!observation) {
+      observation = {};
+      this.operationObservations.set(operationId, observation);
+    }
+    return observation;
+  }
+
+  private retireOperationObservation(operationId: string | undefined): void {
+    if (operationId) this.operationObservations.delete(operationId);
+  }
+
+  private completionOperationId(completionId: string): string | undefined {
+    for (const [operationId, observation] of this.operationObservations) {
+      if (observation.pendingCompletionId === completionId) return operationId;
+    }
+    return undefined;
+  }
 
   private completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
@@ -3077,6 +3161,17 @@ export class RuntimeSlot {
     owner?: GatewayWorkHandle,
     assistantCompletionId?: string,
   ): Promise<void> {
+    const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
+    if (terminal) await this.notifyAutomationTerminal(terminal);
+  }
+
+  private async persistInvocationTerminal(
+    operationId: string | undefined,
+    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
+    errorCode?: string,
+    owner?: GatewayWorkHandle,
+    assistantCompletionId?: string,
+  ): Promise<AutomationOperationTerminal | undefined> {
     if (operationId) {
       this.consumedSteeringOperationIDs.delete(operationId);
       for (let index = this.dequeuedSteeringOwners.indexOf(operationId);
@@ -3114,13 +3209,44 @@ export class RuntimeSlot {
       createdAt: new Date().toISOString(),
     }), owner ?? this.operationWork.get(invocation.operationId));
     this.invocations.delete(invocation.invocationId);
-    await this.notifyAutomationTerminal({
+    return {
       lifecycle,
       operationId: invocation.operationId,
       invocationId: invocation.invocationId,
       ...(errorCode === undefined ? {} : { errorCode }),
       ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
-    });
+    };
+  }
+
+  /** A distinct successor ends the predecessor; another assistant turn or
+   * automatic compaction does not. Capture exact completion evidence before
+   * the transfer retires its operation observation. */
+  private terminalizeTransferredOperation(operationId: string | undefined): void {
+    if (!operationId) return;
+    const completionId = this.completionOwnershipQueue.findLast(item => item.completion.operationId === operationId)?.completion.id
+      ?? this.operationObservations.get(operationId)?.observedCompletionId;
+    if (!completionId) return;
+    const interrupted = this.abortedOperations.has(operationId);
+    const attention = this.attentionBarrier;
+    void this.persistInvocationTerminal(
+      operationId, interrupted ? "interrupted" : "completed", interrupted ? "user-abort" : undefined,
+      this.operationWork.get(operationId), completionId,
+    ).then(async terminal => {
+      if (attention) await attention;
+      if (terminal) await this.notifyAutomationTerminal(terminal);
+      this.abortedOperations.delete(operationId);
+    }).catch(() => {});
+  }
+
+  private async joinTerminalReceiptWrites(): Promise<void> {
+    // Guarantees receipt order against the next admitted user input, not
+    // SDK-owned between-turn entries (such as tool-loadout system messages)
+    // emitted before that exact boundary. Their relative order proves nothing.
+    const prefix = `canonical:${INVOCATION_RECEIPT_TYPE}:terminal:`;
+    await Promise.all([...this.durableWrites.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, write]) => write.waiter));
+    this.assertOwnershipPersistence();
   }
 
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
@@ -3180,11 +3306,15 @@ export class RuntimeSlot {
       // attention settlement and agent_settled notification handling must read
       // this same disposition rather than resampling a close/completion race.
       this.completionObserved(completion.id);
-      const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+      const operationId = completion.operationId ?? this.completionOperationId(completion.id);
       const exactOwner = operationId ? this.operationWork.get(operationId) : undefined;
       item = {
         completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
+        observationSettled: false,
+        ...(operationId && this.operationObservations.get(operationId)?.cursor
+          ? { observationCursor: this.operationObservations.get(operationId)!.cursor }
+          : {}),
         ...(exactOwner ? {} : {
           fallbackWork: this.dependencies.workRegistry.beginDerived({
             kind: "terminal-receipt-persistence",
@@ -3238,7 +3368,7 @@ export class RuntimeSlot {
     _error: unknown,
     fallbackWork?: GatewayWorkHandle,
   ): void {
-    const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+    const operationId = completion.operationId ?? this.completionOperationId(completion.id);
     this.dependencies.persistenceDiagnostic?.(this.id, "terminal-receipt-persistence-failed");
     this.emit("session.diagnostic", {
       code: "terminal-receipt-persistence-failed",
@@ -3246,8 +3376,51 @@ export class RuntimeSlot {
     });
     this.settleOperationWork(operationId);
     fallbackWork?.settle();
-    this.completionWorkOwners.delete(completion.id);
+    const pendingOwnerId = this.completionOperationId(completion.id);
+    if (pendingOwnerId) delete this.operationObservations.get(pendingOwnerId)!.pendingCompletionId;
     if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
+  }
+
+  private admitCompletionObservation(item: CompletionOwnershipItem): void {
+    if (item.observationSettled) return;
+    const operationId = item.completion.operationId ?? this.completionOperationId(item.completion.id);
+    if (!operationId) return;
+    const start = item.observationCursor ?? this.operationObservations.get(operationId)?.cursor;
+    if (!start) return;
+    const entries = this.canonicalSessionEntries();
+    const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
+    if (completionIndex < start.entryIndex) return;
+    const observed = this.observationEntries(operationId, item.completion.id, start);
+    if (observed.entries.length === 0) return;
+    try {
+      this.hooks.turnSettled?.(
+        this.id,
+        observed.entries,
+        "completed",
+        item.completion.id,
+        observed.branchId,
+        this.cwd,
+        this.invocationForOperation(operationId)?.invocationId,
+      );
+    } catch {
+      // Observation admission is fire-and-forget; it cannot undo durable completion.
+      return;
+    }
+    item.observationSettled = true;
+    // The deduplication record belongs only to the operation whose eventual
+    // agent_settled callback can consume it. A completion from an earlier
+    // operation in a queued run may settle after its callback ownership ended.
+    if (this.activeOperationId === operationId) {
+      this.observationFor(operationId).observedCompletionId = item.completion.id;
+    }
+    if (this.hasActiveAgentRun && this.activeOperationId === operationId) {
+      // The same foreground operation can continue after a completion (for
+      // example, a consumed steer). Advance to the exact next canonical entry;
+      // its later completion owns only the remaining range.
+      this.observationFor(operationId).cursor = { entryIndex: completionIndex + 1, branchId: start.branchId };
+    } else {
+      this.retireOperationObservation(operationId);
+    }
   }
 
   private async settleAssistantCompletion(item: CompletionOwnershipItem): Promise<void> {
@@ -3269,24 +3442,14 @@ export class RuntimeSlot {
         }
       }
       if (lastError !== undefined) throw lastError;
-      const completionLifecycle = completion.operationId !== undefined
-        && this.abortedOperations.has(completion.operationId)
-        ? "interrupted" as const
-        : "completed" as const;
-      await this.terminalizeInvocation(
-        completion.operationId,
-        completionLifecycle,
-        completionLifecycle === "interrupted" ? "user-abort" : undefined,
-        item.fallbackWork,
-        completion.id,
-      );
-      if (completion.operationId) this.abortedOperations.delete(completion.operationId);
       if (!completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
-      const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+      this.admitCompletionObservation(item);
+      const completionWorkOwner = completion.operationId ?? this.completionOperationId(completion.id);
       this.settleOperationWork(completionWorkOwner);
-      this.completionWorkOwners.delete(completion.id);
+      const pendingOwner = this.completionOperationId(completion.id);
+      if (pendingOwner) delete this.operationObservations.get(pendingOwner)!.pendingCompletionId;
       if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
       // A continuation may already own the agent while this older durable write
       // unwinds. Settlement retires only its exact completion; the newer run
@@ -3406,7 +3569,7 @@ export class RuntimeSlot {
             if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
               this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
             }
-            if (this.activeOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, this.activeOperationId);
+            if (this.activeOperationId) this.observationFor(this.activeOperationId).pendingCompletionId = this.pendingAssistantCompletion.id;
             // Pi may start an extension continuation before the older settlement
             // callback unwinds. Preserve and immediately commit the prior exact
             // completion, then give the continuation a distinct marker owner so
@@ -3423,6 +3586,7 @@ export class RuntimeSlot {
           // `message_end` may still be waiting for Pi's canonical append. Its
           // callback-turn binding owns the preceding operation even before a
           // completion object exists, so the new run must rotate now.
+          this.terminalizeTransferredOperation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
@@ -3459,6 +3623,8 @@ export class RuntimeSlot {
         this.notificationRun = {};
         if (dequeuedOwner && preflightOwner === dequeuedOwner) this.dequeuedFollowUpOwners.shift();
         if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
+          this.terminalizeTransferredOperation(this.activeOperationId);
+          this.retireOperationObservation(this.activeOperationId);
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
@@ -3469,7 +3635,7 @@ export class RuntimeSlot {
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
         const observationCut = this.canonicalSessionEntries();
-      this.observationStarts.set(this.activeOperationId, { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) });
+      this.observationFor(this.activeOperationId).cursor = { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) };
         if (!continuesToolSegment) {
           if (beginsWithUserInput) {
             this.ownToolSegment(this.activeOperationId);
@@ -3513,9 +3679,10 @@ export class RuntimeSlot {
           this.publishSnapshot();
           break;
         }
-        if (this.queuedManualCompactionInFlight) {
-          // A late settlement callback from the preceding prompt cannot retire
-          // the queued maintenance operation that now owns the session.
+        if (this.queuedManualCompactionInFlight && !this.adoptedManualCompaction) {
+          // Standalone queued maintenance owns the session after its prompt has
+          // already settled. An adopted compaction still belongs to the enclosing
+          // agent run, whose terminal receipt must retire independently.
           this.publishSnapshot();
           break;
         }
@@ -3567,26 +3734,26 @@ export class RuntimeSlot {
               // An earlier success can still await attention while a queued
               // follow-up fails. Its receipt cannot stand in for this exact
               // terminal owner (or overwrite its failure when owners coincide).
-              if (terminalLifecycle !== "completed") {
-                await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
-              }
+              const terminal = await this.persistInvocationTerminal(
+                settledOperationId, terminalLifecycle, terminalErrorCode, undefined,
+                settledOperationId === completion.operationId ? completion.id : undefined,
+              );
               await this.beginAttentionSettlement(completion);
-              const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
-              const observed = this.observationEntries(completionOperationId ?? "", completion.id);
-              // The completion waiting for attention is a separate owner from
-              // the follow-up that just settled. Admit each exact cut with its
-              // own outcome and invocation provenance.
-              this.hooks.turnSettled?.(this.id, observed.entries, "completed", completion.id, observed.branchId, this.cwd, completionOperationId ? this.invocationForOperation(completionOperationId)?.invocationId : undefined);
+              if (terminal) await this.notifyAutomationTerminal(terminal);
+              const completionOperationId = completion.operationId ?? this.completionOperationId(completion.id);
+              if (completionOperationId) this.retireOperationObservation(completionOperationId);
+              // A successful earlier completion is admitted by its exact
+              // settlement owner; this lane admits only a distinct follow-up cut.
               if (settledOperationId && settledOperationId !== completionOperationId) {
                 const followUpObserved = this.observationEntries(settledOperationId);
                 this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
               }
-              if (settledOperationId) this.observationStarts.delete(settledOperationId);
+              this.retireOperationObservation(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
-                this.abortedOperations.delete(settledOperationId);
                 this.settleOperationWork(settledOperationId);
               }
+              if (settledOperationId) this.abortedOperations.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
             })().catch(() => {});
             break;
@@ -3597,10 +3764,20 @@ export class RuntimeSlot {
               settledOperationId,
               terminalLifecycle,
               terminalErrorCode,
+              undefined,
+              this.operationObservations.get(settledOperationId)?.observedCompletionId,
             ).then(async () => {
-              const observed = this.observationEntries(settledOperationId);
-              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
-              this.observationStarts.delete(settledOperationId);
+              const alreadyObservedCompletion = terminalNotification !== undefined
+                && this.operationObservations.get(settledOperationId)?.observedCompletionId === terminalNotification.sourceId;
+              if (!alreadyObservedCompletion && this.operationObservations.get(settledOperationId)?.cursor) {
+                const observed = this.observationEntries(settledOperationId);
+                if (observed.entries.length > 0) {
+                  this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+                }
+              }
+              // Only the exact completion ID proves that this terminal cut was
+              // already admitted. A missing cursor alone never means coverage.
+              this.retireOperationObservation(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });
@@ -3634,7 +3811,18 @@ export class RuntimeSlot {
         }
         this.publishSnapshot();
         break;
-      case "compaction_start":
+      case "compaction_start": {
+        const adoptedManual = this.pendingManualCompaction;
+        if (adoptedManual) {
+          this.pendingManualCompaction = undefined;
+          this.queuedManualCompactionInFlight = true;
+          this.adoptedManualCompaction = adoptedManual;
+          this.dependencies.manualCompactionAdopted?.({
+            sessionId: this.id,
+            operationId: adoptedManual.operationId,
+            reason: event.reason,
+          });
+        }
         this.phase = "compacting";
         // Canonical compaction is a hard transcript barrier. A provisional
         // generation keeps older unresolved calls terminal until the next
@@ -3648,9 +3836,9 @@ export class RuntimeSlot {
         // maintenance within one prompt can never collide with the prompt row
         // or another canonical compaction.
         const compactionOperation: SessionOperationState = {
-          id: this.operation?.kind === "compaction"
+          id: adoptedManual?.operationId ?? (this.operation?.kind === "compaction"
             ? (this.operation.id ?? randomUUID())
-            : randomUUID(),
+            : randomUUID()),
           kind: "compaction",
           // Manual admission already owns this identity, including its start
           // time. SDK preparation must not invalidate Stop/cleanup matching.
@@ -3662,6 +3850,7 @@ export class RuntimeSlot {
         this.compactionOperation = compactionOperation;
         this.publishSnapshot();
         break;
+      }
       case "compaction_end": {
         const completedOperation = this.compactionOperation;
         const ownerStillCurrent = completedOperation !== undefined && this.operationMatches(completedOperation);
@@ -3689,6 +3878,35 @@ export class RuntimeSlot {
         }
         this.compactionBaselineEntryId = undefined;
         this.compactionOperation = undefined;
+        const adoptedManual = this.adoptedManualCompaction;
+        if (adoptedManual) {
+          void (async () => {
+            try {
+              await this.clearMarkerOwnership(adoptedManual.operationId, adoptedManual.work);
+              // The accepted command owns the first compaction after it queued;
+              // if that compaction fails or is cancelled, settle it as failed
+              // rather than launching a second manual compaction.
+              if (outcome === "success") adoptedManual.resolve();
+              else adoptedManual.reject(new GatewayError(
+                outcome === "cancelled" ? "conflict" : "internal",
+                errorMessage ?? (outcome === "cancelled" ? "Adopted compaction was cancelled" : "Adopted compaction failed"),
+                outcome === "cancelled",
+              ));
+            } catch (error) {
+              adoptedManual.reject(error);
+            } finally {
+              if (this.adoptedManualCompaction === adoptedManual) this.adoptedManualCompaction = undefined;
+              this.queuedManualCompactionInFlight = false;
+              if (this.operation?.id === adoptedManual.operationId && !this.hasActiveAgentRun && !this.activeOperationId) {
+                this.phase = "idle";
+                this.operation = undefined;
+              }
+              this.hooks.settled(this.id);
+              this.publishSnapshot();
+              adoptedManual.work.settle();
+            }
+          })();
+        }
         // Retire only the completed compaction's abort intent. This remains
         // safe when a successor replaced `operation`, because its identity is
         // fenced by the captured compaction owner.
@@ -3727,7 +3945,7 @@ export class RuntimeSlot {
             startedAt: new Date().toISOString(),
           };
         } else if (completedOperation.kind === "compaction"
-          && completedOperation.reason === "manual") {
+          && completedOperation.reason === "manual" && !this.adoptedManualCompaction) {
           // The wrapper still owns durable marker retirement. Canonical presence
           // suppresses the spinner, while phase remains truthful until cleanup.
           this.phase = "compacting";
@@ -3821,6 +4039,10 @@ export class RuntimeSlot {
               this.pendingQueueAdmission = undefined;
               reclassifiedAdmission.resolveDisposition("foreground");
               const displacedOwner = this.activeOperationId;
+              if (displacedOwner !== reclassifiedAdmission.id) {
+                this.terminalizeTransferredOperation(displacedOwner);
+                this.retireOperationObservation(displacedOwner);
+              }
               this.activeOperationId = reclassifiedAdmission.id;
               const invocation = this.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
@@ -4208,10 +4430,13 @@ export class RuntimeSlot {
             // Pi can admit a same-agent queued follow-up without emitting a
             // second agent_start. The canonical user binding is the exact
             // prospective cut boundary; never fall back to session history.
-            if (!this.observationStarts.has(operationID)) {
+            // Steering is nested input in the foreground run, not an observation owner.
+            const isConsumedSteering = this.consumedSteeringOperationIDs.has(operationID);
+            const observationOwnerId = isConsumedSteering ? this.activeOperationId ?? operationID : operationID;
+            if (isConsumedSteering || !this.operationObservations.get(observationOwnerId)?.cursor) {
               const canonical = this.canonicalSessionEntries();
               const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
-              if (entryIndex >= 0) this.observationStarts.set(operationID, { entryIndex, branchId: this.observationBranchId(canonical) });
+              if (entryIndex >= 0) this.observationFor(observationOwnerId).cursor = { entryIndex, branchId: this.observationBranchId(canonical) };
             }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
@@ -6037,6 +6262,8 @@ export class RuntimeSlot {
           // follow-up then retrospectively transfers its pre-cutoff token into
           // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.activeOperationId;
+          this.terminalizeTransferredOperation(syntheticOwner);
+          if (syntheticOwner !== item.id) this.retireOperationObservation(syntheticOwner);
           this.activeOperationId = item.id;
           this.operation = {
             id: item.id,
@@ -6756,6 +6983,26 @@ export class RuntimeSlot {
     return true;
   }
 
+  private attentionPendingError(): GatewayError {
+    const completion = this.pendingAssistantCompletion ?? this.completionOwnershipQueue[0]?.completion;
+    const ageMs = completion ? Math.max(0, Date.now() - Date.parse(completion.completedAt)) : undefined;
+    const completionId = completion?.operationId ?? completion?.id;
+    this.emit("session.diagnostic", {
+      code: "attention-pending",
+      ...(completionId ? { operationId: completionId } : {}),
+      ...(ageMs !== undefined ? { ageMs } : {}),
+    });
+    return new GatewayError(
+      "busy",
+      completion
+        ? `The prior response is still committing durable attention state (completion ${completionId} pending for ${Math.floor((ageMs ?? 0) / 1000)} s)`
+        : "The prior response is still committing durable attention state",
+      true,
+      { reason: "attention-pending", ...(completionId ? { operationId: completionId } : {}), ...(ageMs !== undefined ? { ageMs } : {}) },
+      "attention-pending",
+    );
+  }
+
   private async admitPrompt(
     text: string,
     images: ImageContent[],
@@ -6773,10 +7020,10 @@ export class RuntimeSlot {
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
-        throw new GatewayError("busy", "The prior response is still committing durable attention state", true);
+        throw this.attentionPendingError();
       }
       if (this.completionOwnershipQueue.length > 0 || this.pendingAssistantCompletion) {
-        throw new GatewayError("busy", "The prior response is still committing durable attention state", true);
+        throw this.attentionPendingError();
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
@@ -7099,7 +7346,7 @@ export class RuntimeSlot {
       ) => {
         if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
-        if (!owned || this.queuedManualCompactionInFlight || noAgentSettlementStarted) return;
+        if (!owned || (this.queuedManualCompactionInFlight && !this.adoptedManualCompaction) || noAgentSettlementStarted) return;
         noAgentSettlementStarted = true;
         if (terminalLifecycle === "failed") this.completionObserved(`terminal:${invocationId}`);
         if (this.pendingPrompt?.id === operationId) {
@@ -8030,7 +8277,11 @@ export class RuntimeSlot {
           this.publishSnapshot();
           const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
           const startedMonotonicMs = performance.now();
-          const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId });
+          const result = await this.runtime.session.executeBash(command, undefined, {
+            excludeFromContext,
+            id: operationId,
+            operations: this.directBashProcesses!.shellOperations(),
+          });
           const completedAt = new Date().toISOString();
           const bashEntries = this.sessionManager.getBranch().filter((entry) =>
             !previousEntryIDs.has(entry.id)
@@ -8317,6 +8568,7 @@ export class RuntimeSlot {
       agentDir: this.dependencies.agentDir,
       cwd: this.cwd,
       settingsManager: this.runtime.session.settingsManager,
+      ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}),
     });
   }
 
@@ -8720,6 +8972,9 @@ export class RuntimeSlot {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.operationObservations.clear();
+    this.detachOpenAIEligibility?.();
+    this.detachOpenAIEligibility = undefined;
     this.dependencies.browserLiveViews?.retireSession(this.id);
     this.unregisterExtensionExpiry();
     this.unregisterProcessExpiry();

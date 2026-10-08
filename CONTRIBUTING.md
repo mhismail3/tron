@@ -58,7 +58,31 @@ agent execution, session state, inbox, badge, or reminder policy.
    restores only its owned manifests plus
    the disposable installed tree with `npm ci` if anything fails. No deployment or
    Gateway lifecycle command is part of dependency maintenance.
-9. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
+9. `pi-subagents` updates are one atomic Tron-owned provider change, not a
+   user-managed npm dependency. `packages/gateway/pi-subagents-pin.json` binds
+   the exact fork/upstream commits, source archive, lockfile, and bundled closure.
+   From a clean pin/artifact/package state use `cd packages/gateway && npm run
+   update:pi-subagents -- --fork-repo <path-or-url> <full-fork-commit>`, then run
+   `npm run check:pi-subagents` and `npm run test:pi-subagents-scripts`.
+   `fork.repository` is null until the public fork URL exists; only the updater
+   needs the explicit source. Once recorded, that URL is the default and an
+   override must match it. Checks and installs remain self-contained/offline.
+   The updater reads git objects, never the fork working tree; it preflights
+   the pinned upstream release/tag and fork ancestry, reports latest upstream
+   without selecting it, and packs/builds using the pinned Node/npm. Publication
+   retains current as previous, and failure restores only invocation-owned
+   files. Prior artifacts and install roots stay untouched for rollback. Do not
+   install through the user package updater, edit a user's package manifest, or
+   deploy/restart a Gateway as dependency maintenance. Conflicting user-installed
+   providers are refused rather than replaced or run alongside Tron. Every
+   Gateway startup installs/verifies its selected payload's closure offline before
+   discovery, reusing a valid immutable root and refusing damage. Debug activation
+   uses `scripts/tron dev start`; inspect status first and coordinate any other
+   worktree's running candidate. Stable installation happens only when the
+   maintainer updates/promotes the reviewed Stable payload (or follows the Mac
+   Release reinstall runbook); agents never install into Stable. This is payload
+   activation, not part of the dependency updater.
+10. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
    compaction/retries, extension UI, projections, settings/auth/models,
    packaging, or user-visible UI/UX changes must be compared with the approved
    baseline and explicitly decided; never accept a changed behavior merely

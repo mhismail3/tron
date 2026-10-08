@@ -1,3 +1,4 @@
+import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,7 @@ import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-di
 import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { assertNewModelChoice, OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
@@ -75,7 +77,7 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await assertDelegatedRootCutoverReady(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
-// extensions. No source or installed package is rewritten at startup.
+// extensions. Existing installed packages are never rewritten in place.
 delegatedProviderEnvironment(delegatedRoot);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
@@ -101,6 +103,9 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
+// Activate this payload's exact offline closure before any Pi discovery. A
+// restart verifies/reuses the immutable root; damaged roots fail startup closed.
+const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
   logger.log(
@@ -148,6 +153,7 @@ const notifications = new NotificationService(
 await notifications.initialize();
 startupCheckpoint("notifications");
 
+const openAIModelEligibility = new OpenAIModelEligibility();
 const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
@@ -155,6 +161,7 @@ const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime
   refreshOnCreate: true,
   allowModelNetwork: false,
 })));
+openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
 const trust = new TrustService(config.agentDir);
@@ -210,9 +217,11 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  managedSubagents,
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
+  openAIModelEligibility,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
@@ -270,6 +279,11 @@ const sessions = new RuntimeRegistry({
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
+  ),
+  manualCompactionAdopted: (diagnostic) => logger.log(
+    "info",
+    "Queued manual compaction adopted by an active compaction",
+    { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
   ),
   codemodeDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "completed" ? "info" : "warning",
@@ -401,6 +415,14 @@ const knowledge = new KnowledgeService(
     );
   }),
   knowledgeTagging,
+  async modelReference => {
+    const separator = modelReference.indexOf("/");
+    if (separator <= 0 || separator === modelReference.length - 1) throw new GatewayError("invalid_request", "Knowledge model must identify a registered provider/model");
+    const provider = modelReference.slice(0, separator);
+    const id = modelReference.slice(separator + 1);
+    if (!modelRuntime.getModel(provider, id)) throw new GatewayError("invalid_request", "Knowledge model is not registered");
+    await assertNewModelChoice(modelRuntime, provider, id);
+  },
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
 sessions.setKnowledgeService(knowledge);
@@ -413,10 +435,11 @@ const packages = new PackageService(
   trust,
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
+  managedSubagents,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
-const hookResources = new HookResources(config.agentDir, trust, workRegistry);
+const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,

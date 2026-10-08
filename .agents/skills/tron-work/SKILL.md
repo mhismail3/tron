@@ -101,11 +101,17 @@ took. If they ask for options, list the top three and wait.
    retained artifact.
 4. **Implement.** Ship code, its tests and its owning docs together.
    - For a bug, first record a failing reproduction (a test or log) as
-     evidence. If it cannot be reproduced, comment what was tried, add
-     `needs-decision`, set Status Needs you and ask for the missing detail
-     instead of guessing a fix.
+     evidence. If it cannot be reproduced, post what was tried with
+     `scripts/tron work comment`, add `needs-decision` with
+     `scripts/tron work issue labels`, set Status Needs you with
+     `scripts/tron work project set`, and ask for the missing detail instead of
+     guessing a fix.
 5. **Post evidence as you go.** Comment on the issue at each milestone, not
-   only at the end, so the issue alone shows where the work stands:
+   only at the end, so the issue alone shows where the work stands. Write the
+   comment to a local Markdown file and post it with
+   `scripts/tron work comment <issue> --body-file <file>`; never use a direct
+   `gh` mutation. The command privacy-checks the body and the shared GitHub
+   boundary records the mutation in the private local audit:
    - **Reproduced:** what failed, the command or CI run, the retained log, and
      which cause is proven and which is still a lead.
    - **Candidate:** the root-cause evidence, the change, the negative control
@@ -113,8 +119,9 @@ took. If they ask for options, list the top three and wait.
    - **Blocked or replanned:** what, why, and the decision needed.
 
    Label each claim verified or inferred. Cite commits, run IDs and retained
-   log names, never local paths, device exports or personal data, and run
-   `scripts/personal-info-guard.sh --stdin` on the text before posting.
+   log names, never local paths, device exports or personal data. The typed
+   comment command runs `scripts/personal-info-guard.sh --stdin` (or the
+   configured scrubber) before posting.
    Screenshots and full logs go to the private evidence repository through
    `verify --evidence-manifest`. When delegating, put this rule in every child
    task and read the issue yourself rather than trusting the child's report.
@@ -147,6 +154,8 @@ took. If they ask for options, list the top three and wait.
    - The Debug Gateway may be restarted by agents (AGENTS.md rule 8); Stable
      may not.
 8. **Clean up and sync.**
+   - Follow the [creator-owned cleanup rule](../../../AGENTS.md#process-lifecycle-and-cleanup),
+     including on failure.
    - Run `scripts/tron work cleanup` from the task worktree. It runs the
      configured release commands (the iOS lane and Gateway E2E `clean`) itself,
      then removes the worktree and both branches only if they are provably
@@ -166,10 +175,16 @@ took. If they ask for options, list the top three and wait.
 ## Plan larger work
 
 For work that spans sessions or several tasks:
-1. Open an epic with the Epic form: goal, constraints, decisions, rules.
-2. Add one Task issue per claimable step as a sub-issue, with blocked-by links
-   for the order.
-3. Add everything to the Project as Proposed, and present the epic to the user.
+1. Write the epic body with its goal, constraints, decisions and rules, then
+   file it with `scripts/tron work issue create --type epic --title <title>
+   --body-file <file>`.
+2. Add each task using `issue create` with its declared kind and visibility
+   plus one or more declared area labels; add it to the Project with `project add`, and assign Proposed plus a
+   priority using `project set`.
+3. Link tasks with `issue parent <task> --epic <epic>` and explicit ordering
+   with `issue block <task> --blocked-by <blocker>`. All GitHub writes use
+   these typed `scripts/tron work` commands; issue text is privacy-checked.
+4. Present the epic to the user.
    Landing (straight to `main`, or held on an integration branch until the
    maintainer verifies the whole set) is the maintainer's decision: present it
    as one, not as a default.
@@ -180,13 +195,15 @@ Nothing in it can be claimed until the maintainer moves it to Ready.
 
 When asked to triage, take the open issues labeled `needs-triage`. For each:
 
-1. Run the related-issue check on its title and body. Comment on an apparent
-   duplicate with the other issue's number and leave the decision to the
-   maintainer; never close it yourself.
-2. Correct its labels as AGENTS.md requires: one `kind:*`, one `visibility:*`,
-   and its `area:*` labels.
-3. Make sure it is in the Project with Status Proposed and a Priority (P0 to
-   P3, declared in `.github/work.json`). Use Ready only for work inside an
-   approved epic's scope, and make that work a sub-issue of the epic.
-4. Remove `needs-triage`, and list the triaged issues and any suspected
-   duplicates for the user.
+1. Run the related-issue check on its title and body. Post an apparent duplicate
+   with `scripts/tron work comment`, state the other issue number, and leave the
+   decision to the maintainer; never close it yourself.
+2. Use `scripts/tron work issue labels <n>` to set exactly one declared
+   `kind:*` and `visibility:*` label plus one or more declared `area:*` labels,
+   while removing `needs-triage`.
+3. Ensure Project membership with `scripts/tron work project add <n>`, then set
+   Status Proposed and Priority P0–P3 with `scripts/tron work project set`.
+   Use Ready only when the maintainer approved scope and blockers are closed;
+   link an approved epic with `issue parent` and blockers with `issue block`.
+4. List triaged issues and suspected duplicates for the user. Do not use direct
+   `gh` mutation commands.

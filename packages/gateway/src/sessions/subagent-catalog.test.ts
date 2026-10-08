@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { ManagedSubagents } from "./managed-subagents.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -18,17 +19,18 @@ import {
  * instead of throwing; a large catalog must stay capped.
  */
 
-async function fixture(configuredPackage = true): Promise<{ agentDir: string; cwd: string; settings: SettingsManager }> {
+const roots: string[] = [];
+afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+async function fixture(installed = true) {
   const root = await mkdtemp(join(tmpdir(), "tron-subagents-"));
+  roots.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
-  if (configuredPackage) {
-    await mkdir(join(agentDir, "npm", "node_modules", "pi-subagents"), { recursive: true });
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-subagents"] }));
-  }
+  const provider = new ManagedSubagents(root);
+  if (installed) provider.install();
   const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
-  return { agentDir, cwd, settings };
+  return { agentDir, cwd, settings, provider };
 }
 
 describe("subagent distribution", () => {
@@ -86,18 +88,18 @@ describe("subagent distribution", () => {
 
 describe("subagent discovery", () => {
   it("fails soft when the package is not installed", async () => {
-    const { agentDir, cwd, settings } = await fixture(false);
-    const catalog = await loadSubagentCatalog({ agentDir, cwd, settingsManager: settings });
+    const { agentDir, cwd, settings, provider } = await fixture(false);
+    const catalog = await loadSubagentCatalog({ agentDir, cwd, settingsManager: settings, managedSubagents: provider });
     expect(catalog.subagents).toEqual([]);
     expect(catalog.diagnostic).toBeTruthy();
   });
 
   it("fails soft when loading the package's discovery module throws", async () => {
-    const { agentDir, cwd, settings } = await fixture();
+    const { agentDir, cwd, settings, provider } = await fixture();
     const catalog = await loadSubagentCatalog({
       agentDir,
       cwd,
-      settingsManager: settings,
+      settingsManager: settings, managedSubagents: provider,
       loadDiscovery: async () => { throw new Error("jiti could not load pi-subagents"); },
     });
     expect(catalog.subagents).toEqual([]);
@@ -105,11 +107,11 @@ describe("subagent discovery", () => {
   });
 
   it("fails soft when the version exposes no discovery export", async () => {
-    const { agentDir, cwd, settings } = await fixture();
+    const { agentDir, cwd, settings, provider } = await fixture();
     const catalog = await loadSubagentCatalog({
       agentDir,
       cwd,
-      settingsManager: settings,
+      settingsManager: settings, managedSubagents: provider,
       loadDiscovery: async () => ({ registerRuntimeAgent: () => {} }),
     });
     expect(catalog.subagents).toEqual([]);
@@ -117,11 +119,11 @@ describe("subagent discovery", () => {
   });
 
   it("fails soft when discovery itself throws", async () => {
-    const { agentDir, cwd, settings } = await fixture();
+    const { agentDir, cwd, settings, provider } = await fixture();
     const catalog = await loadSubagentCatalog({
       agentDir,
       cwd,
-      settingsManager: settings,
+      settingsManager: settings, managedSubagents: provider,
       loadDiscovery: async () => ({ discoverAgentsAll: () => { throw new Error("discovery exploded"); } }),
     });
     expect(catalog.subagents).toEqual([]);
@@ -129,11 +131,11 @@ describe("subagent discovery", () => {
   });
 
   it("projects the discovered agents from the package's own discovery", async () => {
-    const { agentDir, cwd, settings } = await fixture();
+    const { agentDir, cwd, settings, provider } = await fixture();
     const catalog = await loadSubagentCatalog({
       agentDir,
       cwd,
-      settingsManager: settings,
+      settingsManager: settings, managedSubagents: provider,
       loadDiscovery: async () => ({
         discoverAgentsAll: (discoveryCwd: string) => {
           expect(discoveryCwd).toBe(cwd);

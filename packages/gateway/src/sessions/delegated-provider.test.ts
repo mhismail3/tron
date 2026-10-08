@@ -61,28 +61,10 @@ describe("delegated provider origin", () => {
     expect(delegatedProviderOrigin([])).toEqual({ source: "pi-subagents" });
   });
 
-  it("continues accepting the unversioned npm package source", () => {
-    const installed = extension({ source: "npm:pi-subagents" });
-    const finalized = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
-    expect(delegatedProviderOrigin(finalized.extensions).owner?.source).toBe("npm:pi-subagents");
-  });
-
-  it("accepts the pinned npm package identity without rewriting its configured source", () => {
-    const source = "npm:pi-subagents@0.59.0";
+  it.each(["npm:pi-subagents", "npm:pi-subagents@0.59.0", "npm:pi-subagents@file:/tmp/candidate.tgz"])("rejects unverified user package %s", (source) => {
     const installed = extension({ source });
     const finalized = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
-    const origin = delegatedProviderOrigin(finalized.extensions);
-    expect(origin.owner?.source).toBe(source);
-    expect(origin.source).toBe(source);
-  });
-
-  it("accepts an explicit local npm tarball only when the installed manifest names pi-subagents", () => {
-    const source = "npm:pi-subagents@file:/tmp/pi-subagents-0.59.0.tgz";
-    const installed = extension({ source });
-    const finalized = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
-    const origin = delegatedProviderOrigin(finalized.extensions);
-    expect(origin.owner?.source).toBe(source);
-    expect(origin.source).toBe(source);
+    expect(delegatedProviderOrigin(finalized.extensions)).toEqual({ source: "pi-subagents" });
   });
 
   it.each([
