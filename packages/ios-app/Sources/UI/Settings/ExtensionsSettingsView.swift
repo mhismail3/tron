@@ -446,6 +446,7 @@ struct ExtensionsSettingsView: View {
                 source: package.source,
                 detail: [
                     package.scopeLabel,
+                    package.conflict != nil ? "Ignored" : nil,
                     package.filtered ? "Filtered" : nil,
                     updates.contains { $0.id == package.id } ? "Update available" : nil,
                 ].compactMap { $0 }.joined(separator: " · "),

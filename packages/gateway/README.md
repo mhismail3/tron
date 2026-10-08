@@ -287,6 +287,242 @@ delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 
+### Tron-owned `pi-subagents` build
+
+The delegated provider is distributed separately from the Gateway's Pi SDK. Its
+single source of version authority is `pi-subagents-pin.json`: the fork commit,
+source archive SHA-256, fork lockfile SHA-256, Node/npm build versions, and
+SHA-512 of the self-contained closure are bound together. `npm run
+check:pi-subagents` validates both selections' immutable inputs and package
+identity, compares source/closure runtime declarations, and traverses the complete
+lock-resolved runtime graph without registry access. Every direct or transitive
+non-peer dependency must resolve within the closure at the exact locked package
+path and version, with matching runtime declarations and installed npm lock
+`resolved`/`integrity` values. Nested versions, scoped packages, hoisting and cycles
+use the same graph check; an unpinned nested package cannot shadow a checked
+hoisted dependency. Pi host-provided peers are excluded, not dependencies merely
+sharing a peer's name. The integrity trust chain has three links: build-time
+`npm ci` verifies dependency tarballs against the lockfile SRI, deterministic
+packaging pins the resulting closure bytes with SHA-512, and the offline checker
+verifies that digest plus graph completeness and installed lock metadata. It does
+not attempt to recompute original registry-tarball SRI from extracted files.
+A retained predecessor
+pin must bind its exact source archive, lockfile, and self-contained closure;
+a fork predecessor carries the complete prior build provenance, while a registry
+predecessor also binds registry integrity. A partial rollback record is rejected. The retained
+`0.59.0` predecessor uses the public npm registry archive, verified against its
+`dist.integrity`. Its vendored runtime lock preserves the coordinator-extracted
+dependency records and versions, with a root derived from that archive's manifest;
+no development dependency versions are inferred. Source archives and lockfiles
+are retained under `artifacts/`; build the deterministic closure with `npm run
+build:pi-subagents-closure` using the pinned Node 22/npm toolchain. The builder
+reads the top-level pin selection; rebuild a predecessor in a disposable copy
+with its version and artifact inputs selected, never by changing a live install.
+`npm ci` validates even omitted development dependencies, so the builder removes
+them only from its temporary install manifest. The packaged manifest preserves
+the source metadata, including development dependencies, and adds sorted
+`bundledDependencies`. `npm run test:pi-subagents-scripts` includes a real npm
+runtime-only-lock regression with an unavailable registry.
+
+Prepare a new reviewed commit with `npm run update:pi-subagents -- --fork-repo
+<path-or-url> <full-fork-commit>`. The pin's `fork.repository` is null until a
+public fork URL is recorded; offline consumers never require that repository.
+Once recorded, the URL is the updater default and a different override is refused.
+The updater checks the exact pinned upstream release/tag and the fork's ancestry
+online, reports latest upstream for information only, and exports immutable git
+objects into a disposable tree. It uses the recorded Node/npm to install build
+dependencies, run `npm pack` (including the fork's packaging scripts), and build
+the closure. The candidate must have a new exact upstream-based `-tron.N` version.
+Before publication, the exact staged candidate must pass the offline real-Gateway
+activation/discovery/child-execution gate and the mandatory previous → candidate
+→ previous execution/resume probe. Both use disposable payloads and isolated homes;
+no repository pin or immutable artifact is published while either gate runs.
+Their passing JSON reports accompany the command result. Any gate failure refuses
+the update and removes its staging; original pin/artifact bytes remain unchanged.
+Only then does it exclusively create new immutable artifacts and atomically
+rename the pin, retaining the complete current pin (including fork provenance)
+as previous. A final
+`npm run check:pi-subagents` failure restores the original pin and removes only
+newly created files. The private `.pi-subagents-update-staging` directory is
+also the exclusive invocation lease; overlapping updates are refused. An
+uncatchable termination leaves it in place: inspect the interrupted owner before
+manually removing staging, never sweep another update's files. Dirty owned
+inputs, reused artifact paths, and mismatched provenance are refused. The updater never edits fork refs/working-tree files or
+installed Gateway homes, deploys, or starts a service. `test:pi-subagents-scripts`
+covers real local-git export/pack/build/check, both execution gates, unusable
+candidate and return-leg resume refusal, and late-failure restoration; only the
+online release metadata boundary is faked in those tests. The successful update
+regression compares the complete retained prior pin unchanged (repository,
+commit, source/lock/closure paths and hashes), and real previous/return legs
+require its exact fork-bound receipt. Work verification selects the offline
+checker and script suite for provider pin/artifacts/scripts, package manifests,
+and Node pin changes, not unrelated runtime sources.
+
+The closure excludes Pi SDK peer dependencies so those resolve from the selected
+Gateway SDK, not from a user npm tree. Gateway payloads carry the pin, input
+archives, and closure as fingerprinted app inputs; bundling refuses an invalid
+pin. This does not install the package into Stable or mutate a user's package
+manifest. The provider install/activation lifecycle is managed by Tron and is
+not an ordinary user package update.
+
+After building, `npm run install:pi-subagents -- <gateway-home>` explicitly
+extracts the selected closure offline into
+`<gateway-home>/internal/pi-subagents/<version>`. It stages files and a receipt
+(version, fork commit, closure SHA-512) together, verifies them, then publishes
+by directory rename. Failed staging is removed; an existing valid root is reused,
+and a damaged root is refused rather than overwritten in place. Previous version
+roots are not pruned. This activation entry point never defaults to a home and
+never edits `agent/npm/package.json`, runs npm installation, or downloads bytes.
+Every Gateway startup activates the exact closure carried by its selected
+payload, after delegated-root cutover admission and before Pi extension discovery.
+A verified existing root is reused without changing files or its receipt; a
+missing root is installed offline and damaged bytes/receipts fail startup closed.
+There is no channel-dependent installer, registry fetch, or user package update.
+`scripts/tron dev start` therefore builds/stages the Debug payload and its startup
+installs or verifies that payload's pin in `~/.tron-dev/internal/pi-subagents/`.
+Restart and rollback derive their selection from the newly selected payload.
+
+**Stable installation is maintainer-only:** update/promote the reviewed Gateway
+payload using the supported Stable payload workflow (or the Mac Release reinstall
+runbook if the installed launcher cannot select it). Startup of that selected
+payload performs the same offline activation in Stable's home; no separate agent
+install into Stable is authorized. Previous roots and all historical runs remain
+untouched. Remove an explicitly reported user-provider conflict yourself; Tron
+never edits that user declaration.
+
+One `ManagedSubagents` selection belongs to the Gateway payload and configured
+home, including when the agent directory is customized. Runtime extension loads,
+session-free admin loads, subagent discovery, `session.resources` and the managed
+`packages.list` row use that selection. Admission revalidates the receipt and
+every installed closure file against the pinned archive; a receipt alone cannot
+bless changed bytes. SDK peer ranges are checked against the selected Gateway payload. Pi's extension
+loader aliases their imports to its own host SDK exports; no SDK peer copies or
+links are installed, so a new Gateway payload can reuse the same immutable root.
+Before provider initialization, the delegated-provider environment owner also
+sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the running payload's own
+resolved `@earendil-works/pi-coding-agent` package root, replacing any inherited
+override. This process-lifetime binding lets the reserved provider's detached
+children use the selected host even when argv is not a Pi CLI and the reserved
+install has no SDK ancestor. Restart/rollback selects the new process's host;
+no SDK files or links are added to the provider install. They never resolve from
+user or global npm. Arbitrary shell commands still filter `PI_*`; this binding
+is for the provider's own children, not a shell command environment.
+The exact loaded extension gets a build-bound `tron:pi-subagents@…#…` owner;
+user npm sources and provider-shaped local paths grant no delegated authority.
+The existing per-extension registration admission also reserves `subagent` for
+that owner at load and for late registrations; it is not a one-shot load check.
+User or project `npm:pi-subagents` declarations are ignored, never executed,
+and never contribute resources or the reserved tool. The managed pinned provider
+still loads; no settings or user npm-tree bytes are changed. `packages.list`
+retains the declaration with a typed `conflict` (`code: managed-provider`) and
+empty `provides`, alongside the managed provider's row. Settings labels it
+“Ignored” and displays: “Tron manages pi-subagents; this user declaration is
+ignored. Remove it with `pi remove npm:pi-subagents`.” Cleanup is optional.
+One `pi-subagents.user-package-ignored` warning per runtime startup/reload or
+session-free load reports the exclusion without exposing user paths/specs.
+
+The pinned Pi SDK's `DefaultResourceLoader.extensionsOverride` executes after
+module loading, so it is not an exclusion seam. `managedProviderSettingsView`
+supplies the resolver's `getGlobalSettings`/`getProjectSettings` package reads
+(and `getSettings`/`getPackages`) with a read-only filtered projection, including
+pre-trust, final and reload passes. The SDK's `DefaultPackageManager.resolve`
+uses these scoped reads; its package persistence paths use `setPackages` or
+`setProjectPackages`, which the view refuses, as it does package-bearing
+`applyOverrides`. Other calls bind to the canonical manager; non-package writes
+persist canonical unfiltered snapshots. Package admin retains its canonical
+manager for inventory/mutations and uses the view only for resource resolution.
+Any other extension claiming `subagent` still fails admission, including late
+registrations. Missing installation
+leaves delegated discovery unavailable in read-only/unactivated fixtures; managed
+startup activates it before discovery. Corrupt bytes or receipts fail closed. Catalog and package reads retain their
+bounded unavailable diagnostic. `managed-subagents.test.ts` installs one real
+immutable closure per file and shares it among admission/discovery cases;
+destructive byte/receipt cases own separate state. The two cold real-loader
+cases and `package-provides.test.ts`'s single real-closure attribution case have
+measured, explicit deadlines for parallel verification; synthetic cases retain
+the default bound.
+It exercises the real
+closure and SDK loader/discovery in an isolated empty home, plus exact host SDK
+export identity across two payload paths sharing one install.
+`managed-subagents.integration.test.ts` invokes the same startup activation
+boundary as `gateway-main` from an empty agent home and npm cache with npm offline
+and all TCP denied, verifies a second startup preserves root/receipt inode and
+mtime, then runs a
+real foreground child through `RuntimeRegistry` / `RuntimeSlot` and the host SDK.
+Only model output is scripted. It checks packaged/project discovery, the
+build-bound canonical activity owner, successful child completion, canonical
+child JSONL, the Gateway's matching child-session reference, and read-only
+transcript admission/projection through that declared child binding. Damaged bytes
+and receipt restart refusals are covered by `managed-subagents.test.ts`.
+Regenerate its
+sanitized evidence with
+`npx vitest run src/sessions/managed-subagents.integration.test.ts --maxWorkers=2` from the
+Gateway directory; the report is `test-results/managed-subagents.integration.json`
+(or `TRON_SUBAGENTS_REPORT` for an external evidence destination).
+
+`npm run test:pi-subagents-rollback` runs the real previous → candidate → previous
+sequence against one isolated home. Each leg loads a fresh Gateway runtime with
+the selected exact closure, discovers packaged/project agents, and completes a
+real foreground child. The return leg reconstructs the candidate parent, reads
+its retained run through the previous provider, refuses terminal live control,
+and resumes the candidate child through the producer's documented `action: resume`
+management API. Revival is detached even with `async: false`: the probe awaits the
+same canonical child identity/output and the producer's observed runner/writer
+exit-0 proof, then reads terminal producer status. Fixture retirement is a
+separate test-support process owner: each leg records native spawn handles/PIDs
+and detached groups, propagates its scoped `--import` preload to runner descendants,
+and stops/joins the trees before retiring HTTP state or removing roots. Normal
+exit, assertion failure and termination signals all use this owner; TERM is
+bounded and escalates once to KILL. Disposal confirms no owned non-zombie
+PID/group members remain and direct child exit events have settled, never
+retrying directory removal. Zombies cannot write; their reaping belongs to the
+parent/OS. macOS EPERM during signaling is ignored only after a fresh process
+snapshot proves the target is absent or contains exclusively zombies; live
+permission failures or failed inspections still reject disposal.
+The updater supplies the exclusive `TRON_TEST_PROCESS_OWNER_FAILURE` JSONL path
+inside its staging owner, outside disposable leg roots. Join failures record
+unjoined live PIDs, attempted signals and the error there. The owner regression
+suite keeps this record outside its disposable writer root and includes it plus
+host stderr in exit assertions, so a failure is diagnosable from one test log.
+Any record fails the update,
+restores owned publications and preserves staging for explicit diagnosis; a
+later update refuses that still-owned staging directory. Standalone probes own
+the same failure record within their fixture root and likewise refuse removal. Scripted model responses are
+turn-addressed, not globally queued, so parent notifications and the revived
+child cannot steal each other's responses. The fixture supplies the same reserved
+delegated-artifact root and process-owned Pi host binding as Gateway startup,
+before extension initialization. Its return-leg detached resume proves the host
+binding works from a reserved install, including overriding an unavailable
+inherited host selection.
+The original parent/child JSONL prefixes and all other retained session-tree run
+artifacts must remain unchanged; supported continuation appends canonical history rather
+than converting it. Both immutable installs/receipts survive rollback. Only the
+loopback model endpoint is scripted, including for the predecessor's CLI child.
+The loader and admission use the verified manifest's `pi.extensions`, not a
+candidate-specific filename; empty, escaping, missing or non-regular entries
+fail closed before loading. The suite also exercises invalid entries in actual
+receipt-verified closures.
+
+The sanitized report defaults to `test-results/managed-subagents.rollback.json`;
+set `TRON_SUBAGENTS_ROLLBACK_REPORT` to retain it elsewhere. To inspect the whole
+disposable home, set `TRON_SUBAGENTS_ROLLBACK_ROOT` to a **nonexistent** evidence
+directory; the probe refuses to overwrite an existing fixture. Without that
+explicit retention request, it removes the fixture on success and failure.
+Payload source copies always retire after the probe. This gate selects provider
+versions with the current Gateway/SDK, not historical Gateway executables or a
+Stable/Debug service transition. Actual service qualification and the broader
+detached/live control matrix remain separate release gates.
+
+After `npm run build`, run `npx vitest run
+src/sessions/managed-subagents.payload.test.ts --maxWorkers=2` to execute the
+bundler's real app-input staging step and activate that staged compiled runtime
+with TCP denied. It verifies both selections through the same trusted checker
+used by the payload verifier, proves the shipped installer is usable, and rejects
+a damaged retained closure. The report is
+`test-results/managed-subagents.payload.json` (or `TRON_SUBAGENTS_PAYLOAD_REPORT`).
+It shares the selected SDK dependency tree only; pin/artifact authority comes
+exclusively from staged app bytes.
+
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
 layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote
 through the real Gateway, plus the Tron-level observation of that corpus reopened
@@ -1666,7 +1902,7 @@ in `projection.test.ts` and `hook-projection.test.ts` cover these boundary cases
 
 Live and canonical transcript projections preserve the canonical tool name while optionally carrying the bounded human-readable `label` declared by the mounted Pi extension tool definition; native clients use that label for presentation and never derive extension titles from snake_case names. Project Resources exposes the same label beside the canonical name. Live tool projections may also carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
-Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires the finalized `npm:pi-subagents` package identity as well as matching path evidence, so a project or local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. The resolved `<tronHome>/internal/subagents/` root is scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. Project-local and temporary roots are accepted only by isolated pre-cutover fixtures, never as a second production authority. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction. Native `subagent_supervisor` receipts remain ordinary control-tool results: their `runId` references an existing execution and never creates a delegated activity or canonical launch-ownership claim. This applies equally to live admission and replay of existing session history; a supervisor reply cannot prevent the real launch's terminal artifact from settling. Distinct genuine launch calls claiming the same run still fail closed. The supervisor-reference regression in `runtime-registry.integration.test.ts` verifies completion and drain release.
+Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires admission from the receipt-verified Tron-reserved closure and its build-bound owner, so a user npm package or a project/local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. The resolved `<tronHome>/internal/subagents/` root is scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. Project-local and temporary roots are accepted only by isolated pre-cutover fixtures, never as a second production authority. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction. Native `subagent_supervisor` receipts remain ordinary control-tool results: their `runId` references an existing execution and never creates a delegated activity or canonical launch-ownership claim. This applies equally to live admission and replay of existing session history; a supervisor reply cannot prevent the real launch's terminal artifact from settling. Distinct genuine launch calls claiming the same run still fail closed. The supervisor-reference regression in `runtime-registry.integration.test.ts` verifies completion and drain release.
 
 Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
@@ -1820,12 +2056,15 @@ No cancellation is inferred from the spinner, and a late Stop cannot cancel a su
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
 rather than serialized behind the first. An idle request starts canonical compaction immediately.
-A request accepted during an active agent run publishes `compactionQueued`, persists its own exact run marker,
-and keeps its command receipt pending until the exact compaction starts after final `agent_settled`
-and completes or fails. Handoff revalidates that no newer agent run owns the session, and queued
-completion awaits durable marker removal before publishing settled. Each preceding prompt retires
-its own marker independently, even if newer prompts defer the handoff; compaction never sweeps a
-successor's marker. Every successful or failed
+A request accepted during an active agent run publishes `compactionQueued` and persists its own exact
+run marker. The first SDK compaction that starts after the request was queued adopts it, regardless
+of whether its reason is manual, threshold, or overflow; the queued flag clears at that start, and
+the original command receipt settles with that compaction's result only after its exact marker is
+durably removed. If the adopting compaction fails or is cancelled, the queued request fails instead
+of launching another manual compaction. The enclosing prompt still owns and persists its own terminal
+receipt independently of adopted-marker cleanup. Each preceding prompt retires its own marker, and
+compaction never sweeps a successor's marker. A completed manual-reason compaction retires its exact
+compacting projection after marker cleanup, unless a successor already owns the slot. Every successful or failed
 `compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
 tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
 marker retires. Each terminal compaction is logged as `session.compaction.completed` with the exact
@@ -2407,7 +2646,7 @@ source is a Tron module, and a `top-level` `local`/`auto`/`cli` source is local.
 It is a separate key from Pi's `origin`, which keeps its `package`/`top-level`
 meaning. The same response lists available subagents (`name`, `description`,
 `model`, `thinking`, `source`, `distribution`) using the installed `pi-subagents`
-package's own discovery, loaded through its declared `jiti` dependency. Subagent
+Tron-reserved package's own discovery, loaded through its bundled `jiti` dependency from the same receipt-verified root as extension admission. Subagent
 discovery spawns nothing, is capped at 128 rows, is never cached across calls,
 and fails soft to an empty list plus one bounded `subagentDiagnostics` string
 when the package is absent, cannot load, or exposes an unexpected shape.
@@ -2559,9 +2798,20 @@ resource boundary; Tron does not pretend those SDK objects were explicitly dispo
 `gateway.drain.status` returns a bounded in-memory `AdministrativeDrainSnapshot` before
 and during a drain. The accepted `gateway.restart` response includes the same initial
 drain identity and revision while retaining its legacy fields; `{ commandId,
-restartNow: true }` can escalate an existing drain without waiting behind it. Because the
-drain has already closed ordinary work admission, its receipt write is admitted as derived
-settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
+restartNow: true }` can escalate an existing drain without waiting behind it. The
+authenticated `gateway.stop` request uses the same receipt, terminal-admission, and
+administrative-drain owners. It does not cancel accepted provider-login work: the
+login remains a blocker until its own response/completion settles. After the stop receipt
+settles, the process owner awaits the canonical drain and exits successfully only after
+an exact zero-blocker completion proof. While that proof is pending, status remains
+`preparing`/`waiting` and the app stays open; a rejected wait or failed final proof
+records `failed`, keeps work admission closed, and permits an explicit new stop or
+restart request. An explicit Restart Now retains restart's existing relaunch behavior;
+intentional stop itself never requests a restart. Intentional stop uses exit 0, while
+restart uses the relaunch code. The Stable LaunchAgent's `KeepAlive.SuccessfulExit=false`
+therefore suppresses relaunch only for intentional successful stop while retaining
+crash and restart recovery. Because the drain has already closed ordinary work
+admission, its receipt write is admitted as derived settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
 same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
 64 blocker summaries with session identity, category, state, age, and progress timestamp
 when available (plus the method for an `rpc-mutation`: a receipt-backed RPC still
@@ -2584,8 +2834,8 @@ when one blocker is stuck, and avoids waiting 180 s when only unresolved owners 
 Persistence retry, blocked and terminal-receipt failures are also written to
 `gateway.jsonl` with session identity. Active log rotation keeps the previous file
 within its one-MiB bound; fast successful RPCs are omitted.
-Live PTYs block restart because process replacement cannot preserve them. Restart closes
-terminal admission atomically only after proving no PTY is live, so an already-dispatched
+Live PTYs block restart and stop because process retirement cannot preserve them. Both
+close terminal admission atomically only after proving no PTY is live, so an already-dispatched
 `terminal.open` cannot resume across the cutoff and spawn a shell.
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.

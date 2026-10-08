@@ -2158,7 +2158,11 @@ because every installed package is external, then the names the package provides
 Prompts, Tools, Commands, Themes order. An empty kind is hidden, a package that provides nothing says so in one line,
 and a Gateway that predates `provides` shows no groups and no line at all. Each group reuses the Project Resources icon
 and colour for its kind, and the one bounded `providesDiagnostic` from the same read appears once as the standard
-notice. These names are the projection `packages.list` already carries beside each installed package, so this sheet
+notice. A typed package-row `conflict` adds the secondary “Ignored” status on the installed row
+and displays its message in the same shared notice on the detail sheet. The optional projection
+retains unknown codes as strings so their message remains readable. Tron's managed subagent
+provider excludes user `npm:pi-subagents` declarations without altering them; the notice explains
+`pi remove npm:pi-subagents` as optional user cleanup. These names are the projection `packages.list` already carries beside each installed package, so this sheet
 opens no new read. Pi themes style the terminal rather than this app, so a theme an installed package owns appears only
 in that package's sheet, and the themes no package owns — including one whose package has left the listing — stay
 reachable in a single Local themes group that appears only while some exist. Opaque, no-space source

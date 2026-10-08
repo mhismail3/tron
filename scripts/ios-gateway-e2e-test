@@ -396,6 +396,25 @@ proxy_running() {
   [[ "$command" == *"node $proxy_script"* ]]
 }
 
+report_proxy_exit() {
+  local pid="$1" status reason
+  if wait "$pid" 2>/dev/null; then
+    status=0
+  else
+    status=$?
+  fi
+  if ((status >= 129 && status <= 192)); then
+    reason="signal $(kill -l "$((status - 128))" 2>/dev/null || printf '%s' "$((status - 128))") (status $status)"
+  else
+    reason="exit code $status"
+  fi
+  echo "error: owned fault proxy exited ($reason)" >&2
+  if [[ -s "$run_root/proxy.log" ]]; then
+    echo "owned fault proxy stderr tail (last 20 lines):" >&2
+    tail -n 20 "$run_root/proxy.log" >&2
+  fi
+}
+
 stop_proxy() {
   if [[ -s "$proxy_pid_file" ]] && kill -0 "$(<"$proxy_pid_file")" 2>/dev/null && ! proxy_running; then
     die "refusing to signal a non-owned E2E proxy PID"
@@ -615,7 +634,11 @@ PY
   echo "$proxy_pid" >"$proxy_pid_file"
   for _ in {1..100}; do
     [[ -s "$proxy_ready" ]] && break
-    kill -0 "$proxy_pid" 2>/dev/null || { stop_gateway; die "owned fault proxy exited"; }
+    if ! kill -0 "$proxy_pid" 2>/dev/null; then
+      report_proxy_exit "$proxy_pid"
+      stop_gateway
+      exit 1
+    fi
     sleep 0.1
   done
   [[ -s "$proxy_ready" ]] || { stop_gateway; die "owned fault proxy did not become ready"; }

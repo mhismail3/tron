@@ -80,11 +80,6 @@ enum MenuBarItemBuilder {
         items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
 
         items.append(.separator)
-        if snapshot.state.canPause {
-            items.append(.action(title: "Pause Tron", isEnabled: serviceControlsEnabled, action: .pauseServer))
-        } else {
-            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
-        }
         items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: snapshot.state.requiresUpdateRepair ? .updateGateway : .restartServer))
         items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
         items.append(.quit(title: "Quit Tron"))
@@ -151,8 +146,6 @@ struct MenuHeaderContent: Equatable, Sendable {
 enum ServerBusyAction: String, Equatable, Sendable {
     case starting = "Starting"
     case restarting = "Restarting"
-    case pausing = "Pausing"
-    case resuming = "Resuming"
     case updating = "Updating"
 }
 
@@ -187,16 +180,6 @@ enum ServerStatusState: Equatable, Sendable {
     var requiresUpdateRepair: Bool {
         if case .updateIncomplete = self { return true }
         return false
-    }
-
-    /// A Gateway answers on the port, so Pause has a job to unregister. That
-    /// includes a refused admission: the reinstall sequence pauses the old
-    /// wrapper before its app is replaced, whatever state it reports.
-    var canPause: Bool {
-        switch self {
-        case .running, .updateIncomplete, .needsRepair: return true
-        default: return false
-        }
     }
 
     var runningPort: Int? {
@@ -237,12 +220,6 @@ enum ServerStatusState: Equatable, Sendable {
         return "Restart Tron"
     }
 
-    var resumeTitle: String {
-        if case .busy(let action) = self {
-            return "\(action.rawValue)…"
-        }
-        return "Resume Tron"
-    }
 }
 
 /// Snapshot consumed by `MenuBarItemBuilder` and produced by

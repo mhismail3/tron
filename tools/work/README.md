@@ -27,6 +27,48 @@ Tron runs it through `scripts/tron work`.
 Agent shells can inherit a PATH without Homebrew, which is why step 3 exists.
 Authentication stays in gh's own credential store.
 
+## GitHub writes and the local audit
+
+Every GitHub mutation made by this tool uses `Gh`, which records the attempt
+before invoking `gh` and appends its terminal outcome afterwards. This covers
+all typed work commands (claim/status/comment, receipt publication, bootstrap,
+landing, handoff and cleanup-related reads/writes); callers do not construct an
+alternate `gh` writer. It is deliberately not a generic `work gh` passthrough.
+
+The append-only JSONL audit lives in the repository's private Git common
+metadata at `work/github-writes.jsonl`, shared safely by linked worktrees. A
+separate lock file serializes each append across threads and processes. Each
+mutation has a stable random ID, timestamp, operation class and an `attempt`
+record followed by `succeeded`, `failed` or `uncertain`; an interrupted command
+therefore remains visibly attempted, never silently successful. A single
+request rejected with HTTP 4xx is failed. Compound CLI operations that can
+commit a sub-write before a later rejection (including `issue close --comment`)
+are uncertain on any command failure; transport/opaque errors are also
+uncertain. No request body, credential, CLI arguments, response body, or issue
+text enters the audit. Files are owner-only, symlinks are refused, and history
+is capped at 16 MiB. Capacity is reserved for terminal outcomes before a
+mutation starts; a full, malformed, or unwritable audit refuses the GitHub
+mutation instead of dropping history.
+
+`scripts/tron work comment <issue> --body-file <markdown>` is the typed command
+for public progress/evidence comments. It bounds and privacy-checks the body
+with the configured scrub command before GitHub is called, and suppresses guard
+output so private offending text is not copied to the terminal. Read operations
+such as `work issues` remain reads and do not appear in the audit.
+
+### Failure modes
+
+`test_gh.py` runs the real CLI/GitHub boundary against an executable stand-in.
+It checks that reads are not audited, every CLI/REST/GraphQL mutation has
+attempt and outcome records, concurrent writers produce complete records,
+privacy refusal prevents a public write, rejected and ambiguous/partial errors
+remain distinct, payloads are absent, well-formed full and reservation-bearing
+audits refuse writes, and admitted records stay within the bound. A compound
+fixture commits a comment-like side effect before returning HTTP 422 and proves
+its result is `uncertain`, not `failed`. Malformed audit refusal is a separate
+case. The stand-in does not prove remote GitHub availability or server-side
+behavior.
+
 ## `bootstrap`
 
 Declares the tracking vocabulary, and converges GitHub to it when you pass
@@ -715,6 +757,51 @@ lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
 52. **Success output is not pure JSON.** On success stderr is empty and stdout
     holds only the bounded corpus.
 
+## `issue` and `project` mutations
+
+Use these typed commands instead of direct `gh` writes:
+
+- `issue create --title <title> --body-file <md> --kind kind:* --visibility visibility:* --area area:* [--area area:* ...] [--type task|epic]` files a task with exactly one declared kind and visibility label and one or more declared area labels, plus `needs-triage`. Repeat `--area` for each affected area. An epic receives only the `epic` and `needs-triage` labels and no task taxonomy. Titles and bodies are bounded and scrubbed before creation. A newly filed issue is not implicitly approved or added to the Project.
+- `issue labels <issue> [--add <declared-label>] [--remove <label>]` changes classifications and triage labels. New labels must be declared. Issue-type labels are fixed at creation; non-epics must retain exactly one declared kind and visibility label plus one or more declared area labels. A stale undeclared label may be removed. Writes use GitHub's targeted add/remove endpoints rather than replacing a stale whole label set, so unrelated concurrent label changes are preserved. Taxonomy changes re-read under a private process lock shared by linked worktrees; ordinary flag changes can overlap safely.
+- `project add <issue>` adds the issue idempotently to the configured repository-linked work Project.
+- `project set <issue> [--status Proposed|Ready|Needs you|Blocked] [--priority P0|P1|P2|P3]` assigns only unclaimed statuses. `start` owns In progress, `land` owns In review and Done. Ready is only for maintainer-approved work inside approved scope after blockers close. Every requested live field and option is resolved before the first mutation; partial two-field updates report exactly which field succeeded if a request later fails, and rerunning is safe.
+- `issue parent <task> --epic <epic>` creates the native parent/sub-issue relationship after validating the labels. `issue block <issue> --blocked-by <blocker>` creates GitHub's native blocked-by relation. Both are idempotent.
+
+A new task normally follows this sequence: `issue create`, `project add`,
+`project set --status Proposed --priority P2`, and optional `issue parent` /
+`issue block`. Promotion to Ready is a separate, explicitly approved action.
+Triage changes the complete label classification in one `issue labels` call,
+then assigns Status/Priority with `project set`, and links the issue if needed.
+For a maintainer decision, add `needs-decision`, set Needs you and post the
+scrubbed question with `work comment`. Each GitHub mutation is individually
+audited; multi-request commands explain completed fields on partial failure.
+Each REST label delta and Project field mutation is audited separately; when a
+later request fails, the command identifies completed label deltas or fields.
+No generic argument passthrough is provided.
+
+`test_tracking.py` uses the real CLI boundary with an executable GitHub stand-in
+to exercise issue filing with multiple areas, taxonomy authorization, area
+preservation during unrelated flag changes, overlapping independent label
+additions, Project add and field selection, parent/blocker links, audit
+completeness, live-option preflight and partially completed Project updates.
+Controlled reads prove concurrent flags survive on the remote fixture, and
+schema drift proves no field is changed before validation completes. The
+stand-in does not substitute for live API/schema validation.
+
+## `comment`
+
+`scripts/tron work comment <issue> --body-file <markdown>` posts one public
+issue comment. It accepts only a positive issue number and a nonempty UTF-8 body
+up to 64 KiB. The configured privacy guard runs before any GitHub call; a
+refusal reports only that the guard refused, not the guard's potentially
+sensitive matching lines. The command requires `WORK_SESSION_ID` or
+`PI_SESSION_ID` and appends a work-session marker, so milestone comments retain
+agent attribution. The comment is sent on stdin rather than as a process
+argument. The common `Gh` boundary audits the operation without retaining its
+body. This is the supported agent path for reproduced, candidate, blocked and
+other milestone evidence; GitHub reads remain available through read-only
+commands.
+
 ## `land`
 
 `scripts/tron work land [--title <title>] [--summary-file <path>]
@@ -738,7 +825,15 @@ as does `acceptance` for the journeys it can run.
      `--irreducible` without `--needs-user-validation`;
    - `--acceptance` names no journeys, or an id the registry does not hold;
    - the scrub command (`verify.scrubCommand`) finds anything in the title,
-     the summary, the validation text or the acceptance evidence.
+     the summary, the validation text or the acceptance evidence;
+   - an issue labeled `kind:bug` has a Summary without exactly one non-empty,
+     top-level `## Repro`, `## Cause` and `## Fix` section in that order. Fenced
+     examples, nested headings and a user-authored `## Verification` do not
+     satisfy this contract. The separate `## Verification` section is generated
+     from the passing receipt. This is checked before publication, push or PR
+     create/edit; adopting an existing PR, resuming a merged PR and stewarding a
+     merge check the stored body too. Other issue kinds keep the existing freeform
+     summary contract.
 2. **Update.** It fetches the remote base branch and, when the branch does not
    contain its tip, merges it in. It merges rather than rebases, so the
    incremental re-verify can carry over checks whose inputs did not change. On
@@ -1065,6 +1160,26 @@ Project state and records every call. The live E2E covers GitHub itself.
     irreducible part and then the check, and the handoff comment carries both;
     a resumed land compares that whole section with the merged body, so a
     resume cannot quietly drop or change the irreducible part.
+79. **A malformed bug summary is published or merged.** `test_land.py` runs
+    the real `cli.py land` process against its isolated Git/fake-GitHub fixture.
+    It refuses missing or empty sections (including headings/content hidden in
+    comments, a sibling heading with no section body, empty fenced blocks,
+    unclosed comments/fences and fence trailers that are not valid closers),
+    reordered/nested/fenced headings, duplicate wrapper headings and a
+    user-supplied Verification heading before publication. It checks adopted
+    open and merged PR bodies as well. Only CR/LF Markdown line endings split
+    lines; Unicode separators remain text. ATX headings and fence delimiters
+    accept valid zero-to-three-space indentation only; four-space and
+    tab-indented code is never structural. Closing ATX hashes require preceding
+    whitespace, and raw `<pre>` blocks remain literal rather than supplying
+    sections. A closing fence may trail only ASCII spaces or tabs; other Unicode
+    whitespace is payload, not a delimiter. Raw `<pre>` blocks keep their
+    contents literal, and an unclosed raw block is rejected so it cannot hide
+    generated sections. Non-empty fenced evidence—including heading-shaped
+    literal output—and balanced harmless comments remain valid.
+    Valid non-bug summaries remain unchanged;
+    stewarding and merged-resume paths preserve the generated Verification and
+    Maintainer validation sections.
 
 ## `cleanup`
 
