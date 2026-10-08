@@ -3667,9 +3667,10 @@ export class RuntimeSlot {
           this.publishSnapshot();
           break;
         }
-        if (this.queuedManualCompactionInFlight) {
-          // A late settlement callback from the preceding prompt cannot retire
-          // the queued maintenance operation that now owns the session.
+        if (this.queuedManualCompactionInFlight && !this.adoptedManualCompaction) {
+          // Standalone queued maintenance owns the session after its prompt has
+          // already settled. An adopted compaction still belongs to the enclosing
+          // agent run, whose terminal receipt must retire independently.
           this.publishSnapshot();
           break;
         }
@@ -3867,7 +3868,6 @@ export class RuntimeSlot {
         this.compactionOperation = undefined;
         const adoptedManual = this.adoptedManualCompaction;
         if (adoptedManual) {
-          this.adoptedManualCompaction = undefined;
           void (async () => {
             try {
               await this.clearMarkerOwnership(adoptedManual.operationId, adoptedManual.work);
@@ -3883,7 +3883,12 @@ export class RuntimeSlot {
             } catch (error) {
               adoptedManual.reject(error);
             } finally {
+              if (this.adoptedManualCompaction === adoptedManual) this.adoptedManualCompaction = undefined;
               this.queuedManualCompactionInFlight = false;
+              if (this.operation?.id === adoptedManual.operationId && !this.hasActiveAgentRun && !this.activeOperationId) {
+                this.phase = "idle";
+                this.operation = undefined;
+              }
               this.hooks.settled(this.id);
               this.publishSnapshot();
               adoptedManual.work.settle();
@@ -3928,7 +3933,7 @@ export class RuntimeSlot {
             startedAt: new Date().toISOString(),
           };
         } else if (completedOperation.kind === "compaction"
-          && completedOperation.reason === "manual") {
+          && completedOperation.reason === "manual" && !this.adoptedManualCompaction) {
           // The wrapper still owns durable marker retirement. Canonical presence
           // suppresses the spinner, while phase remains truthful until cleanup.
           this.phase = "compacting";
@@ -7329,7 +7334,7 @@ export class RuntimeSlot {
       ) => {
         if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
-        if (!owned || this.queuedManualCompactionInFlight || noAgentSettlementStarted) return;
+        if (!owned || (this.queuedManualCompactionInFlight && !this.adoptedManualCompaction) || noAgentSettlementStarted) return;
         noAgentSettlementStarted = true;
         if (terminalLifecycle === "failed") this.completionObserved(`terminal:${invocationId}`);
         if (this.pendingPrompt?.id === operationId) {
