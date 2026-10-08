@@ -430,27 +430,15 @@ struct ProviderConfigurationSheet: View {
             if provider.isLocalOnly {
                 // Local models have no account, so this status is authoritative
                 // without a Gateway usage capability or a provider.usage read.
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "infinity")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Unlimited")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        Text("Local models run on this Mac with no account usage limits.")
-                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                TronGlassCard(accent: .tronEmerald) {
+                    TronSettingsRow(
+                        icon: "infinity",
+                        title: "Unlimited",
+                        subtitle: "Local models run on this Mac with no account usage limits.",
+                        accent: .tronEmerald
+                    )
+                    .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 8)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
             } else if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
                 TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
             } else if let usage = usageController.snapshots[provider.id] {

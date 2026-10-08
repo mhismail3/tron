@@ -36,11 +36,13 @@ struct HostedIntegrationsFixtureView: View {
     @State private var replacementGateway: HostedIntegrationsGateway
     private let mcpScenario: String?
     private let parentOAuthScenario: String?
+    private let ollamaDetailScenario: Bool
     private let replacementProfile = GatewayProfile(id: "replacement-integration-fixture", label: "Replacement Mac", host: "replacement.example.test", port: 9847, machineId: "fixture-integrations-replacement")
     private let dark: Bool
     private let recoveryScenario: String?
     @State private var presentationTrace = HostedIntegrationPresentationTrace()
     @State private var productionXLogs = ""
+    @State private var showingOllamaDetails = false
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -48,6 +50,7 @@ struct HostedIntegrationsFixtureView: View {
         recoveryScenario = scenario.hasPrefix("connection-") ? scenario : nil
         mcpScenario = scenario.hasPrefix("mcp-") ? scenario : nil
         parentOAuthScenario = scenario.hasPrefix("parent-oauth-") ? scenario : nil
+        ollamaDetailScenario = scenario == "ollama-detail"
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         _gateway = State(initialValue: gateway)
@@ -101,6 +104,26 @@ struct HostedIntegrationsFixtureView: View {
                         .tronPresentation()
                         .tronSettingsLayout()
                         .overlay { fixtureDiagnostics }
+                } else if ollamaDetailScenario {
+                    NavigationStack {
+                        Button("Details for Ollama") { showingOllamaDetails = true }
+                            .sheet(isPresented: $showingOllamaDetails) {
+                                ProviderConfigurationSheet(
+                                    provider: ProviderSummary(
+                                        id: "ollama", name: "Ollama", configured: true,
+                                        usageSupported: false, localOnly: true, authSource: nil,
+                                        credentialType: nil, authMethods: [], modelCount: 1
+                                    ),
+                                    target: .global
+                                )
+                                .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
+                            }
+                    }
+                    .environment(model)
+                    .tronPresentation()
+                    .tronSettingsLayout()
+                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-fixture-large-type") ? .accessibility3 : .large)
                 } else {
                     NavigationStack {
                         VStack {
