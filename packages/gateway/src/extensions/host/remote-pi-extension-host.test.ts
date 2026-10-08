@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ExtensionPresentationStore } from "./extension-presentation-store.js";
 import { MAX_HOST_COMPONENTS, RemotePiExtensionHost, widgetSurfaceId } from "./remote-pi-extension-host.js";
 import type { SemanticUIBroker } from "../../sessions/semantic-ui-broker.js";
+import { withExtensionOwner } from "../owner-attribution.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -28,6 +29,20 @@ function fixture() {
 }
 
 describe("RemotePiExtensionHost retained component foundation", () => {
+
+  it("retains admitted provider classification through component render and resize", async () => {
+    const { host, presentation } = fixture();
+    try {
+      withExtensionOwner({ id: "managed", title: "Subagents", source: "tron:pi-subagents@fixture#build", kind: "subagent" }, () => {
+        host.context().setWidget("provider", (() => component(["private frame"])) as never);
+      });
+      await Promise.resolve();
+      expect(presentation.state().surfaces[0]?.provenance).toMatchObject({ kind: "subagent" });
+      host.resize(100, 20);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(presentation.state().surfaces[0]?.provenance).toMatchObject({ kind: "subagent" });
+    } finally { host.retire(); }
+  });
 
   it("lazily starts, mounts sync factories, captures one render, and publishes bounded frames", async () => {
     const { host, presentation, events } = fixture();

@@ -731,7 +731,7 @@ export interface ExtensionSurface {
   placement: ExtensionSurfacePlacement;
   lifecycle: "retained" | "blocking" | "transient" | "restored";
   targetId?: string;
-  provenance?: { source?: string; path?: string };
+  provenance?: { source?: string; path?: string; kind?: "subagent" | "extension" };
   revision: number;
   focused: boolean;
   inputMode: "none" | "keys" | "textAndKeys";

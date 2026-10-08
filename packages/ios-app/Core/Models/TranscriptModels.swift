@@ -232,7 +232,12 @@ package enum ChatDirection: String, Codable, Sendable { case inboundContext, age
 package enum ChatContextEffect: String, Codable, Sendable { case none, modelInput, hiddenModelInput, toolResult }
 package enum ChatDelivery: String, Codable, Sendable { case stored, nextTurn, steer, followUp, triggeredTurn, continuedTurn, beforeAgentStart, toolResult, unknown }
 package enum ChatOriginKind: String, Codable, Sendable { case user, subagent, `extension`, process, gateway, assistant, unknown }
-package enum ChatSemanticKind: String, Codable, Sendable { case prompt, resourcePrompt, command, message, tool, status, state, unknown }
+package enum ChatSemanticKind: String, Codable, Sendable {
+    case prompt, resourcePrompt, command, message, tool, status, state, subagentWake, unknown
+    package init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
 package enum ChatSemanticVisibility: String, Codable, Sendable { case visible, hidden }
 
 package enum ChatOriginConfidence: String, Codable, Sendable { case boundary, receipt, adapter, unknown }
