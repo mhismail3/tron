@@ -46,11 +46,14 @@ the final ledger replacement, never before the session serializer. Queue tails
 retire at settlement and a failed mutation cannot poison the next one.
 The Registry materializer claims one attempt per reserved
 chapter, scans every candidate before adoption or creation. The same strict
-complete-file scan runs before a cold Home runtime is opened and before a Home
-chapter is used as a fork source. It scans the exact canonical file's owning
-directory, not a directory re-encoded from cwd: workspace aliases must not change
-evidence ownership, including cold search. The version-3 scanner validates the
-header, supported entry/message content and usage shapes, unique IDs, and one
+complete-file scan runs before a cold Home runtime is opened or searched.
+Generic JSONL import is a separate Registry admission followed by an SDK fork:
+it preserves the caller's source path in `parentSession` and checks capacity
+before source construction, without Home chapter scanning. The Home scan uses
+the exact canonical file's owning directory, not a directory re-encoded from cwd:
+workspace aliases must not change evidence ownership, including cold search.
+The version-3 scanner validates the header, supported entry/message content and
+usage shapes, unique IDs, and one
 append-ordered parent chain beginning with a null parent. Cycles, forward or
 missing parents, duplicate IDs, extra roots and branches refuse before SDK
 construction; parent validation is one pass, never a graph traversal. Unknown

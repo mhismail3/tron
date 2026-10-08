@@ -3486,23 +3486,6 @@ export class RuntimeRegistry {
     const finishAdmission = this.beginSlotAdmission();
     try {
       const trust = await this.options.trust.requireResolved(cwdInput);
-      const sourcePath = resolve(await realpath(path));
-      const homeSource = this.sessionCatalog.rows().find(row => resolve(row.path) === sourcePath);
-      const homeSessionDirectory = this.sessionDirectoryFor(await this.home.homeWorkspacePath());
-      if (dirname(sourcePath) === resolve(homeSessionDirectory) && !homeSource) {
-        throw new GatewayError("conflict", "Home fork source is not uniquely present in the session catalog");
-      }
-      if (homeSource) {
-        const chapter = this.home.chapterStateFor(homeSource.id);
-        if (chapter.homeId) {
-          const scan = await scanReservedHomeSession({
-            directory: this.sessionDirectoryFor(homeSource.cwd), expectedPath: sourcePath, sessionId: homeSource.id,
-          });
-          if (scan.action !== "adopt" || scan.path !== sourcePath) {
-            throw new GatewayError("conflict", "Home fork source is blocked by uncertain canonical evidence");
-          }
-        }
-      }
       await this.evictIdle(true);
       // The fork copies the source transcript, so the source's bytes are the
       // bytes this admission has to fit beside the runtimes already loaded.
@@ -3523,7 +3506,9 @@ export class RuntimeRegistry {
         }
         this.requireLiveSlotCapacity();
         const sessionDirectory = this.sessionDirectoryFor(trust.cwd);
-        const manager = SessionManager.forkFrom(sourcePath, trust.cwd, sessionDirectory);
+        // Generic imports preserve caller-path provenance and reach source
+        // construction only after capacity admission; Home scans own opens/searches.
+        const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
         const importedId = manager.getSessionId();
         const importedPath = manager.getSessionFile();
         let slot: RuntimeSlot | undefined;
