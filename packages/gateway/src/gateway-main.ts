@@ -280,6 +280,11 @@ const sessions = new RuntimeRegistry({
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
   ),
+  manualCompactionAdopted: (diagnostic) => logger.log(
+    "info",
+    "Queued manual compaction adopted by an active compaction",
+    { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
+  ),
   codemodeDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "completed" ? "info" : "warning",
     `Codemode execution ${diagnostic.outcome}`,

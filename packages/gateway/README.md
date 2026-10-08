@@ -2049,12 +2049,15 @@ No cancellation is inferred from the spinner, and a late Stop cannot cancel a su
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
 rather than serialized behind the first. An idle request starts canonical compaction immediately.
-A request accepted during an active agent run publishes `compactionQueued`, persists its own exact run marker,
-and keeps its command receipt pending until the exact compaction starts after final `agent_settled`
-and completes or fails. Handoff revalidates that no newer agent run owns the session, and queued
-completion awaits durable marker removal before publishing settled. Each preceding prompt retires
-its own marker independently, even if newer prompts defer the handoff; compaction never sweeps a
-successor's marker. Every successful or failed
+A request accepted during an active agent run publishes `compactionQueued` and persists its own exact
+run marker. The first SDK compaction that starts after the request was queued adopts it, regardless
+of whether its reason is manual, threshold, or overflow; the queued flag clears at that start, and
+the original command receipt settles with that compaction's result only after its exact marker is
+durably removed. If the adopting compaction fails or is cancelled, the queued request fails instead
+of launching another manual compaction. The enclosing prompt still owns and persists its own terminal
+receipt independently of adopted-marker cleanup. Each preceding prompt retires its own marker, and
+compaction never sweeps a successor's marker. A completed manual-reason compaction retires its exact
+compacting projection after marker cleanup, unless a successor already owns the slot. Every successful or failed
 `compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
 tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
 marker retires. Each terminal compaction is logged as `session.compaction.completed` with the exact
