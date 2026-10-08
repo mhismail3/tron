@@ -11,8 +11,10 @@ struct MacAppStartupMaintenanceTests {
         recordedVersion: MacAppVersionIdentity? = nil,
         onboarded: Bool = true,
         canManageLaunchAgent: Bool = true,
+        launchAgentServiceStatus: ExistingInstallDetector.ServiceRegistrationStatus = .enabled,
         pingResult: ServerPingResult? = nil,
         runtimeOwnershipHealthy: Bool = true,
+        restoreApprovedNativeHost: @escaping @Sendable () async -> Void = {},
         launchAgentManager: MockLaunchAgentManager = MockLaunchAgentManager()
     ) -> EnvironmentSetup {
         let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json", isDirectory: false)
@@ -32,6 +34,8 @@ struct MacAppStartupMaintenanceTests {
             serverHelperBinaryPath: helper,
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,
+            launchAgentServiceStatus: { launchAgentServiceStatus },
+            openLoginItemsSettings: {},
             canManageLaunchAgent: canManageLaunchAgent,
             wrapperLockPath: tmp.appendingPathComponent("internal/run/.mac-wrapper.com.tron.mac.lock", isDirectory: false),
             onboardedSentinelExists: { onboarded },
@@ -47,6 +51,7 @@ struct MacAppStartupMaintenanceTests {
             pingServer: { _ in
                 pingResult ?? .success(ServerPingInfo(version: currentVersion.canonicalVersion, gatewayChannel: "stable"))
             },
+            restoreApprovedNativeHost: restoreApprovedNativeHost,
             serverStartHealthCheckAttempts: 1,
             serverStartHealthCheckDelayNanoseconds: 0,
             launchAgentManager: launchAgentManager,
@@ -90,6 +95,23 @@ struct MacAppStartupMaintenanceTests {
         #expect(try Data(contentsOf: stderrLog) == contents)
     }
 
+    @Test("startup retries approved native helper restoration after an interrupted prior launch")
+    func repeatedStartupRestoresApprovedHelper() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "1", buildNumber: "1")
+        let restores = RestoreCounter()
+        let setup = Self.makeSetup(
+            tmp: tmp,
+            currentVersion: current,
+            recordedVersion: current,
+            restoreApprovedNativeHost: { await restores.increment() }
+        )
+        _ = await MacAppStartupMaintenance.run(setup: setup, controller: nil, context: .existingOnboardedLaunch)
+        _ = await MacAppStartupMaintenance.run(setup: setup, controller: nil, context: .existingOnboardedLaunch)
+        #expect(await restores.value == 2)
+    }
+
     @Test("version marker round-trips JSON")
     func versionMarkerRoundTrips() throws {
         let tmp = TestTempDir.make()
@@ -122,6 +144,23 @@ struct MacAppStartupMaintenanceTests {
         #expect(result == .restarted(.ok))
         #expect(mock.calls.map(\.kind) == [.load, .restart])
         #expect(setup.readRecordedAppVersion() == current)
+    }
+
+    @Test("revoked Login Item approval is surfaced without attempting registration")
+    func revokedApprovalIsNotReenabled() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "1", buildNumber: "1")
+        let mock = MockLaunchAgentManager()
+        let setup = Self.makeSetup(
+            tmp: tmp,
+            currentVersion: current,
+            launchAgentServiceStatus: .requiresApproval,
+            launchAgentManager: mock
+        )
+        let result = await MacAppStartupMaintenance.run(setup: setup, controller: nil, context: .existingOnboardedLaunch)
+        #expect(result == .restarted(.requiresApproval(message: "Approve Tron Agent in System Settings → General → Login Items.")))
+        #expect(mock.calls.isEmpty)
     }
 
     @Test("existing onboarded launch does not record update marker until health passes")
@@ -303,4 +342,9 @@ private struct StartupMaintenanceCalls {
     var recordedVersionReads = 0
     var onboardedReads = 0
     var markerWrites = 0
+}
+
+private actor RestoreCounter {
+    private(set) var value = 0
+    func increment() { value += 1 }
 }

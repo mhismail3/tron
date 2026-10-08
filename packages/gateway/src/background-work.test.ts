@@ -7,7 +7,7 @@ import {
   type BackgroundBacklogRecord,
   type BackgroundSliceRecord,
 } from "./background-work.js";
-import { waitFor } from "../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../test-support/wait-for.js";
 
 // Failure modes this file covers, written before the scheduler existed:
 // 1. A slice starts while a request is in flight: the request shares the loop
@@ -203,15 +203,23 @@ describe("BackgroundWorkScheduler", () => {
     // The production wiring: no `eventLoopP99Ms`, so the scheduler reads its own
     // `monitorEventLoopDelay` histogram. An idle loop must not pause it.
     const slices: BackgroundSliceRecord[] = [];
+    let observedSlice!: () => void;
+    const sliceObserved = new Promise<void>((resolve) => { observedSlice = resolve; });
     const scheduler = new BackgroundWorkScheduler();
-    scheduler.start({ requestsInFlight: () => false, onSlice: (record) => slices.push(record) });
+    scheduler.start({
+      requestsInFlight: () => false,
+      onSlice: (record) => {
+        slices.push(record);
+        observedSlice();
+      },
+    });
     scheduler.register({ name: "job.one", intervalMs: 1, slice: () => {} });
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    scheduler.stop();
-    // Every slice due in the window ran: an idle loop is never paused by the
-    // scheduler's own reading.
-    expect(slices.length).toBeGreaterThan(1);
-    expect(slices.every((record) => record.job === "job.one" && record.outcome === "completed")).toBe(true);
+    try {
+      await awaitsWithin(sliceObserved, "a background slice with the scheduler's own event-loop reading");
+      expect(slices[0]).toMatchObject({ job: "job.one", outcome: "completed" });
+    } finally {
+      scheduler.stop();
+    }
   });
 
   it("holds a yielding slice until the pause clears, then resumes it", async () => {

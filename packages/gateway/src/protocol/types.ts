@@ -1011,6 +1011,12 @@ export interface TronModuleSummary {
  * `resources` inventory stays authoritative for every resolved path — and each
  * kind is capped. A kind whose source failed to resolve is empty, and the
  * response carries one bounded `providesDiagnostic`. */
+/** A configured user package excluded from execution by Tron's managed owner. */
+export interface PackageConflict {
+  code: "managed-provider";
+  message: string;
+}
+
 export interface PackageProvides {
   skills: string[];
   prompts: string[];

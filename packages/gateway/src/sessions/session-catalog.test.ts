@@ -210,7 +210,8 @@ async function fixture(
   scheduler.start({ requestsInFlight, eventLoopP99Ms: () => 0 });
   schedulers.push(scheduler);
   const catalog = new SessionCatalog({
-    catalogRoot: () => sessions, index, source, persistDebounceMs: 5, backgroundWork: scheduler, ...extra,
+    catalogRoot: () => sessions, index, source, persistDebounceMs: 5, backgroundWork: scheduler,
+    watchCatalog: manualWatch().backend, ...extra,
   });
   catalogs.push(catalog);
   return {
@@ -229,7 +230,11 @@ async function fixture(
 /** A folder watcher a test drives by hand: it delivers exactly the events the
  * test chose, so an event the platform would have dropped, a start failure and a
  * watcher that stops observing can each be reproduced. Every case that needs the
- * real backend uses the production watcher. */
+ * real backend explicitly selects the production watcher. The default-TMPDIR
+ * macOS probe (#601) delivered relative file/directory names and the root's
+ * basename identically through `/var` and `/private/var`; directory moves are
+ * therefore injected as folder hints, not idealized per-transcript events.
+ * Null models the platform's documented unnameable-event shape. */
 interface ManualWatch {
   backend: (request: SessionCatalogWatchRequest) => SessionCatalogWatchHandle;
   requests: SessionCatalogWatchRequest[];
@@ -606,9 +611,10 @@ describe("SessionCatalog", () => {
     expect(catalog.row(written)).toMatchObject({ messageCount: 2, eofOffset: appended, size: appended });
   });
 
-  it("advances a row for an external append within a second without walking the catalog", async () => {
-    // No interval backstop: only the watcher can publish this append.
-    const { sessions, catalog, source } = await fixture({ reconcileIntervalMs: 0 });
+  it("advances a row for an external append hint without walking the catalog", async () => {
+    const watch = manualWatch();
+    // No interval backstop: only the injected hint can publish this append.
+    const { sessions, catalog, source } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
     const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
     await writeSession(join(sessions, "parent.jsonl"), "id-parent", sessions, ["parent prompt"]);
     await writeSession(child, "id-child", sessions, ["child prompt"]);
@@ -617,17 +623,46 @@ describe("SessionCatalog", () => {
     expect(catalog.row(child)?.delegated).toBe(true);
 
     const walks = vi.spyOn(source, "scan");
-    const appendedAt = Date.now();
     await appendMessage(child, "an external writer appended", 1);
-    await waitFor(() => catalog.row(child)?.messageCount === 2, "the child's second catalog message");
-    const observedInMs = Date.now() - appendedAt;
-
-    // The Done-when bound: an external append reaches its row within one second.
-    expect(observedInMs).toBeLessThanOrEqual(1_000);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      watch.emit(relative(sessions, child));
+      await vi.advanceTimersByTimeAsync(CATALOG_EVENT_DEBOUNCE_MS);
+      await catalog.awaitQueuedChanges();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(catalog.row(child)?.messageCount).toBe(2);
     expect(walks).not.toHaveBeenCalled();
     await catalog.settled();
     expect(catalog.row(child)).toMatchObject({ messageCount: 2, size: (await stat(child)).size });
     expect(catalog.row(child)?.eofOffset).toBe((await stat(child)).size);
+  });
+
+  it("attaches the real watcher to the canonical root and repairs an external append", async () => {
+    // Explicit undefined selects the production backend instead of the fixture's
+    // default manual watcher. This is the only real-backend case in this file.
+    const { sessions, catalog } = await fixture({ watchCatalog: undefined, reconcileIntervalMs: 0 });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    // Observe the actual backend's registration, not FSEvents' delivery time.
+    const backend = catalog as unknown as { watchCatalog: NonNullable<SessionCatalogOptions["watchCatalog"]> };
+    const realWatch = backend.watchCatalog;
+    const requests: SessionCatalogWatchRequest[] = [];
+    backend.watchCatalog = (request) => {
+      const handle = realWatch(request);
+      requests.push(request);
+      return handle;
+    };
+    catalog.start();
+    await catalog.settled();
+    expect(requests.map(({ root }) => root)).toEqual([sessions]);
+    await appendMessage(file, "two", 2);
+    // OS hints can be delayed or dropped. The owner's reconcile repairs either
+    // case; the deterministic hint test above owns the no-walk requirement.
+    await catalog.reconcile();
+    await catalog.settled();
+    expect(catalog.row(file)).toMatchObject({ messageCount: 2, size: (await stat(file)).size });
   });
 
   it("repairs an event the platform never delivered at the next interval pass", async () => {
@@ -810,8 +845,8 @@ describe("SessionCatalog", () => {
   });
 
   it("replaces a row when the file is replaced by a new inode", async () => {
-    // The production watcher: an atomic rename delivers a file event.
-    const { sessions, catalog } = await fixture({ reconcileIntervalMs: 0 });
+    const watch = manualWatch();
+    const { sessions, catalog } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
     catalog.start();
@@ -821,6 +856,8 @@ describe("SessionCatalog", () => {
     const replacement = join(sessions, "workspace", "replacement.jsonl");
     await writeSession(replacement, "id-a", sessions, ["one", "two", "three"]);
     await rename(replacement, file);
+    watch.emit(relative(sessions, replacement));
+    watch.emit(relative(sessions, file));
     await waitFor(() => catalog.row(file)?.messageCount === 3, "the file's third catalog message");
 
     const after = catalog.row(file)!;
@@ -832,9 +869,9 @@ describe("SessionCatalog", () => {
   });
 
   it("publishes a folder moved into the root and the folder an in-root move renamed", async () => {
-    // The production watcher: moving a directory in gives the watcher one event
-    // for the folder, and none for the transcript inside it.
-    const { sessions, catalog } = await fixture({ reconcileIntervalMs: 0 });
+    // A directory move can name only the folder, not each transcript inside it.
+    const watch = manualWatch();
+    const { sessions, catalog } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
     catalog.start();
     await catalog.settled();
 
@@ -843,6 +880,7 @@ describe("SessionCatalog", () => {
     const project = join(staged, "proj");
     await writeSession(join(project, "moved.jsonl"), "id-moved", sessions, ["moved prompt"]);
     await rename(project, join(sessions, "proj"));
+    watch.emit("proj");
     await waitFor(() => catalog.row(join(sessions, "proj", "moved.jsonl"))?.id === "id-moved", "the moved file's catalog identity");
 
     // A subagent run folder renamed inside the root: the folder event names both
@@ -850,22 +888,26 @@ describe("SessionCatalog", () => {
     // and the path that no longer exists is not.
     const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
     await writeSession(child, "id-child", sessions, ["child prompt"]);
+    watch.emit(relative(sessions, dirname(child)));
     await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
     const renamed = join(sessions, "parent", "producer", "run-2");
     await rename(dirname(child), renamed);
+    watch.emit(relative(sessions, dirname(child)));
+    watch.emit(relative(sessions, renamed));
     const movedChild = join(renamed, "session.jsonl");
     await waitFor(() => catalog.row(movedChild)?.id === "id-child", "the moved child's catalog identity");
-    expect(catalog.row(child)).toBeUndefined();
+    await waitFor(() => catalog.row(child) === undefined, "the old child path to leave the catalog");
     expect(catalog.row(movedChild)?.delegated).toBe(true);
     await catalog.dispose();
   });
 
   it("costs no whole-folder pass for a non-transcript name that is gone", async () => {
-    // The production watcher, real file operations: an atomic write's temporary
-    // name, a scratch file created and deleted, and the Gateway's own quarantine
-    // rename and removal all name a path no row was cut from. None of them is
-    // evidence about the folder, so none may cost a structure walk.
-    const { sessions, catalog, source } = await fixture({ reconcileIntervalMs: 0 });
+    // Real file operations: an atomic write's temporary name, a scratch file
+    // created and deleted, and the Gateway's own quarantine rename and removal
+    // all name a path no row was cut from. None is evidence about the folder,
+    // so none may cost a structure walk.
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
     catalog.start();
@@ -879,18 +921,24 @@ describe("SessionCatalog", () => {
     const scratch = join(sessions, "workspace", "scratch.txt");
     await writeFile(scratch, "x");
     await rm(scratch);
+    watch.emit(relative(sessions, `${status}.tmp`));
+    watch.emit(relative(sessions, status));
+    watch.emit(relative(sessions, scratch));
     // The Gateway's own delete renames the transcript to a quarantine name and
     // then removes it; both names are non-transcript paths that are gone.
     const doomed = join(sessions, "workspace", "doomed.jsonl");
     await writeSession(doomed, "id-doomed", sessions, ["doomed"]);
+    watch.emit(relative(sessions, doomed));
     await waitFor(() => catalog.row(doomed)?.id === "id-doomed", "the doomed file's catalog identity");
     const quarantine = `${doomed}.tron-delete-0f0f0f0f`;
     await rename(doomed, quarantine);
     await rm(quarantine);
+    watch.emit(relative(sessions, doomed));
+    watch.emit(relative(sessions, quarantine));
+    await waitFor(() => catalog.row(doomed) === undefined, "the deleted row to leave the catalog");
 
-    // The append fences every event above: one watch reports its events in
-    // order, so a row published from this append means they were all resolved.
     await appendMessage(file, "after", 1);
+    watch.emit(relative(sessions, file));
     await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.settled();
     expect(walks).not.toHaveBeenCalled();
@@ -899,10 +947,11 @@ describe("SessionCatalog", () => {
   });
 
   it("drops the rows under a folder removed with its transcripts, without a whole-folder pass", async () => {
-    // The production watcher: `rm -rf` of a subagent run folder names the folder
-    // and its transcript. The rows at or under the named path are the only rows
-    // that absence can reach, so they are re-read and dropped without a walk.
-    const { sessions, catalog, source } = await fixture({ reconcileIntervalMs: 0 });
+    // `rm -rf` of a subagent run folder can name the folder and its transcript.
+    // The rows at or under the named path are the only rows that absence can
+    // reach, so they are re-read and dropped without a walk.
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({ watchCatalog: watch.backend, reconcileIntervalMs: 0 });
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
     const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
@@ -913,7 +962,11 @@ describe("SessionCatalog", () => {
 
     const walks = vi.spyOn(source, "scan");
     await rm(dirname(dirname(child)), { recursive: true, force: true });
+    watch.emit(relative(sessions, dirname(dirname(child))));
+    watch.emit(relative(sessions, child));
+    await waitFor(() => catalog.row(child) === undefined, "the removed folder's row to leave the catalog");
     await appendMessage(file, "after", 1);
+    watch.emit(relative(sessions, file));
     await waitFor(() => catalog.row(file)?.messageCount === 2, "the file's second catalog message");
     await catalog.settled();
     expect(walks).not.toHaveBeenCalled();
@@ -960,11 +1013,8 @@ describe("SessionCatalog", () => {
   });
 
   it("keeps its rows while the root itself is away, and a later cut republishes them", async () => {
-    // The production watcher: macOS reports the root's own rename as one event
-    // named for the root, which may coalesce with the report the watch makes
-    // when it attaches, so no outage record is asserted here (the injectable
-    // backend covers that path) — what must hold either way is that no pass
-    // publishes a cut of a folder that is not there.
+    // A root move whose hint was dropped: no reconcile may publish a cut of
+    // a folder that is not there. The adjacent case drives the root-name hint.
     const outcomes: SessionCatalogReconcileOutcome[] = [];
     const resets: SessionCatalogWatcherReset[] = [];
     const { sessions, catalog, index } = await fixture({

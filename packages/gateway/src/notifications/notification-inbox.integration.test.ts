@@ -94,6 +94,7 @@ async function fixture() {
   const service = new GatewayService({
     config: { tronHome: root },
     notifications,
+    sessions: { isAdministrativeDrainStarted: false },
     devices: { hasDevice: async () => false, revoke: async () => false },
     receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() },
   } as never);

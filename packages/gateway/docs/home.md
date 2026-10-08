@@ -410,7 +410,10 @@ identity/generation, intent revision, worker session and exact operation. Cold
 runtime construction checks the reference before loading executable resources;
 missing/contradictory tasks are not recreated.
 
-In v1, Home task workers cannot run subagents; this preserves the 24-hour
+Task workers are ordinary sessions and load the same Tron-managed subagent
+provider as ordinary chats; Home itself does not load it. The verified managed
+closure owns provider identity/version, not a user package manifest. In v1,
+Home task workers cannot run subagents; this preserves the 24-hour
 termination guarantee for operation-owned work. A provider-supported
 foreground-only contract will lift this. The first-party task extension refuses
 subagent executions (even `async:false`, whose pinned provider configuration can
@@ -434,7 +437,13 @@ the whole payload is at most 128 KiB). The worker cannot supply task/Home/sessio
 identity or cost. Acceptance appends one immutable `tron-home-task-report` with
 those owner identities and accepted time, seals it, and requests exact Stop
 without awaiting that Stop from the tool it is joining. Task settlement joins
-Stop before publishing the result. Identical duplicates reuse the same entry;
+Stop before publishing the result. RuntimeSlot's operation settlement owns the
+single terminal invocation receipt write and notifies the task observer only
+after it; assistant attention completion never adds a second write path. A
+successor's input joins the predecessor's terminal receipt persistence. The task
+lease alone acknowledges its operation marker after durable result publication,
+and only the exact task operation suppresses ordinary completion push.
+Identical duplicates reuse the same entry;
 conflicts refuse. References include the exact entry ID and payload digest,
 never a latest-assistant pointer.
 
@@ -727,14 +736,21 @@ imported Registry target is ordinary unless the ledger names it.
 
 | | Home | Ordinary |
 | --- | --- | --- |
-| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) |
-| Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles` | agent directory and trusted project resources |
+| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
+| Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed provider settings view excludes user declarations of pi-subagents |
 | System prompt | the agent directory's `SYSTEM.md` and `APPEND_SYSTEM.md` are dropped through `systemPromptOverride`/`appendSystemPromptOverride` | loaded |
 | Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | a session-local view of the Gateway-wide user-scope runtime | one per session runtime |
 | Cache warming | zero requests | unchanged |
+
+The managed pi-subagents loader and admission apply only to ordinary runtimes.
+Home is delegate-only through Home tasks, not subagents: `session.resources`
+returns an empty subagent catalog without invoking provider discovery. This
+boundary follows the live runtime's profile through reload, profile replacement
+and cold acquisition. `home-managed-provider.integration.test.ts` exercises
+those transitions beside an ordinary managed-provider session.
 
 Home runs on the Gateway-wide model runtime, the one that serves the model
 catalog, admits `home.designate` and backs Home's summarizer. User provider

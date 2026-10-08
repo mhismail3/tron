@@ -146,10 +146,10 @@ describe("DirectBashProcessOwner", () => {
     20_000,
   );
 
-  // #499 review: once a timeout or Stop asks for termination, a descendant that left
-  // the process group and keeps writing to the inherited pipe cannot hold the call.
+  // #499 review: timeout aborts a running command, while Stop settles an escaped writer
+  // only after its shell has exited and the writer still holds the inherited pipe open.
   it.skipIf(process.platform === "win32")(
-    "settles a timed-out or stopped call whose escaped descendant keeps writing",
+    "times out a running command and stops an escaped writer after the shell exits",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
@@ -157,21 +157,54 @@ describe("DirectBashProcessOwner", () => {
       const tool = owner.toolDefinition(root);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
-      const writer = `/*${marker}*/ setInterval(() => process.stdout.write('tick\\n'), 20)`;
-      const launcher = `/*${marker}*/ require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref();`;
-      const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; echo started`;
       const failure = (promise: Promise<unknown>) =>
         promise.then(() => "completed", (error: unknown) => error instanceof Error ? error.message : String(error));
+      const fixture = (name: string) => {
+        const readyFile = join(root, `${name}-writer-ready`);
+        const shellPidFile = join(root, `${name}-shell.pid`);
+        const shellExitFile = join(root, `${name}-shell-exited`);
+        // The same 150 ms delayed first write crosses the owner's 100 ms idle grace.
+        // Keep the launcher (and therefore its shell) alive until that write is flushed.
+        const writer = `/*${marker}*/ const fs = require('node:fs'); setTimeout(() => { process.stdout.write('tick\\n', () => { fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready'); process.send('ready'); }); setInterval(() => process.stdout.write('tick\\n'), 20); }, 150)`;
+        const launcher = `/*${marker}*/ const fs = require('node:fs'); const { spawn } = require('node:child_process'); const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] }); child.on('message', () => { fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready'); child.disconnect(); child.unref(); child.channel?.unref(); process.stdout.write('started\\n'); }); child.once('error', () => process.exit(1)); child.unref();`;
+        const command = `printf '%s' "$$" > ${JSON.stringify(shellPidFile)}; ${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; printf '%s' exited > ${JSON.stringify(shellExitFile)}`;
+        return { command, readyFile, shellPidFile, shellExitFile };
+      };
+      const waitForFixture = async (setup: ReturnType<typeof fixture>, label: string) => {
+        await waitFor(async () => {
+          try { return (await readFile(setup.readyFile, "utf8")) === "ready"; }
+          catch { return false; }
+        }, `${label} writer to flush output`);
+        await waitFor(async () => {
+          try { return (await readFile(setup.shellExitFile, "utf8")) === "exited"; }
+          catch { return false; }
+        }, `${label} shell to finish its command`);
+        await waitFor(async () => {
+          try {
+            const pid = Number(await readFile(setup.shellPidFile, "utf8"));
+            return Number.isSafeInteger(pid) && pid > 0 && !processExists(pid);
+          } catch { return false; }
+        }, `${label} shell to exit`);
+      };
 
-      const timedOut = await failure(tool.execute("escaped-timeout", { command, timeout: 1 }, undefined, undefined, undefined));
-      expect(timedOut).toContain("started");
+      const timeoutWriter = `/*${marker}*/ setInterval(() => process.stdout.write('tick\\n'), 20)`;
+      const timedOut = await failure(tool.execute(
+        "direct-timeout",
+        { command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify(timeoutWriter)}`, timeout: 1 },
+        undefined,
+        undefined,
+        undefined,
+      ));
+      expect(timedOut).toContain("tick");
       expect(timedOut).toMatch(/Command timed out after 1 seconds/u);
       expect(owner.hasActiveProcesses).toBe(false);
 
+      const stopFixture = fixture("stop");
       const stop = new AbortController();
-      const stopped = failure(tool.execute("escaped-stop", { command }, stop.signal, undefined, undefined));
-      setTimeout(() => stop.abort(), 1_000);
-      expect(await stopped).toMatch(/Command aborted/u);
+      const stoppedExecution = failure(tool.execute("escaped-stop", { command: stopFixture.command }, stop.signal, undefined, undefined));
+      await waitForFixture(stopFixture, "escaped stop");
+      stop.abort();
+      expect(await stoppedExecution).toMatch(/Command aborted/u);
       expect(owner.hasActiveProcesses).toBe(false);
     },
     20_000,

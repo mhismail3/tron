@@ -38,6 +38,7 @@ function fixture() {
   };
   const service = new GatewayService({
     config: { tronHome: "/tmp" }, automations,
+    sessions: { isAdministrativeDrainStarted: false },
     receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() },
   } as any);
   return { service, automations, record };

@@ -11,6 +11,8 @@ import type { NotificationService } from "../notifications/notification-service.
 import { HomeTaskStore } from "./home-task-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { SessionCatalog } from "../sessions/session-catalog.js";
+import { ManagedSubagents } from "../sessions/managed-subagents.js";
+import { delegatedArtifactRoot } from "../sessions/delegated-provider.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -27,12 +29,13 @@ afterEach(async () => {
     await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
     await rm(fixture.root, { recursive: true, force: true });
   }
+  vi.unstubAllEnvs();
 });
 afterAll(async () => {
   if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));
 });
 
-async function fixture(providerVersion?: string, codemode = false, contextWindow?: number) {
+async function fixture(providerVersion?: string, codemode = false, contextWindow?: number, managed = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -56,9 +59,8 @@ async function fixture(providerVersion?: string, codemode = false, contextWindow
       pi.registerTool({name:'subagent',label:'Subagent',description:'Test producer boundary',parameters:{type:'object',properties:{}},
         execute:async (_id,input) => { writeFileSync(${JSON.stringify(join(cwd, "subagent-effect.json"))}, JSON.stringify(input)); return {content:[{type:'text',text:'producer admitted'}]}; }});
       pi.registerTool({name:'bg_wait',label:'Background Wait',description:'Test versioned wait boundary',parameters:{type:'object',properties:{}},
-        execute:async (_id,input,signal) => {
+        execute:async (_id,input) => {
           writeFileSync(${JSON.stringify(join(cwd, "wait-effect.json"))}, JSON.stringify(input));
-          if (!input.nonBlocking && ${JSON.stringify(providerVersion)} === '0.76.1-tron.4') await new Promise(resolve => { const stop = () => { writeFileSync(${JSON.stringify(join(cwd, "wait-aborted"))}, 'aborted'); resolve(); }; if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, {once:true}); });
           return {content:[{type:'text',text:'wait finished'}]}; }});
     }`);
     settings.packages = [`npm:pi-subagents@${providerVersion}`];
@@ -68,7 +70,12 @@ async function fixture(providerVersion?: string, codemode = false, contextWindow
   await trust.set(cwd, true);
   const signals: Array<Record<string, unknown>> = [];
   const notifications: Array<Record<string, unknown>> = [];
-  const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test",
+  if (managed) {
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    vi.stubEnv("PI_SUBAGENTS_TEMP_ROOT", delegatedArtifactRoot(tronHome));
+  }
+  const managedSubagents = managed ? ManagedSubagents.activateForStartup(tronHome) : undefined;
+  const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", managedSubagents,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
@@ -1130,6 +1137,32 @@ describe("Home task production dispatch", () => {
     expect((await (await dispatch(f, "after-confirmation")).completion).terminalEvidence?.outcome).toBe("final");
     evidence.push({ case: "explicit-permission-reconfirmation", refusedBefore: true, admittedAfter: true });
   }, 20_000);
+  it.each(["report", "natural"] as const)("loads the managed provider into ordinary task workers but refuses execution (%s)", async ending => {
+    const f = await fixture(undefined, false, undefined, true);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { action: "guide" }, { id: "managed-guide" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("subagent", { agent: "missing-task-test-agent", task: "must not execute", async: false }, { id: "managed-execution" })], { stopReason: "toolUse" }),
+      ending === "report" ? fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }) : fauxAssistantMessage("No explicit report"),
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    const rows = (await f.registry.readTaskEvidence(run.sessionId)) as any[];
+    const tools = rows.filter(row => row.type === "message" && row.message?.role === "toolResult").map(row => row.message);
+    expect(tools).toContainEqual(expect.objectContaining({ toolCallId: "managed-guide", isError: false }));
+    expect(tools).toContainEqual(expect.objectContaining({ toolCallId: "managed-execution", isError: true,
+      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Home tasks can't launch subagents yet") })]) }));
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "subagent-execution" }));
+    const receipts = rows.filter(row => row.type === "custom" && row.customType === "tron.chat-invocation.v1"
+      && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].data).toMatchObject({ sessionId: run.sessionId, operationId: run.operationId,
+      lifecycle: ending === "report" ? "interrupted" : "completed" });
+    expect(result.terminalEvidence?.outcome).toBe(ending === "report" ? "final" : "unknown");
+    expect(f.notifications).toHaveLength(1);
+    expect(f.notifications[0]).toMatchObject({ kind: "agent_finished", title: "Tron Home task", sessionId: result.homeId });
+    evidence.push({ case: `managed-task-${ending}`, guideLoaded: true, executionRefused: true, terminalReceipt: receipts[0].data, result });
+  }, 20_000);
+
   it.each([
     { label: "async", version: "0.76.1-tron.4", input: { agent: "worker", task: "work", async: true }, allowed: false },
     { label: "foreground", version: "0.76.1-tron.4", input: { agent: "worker", task: "work", async: false }, allowed: false },
@@ -1137,7 +1170,7 @@ describe("Home task production dispatch", () => {
     { label: "workflow", version: "0.76.1-tron.4", input: { workflow: true, async: false }, allowed: false },
     { label: "resume", version: "0.76.1-tron.4", input: { action: "resume", id: "run" }, allowed: false },
     { label: "scheduled", version: "0.76.1-tron.4", input: { action: "schedule.create", at: "later" }, allowed: false },
-    { label: "read-only", version: "0.76.1-tron.4", input: { action: "guide" }, allowed: true },
+    { label: "unmanaged-read-only", version: "0.76.1-tron.4", input: { action: "guide" }, allowed: false },
     { label: "unknown-version", version: "0.76.1-tron.5", input: { action: "guide" }, allowed: false },
   ])("gates task producer $label at the actual tool-call boundary", async ({ version, input, allowed, label }) => {
     const f = await fixture(version);
@@ -1150,6 +1183,7 @@ describe("Home task production dispatch", () => {
 
   it.each([
     { version: "0.76.1-tron.4", input: { id: "run", nonBlocking: true }, label: "subscription" },
+    { version: "0.76.1-tron.4", input: { id: "run", nonBlocking: false }, label: "unmanaged known-version wait" },
     { version: "0.76.1-tron.5", input: { id: "run", nonBlocking: false }, label: "unknown wait provider" },
   ])("refuses $label before bg_wait can install later work", async ({ version, input, label }) => {
     const f = await fixture(version);
@@ -1160,28 +1194,13 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: `wait-${label}`, executed: false, version });
   }, 20_000);
 
-  it("owns the known blocking bg_wait through exact Stop and join", async () => {
-    const f = await fixture("0.76.1-tron.4");
-    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bg_wait", { id: "run", nonBlocking: false })], { stopReason: "toolUse" })]);
-    const run = await dispatch(f);
-    await waitFor(() => existsSync(join(f.cwd, "wait-effect.json")), "signal-owned blocking wait");
-    const slot = await f.registry.acquire(run.sessionId);
-    await slot.abort("agent", run.operationId);
-    const result = await run.completion;
-    expect(existsSync(join(f.cwd, "wait-aborted"))).toBe(true);
-    expect(result.terminalEvidence?.outcome).toBe("interrupted");
-    expect(result.stopIntent).toMatchObject({ operationId: run.operationId });
-    expect(slot.isBusy).toBe(false);
-    evidence.push({ case: "wait-owned-stop", joined: true });
-  }, 20_000);
-
   it("applies the same producer refusal to nested codemode calls", async () => {
     const f = await fixture("0.76.1-tron.4", true);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code: 'await tools.subagent({agent:"worker",task:"work",async:false});' })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const result = await (await dispatch(f)).completion;
     expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(false);
     expect(result.terminalEvidence?.outcome).toBe("final");
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "subagent-execution" }));
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "unverified-provider" }));
     evidence.push({ case: "nested-producer-gate", executed: false });
   }, 20_000);
 

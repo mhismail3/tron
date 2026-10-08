@@ -71,6 +71,18 @@ struct GatewayRestartClientTests {
         }
     }
 
+    @Test("intentional stop accepts an acknowledged drain even while accepted work is settling")
+    func stopReceiptAcceptsScheduledDrain() {
+        let body = #"{"type":"response","id":"command-123","ok":true,"result":{"stopping":false,"scheduled":true}}"#
+        #expect(GatewayStopClient.decodeFrame(data: Data(body.utf8), expectedID: "command-123") == .result(.init(stopping: false, scheduled: true)))
+    }
+
+    @Test("intentional stop rejects an acknowledgement without a scheduled process owner")
+    func stopReceiptRequiresScheduledOwner() {
+        let body = #"{"type":"response","id":"command-123","ok":true,"result":{"stopping":true,"scheduled":false}}"#
+        #expect(GatewayStopClient.decodeFrame(data: Data(body.utf8), expectedID: "command-123") == .malformed)
+    }
+
     @Test("success frames with invalid result shape are rejected")
     func invalidResultIsMalformed() {
         let body = #"{"type":"response","id":"command-123","ok":true,"result":{"restarting":"yes","scheduled":false,"activeSessionIds":[]}}"#
