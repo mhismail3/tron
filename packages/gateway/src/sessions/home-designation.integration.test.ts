@@ -372,9 +372,9 @@ describe("Tron Home designation", () => {
     expect(activeTools(await contextOf(ordinary))).toEqual(activeTools(ordinaryContext));
     expect(extensionNames(await contextOf(ordinary))).toEqual(extensionNames(ordinaryContext));
 
-    expect(await homeStatus(f)).toEqual({
+    expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
-      sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
+      sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
       // Home has no memory defaults: until `home.configureMemory`, the
       // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false },
@@ -406,33 +406,19 @@ describe("Tron Home designation", () => {
     await expect(home.setModel(PROVIDER, VIRTUAL_MODEL_ID)).rejects.toMatchObject({ code: "invalid_request" });
     expect(await homeStatus(f)).toMatchObject({ model: MODEL });
 
-    // Forking the Home session yields an ordinary session. Home's memory is
-    // configured first, so the prompt below is a real Home turn rather than a
-    // fail-closed refusal.
+    // An active Home slot cannot be rekeyed by a fork. Configure memory so
+    // the source has a real canonical turn rather than an admission refusal.
     await configureHomeMemory(f);
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
     await home.prompt("hello home");
     await waitUntil(() => !home.isBusy);
     const leaf = (home as unknown as { sessionManager: { getLeafId(): string | null } }).sessionManager.getLeafId();
     expect(leaf).toBeTypeOf("string");
-    const forked = await home.fork(leaf!);
-    expect(f.registry.homeOwner().profileFor(forked.sessionId)).not.toBe("home");
-    const forkedSlot = await f.registry.acquire(forked.sessionId);
-    const forkedContext = await contextOf(forkedSlot);
-    // The curated profile is keyed by session id, so the fork registers exactly
-    // what the control registry's ordinary session registers, and compaction is
-    // back to the canonical budget. Its *active* set is the Home loadout the
-    // canonical transcript declares, which Pi replays for every chat (documented
-    // in docs/home.md), minus the tools this profile cannot register: the memory
-    // tools come from the Home-only module, so a fork can never read Home's
-    // memory. `session.setTools` is how a user changes the loadout.
-    expect(registeredTools(forkedContext)).toEqual(registeredTools(controlContext));
-    expect(extensionNames(forkedContext)).toEqual(extensionNames(controlContext));
-    expect(activeTools(forkedContext)).toEqual(HOME_TOOLS.filter((name) => registeredTools(forkedContext).includes(name)));
-    expect(activeTools(forkedContext)).not.toContain("zoom");
-    expect(forkedSlot.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
-    await forkedSlot.setTools(activeTools(controlContext));
-    expect(activeTools(await contextOf(forkedSlot))).toEqual(activeTools(controlContext));
+    await expect(home.fork(leaf!)).rejects.toMatchObject({
+      code: "conflict", details: { reason: "home-identity-replacement", sessionId: home.id },
+    });
+    expect(await f.registry.acquire(designation.sessionId)).toBe(home);
+    expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: false });
   });
 
   homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from Home", async () => {

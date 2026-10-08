@@ -40,9 +40,10 @@
  * seam on its first runtime, F18 an ordinary session's requests change when a
  * Home is designated.
  */
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   convertToLlm, ModelRuntime, type AgentSession, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
@@ -53,6 +54,7 @@ import { TrustService } from "../admin/trust-service.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
+import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason } from "../home/home-request-policy.js";
 import * as tronModules from "../extensions/tron-modules.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -273,6 +275,342 @@ async function open(label: string, options: FixtureOptions = {}) {
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
 describe.sequential("Home request seam inside the Gateway runtime", () => {
+  it("single-flights a reserved Home materialization and records its path before returning", async () => {
+    const item = await open("reserved-materialization-single-flight", { home: true });
+    const owner = item.registry.homeOwner() as unknown as {
+      writeLocked(record: HomeRecord): Promise<void>;
+      claimReservedChapter(sessionId: string, attemptId: string): Promise<unknown>;
+    };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-successor";
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+
+    let releaseClaim!: () => void;
+    let enteredClaim!: () => void;
+    const claimEntered = new Promise<void>(resolve => { enteredClaim = resolve; });
+    const claimGate = new Promise<void>(resolve => { releaseClaim = resolve; });
+    const originalClaim = owner.claimReservedChapter.bind(owner);
+    let claims = 0;
+    owner.claimReservedChapter = async (sessionId, attemptId) => {
+      claims += 1;
+      enteredClaim();
+      await claimGate;
+      return originalClaim(sessionId, attemptId);
+    };
+
+    const first = item.registry.materializeReservedHome(reservedId);
+    await claimEntered;
+    const second = item.registry.materializeReservedHome(reservedId);
+    releaseClaim();
+    const [firstSlot, secondSlot] = await Promise.all([first, second]);
+    expect(claims).toBe(1);
+    expect(secondSlot).toBe(firstSlot);
+    const stored = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters[1]).toMatchObject({
+      sessionId: reservedId, state: "materializing", attemptId: expect.any(String),
+      expectedPath: firstSlot.sessionFile,
+    });
+    expect(firstSlot.sessionFile).toBeTruthy();
+    expect(existsSync(firstSlot.sessionFile!)).toBe(false);
+    expect(item.faux.state.callCount).toBe(0);
+
+    // A contender arriving after the shared construction promise resolves, but
+    // before the first canonical flush, must still join the live owner.
+    const afterReturn = await item.registry.materializeReservedHome(reservedId);
+    const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(afterReturn).toBe(firstSlot);
+    expect(afterReturn.sessionFile).toBe(firstSlot.sessionFile);
+    expect(afterReturnRecord.chapters[1]).toMatchObject({
+      state: "materializing", attemptId: stored.chapters[1]!.attemptId,
+      expectedPath: stored.chapters[1]!.expectedPath,
+    });
+    const home = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const authoritative = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    for (const mismatch of [
+      { attemptId: "different-attempt", expectedPath: stored.chapters[1]!.expectedPath },
+      { attemptId: stored.chapters[1]!.attemptId, expectedPath: `${stored.chapters[1]!.expectedPath}.other` },
+    ]) {
+      await home.writeLocked({
+        ...authoritative,
+        chapters: authoritative.chapters.map((entry, index) => index === 1 ? { ...entry, ...mismatch } : entry),
+      });
+      await expect(firstSlot.prompt("mismatched slot authority"))
+        .rejects.toMatchObject({ details: { reason: "sealed-chapter" } });
+      expect(existsSync(firstSlot.sessionFile!)).toBe(false);
+    }
+    await home.writeLocked(authoritative);
+    item.faux.setResponses([item.response("first reserved response")]);
+    await firstSlot.prompt("first reserved prompt without operation permit");
+    await waitUntil(() => !firstSlot.isBusy);
+    expect(existsSync(firstSlot.sessionFile!)).toBe(true);
+    expect(firstSlot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "user"))
+      .toBe(true);
+    cases.push({ case: "reservation-owner-through-first-flush", firstPathPreserved: true, contenderJoined: true, firstAppendAuthorizedBySlot: true });
+  });
+
+  it("blocks Registry materialization on uncertain scan evidence without creating a runtime", async () => {
+    const item = await open("reserved-materialization-scan-block", { home: true });
+    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-scan-block";
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+    const unknownPath = join(dirname(item.slot.sessionFile!), "unreadable-candidate.jsonl");
+    const unknownBytes = "{partial";
+    await writeFile(unknownPath, unknownBytes);
+
+    await expect(item.registry.materializeReservedHome(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(unknownPath, "utf8")).toBe(unknownBytes);
+    expect(item.faux.state.callCount).toBe(0);
+    expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
+  });
+
+  it("does not publish or dispatch when the durable expected-path barrier fails", async () => {
+    const item = await open("reserved-materialization-path-failure", { home: true });
+    const owner = item.registry.homeOwner() as unknown as {
+      writeLocked(record: HomeRecord): Promise<void>;
+      recordReservedChapterPath(sessionId: string, attemptId: string, path: string): Promise<void>;
+    };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = "reserved-path-failure";
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+    const refused = owner.recordReservedChapterPath.bind(owner);
+    owner.recordReservedChapterPath = async () => { throw new Error("injected path persistence failure"); };
+
+    await expect(item.registry.materializeReservedHome(reservedId)).rejects.toThrow("injected path persistence failure");
+    owner.recordReservedChapterPath = refused;
+    expect(item.faux.state.callCount).toBe(0);
+    expect(await item.registry.homeOwner().status()).toMatchObject({ sessionId: reservedId, live: false });
+  });
+
+  it("continues refusing sealed physical mutations after Home is disabled", async () => {
+    const item = await open("disabled-sealed-chapter", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+    await item.registry.homeOwner().disable();
+    const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        ...current.chapters.map(chapter => chapter.sessionId === item.slot.id
+          ? { ...chapter, state: "sealed" as const, sealedAt: new Date().toISOString() }
+          : chapter),
+        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", createdAt: new Date().toISOString() },
+      ],
+    });
+    expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    expect(item.registry.homeOwner().chapterStateFor(item.slot.id)).toMatchObject({ sessionId: item.slot.id, sealed: true, ordinal: 1 });
+    const oldBytes = await item.jsonl();
+    await item.registry.dispose();
+
+    const coldModelRuntime = await ModelRuntime.create({ authPath: join(item.root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    coldModelRuntime.registerNativeProvider(item.faux.provider);
+    const coldRegistry = new RuntimeRegistry({
+      agentDir: item.agentDir,
+      tronHome: item.tronHome,
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => coldModelRuntime,
+      trust: new TrustService(item.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      homeMemorySummarizer: () => ({ summarizer: async () => "summary" }),
+    });
+    disposals.push(() => coldRegistry.dispose());
+    await coldRegistry.initialize();
+    await coldRegistry.recoverCanonicalAttention();
+    expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
+    const callsBefore = item.faux.state.callCount;
+    // Disabled changes the profile, not sealed evidence ownership. A cold
+    // chapter must never enter the writer-capable SDK constructor at all.
+    await expect(coldRegistry.acquire(item.slot.id)).rejects.toMatchObject({ code: "conflict" });
+    expect(item.faux.state.callCount).toBe(callsBefore);
+    expect(await item.jsonl()).toBe(oldBytes);
+    item.record("disabled-sealed-chapter", { profile: "ordinary", refusedBeforeConstruction: true, bytesUnchanged: true });
+  });
+
+  it("refuses sealed Slot mutation paths before changing SDK state or the canonical file", async () => {
+    const item = await open("sealed-mutation-paths", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      runtime: { session: AgentSession };
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const owner = item.registry.homeOwner() as unknown as {
+      chapterStateFor: (sessionId: string) => { sessionId: string; sealed: boolean };
+    };
+    owner.chapterStateFor = runtime.dependencies.homeChapterState;
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalFile = await item.jsonl();
+    const originalRequestCount = item.requests.length;
+    const actions = (item.slot as unknown as { commandActions: () => Record<string, (...args: unknown[]) => unknown> }).commandActions();
+    const extensionMutation = (name: string, ...arguments_: unknown[]) => async () => {
+      await actions[name]!(...arguments_);
+    };
+    const sealedRefusal = { code: "conflict", details: { reason: "sealed-chapter", sessionId: item.slot.id } };
+    const mutationPaths: Array<[string, () => Promise<unknown>]> = [
+      ["prompt", () => item.slot.prompt("sealed input")],
+      ["steer", () => item.slot.prompt("sealed steering input", [], "steer")],
+      ["follow-up", () => item.slot.prompt("sealed follow-up input", [], "followUp")],
+      ["setModel", () => item.slot.setModel(PROVIDER, MODEL_ID)],
+      ["setContextWindow", () => item.slot.setContextWindow(PROVIDER, MODEL_ID, 8_000, -1, "stale")],
+      ["setThinking", () => item.slot.setThinking("off")],
+      ["setTools", () => item.slot.setTools(["ask_user"])],
+      ["rename", () => item.slot.rename("sealed rename")],
+      ["setLabel", () => item.slot.setLabel(originalLeaf!, "sealed label")],
+      ["fork", () => item.slot.fork(originalLeaf!)],
+      ["navigate", () => item.slot.navigate(originalLeaf!, { summarize: false })],
+      ["reload", () => item.slot.reload()],
+      ["extension newSession", extensionMutation("newSession")],
+      ["extension fork", extensionMutation("fork", originalLeaf)],
+      ["extension navigateTree", extensionMutation("navigateTree", originalLeaf, {})],
+      ["extension switchSession", extensionMutation("switchSession", "unused", {})],
+      ["extension reload", extensionMutation("reload")],
+      ["bash", () => item.slot.executeBash("echo sealed", false)],
+      ["archive lane", () => item.slot.commitArchiveWhileIdle(undefined, async () => undefined)],
+      ["attention", () => item.registry.setAttention(item.slot.id, true)],
+      ["archive", () => item.registry.setArchived(item.slot.id, true)],
+      ["delete", () => item.registry.delete(item.slot.id)],
+    ];
+
+    for (const [name, mutation] of mutationPaths) {
+      const refusal = await mutation().then(() => undefined, (error: unknown) => error);
+      expect(refusal, `${name} was not refused`).toMatchObject(sealedRefusal);
+      expect(manager.getEntries(), `${name} changed live SDK entries`).toEqual(originalEntries);
+      expect(manager.getLeafId(), `${name} changed the live leaf`).toBe(originalLeaf);
+      expect(await item.jsonl(), `${name} changed canonical file bytes`).toBe(originalFile);
+    }
+    expect(item.requests).toHaveLength(originalRequestCount);
+  }, 30_000);
+
+  it("refuses a sealed first activation before the SDK first flush can materialize a file", async () => {
+    const item = await open("sealed-first-flush", { home: true, memory: true });
+    item.faux.setResponses([item.response("unexpected sealed mutation response")]);
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      runtime: { session: AgentSession };
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalSessionFile = item.slot.sessionFile;
+    const originalRequestCount = item.requests.length;
+    const fileBefore = originalSessionFile
+      ? await readFile(originalSessionFile, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error))
+      : undefined;
+
+    await expect(item.slot.prompt("must not materialize sealed Home")).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "sealed-chapter", sessionId: item.slot.id },
+    });
+    expect(manager.getEntries()).toEqual(originalEntries);
+    expect(manager.getLeafId()).toBe(originalLeaf);
+    expect(item.slot.sessionFile).toBe(originalSessionFile);
+    expect(item.requests).toHaveLength(originalRequestCount);
+    if (originalSessionFile) {
+      const fileAfter = await readFile(originalSessionFile, "utf8").catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+      expect(fileAfter).toBe(fileBefore);
+    }
+  }, 30_000);
+
+  it("keeps a pre-append sealed custom-entry refusal out of the uncertain-write fence", async () => {
+    const item = await open("sealed-custom-entry", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
+      hasBlockedOwnershipWrite: boolean;
+      durableWrites: Map<string, unknown>;
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: true });
+    const manager = item.session.sessionManager;
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId();
+    const originalFile = await item.jsonl();
+
+    vi.useFakeTimers();
+    try {
+      const write = runtime.persistCanonicalCustomEntry("test.sealed-entry", { receiptId: "sealed-receipt" }, "sealed-receipt");
+      await vi.advanceTimersByTimeAsync(20_001);
+      await expect(write).rejects.toMatchObject({
+        code: "conflict",
+        details: { reason: "sealed-chapter", sessionId: item.slot.id },
+      });
+      expect(runtime.hasBlockedOwnershipWrite).toBe(false);
+      expect(manager.getEntries()).toEqual(originalEntries);
+      expect(manager.getLeafId()).toBe(originalLeaf);
+      expect(await item.jsonl()).toBe(originalFile);
+    } finally {
+      runtime.durableWrites.clear();
+      vi.useRealTimers();
+    }
+  }, 30_000);
+
+  it("fences a custom entry that fails after the SDK has staged it", async () => {
+    const item = await open("staged-custom-entry-failure", { home: true });
+    item.faux.setResponses([item.response("canonical baseline")]);
+    await item.slot.prompt("canonical baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const runtime = item.slot as unknown as {
+      dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
+      persistCanonicalCustomEntry(type: string, data: Record<string, unknown>, identity: string): Promise<void>;
+      hasBlockedOwnershipWrite: boolean;
+      durableWrites: Map<string, unknown>;
+    };
+    runtime.dependencies.homeChapterState = (sessionId) => ({ sessionId, sealed: false });
+    const manager = item.session.sessionManager;
+    const append = manager.appendCustomEntry.bind(manager);
+    const appendAttempt = vi.spyOn(manager, "appendCustomEntry").mockImplementation((...arguments_) => {
+      append(...arguments_);
+      throw new Error("injected failure after SDK staging");
+    });
+    try {
+      await expect(runtime.persistCanonicalCustomEntry(
+        "test.staged-entry", { receiptId: "staged-receipt" }, "staged-receipt",
+      )).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(appendAttempt).toHaveBeenCalledTimes(1);
+      expect(manager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "test.staged-entry")).toHaveLength(1);
+      expect(runtime.hasBlockedOwnershipWrite).toBe(true);
+      await expect(item.slot.prompt("must remain fenced")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    } finally {
+      appendAttempt.mockRestore();
+      // This isolated fixture intentionally poisons one runtime. Remove its
+      // unresolved owner only so the test runner can dispose its temporary tree;
+      // production recovery remains an authoritative reopen, never this reset.
+      runtime.durableWrites.clear();
+    }
+  }, 30_000);
+
   // F1: Pi's supported image replacement must not look like a context mutation.
   // Disable resizing here to isolate the settings-aware converter at the guard.
   it("C21 image conversion follows live session settings without rebuilding", async () => {
@@ -400,7 +738,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.policyInstalled).toBe(false);
   }, 30_000);
 
-  it("C2 exclusion, frozen view, tool loop, persistence and fork", async () => {
+  it("C2 exclusion, frozen view, tool loop and persistence", async () => {
     const item = await open("c2", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C2 first activation input"));
@@ -417,10 +755,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const jsonl = await item.jsonl();
     const entries = await item.entries();
     const memoryStatus = await item.memoryStatus();
-    const leafBeforeFork = item.session.sessionManager.getLeafId()!;
-    const fork = await item.slot.fork(leafBeforeFork);
-    const forkedSession = (item.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
-    const forkBlob = JSON.stringify(forkedSession.sessionManager.buildSessionProjection().messages);
     const row = {
       providerRequests: item.requests.length,
       roleSequences: item.requests.map((request) => request.roles),
@@ -433,9 +767,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       viewFrozenAcrossSteps: viewOf(activationRequest) !== "" && viewOf(activationRequest) === viewOf(toolStepRequest),
       nonceAbsentFromJsonl: !jsonl.includes(HOME_NONCE_MARKER),
       viewAbsentFromJsonl: !jsonl.includes(HOME_MEMORY_VIEW_MARKER) && !jsonl.includes(SUMMARY_MARKER),
-      forkProfile: item.registry.homeOwner().profileFor(fork.sessionId),
-      forkExcludesView: !forkBlob.includes(HOME_MEMORY_VIEW_MARKER),
-      forkHasNoSeam: item.registry.homeOwner().requestPolicyFor(fork.sessionId) === undefined,
       canonicalEntryCount: entries.length,
       memory: { configured: memoryStatus.configured, open: memoryStatus.open, messages: memoryStatus.episodic?.messages ?? 0, blocked: memoryStatus.blocked ?? null },
       transformObservations,
@@ -450,9 +781,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.viewFrozenAcrossSteps).toBe(true);
     expect(row.nonceAbsentFromJsonl).toBe(true);
     expect(row.viewAbsentFromJsonl).toBe(true);
-    expect(row.forkProfile).not.toBe("home");
-    expect(row.forkExcludesView).toBe(true);
-    expect(row.forkHasNoSeam).toBe(true);
     // The SDK's context stage clones every message, so the fidelity check's
     // identity comparison is a fallback in practice: the header says so, and this
     // is where the claim is observed rather than inferred.
@@ -460,6 +788,63 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(transformObservations.every((observation) => observation.identity === false)).toBe(true);
     // The memory covers the whole first activation by the time the second one runs.
     expect(row.memory.messages).toBeGreaterThanOrEqual(2);
+  }, 30_000);
+
+  it.each([true, false])("keeps bound Home identity and path immutable when enabled=%s", async enabled => {
+    const item = await open(`home-identity-${enabled}`, { home: true });
+    item.faux.setResponses([item.response("identity baseline")]);
+    await item.slot.prompt("identity baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+    if (!enabled) await item.registry.homeOwner().disable();
+    const manager = (item.slot as unknown as { sessionManager: AgentSession["sessionManager"] }).sessionManager;
+    const originalId = item.slot.id;
+    const originalPath = item.slot.sessionFile;
+    const originalFile = await item.jsonl();
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId()!;
+    const target = await item.registry.create(item.agentDir);
+    const targetFile = target.sessionFile!;
+    const actions = (item.slot as unknown as { commandActions: () => Record<string, (...args: unknown[]) => unknown> }).commandActions();
+    const paths: Array<[string, () => unknown]> = [
+      ["RPC fork", () => item.slot.fork(originalLeaf)],
+      ["extension newSession", () => actions.newSession!()],
+      ["extension fork", () => actions.fork!(originalLeaf)],
+      ["extension switchSession", () => actions.switchSession!(targetFile)],
+    ];
+    for (const [name, replace] of paths) {
+      await expect(Promise.resolve().then(replace), name).rejects.toMatchObject({
+        code: "conflict", details: { reason: "home-identity-replacement", sessionId: originalId },
+      });
+      expect(item.slot.id, name).toBe(originalId);
+      expect(item.slot.sessionFile, name).toBe(originalPath);
+      expect(manager.getLeafId(), name).toBe(originalLeaf);
+      expect(manager.getEntries(), name).toEqual(originalEntries);
+      expect(await item.jsonl(), name).toBe(originalFile);
+      expect(await item.registry.acquire(originalId), name).toBe(item.slot);
+    }
+    item.record("home-identity-immutable", { enabled, paths: paths.map(([name]) => name), identityPreserved: true, bytesPreserved: true });
+  }, 30_000);
+
+  it.each([true, false])("owns one canonical append guard across Home=%s runtime rebuilds", async home => {
+    const item = await open(`manager-guard-${home}`, { home });
+    const slot = item.slot as unknown as {
+      sessionManager: AgentSession["sessionManager"] & { _appendEntry: unknown };
+      replaceRuntimeForProfile: (commit: () => Promise<void>) => Promise<void>;
+      observeHomeChapterGrowth: () => void;
+    };
+    const manager = slot.sessionManager;
+    const append = manager._appendEntry;
+    const observations = vi.spyOn(slot, "observeHomeChapterGrowth");
+    for (let rebuild = 0; rebuild < 5; rebuild += 1) {
+      await slot.replaceRuntimeForProfile(async () => {});
+      await item.slot.reload();
+      observations.mockClear();
+      manager.appendCustomEntry("guard-rebuild-proof", { rebuild });
+      expect(observations, `rebuild ${rebuild} stacked canonical observers`).toHaveBeenCalledTimes(1);
+      expect(manager._appendEntry).toBe(append);
+    }
+    expect(manager.getEntries().filter(entry => entry.type === "custom" && entry.customType === "guard-rebuild-proof")).toHaveLength(5);
+    item.record("manager-guard-rebuild", { home, rebuilds: 5, reloads: 5, observersPerAppend: 1 });
   }, 30_000);
 
   it("C3 steering during the activation keeps the earlier tool exchange", async () => {

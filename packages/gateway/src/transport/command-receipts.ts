@@ -37,7 +37,19 @@ interface CommandReceiptUsage {
   bytes: number;
 }
 
+export interface CommandReceiptBinding {
+  homeId: string;
+  bindingRevision: number;
+  physicalSessionId: string;
+}
+
+export type CommandReceiptRouteCategory = "fresh" | "replay";
+
 export interface CommandReceiptExecutionOptions {
+  /** The receipt decision owns route signaling: no identities or result data. */
+  onRouteBound?: (category: CommandReceiptRouteCategory) => void;
+  /** Resolve and persist a logical route after replay/fence lookup but before effects. */
+  resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>;
   /** Only prompts may answer once admitted while their completed receipt is still being fsynced. */
   respondBeforeCompletion?: boolean;
   /** Own the still-running completed write before the early result can be delivered. */
@@ -47,8 +59,9 @@ export interface CommandReceiptExecutionOptions {
 }
 
 interface Receipt {
-  version: 1;
+  version: 1 | 2;
   identityHash: string;
+  binding?: CommandReceiptBinding;
   commandId: string;
   method: string;
   status: "pending" | "completed";
@@ -60,15 +73,25 @@ function outcomeUnknown(message: string): GatewayError {
   return new GatewayError("conflict", message, false, { outcomeUnknown: true });
 }
 
+function isReceiptBinding(value: unknown): value is CommandReceiptBinding {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const binding = value as Record<string, unknown>;
+  return Object.keys(binding).length === 3
+    && typeof binding.homeId === "string" && binding.homeId.length > 0 && binding.homeId.length <= 200
+    && Number.isSafeInteger(binding.bindingRevision) && (binding.bindingRevision as number) > 0
+    && typeof binding.physicalSessionId === "string" && binding.physicalSessionId.length > 0 && binding.physicalSessionId.length <= 200;
+}
+
 function isReceipt(value: unknown): value is Receipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const receipt = value as Record<string, unknown>;
   const keys = Object.keys(receipt);
-  const expectedKeys = receipt.result === undefined
-    ? ["version", "identityHash", "commandId", "method", "status", "createdAt"]
-    : ["version", "identityHash", "commandId", "method", "status", "createdAt", "result"];
+  const expectedKeys = ["version", "identityHash", "commandId", "method", "status", "createdAt",
+    ...(receipt.version === 2 ? ["binding"] : []), ...(receipt.result === undefined ? [] : ["result"])];
+  const binding = receipt.binding;
   return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
-    && receipt.version === 1
+    && (receipt.version === 1 || receipt.version === 2)
+    && (receipt.version === 1 ? binding === undefined : isReceiptBinding(binding))
     && typeof receipt.identityHash === "string" && /^[A-Za-z0-9_-]{43}$/.test(receipt.identityHash)
     && typeof receipt.commandId === "string" && /^[A-Za-z0-9._:-]{8,160}$/.test(receipt.commandId)
     && typeof receipt.method === "string" && Buffer.byteLength(receipt.method) > 0 && Buffer.byteLength(receipt.method) <= 160
@@ -313,8 +336,8 @@ export class CommandReceiptStore {
     }
     const identityHash = createHash("sha256").update(identity).digest("base64url");
     const key = createHash("sha256").update(identityHash).update("\0").update(method).update("\0").update(commandId).digest("base64url");
-    if (options.respondBeforeCompletion && method !== "session.prompt") {
-      throw new Error("Early receipt responses are restricted to session.prompt");
+    if (options.respondBeforeCompletion && method !== "session.prompt" && method !== "home.prompt") {
+      throw new Error("Early receipt responses are restricted to prompt methods");
     }
     const lane = this.lanes.get(key) ?? {
       mutex: new AsyncMutex(),
@@ -335,15 +358,8 @@ export class CommandReceiptStore {
       const execution = wait("receipt.command-lane", (acquired) => lane.mutex.run(async () => {
         acquired();
         const path = join(this.directory, `${key}.json`);
-        const pending: Receipt = {
-          version: 1,
-          identityHash,
-          commandId,
-          method,
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        };
-        const pendingBytes = persistedReceiptBytes(pending);
+        let pending: Receipt | undefined;
+        let pendingBytes = 0;
         let reserved = false;
         // Admission is accounting only. `inventoryMutex` guards the entry/byte
         // inventory and the inflight byte reservations; the durable write is a
@@ -357,9 +373,23 @@ export class CommandReceiptStore {
             if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
               throw outcomeUnknown("Idempotency receipt identity mismatch; refresh authoritative state instead of replaying");
             }
-            if (existing.status === "completed") return { exists: true, result: existing.result ?? null } as const;
+            if (existing.status === "completed") {
+              if (existing.binding) options.onRouteBound?.("replay");
+              return { exists: true, result: existing.result ?? null } as const;
+            }
             throw new GatewayError("conflict", "Previous command outcome is uncertain; refresh authoritative state instead of replaying", false, { outcomeUnknown: true });
           }
+          const binding = await options.resolveBinding?.();
+          pending = {
+            version: binding ? 2 : 1,
+            identityHash,
+            ...(binding ? { binding } : {}),
+            commandId,
+            method,
+            status: "pending",
+            createdAt: new Date().toISOString(),
+          };
+          pendingBytes = persistedReceiptBytes(pending);
           let usage = await this.inventoryUsage();
           if (usage.entries >= this.maximumEntries
             || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
@@ -385,6 +415,7 @@ export class CommandReceiptStore {
           return { exists: false } as const;
         }));
         if (admission.exists) return admission.result;
+        if (!pending) throw new Error("Command receipt pending record was not prepared");
         // This write's accounting is the only step that adds its bytes to the
         // totals, so the lane reports it as unaccounted before the publication
         // can be seen by a concurrent admission's rebuild. A failed write
@@ -414,6 +445,7 @@ export class CommandReceiptStore {
 
         let result: JsonValue;
         try {
+          if (pending.binding) options.onRouteBound?.("fresh");
           result = await operation();
         } catch (error) {
           // An owner that reports an uncertain outcome may already have applied its

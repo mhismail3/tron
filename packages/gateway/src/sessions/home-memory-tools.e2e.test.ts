@@ -142,6 +142,7 @@ interface Fixture {
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
   registry: RuntimeRegistry;
   sessionId: string;
+  homeId: string;
   slot: HomeSlot;
 }
 
@@ -206,6 +207,7 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
     await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
   }
   f.sessionId = designation.sessionId;
+  f.homeId = designation.homeId;
   f.slot = await registry.acquire(designation.sessionId);
 }
 
@@ -302,6 +304,7 @@ async function runActivation(f: Fixture, input: string, steps: Step[]): Promise<
   ]);
   const before = f.requests.length;
   await f.slot.prompt(input);
+  await waitUntil(() => f.requests.length >= before + steps.length + 1);
   await waitUntil(() => !f.slot.isBusy);
   const activation = f.requests.slice(before);
   expect(activation.length, "one request per step, plus the closing reply").toBe(steps.length + 1);
@@ -357,7 +360,7 @@ const userMessage = (text: string): Message => ({ role: "user", content: text, t
 /** The text one durable node record holds for an address, read from the store the
  * memory wrote: the independent oracle for "what the line said before". */
 async function durableNodeText(f: Fixture, level: number, index: number): Promise<string | undefined> {
-  const path = join(f.tronHome, "workspace", "state", "episodic", f.sessionId, "nodes.jsonl");
+  const path = join(f.tronHome, "workspace", "state", "episodic", f.homeId, "nodes.jsonl");
   const lines = (await readFile(path, "utf8")).trimEnd().split("\n").filter((line) => line !== "");
   const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   const latest = records.filter((record) => record.level === level && record.index === index && typeof record.text === "string").at(-1);
@@ -384,7 +387,7 @@ async function persistedCatalog(f: Fixture): Promise<EpisodicMessageRecord[]> {
   // Reuse Home's initialized workspace. Store reads are read-only and do not
   // reserve another opener or reclaim its active checkpoint artifacts.
   const workspace = (f.registry as unknown as { workspace: TronWorkspace }).workspace;
-  const store = new EpisodicStore(workspace, f.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+  const store = new EpisodicStore(workspace, f.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
   return [...(await store.read()).messages.values()];
 }
 
@@ -676,31 +679,24 @@ describe.sequential("Tron Home memory tools end to end", () => {
     expect(row.oversizedText).toBe(row.emptyText);
   }, 120_000);
 
-  it("answers a typed unavailable result for a stopped memory", async () => {
+  it("refuses a new activation when the memory has stopped", async () => {
     const f = await fixture("blocked");
     await prompt(f, longInput("blocked first"), "reply-r0");
     await waitForBuiltTree(f);
-    // The next activation's own input needs a summary, and that compactor call
-    // fails permanently: the memory stops while the activation is already served.
     f.compactor.failing = true;
-
-    const answers = await toolAnswers(f, longInput("blocked second"), [
-      {
-        name: "zoom",
-        args: { id: 0, n: 1 },
-        before: () => waitUntil(async () => (await memoryStatus(f)).blocked === "permanent-failure"),
-      },
-      { name: "date", args: { id: 0 } },
-      { name: "memory_search", args: { query: "blocked", to: 2 } },
-    ]);
-    const texts = answers.map((answer) => unavailable(answer, "memory-blocked"));
-    const row = { blocked: (await memoryStatus(f)).blocked ?? null, texts, providerRequests: f.requests.length };
+    // Revoke an already-built summary, then observe the memory owner's actual
+    // failed rebuild. A fresh prompt need not require compaction immediately.
+    const first = await entryForMessageText(f, longInput("blocked first"));
+    managerOf(f).appendContextEdit(first.id, { content: longInput("changed blocked first") });
+    f.registry.homeOwner().noteEntriesCommitted(f.sessionId);
+    await waitUntil(async () => (await memoryStatus(f)).blocked === "permanent-failure");
+    const requestsBefore = f.requests.length;
+    await f.slot.prompt(longInput("blocked second"));
+    await waitUntil(() => f.registry.homeOwner().requestPolicyFor(f.sessionId)?.refusalLog().some(entry => entry.reason === "memory-blocked") === true);
+    const row = { blocked: (await memoryStatus(f)).blocked ?? null, providerRequests: f.requests.length - requestsBefore };
     report.cases.push({ case: "blocked", ...row });
     expect(row.blocked).toBe("permanent-failure");
-    for (const text of row.texts) expect(text).toContain("stopped");
-    // The activation that was already served still ran its whole tool loop: the
-    // memory stopped its pump, not the turn.
-    expect(row.providerRequests).toBeGreaterThan(2);
+    expect(row.providerRequests).toBe(0);
   }, 120_000);
 
   it("shows an edit committed between activations, not the text the view carried", async () => {
@@ -727,15 +723,14 @@ describe.sequential("Tron Home memory tools end to end", () => {
     expect(row.blocked).toBeNull();
   }, 120_000);
 
-  it("answers a date for a catalog record written before the field existed", async () => {
+  it("reports unavailable rather than inventing a date for a Home catalog missing instants", async () => {
     const f = await fixture("legacy");
     await prompt(f, "first text", "reply-r0");
-    const planted = managerOf(f).appendMessage(userMessage("no date on this record"));
+    managerOf(f).appendMessage(userMessage("no date on this record"));
     // Ingest it, so the navigation below leaves an indexed message off the branch
     // rather than an entry the memory never held.
     await prompt(f, "ingest them", "reply-r1");
     await waitUntil(async () => ((await memoryStatus(f)).episodic?.messages ?? 0) === 5);
-    const plantedEntry = (await canonicalEntries(f)).find((entry) => entry.id === planted)!;
     // The first *projected* message, not the session's first message entry: the
     // session's own system message is a message entry too and holds no slot.
     const firstMessage = await entryForMessageText(f, "first text");
@@ -743,14 +738,14 @@ describe.sequential("Tron Home memory tools end to end", () => {
     // starts from a complete canonical session snapshot rather than racing the
     // live source reader against SessionManager's navigation write.
     managerOf(f).branch(firstMessage.id);
-    // A record written by a build before the optional `timestamp` existed: remove
-    // only that field, then publish it through the supported checkpoint API.
+    // Malformed Home projection evidence, not a supported legacy Home format:
+    // remove instants through the shared store API. Date must not guess/backfill.
     await f.registry.dispose();
     registries.splice(registries.indexOf(f.registry), 1);
     const workspace = new TronWorkspace(f.tronHome);
     await workspace.initialize();
     try {
-      const store = new EpisodicStore(workspace, f.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+      const store = new EpisodicStore(workspace, f.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
       const snapshot = await store.read();
       if (!snapshot.state) throw new Error("Legacy timestamp fixture has no persisted store state");
       const legacyMessages = [...snapshot.messages.values()].map((record) => {
@@ -770,9 +765,6 @@ describe.sequential("Tron Home memory tools end to end", () => {
     // loads those records as its catalog.
     await attach(f, { configure: false });
     const status = await memoryStatus(f);
-    // One message stays on the branch the reader follows; the others leave it,
-    // so the source has to prove an instant for a record that is no longer on the
-    // branch.
 
     const answers = await toolAnswers(f, "tools", [
       { name: "date", args: { id: 0 } },
@@ -781,38 +773,22 @@ describe.sequential("Tron Home memory tools end to end", () => {
     ]);
     const row = {
       openBefore: status.open,
-      date: ok(answers[0]!),
-      expectedDate: `0+0|${expectedDateText(firstMessage)}`,
-      // The read is by entry id over every parsed entry, not only the branch, so a
-      // record that left the branch still answers its own entry's instant.
-      offBranchDate: ok(answers[1]!),
-      expectedOffBranchDate: `2+0|${expectedDateText(plantedEntry)}`,
+      date: unavailable(answers[0]!, "timestamp-unavailable"),
+      offBranchDate: unavailable(answers[1]!, "timestamp-unavailable"),
       zoom: ok(answers[2]!),
       records: await catalogTimestampFlags(f, 4),
-      // Nothing re-read the field into the catalog: both answers came from the
-      // source.
+      // Home does not use ordinary single-file legacy timestamp backfill.
       timestampsStillAbsent: (await catalogTimestampFlags(f, 4)).every((entry) => entry.timestamp === false),
       refusals: refusalsOf(f),
     };
-    report.cases.push({ case: "legacy", ...row });
+    report.cases.push({ case: "home-missing-instants", ...row });
     expect(row.openBefore).toBe(false);
     expect(row.timestampsStillAbsent).toBe(true);
-    expect(row.date).toBe(row.expectedDate);
-    expect(row.offBranchDate).toBe(row.expectedOffBranchDate);
+    expect(row.date).toContain("no longer available");
+    expect(row.offBranchDate).toContain("no longer available");
     expect(row.zoom).toBe("0+0|user: first text");
     expect(row.refusals).toEqual([]);
 
-    // The one thing the source cannot prove: an entry the file no longer holds at
-    // all. The record keeps its index as `[omitted]`, and the instant is gone with
-    // the line.
-    const canonical = await readFile(f.slot.sessionFile!, "utf8");
-    await writeFile(f.slot.sessionFile!, canonical.split("\n").filter((line) => line !== "" && (JSON.parse(line) as { id?: string }).id !== plantedEntry.id).join("\n") + "\n");
-    await f.registry.dispose();
-    registries.splice(registries.indexOf(f.registry), 1);
-    await attach(f, { configure: false });
-    const gone = await toolAnswers(f, "tools", [{ name: "date", args: { id: 2 } }]);
-    report.cases.push({ case: "legacy-entry-gone", date: gone[0]!.text, details: gone[0]!.details });
-    expect(unavailable(gone[0]!, "timestamp-unavailable")).toContain("no longer available");
   }, 180_000);
 
   it("never reaches a memory for a session that is not the enabled Home", async () => {

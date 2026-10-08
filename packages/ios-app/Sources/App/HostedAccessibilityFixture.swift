@@ -43,7 +43,9 @@ struct HostedAccessibilityFixtureView: View {
                     case .maintenance:
                         NavigationStack {
                             GatewayMaintenanceActions(
-                                lifecycle: ["Rebuild from Source", "Roll Back", "Restart", "Disable"].map { title in
+                                lifecycle: (ProcessInfo.processInfo.arguments.contains("-fixture-lone-maintenance")
+                                    ? ["Rebuild from Source", "Restart", "Disable"]
+                                    : ["Rebuild from Source", "Roll Back", "Restart", "Disable"]).map { title in
                                     GatewayMaintenanceAction(id: title, title: title) {}
                                 },
                                 destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {}

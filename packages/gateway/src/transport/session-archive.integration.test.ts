@@ -106,6 +106,8 @@ async function fixture(options: {
   });
   const listChanged = vi.fn();
   const archiveDiagnostic = vi.fn();
+  const logs: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
+  const captureLog = (level: string, message: string, metadata: Record<string, unknown>) => logs.push({ level, message, metadata });
   const sockets: WebSocket[] = [];
   const devices = new DeviceStore(root, "fixture-machine");
   await devices.initialize();
@@ -161,7 +163,7 @@ async function fixture(options: {
       receipts,
       uploads,
       terminals: { belongsToSession: () => false },
-      logger: { log: () => {} },
+      logger: { log: captureLog },
       sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
       ...(searchService ? { sessionSearch: searchService } : {}),
     } as never);
@@ -174,7 +176,7 @@ async function fixture(options: {
       service,
       uploads: uploads as never,
       auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
-      logger: { log: () => {} } as never,
+      logger: { log: captureLog } as never,
     });
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
@@ -271,7 +273,7 @@ async function fixture(options: {
     await settle();
     return { id, file, entryId };
   };
-  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, rawSession, settle, restart, current: () => current! };
+  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, logs, connect, coldSession, rawSession, settle, restart, current: () => current! };
 }
 
 /** An extension-owned trigger that starts a turn of its own. */
@@ -717,6 +719,59 @@ describe("session archive over the real Gateway", () => {
       excludeTraversal: received,
       mismatchedFilterRejected: mismatched.error.code,
     };
+  });
+
+  archiveCase("logs the exact operation and age for attention-pending RPC refusals", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("attention-pending-log");
+    await openSession(client, session.id);
+    const slot = await f.current().registry.acquire(session.id);
+    const completion = {
+      id: "synthetic-completion-id",
+      completedAt: new Date(Date.now() - 2_500).toISOString(),
+      operationId: "synthetic-pending-operation",
+    };
+    const barrier = Promise.reject(new Error("injected pending-attention failure"));
+    void barrier.catch(() => {});
+    const internals = slot as unknown as {
+      attentionBarrier: Promise<void> | undefined;
+      pendingAssistantCompletion: typeof completion | undefined;
+    };
+    const previousBarrier = internals.attentionBarrier;
+    const previousCompletion = internals.pendingAssistantCompletion;
+    internals.attentionBarrier = barrier;
+    internals.pendingAssistantCompletion = completion;
+    try {
+      const response = await client.request("attention-pending-rpc", "session.prompt", {
+        commandId: "attention-pending-command",
+        sessionId: session.id,
+        text: "must be held behind pending attention",
+      });
+      expect(response).toMatchObject({
+        ok: false,
+        error: {
+          code: "busy",
+          details: { reason: "attention-pending", operationId: "synthetic-pending-operation", ageMs: expect.any(Number) },
+        },
+      });
+      await waitFor(() => f.logs.some(({ metadata }) => metadata.event === "rpc.error"
+        && metadata.method === "session.prompt" && metadata.reason === "attention-pending"),
+      "the attention-pending RPC error log");
+      const log = f.logs.find(({ metadata }) => metadata.event === "rpc.error"
+        && metadata.method === "session.prompt" && metadata.reason === "attention-pending");
+      expect(log?.metadata).toMatchObject({
+        code: "busy",
+        reason: "attention-pending",
+        operationId: "synthetic-pending-operation",
+        ageMs: expect.any(Number),
+      });
+      expect(log?.metadata.ageMs).toBeGreaterThanOrEqual(2_500);
+      return { reason: log?.metadata.reason, operationId: log?.metadata.operationId, ageMs: log?.metadata.ageMs };
+    } finally {
+      internals.attentionBarrier = previousBarrier;
+      internals.pendingAssistantCompletion = previousCompletion;
+    }
   });
 
   archiveCase("rejects archiving a session that is running or working through detached subagents", async () => {

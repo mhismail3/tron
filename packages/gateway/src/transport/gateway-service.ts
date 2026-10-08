@@ -50,7 +50,7 @@ import {
   projectIosDeviceInstallConfig,
 } from "../admin/ios-device-install-service.js";
 import type { GatewayLogger } from "./logger.js";
-import type { CommandReceiptStore } from "./command-receipts.js";
+import type { CommandReceiptBinding, CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
@@ -66,6 +66,7 @@ import { AutomationPaginationStore } from "../automations/automation-pagination.
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
+import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
@@ -207,7 +208,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context", "home.open",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -466,6 +467,13 @@ export class GatewayService {
       case "home.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
         return safeJson(await this.requireHome().status());
+      }
+      case "home.open": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
+        const home = this.requireHome();
+        const binding = home.open();
+        home.noteRouteBound("open");
+        return safeJson(binding);
       }
       case "home.designate":
         return this.mutation(client, method, params, async () => {
@@ -1447,6 +1455,51 @@ export class GatewayService {
           }
           return { deleted: true };
         });
+      case "home.prompt": {
+        rejectUnknownFields(params, ["commandId", "text"], method);
+        if (typeof params.text !== "string") throw new GatewayError("invalid_request", "Home prompt requires text");
+        const text = admitPromptText(params.text);
+        let binding: CommandReceiptBinding | undefined;
+        return this.mutation(client, method, params, async () => {
+          if (!binding) throw new GatewayError("internal", "Home route binding was not persisted before dispatch");
+          this.requireHome().assertRouteBinding({
+            homeId: binding.homeId,
+            bindingRevision: binding.bindingRevision,
+            physicalSessionId: binding.physicalSessionId,
+          });
+          const reserved = this.requireHome().reservedChapter(binding.physicalSessionId);
+          const slot = reserved
+            ? await this.dependencies.sessions.materializeReservedHome(binding.physicalSessionId)
+            : await this.dependencies.sessions.acquire(binding.physicalSessionId);
+          if (reserved) await this.dependencies.sessions.assertReservedHomeAttempt(binding.physicalSessionId);
+          this.requireHome().assertRouteBinding({
+            homeId: binding.homeId,
+            bindingRevision: binding.bindingRevision,
+            physicalSessionId: binding.physicalSessionId,
+          });
+          let resolveAdmission!: (result: { operationId: string }) => void;
+          let rejectAdmission!: (error: unknown) => void;
+          const admission = new Promise<{ operationId: string }>((resolve, reject) => {
+            resolveAdmission = resolve;
+            rejectAdmission = reject;
+          });
+          const execution = slot.prompt(text, [], undefined, {
+            text, attachmentEnvelope: "", attachmentCount: 0,
+          }, resolveAdmission);
+          void execution.then(resolveAdmission, rejectAdmission);
+          const accepted = await admission;
+          return safeJson({
+            logicalSessionId: "home", homeId: binding.homeId, bindingRevision: binding.bindingRevision,
+            sessionId: binding.physicalSessionId, operationId: accepted.operationId,
+          });
+        }, false, true, async () => {
+          const home = this.requireHome();
+          await home.ensureChapterBelowHardLimit();
+          const route = home.routeBinding();
+          binding = { homeId: route.homeId, bindingRevision: route.bindingRevision, physicalSessionId: route.physicalSessionId };
+          return binding;
+        });
+      }
       case "session.prompt": {
         // Pin before receipt I/O, but defer rejection to its operation callback:
         // an existing receipt remains readable without a live subscription.
@@ -1574,7 +1627,11 @@ export class GatewayService {
         ));
       case "session.setModel":
         return this.mutation(client, method, params, async (workToken) => {
-          const revision = await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }), workToken, this.configurationExpectation(params));
+          const slot = await this.openedSlot(client, params);
+          const provider = string(params.provider, "provider", { max: 120 });
+          const modelId = string(params.modelId, "modelId", { max: 300 });
+          await assertNewModelChoice(slot.modelRuntime, provider, modelId, client.signal);
+          const revision = await slot.setModel(provider, modelId, workToken, this.configurationExpectation(params));
           return { updated: true, revision };
         });
       case "session.setContextWindow":
@@ -1714,8 +1771,8 @@ export class GatewayService {
       case "provider.list": {
         const modelRuntime = await this.modelRuntime(params);
         return params.sessionId === undefined
-          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.providers(modelRuntime), client.signal)
-          : this.providers(modelRuntime);
+          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.providers(modelRuntime, client.signal), client.signal)
+          : this.providers(modelRuntime, client.signal);
       }
       case "provider.usage": {
         if (Object.keys(params).some((key) => key !== "sessionId" && key !== "providerId")) {
@@ -1740,8 +1797,8 @@ export class GatewayService {
       case "model.list": {
         const modelRuntime = await this.modelRuntime(params);
         return params.sessionId === undefined
-          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit), client.signal)
-          : this.models(modelRuntime, params.cursor, params.limit);
+          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit, client.signal), client.signal)
+          : this.models(modelRuntime, params.cursor, params.limit, client.signal);
       }
       case "model.recent":
         // Global and session-free: usage recency is one Gateway-wide preference,
@@ -2315,6 +2372,7 @@ export class GatewayService {
     operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
     respondBeforeReceiptCompletion = false,
+    resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
     // The entry spans the whole receipt-backed operation (a compaction or a
@@ -2349,7 +2407,11 @@ export class GatewayService {
         knowledgeMutation
           ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
           : () => offLoop(() => operation(work?.token)),
-        respondBeforeReceiptCompletion ? {
+        (respondBeforeReceiptCompletion || resolveBinding) ? {
+          ...(resolveBinding ? { resolveBinding,
+            onRouteBound: category => this.requireHome().noteRouteBound(category),
+          } : {}),
+          ...(respondBeforeReceiptCompletion ? {
           respondBeforeCompletion: true,
           onCompletion: completion => {
             if (!work) return;
@@ -2368,6 +2430,7 @@ export class GatewayService {
               },
             );
           },
+          } : {}),
         } : undefined,
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
@@ -2396,8 +2459,10 @@ export class GatewayService {
     return (await this.dependencies.sessions.acquire(string(params.sessionId, "sessionId", { max: 200 }))).modelRuntime;
   }
 
-  private async providers(modelRuntime: ModelRuntime): Promise<JsonValue> {
-    const credentials = new Map((await modelRuntime.listCredentials()).map((credential) => [credential.providerId, credential.type]));
+  private async providers(modelRuntime: ModelRuntime, signal?: AbortSignal): Promise<JsonValue> {
+    await openAIModelEligibility(modelRuntime)?.refresh(signal);
+    const credentialEntries = await modelRuntime.listCredentials().catch(() => []);
+    const credentials = new Map(credentialEntries.map((credential) => [credential.providerId, credential.type]));
     const providers = await Promise.all(modelRuntime.getProviders().map(async (provider) => {
       const auth = await modelRuntime.checkAuth(provider.id).catch(() => undefined);
       return {
@@ -2411,17 +2476,22 @@ export class GatewayService {
         credentialType: credentials.get(provider.id) ?? null,
         authMethods: [provider.auth.apiKey?.login ? "api_key" : null, provider.auth.oauth ? "oauth" : null]
           .filter((value): value is string => value !== null),
-        modelCount: provider.getModels().length,
+        modelCount: openAIModelEligibility(modelRuntime)?.countChoices(provider.id, modelRuntime) ?? provider.getModels().length,
       };
     }));
     validateProviderCatalog(providers);
     return safeJson({ providers });
   }
 
-  private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown): Promise<JsonValue> {
+  private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown, signal?: AbortSignal): Promise<JsonValue> {
+    await openAIModelEligibility(modelRuntime)?.refresh(signal);
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
-      const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
-      return Promise.all(modelRuntime.getModels().map(async (model) => {
+      const providerIds = new Set(modelRuntime.getModels().map(model => model.provider));
+      const available = new Set((await Promise.all([...providerIds].map(async providerId => {
+        try { return await modelRuntime.getAvailable(providerId, signal ? { signal } : undefined); }
+        catch (error) { if (signal?.aborted) throw error; return []; }
+      }))).flat().map((model) => `${model.provider}\0${model.id}`));
+      const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
         // Undated models simply omit the field; the picker's provider sections
         // list them without a release date.
         const releaseDate = await this.modelReleaseDates.modelReleaseDate(model.provider, model.id);
@@ -2431,18 +2501,22 @@ export class GatewayService {
         return {
           provider: model.provider,
           id: model.id,
-          name: model.name,
+          name: openAIModelEligibility(modelRuntime)?.displayName(model.provider, model.id) ?? model.name,
           virtual: model.api === "pi-virtual",
           reasoning: model.reasoning,
           input: model.input,
           contextWindow: model.contextWindow,
           contextWindowLimits: contextWindowLimits(model),
           maxTokens: model.maxTokens,
-          available: available.has(`${model.provider}\0${model.id}`),
+          // The owner is checked directly as well: an extension contribution that
+          // re-registers openai/openai-codex replaces the SDK filter decoration.
+          available: available.has(`${model.provider}\0${model.id}`)
+            && (openAIModelEligibility(modelRuntime)?.isEligibleInRuntime(modelRuntime, model.provider, model.id) ?? true),
           ...(releaseDate === undefined ? {} : { releaseDate }),
           ...(priced ? { cost: { input: model.cost.input, output: model.cost.output } } : {}),
         };
       }));
+      return openAIModelEligibility(modelRuntime)?.orderAccountModels(projected) ?? projected;
     });
     return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
   }

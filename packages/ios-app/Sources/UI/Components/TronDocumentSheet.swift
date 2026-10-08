@@ -7,12 +7,27 @@ struct TronDocumentSheet<Content: View>: View {
     let title: String
     /// File previews read at full height; nested instruction readers follow
     /// their parent sheets and start at medium.
-    var detents: Set<PresentationDetent> = [.large]
+    var detents: Set<PresentationDetent>
+    let initialDetent: PresentationDetent?
+    @State private var selectedDetent: PresentationDetent
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     private var resolvedAccent: Color { settingsTheme?.accent ?? .tronBlue }
+
+    init(
+        title: String,
+        detents: Set<PresentationDetent> = [.large],
+        initialDetent: PresentationDetent? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.detents = detents
+        self.initialDetent = initialDetent
+        _selectedDetent = State(initialValue: initialDetent ?? .large)
+        self.content = content
+    }
 
     var body: some View {
         NavigationStack {
@@ -42,8 +57,27 @@ struct TronDocumentSheet<Content: View>: View {
                 .tint(resolvedAccent)
         }
         .tronTopBlur(.sheet)
-        .presentationDetents(detents)
+        .modifier(TronDocumentSheetDetents(
+            detents: detents,
+            hasInitialSelection: initialDetent != nil,
+            selection: $selectedDetent
+        ))
         .presentationDragIndicator(.hidden)
         .tronPresentation()
+    }
+}
+
+private struct TronDocumentSheetDetents: ViewModifier {
+    let detents: Set<PresentationDetent>
+    let hasInitialSelection: Bool
+    @Binding var selection: PresentationDetent
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if hasInitialSelection {
+            content.presentationDetents(detents, selection: $selection)
+        } else {
+            content.presentationDetents(detents)
+        }
     }
 }

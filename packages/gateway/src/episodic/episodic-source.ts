@@ -26,7 +26,7 @@ const SUPPORTED_SESSION_VERSION = 3;
 /** How many bytes before the cursor the incremental reader re-reads to prove the
  * prefix is the one it read last time. */
 const PREFIX_WINDOW_BYTES = 8 * 1_024;
-const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
+export const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
 
 /** A failed parse of a source whose snapshot could not be proven stable. */
 export class EpisodicSourceChangedError extends Error {
@@ -47,6 +47,8 @@ export interface EpisodicCanonicalEntry {
   timestamp: string;
   type: string;
   raw: Record<string, unknown>;
+  /** Physical provenance when a stable Home source spans chapters. */
+  sourceSessionId?: string;
   /** The exact JSON text of the entry's line, without its newline. */
   line: string;
 }
@@ -63,6 +65,10 @@ export interface EpisodicCanonicalCut {
   cursor: EpisodicSourceCursor;
   /** True when this read continued from the previous cursor. */
   incremental: boolean;
+  /** Home sources project while streaming, retaining no raw transcript arrays. */
+  projected?: EpisodicProjectedMessage[];
+  /** A full branch refresh invalidates only this physical chapter. */
+  scopeSessionId?: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -107,11 +113,11 @@ async function readLines(handle: { read(buffer: Buffer, offset: number, length: 
   return { lines, completeBytes, tornBytes: pending.length, completePrefixDigest };
 }
 
-function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
+export function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
   return createHash("sha256").update(prefix).update("\\0").update(lineBytes).update("\\n").digest("hex");
 }
 
-function parseEntry(line: string): EpisodicCanonicalEntry {
+export function parseEntry(line: string): EpisodicCanonicalEntry {
   let raw: Record<string, unknown>;
   try {
     raw = asRecord(JSON.parse(line)) ?? {};
@@ -151,7 +157,7 @@ function extendBranch(branch: readonly EpisodicCanonicalEntry[], entries: readon
 
 /** The digest of the last complete non-blank line before `offset`, read from a
  * small window. `undefined` when the window cannot prove it. */
-async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
+export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
   if (offset <= 1) return undefined;
   const start = Math.max(0, offset - PREFIX_WINDOW_BYTES);
   const buffer = Buffer.alloc(offset - start);
@@ -452,6 +458,7 @@ export async function readCanonicalEntryInstants(options: {
 
 export interface EpisodicProjectedMessage {
   entryId: string;
+  sourceSessionId?: string;
   kind: EpisodicMessageKind;
   text: string;
   /** The canonical entry's instant, carried so the catalog can answer a
@@ -608,6 +615,7 @@ export function projectBranch(cut: EpisodicCanonicalCut, limits: EpisodicLimits)
     if (credentials !== text) omissions.push("credentials");
     projected.push({
       entryId: entry.id,
+      ...(entry.sourceSessionId === undefined ? {} : { sourceSessionId: entry.sourceSessionId }),
       kind,
       text: credentials,
       timestamp: entry.timestamp,

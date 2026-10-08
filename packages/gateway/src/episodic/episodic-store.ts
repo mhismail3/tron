@@ -1,3 +1,4 @@
+import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -5,7 +6,7 @@ import { readSecureJson } from "../util/secure-json.js";
 import { durableAtomicWriteJson, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import {
-  EpisodicMemoryError, EPISODIC_STORE_VERSION,
+  EpisodicMemoryError, EPISODIC_STORE_VERSION, EPISODIC_HOME_CURSOR_MAX_BYTES, EPISODIC_STATE_MAX_BYTES,
   type EpisodicContextRun, type EpisodicMessageRecord, type EpisodicNodeLogRecord, type EpisodicNodeRecord, type EpisodicStoreState,
 } from "./episodic-contract.js";
 import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
@@ -31,7 +32,6 @@ import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
  */
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
-const STATE_MAX_BYTES = 64 * 1_024;
 const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "source-unavailable"]);
 
 export interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
@@ -101,10 +101,11 @@ export class EpisodicStore {
     const marker = await readSecureJson<unknown>(paths.initialized, 256);
     if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
     if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
+      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
       || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
     }
-    const stateRead = await readSecureJson<unknown>(paths.state, STATE_MAX_BYTES);
+    const stateRead = await readSecureJson<unknown>(paths.state, EPISODIC_STATE_MAX_BYTES);
     return stateRead.present ? validateState(stateRead.value) : undefined;
   }
 
@@ -126,11 +127,12 @@ export class EpisodicStore {
     const marker = await readSecureJson<unknown>(paths.initialized, 256);
     if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
     if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
+      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
       || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
     }
 
-    const stateRead = await readSecureJson<unknown>(paths.state, STATE_MAX_BYTES);
+    const stateRead = await readSecureJson<unknown>(paths.state, EPISODIC_STATE_MAX_BYTES);
     let state: EpisodicStoreState | null = null;
     if (stateRead.present) state = validateState(stateRead.value);
     const checkpoint = await readCheckpoint(paths, this.maxLineBytes);
@@ -194,12 +196,14 @@ export class EpisodicStore {
   }
 
   async saveState(state: EpisodicStoreState): Promise<void> {
+    validateStatePublication(state);
     await this.ensureRoot();
     await durableAtomicWriteJson((await this.paths()).state, state, 0o600, this.fileSystem);
   }
 
   /** Publish a bounded-line checkpoint before reclaiming append history. */
   async checkpoint(options: { messages: Iterable<EpisodicMessageRecord>; nodes: Iterable<EpisodicNodeRecord>; state: EpisodicStoreState; watermark: number }): Promise<void> {
+    validateStatePublication(options.state);
     const paths = await this.ensureRoot();
     await durableAtomicWriteJson(paths.state, options.state, 0o600, this.fileSystem);
     const name = `checkpoint-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -289,7 +293,7 @@ async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<
   const watermark = value.watermark as number;
   const directory = join(paths.root, value.directory);
   await assertOwnerDirectory(directory);
-  const checkpointState = await readSecureJson<unknown>(join(directory, "state.json"), STATE_MAX_BYTES);
+  const checkpointState = await readSecureJson<unknown>(join(directory, "state.json"), EPISODIC_STATE_MAX_BYTES);
   if (!checkpointState.present) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint state is missing");
   validateState(checkpointState.value);
   // state.json is the authority and can advance independently of catalog/node
@@ -362,14 +366,29 @@ async function removeOwnedTree(path: string, fileSystem: EpisodicStoreFileSystem
   await fileSystem.rm(path, { recursive: info.isDirectory(), force: false });
 }
 
+function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(record).every(key => keys.includes(key));
+}
+
+function validateStatePublication(state: EpisodicStoreState): void {
+  // Check the exact encoding used by durableAtomicWriteJson before any effect.
+  if (Buffer.byteLength(`${JSON.stringify(state, null, 2)}\n`) > EPISODIC_STATE_MAX_BYTES) {
+    throw new EpisodicMemoryError("invalid-store", "Episodic state exceeds its byte limit");
+  }
+  validateState(state);
+}
+
 function validateState(value: unknown): EpisodicStoreState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state is not an object");
   const state = value as Partial<EpisodicStoreState>;
-  if (state.version !== EPISODIC_STORE_VERSION) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an unknown version");
+  if (!hasOnlyKeys(value as Record<string, unknown>, ["version", "generation", "cursor", "blocked", "spend"])
+    || state.version !== EPISODIC_STORE_VERSION) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an unknown version or fields");
   if (typeof state.generation !== "number" || !Number.isSafeInteger(state.generation) || state.generation < 0) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has no generation");
+  if (!("cursor" in state) || !("blocked" in state) || !("spend" in state)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state is missing required fields");
   const cursor = state.cursor;
-  if (cursor !== null && cursor !== undefined) {
-    if (typeof cursor !== "object" || Array.isArray(cursor)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
+  if (cursor !== null) {
+    if (typeof cursor !== "object" || Array.isArray(cursor)
+      || !hasOnlyKeys(cursor as unknown as Record<string, unknown>, ["dev", "ino", "size", "completeBytes", "leafEntryId", "completePrefixDigest", "leafLineDigest", "home"])) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
     for (const field of ["dev", "ino", "size", "completeBytes"] as const) {
       if (typeof cursor[field] !== "number" || !Number.isSafeInteger(cursor[field]) || cursor[field] < 0) {
         throw new EpisodicMemoryError("invalid-store", `Episodic memory state cursor has no ${field}`);
@@ -381,16 +400,46 @@ function validateState(value: unknown): EpisodicStoreState {
       && (typeof cursor.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(cursor.completePrefixDigest))) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid prefix digest");
     }
+    if (cursor.home !== undefined) {
+      const home = cursor.home as unknown as Record<string, unknown>;
+      if (!home || typeof home !== "object" || Array.isArray(home)
+        || !hasOnlyKeys(home, ["version", "ledgerRevision", "chapters"])
+        || home.version !== 2
+        || !Number.isSafeInteger(home.ledgerRevision) || (home.ledgerRevision as number) < 1
+        || !Array.isArray(home.chapters) || home.chapters.length === 0 || home.chapters.length > HOME_MAX_CHAPTERS) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home source cursor");
+      }
+      for (const value of home.chapters) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
+        const chapter = value as Record<string, unknown>;
+        // Include the actual nested indentation in the per-cursor bound.
+        if (Buffer.byteLength(JSON.stringify({ cursor: { home: { chapters: [chapter] } } }, null, 2)) > EPISODIC_HOME_CURSOR_MAX_BYTES) {
+          throw new EpisodicMemoryError("invalid-store", "Home chapter cursor exceeds its byte limit");
+        }
+        if (!hasOnlyKeys(chapter, ["sessionId", "dev", "ino", "size", "completeBytes", "leafEntryId", "leafLineDigest", "completePrefixDigest", "mtimeMs", "ctimeMs", "sealed"])
+          || typeof chapter.sealed !== "boolean"
+          || ["mtimeMs", "ctimeMs"].some(field => typeof chapter[field] !== "number" || !Number.isFinite(chapter[field]) || (chapter[field] as number) < 0)
+          || typeof chapter.sessionId !== "string" || chapter.sessionId.length < 1 || chapter.sessionId.length > 200
+          || ["dev", "ino", "size", "completeBytes"].some(field => !Number.isSafeInteger(chapter[field]) || (chapter[field] as number) < 0)
+          || (chapter.leafEntryId !== null && typeof chapter.leafEntryId !== "string")
+          || (chapter.leafLineDigest !== null && (typeof chapter.leafLineDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.leafLineDigest)))
+          || typeof chapter.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.completePrefixDigest)) {
+          throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
+        }
+      }
+    }
   }
   const blocked = state.blocked;
-  if (blocked !== null && blocked !== undefined) {
-    if (typeof blocked !== "object" || Array.isArray(blocked) || typeof blocked.reason !== "string" || !BLOCKED_REASONS.has(blocked.reason)
+  if (blocked !== null) {
+    if (typeof blocked !== "object" || Array.isArray(blocked)
+      || !hasOnlyKeys(blocked as unknown as Record<string, unknown>, ["reason", "detail"])
+      || typeof blocked.reason !== "string" || !BLOCKED_REASONS.has(blocked.reason)
       || (blocked.detail !== undefined && typeof blocked.detail !== "string")) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid blocked state");
     }
   }
   const spend = state.spend;
-  if (spend !== undefined && (typeof spend !== "number" || !Number.isSafeInteger(spend) || spend < 0)) {
+  if (typeof spend !== "number" || !Number.isSafeInteger(spend) || spend < 0) {
     throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid token spend");
   }
   return {
@@ -401,7 +450,7 @@ function validateState(value: unknown): EpisodicStoreState {
     // A state written before spend was recorded reads as zero spend: the tokens
     // already spent are unknown, and inventing a number would be worse than
     // starting the ceiling again from a known point.
-    spend: spend ?? 0,
+    spend,
   };
 }
 

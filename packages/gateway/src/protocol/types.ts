@@ -1032,9 +1032,21 @@ export const HOME_CAPABILITY = "home.v1";
  * used, which `reason` explains; the preserved record is never overwritten.
  * `live` is whether the session holds a runtime right now; `sessionPresent` is
  * whether it exists at all, live or still on disk. */
+/** `home.open`: a logical route and its current physical binding. It does not
+ * materialize a reserved chapter; clients attach physically only when an active
+ * chapter exists. */
+export interface HomeOpen {
+  logicalSessionId: "home";
+  homeId: string;
+  bindingRevision: number;
+  sessionId: string;
+  generation: number;
+  chapterState: "active" | "sealed" | "reserved" | "materializing";
+}
+
 export interface HomeStatus {
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
-  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "blocked" | "active" | "ready";
+  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
   activation: HomeContextProjection;
   readiness: { ready: boolean; gaps: string[] };
@@ -1044,8 +1056,15 @@ export interface HomeStatus {
   enabled: boolean;
   homeId?: string;
   sessionId?: string;
+  bindingRevision?: number;
   generation?: number;
   model?: ModelRef;
+  chapter?: {
+    count: number;
+    currentBytes?: number;
+    currentEntries?: number;
+    recoveryDecision: "none" | "reserved" | "materializing";
+  };
   live: boolean;
   sessionPresent: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
@@ -1125,6 +1144,14 @@ export type HomeContextProjection =
   };
 
 /** `home.designate`/`home.disable` result: the exact admitted identity. */
+export interface HomeOpen {
+  logicalSessionId: "home";
+  homeId: string;
+  bindingRevision: number;
+  sessionId: string;
+  generation: number;
+}
+
 export interface HomeDesignation {
   homeId: string;
   sessionId: string;

@@ -45,6 +45,38 @@ final class TronAccessibilityUITests: XCTestCase {
         // Never invoke lifecycle actions: these are inert fixture closures.
     }
 
+    // A phantom second column must not steal width from the lone trailing
+    // action. Paired actions, shared hit targets and large-text layout stay intact.
+    func testLoneMaintenanceActionUsesFullContentWidth() {
+        for arguments in [[], ["-fixture-light"], ["-fixture-large-type"]] {
+            let app = launch(["-fixture-lone-maintenance"] + arguments)
+            defer { app.terminate() }
+            app.buttons["Maintenance"].tap()
+            let labels = ["Rebuild from Source", "Restart", "Disable", "Forget Server"]
+            for label in labels { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
+            let frames = labels.map { app.buttons[$0].frame }
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "maintenance-lone-action-\(arguments.joined(separator: "-"))"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTAssertEqual(frames[2].minX, frames[3].minX, accuracy: 1)
+            XCTAssertEqual(frames[2].maxX, frames[3].maxX, accuracy: 1,
+                           "Disable must reach the same trailing edge as Forget Server")
+            XCTAssertEqual(frames[2].width, frames[3].width, accuracy: 1)
+            XCTAssertEqual(frames[0].width, frames[1].width, accuracy: 1)
+            XCTAssertEqual(frames[0].minY, frames[1].minY, accuracy: 1)
+            XCTAssertGreaterThan(frames[2].minY, max(frames[0].maxY, frames[1].maxY))
+            XCTAssertGreaterThan(frames[3].minY, frames[2].maxY)
+            for label in labels {
+                XCTAssertTrue(app.buttons[label].isHittable)
+                XCTAssertGreaterThanOrEqual(app.buttons[label].frame.height, 44)
+            }
+            // Never tap these actions: their fixture callbacks are inert and
+            // the production lifecycle is outside this layout acceptance.
+            app.terminate()
+        }
+    }
+
     func testJSONTypedButtonsOpenTheirCompleteValues() {
         let app = launch()
         defer { app.terminate() }
