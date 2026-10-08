@@ -1579,20 +1579,6 @@ export class RuntimeSlot {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
-            {
-              name: "tron-invocation-settlement",
-              factory: (pi) => {
-                // Pi awaits these public hooks before the next run/input can
-                // append. Join receipt I/O only: attention must not hold up
-                // already accepted follow-ups or extension continuations.
-                pi.on("turn_start", async () => {
-                  await this.joinTerminalReceiptWrites();
-                });
-                pi.on("message_end", async (event) => {
-                  if (event.message.role === "user") await this.joinTerminalReceiptWrites();
-                });
-              },
-            },
             ...tronModuleFactories({
               sessionId: () => this.id,
               cwd: () => this.cwd,
@@ -1609,6 +1595,7 @@ export class RuntimeSlot {
               compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
+              joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
               ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
               jev: new JevDecisionClient(modelRuntime),
               ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),

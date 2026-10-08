@@ -447,9 +447,12 @@ attribution headers.
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
 purpose, declared tool and command names), so the installed list cannot name a
-module a session does not load or omit one it does. MCP servers are managed only
-through the explicit `mcp.*` methods below; they are not projected as Tron
-connection instances.
+module a session does not load or omit one it does. The always-loaded
+`tron-invocation-settlement` module comes first in definition and registration
+order. It has no tools or commands: its awaited hooks join RuntimeSlot-owned
+terminal receipt writes before the next admitted input, without waiting for
+attention settlement. MCP servers are managed only through the explicit `mcp.*`
+methods below; they are not projected as Tron connection instances.
 
 `hooks.list` serves the same hook fields `session.resources` returns
 (`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
