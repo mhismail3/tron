@@ -87,6 +87,21 @@ included in the error.
 | `Mac Keychain credential command is too long` | Adapter write admission / caller error | The escaped UTF-8 stdin command would reach the CLI's 4096-byte input-buffer limit; rejection prevents truncation or loss of an explicit keychain target. |
 | `owned fault proxy exited (<exit code|signal>)` | `scripts/ios-gateway-e2e-test` / command stderr captured by CI | An owned fault proxy exited before readiness; the diagnostic reports its wait status as an exit code or signal and includes the last 20 lines of `proxy.log`. Regression: [`GatewayE2EFixture.test_proxy_startup_failure_reports_process_status_and_stderr_tail`](../../../scripts/test-ios-test-infrastructure.py); see [iOS Gateway E2E diagnostics](../../ios-app/docs/development.md#efficient-focused-tests). |
 
+## Debug payload staging diagnostics
+
+These fail-closed admission errors are emitted by `scripts/gateway-payload-deploy.mjs`
+`stage` on command stderr before candidate publication, not as Gateway runtime
+events. The installed signed Node runtime and native npm files are one signed-app
+concern; inspecting the staging refusal diagnoses the mismatch without waiting
+for a Gateway startup `dlopen` failure.
+
+| Signal | Owner / destination | Meaning |
+| --- | --- | --- |
+| `Debug native payload package identity differs: <package-lock key> (version\|integrity); rebuild and install a signed app before staging` | `stagePayload` / staging command stderr | A Mach-O file's exact owning-package identity differs or is missing. Rebuild and manually install the signed app; no worktree native fallback is published. Regression: `Debug native staging refuses changed or absent package identities` in `scripts/gateway-payload-deploy.test.mjs`. |
+| `Debug native payload installed Mach-O file is missing or substituted: <payload-relative path>; rebuild and install a signed app before staging` | `stagePayload` / staging command stderr | The installed snapshot cannot supply the candidate's native file. Regression: `Debug native staging refuses installed native files that are missing or non-Mach-O`. |
+| `Debug native payload package lock is malformed; rebuild and install a signed app before staging` | `stagePayload` / staging command stderr | Native package identity cannot be admitted from a valid v3 package lock; staging fails closed. Regression: `Debug native staging refuses malformed package locks`. |
+| `Debug native payload native alias leaves npm tree: <payload-relative path>; rebuild and install a signed app before staging` | `stagePayload` / staging command stderr | A native alias targets worktree bytes outside the npm inventory rather than an installed npm artifact. Regression: `Debug native staging refuses native aliases outside the npm tree`. |
+
 ## External provider diagnostics
 
 Installed provider extensions retain their own diagnostic owners; these are not
