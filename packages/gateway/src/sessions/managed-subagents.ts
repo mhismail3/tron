@@ -3,7 +3,8 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, opendirSyn
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import type { Extension, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { Extension, SettingsManager, PackageSource } from "@earendil-works/pi-coding-agent";
+import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -11,6 +12,37 @@ const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), 
   version: string; fork: { commit: string }; closure: { path: string; sha512: string };
 };
 export const MANAGED_SUBAGENTS_SOURCE = `tron:pi-subagents@${pin.version}#${pin.closure.sha512}`;
+type Settings = ReturnType<SettingsManager["getSettings"]>;
+
+export const IGNORED_SUBAGENTS_MESSAGE = "Tron manages pi-subagents; this user declaration is ignored. Remove it with `pi remove npm:pi-subagents`.";
+export function isUserSubagentsPackage(pkg: PackageSource): boolean {
+  return /^npm:pi-subagents(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source);
+}
+
+/** Pi's pinned DefaultResourceLoader has no pre-load filter; extensionsOverride
+ * runs after execution. Its package resolver reads these scoped settings in both
+ * the pre-trust and final passes. Keep that loader's view read-only for packages,
+ * while reload/trust and all other settings remain owned by the canonical manager. */
+export function managedProviderSettingsView(settings: SettingsManager): SettingsManager {
+  const filter = (value: Settings): Settings => ({ ...value,
+    ...(value.packages ? { packages: value.packages.filter(pkg => !isUserSubagentsPackage(pkg)) } : {}),
+  });
+  const refuse = (): never => { throw new GatewayError("conflict", "Managed provider settings view is read-only for packages"); };
+  return new Proxy(settings, {
+    get(target, key) {
+      if (key === "getPackages") return () => target.getPackages().filter(pkg => !isUserSubagentsPackage(pkg));
+      if (key === "getSettings" || key === "getGlobalSettings" || key === "getProjectSettings") return () => filter(target[key]());
+      if (key === "setPackages" || key === "setProjectPackages") return refuse;
+      if (key === "applyOverrides") return (value: Partial<Settings>) => {
+        if (Object.hasOwn(value, "packages")) refuse();
+        target.applyOverrides(value);
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 const receiptName = "tron-install-receipt.json";
 const managedExtensions = new WeakSet<Extension>();
 export function isManagedSubagentExtension(extension: Extension): boolean { return managedExtensions.has(extension); }
@@ -83,7 +115,7 @@ function validateSdkPeers(entries: Entry[]): void {
  * never a user package declaration, network fallback or in-place replacement. */
 export class ManagedSubagents {
   readonly root: string;
-  constructor(tronHome: string) {
+  constructor(tronHome: string, private readonly logger?: Pick<GatewayLogger, "log">) {
     let ancestor = resolve(tronHome);
     const missing: string[] = [];
     while (!existsSync(ancestor)) {
@@ -95,8 +127,8 @@ export class ManagedSubagents {
 
   /** Startup returns a selection only after its immutable build is usable.
    * The same boundary owns fresh activation and restart verification. */
-  static activateForStartup(tronHome: string): ManagedSubagents {
-    const provider = new ManagedSubagents(tronHome);
+  static activateForStartup(tronHome: string, logger?: Pick<GatewayLogger, "log">): ManagedSubagents {
+    const provider = new ManagedSubagents(tronHome, logger);
     provider.install();
     return provider;
   }
@@ -165,14 +197,14 @@ export class ManagedSubagents {
     if (expected.size) throw new GatewayError("conflict", "managed pi-subagents installed closure mismatch: missing entries");
   }
 
-  assertNoConflict(settings: SettingsManager, agentDir: string): void {
-    const manifestPath = join(agentDir, "npm", "package.json");
-    const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : {};
-    const packages = [...settings.getPackages(), ...(settings.getProjectSettings().packages ?? [])];
-    if (manifest.dependencies?.["pi-subagents"] !== undefined || manifest.devDependencies?.["pi-subagents"] !== undefined
-      || packages.some((pkg) => /^npm:pi-subagents(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source))) {
-      throw new GatewayError("conflict", "user-installed pi-subagents conflicts with the Tron-managed provider; remove its user package declaration before loading delegated work");
-    }
+  /** Called by the load owner after startup/reload, once per operation rather
+   * than on each scoped read or in the pre-trust pass. No paths or user specs. */
+  reportIgnoredPackages(settings: SettingsManager): void {
+    const count = [...(settings.getGlobalSettings().packages ?? []), ...(settings.getProjectSettings().packages ?? [])]
+      .filter(isUserSubagentsPackage).length;
+    if (count) this.logger?.log("warning", IGNORED_SUBAGENTS_MESSAGE, {
+      event: "pi-subagents.user-package-ignored", source: "managed-subagents", counts: { declarations: count },
+    });
   }
 
   private extensionPaths(): string[] {
@@ -203,9 +235,8 @@ export class ManagedSubagents {
     });
   }
 
-  loaderOptions(settings: SettingsManager, agentDir: string): { additionalExtensionPaths: string[] } {
-    this.assertNoConflict(settings, agentDir);
-    return { additionalExtensionPaths: existsSync(this.root) ? this.extensionPaths() : [] };
+  loaderOptions(settings: SettingsManager): { settingsManager: SettingsManager; additionalExtensionPaths: string[] } {
+    return { settingsManager: managedProviderSettingsView(settings), additionalExtensionPaths: existsSync(this.root) ? this.extensionPaths() : [] };
   }
 
   admit(extensions: readonly Extension[]): void {

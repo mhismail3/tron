@@ -49,7 +49,7 @@ export async function loadSessionFreeExtensions(
     cwd,
     agentDir,
     settingsManager: settings,
-    ...(managedSubagents?.loaderOptions(settings, agentDir) ?? {}),
+    ...(managedSubagents?.loaderOptions(settings) ?? {}),
     extensionsOverride: (base) => attributeExtensions(base, undefined, managedSubagents ? { managedSubagents } : {}),
     extensionFactories: piBuiltinExtensions(agentDir),
   });
@@ -58,6 +58,7 @@ export async function loadSessionFreeExtensions(
       ? false
       : (await trust.inspect(cwd)).effectiveDecision === true,
   });
+  managedSubagents?.reportIgnoredPackages(settings);
   const loaded = loader.getExtensions();
   return { extensions: loaded.extensions, errors: loaded.errors, warnings: loaded.warnings ?? [] };
 }

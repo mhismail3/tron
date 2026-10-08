@@ -1,4 +1,4 @@
-import type { ManagedSubagents } from "../sessions/managed-subagents.js";
+import { managedProviderSettingsView, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -158,7 +158,10 @@ export class PackageService {
     return this.trackAdministrative(() => this.mutex.run(async () => {
       const { manager, settings } = await this.manager(cwd, false);
       const packages = manager.listConfiguredPackages();
-      const resources = await manager.resolve(async () => "skip");
+      const resolver = this.managedSubagents
+        ? new DefaultPackageManager({ cwd, agentDir: this.agentDir, settingsManager: managedProviderSettingsView(settings) })
+        : manager;
+      const resources = await resolver.resolve(async () => "skip");
       validatePackageInventory(packages, resources);
       // `provides` is additive and fails soft inside its own loader (extension
       // tools/commands and subagent attribution), so it cannot fail this read.

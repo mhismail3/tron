@@ -148,7 +148,6 @@ async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown>
  * diagnostic; it never rejects, so subagents cannot take down the response. */
 export async function loadSubagentCatalog(request: SubagentCatalogRequest): Promise<SubagentCatalog> {
   try {
-    request.managedSubagents?.assertNoConflict(request.settingsManager, request.agentDir);
     const packageRoot = request.managedSubagents?.verify();
     if (!packageRoot) return unavailable(`managed ${SUBAGENT_PACKAGE} is not installed`);
     const discovery = await (request.loadDiscovery ?? loadPiSubagentsDiscovery)(packageRoot);

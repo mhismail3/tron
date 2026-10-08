@@ -209,7 +209,7 @@ async function runLeg(): Promise<void> {
     if (process.env.TRON_SUBAGENTS_ROLLBACK_REJECTION) {
       const reason = process.env.TRON_SUBAGENTS_ROLLBACK_REJECTION;
       const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-      expect(() => managedSubagents.loaderOptions(settings, agentDir)).toThrow(reason);
+      expect(() => managedSubagents.loaderOptions(settings)).toThrow(reason);
       expect(() => managedSubagents.admit([])).toThrow(reason);
       facts.passed = true;
       return;

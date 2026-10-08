@@ -25,7 +25,7 @@ it("activates a real staged Mac app offline without checkout pin or artifact acc
       const { ManagedSubagents } = await import('./dist/sessions/managed-subagents.js');
       const { SettingsManager } = await import('@earendil-works/pi-coding-agent');
       const managed = ManagedSubagents.activateForStartup(${JSON.stringify(join(root, "home"))});
-      console.log(JSON.stringify({ root: managed.verify(), entries: managed.loaderOptions(SettingsManager.inMemory(), ${JSON.stringify(join(root, "agent"))}).additionalExtensionPaths }));`;
+      console.log(JSON.stringify({ root: managed.verify(), entries: managed.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths }));`;
     const output = await run(process.execPath, ["--input-type=module", "-e", script], {
       cwd: app, timeout: 15_000, env: { PATH: process.env.PATH!, HOME: root, TMPDIR: root, npm_config_offline: "true", npm_config_cache: join(root, "cache") },
     });

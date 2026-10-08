@@ -1,4 +1,4 @@
-import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
+import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { basename, dirname, sep } from "node:path";
 import type {
   Extension,
@@ -6,7 +6,7 @@ import type {
   ResolvedResource,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { PackageProvides } from "../protocol/types.js";
+import type { PackageProvides, PackageConflict } from "../protocol/types.js";
 import {
   loadSubagentCatalog,
   type AvailableSubagent,
@@ -35,7 +35,7 @@ export interface InstalledPackage {
 }
 
 /** An installed-package row with the names it provides. */
-export type PackageProvidesEntry = InstalledPackage & { provides: PackageProvides };
+export type PackageProvidesEntry = InstalledPackage & { provides: PackageProvides; conflict?: PackageConflict };
 
 type ResourceKind = "skills" | "prompts" | "themes";
 
@@ -165,7 +165,10 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
   return {
     entries: [...request.packages, ...managedPackage(request)].map((pkg) => ({
       ...pkg,
-      provides: packageProvides({ pkg, resources: request.resources, extensions, subagents: catalog.subagents }),
+      ...(request.managedSubagents && isUserSubagentsPackage(pkg.source) ? {
+        conflict: { code: "managed-provider" as const, message: IGNORED_SUBAGENTS_MESSAGE },
+        provides: { skills: [], prompts: [], themes: [], subagents: [], tools: [], commands: [] },
+      } : { provides: packageProvides({ pkg, resources: request.resources, extensions, subagents: catalog.subagents }) }),
     })),
     ...(diagnostics.length > 0 ? { diagnostic: boundedDiagnostic(diagnostics.join("; ")) } : {}),
   };
@@ -173,7 +176,6 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
 
 function managedPackage(request: PackageProvidesRequest): InstalledPackage[] {
   try {
-    request.managedSubagents?.assertNoConflict(request.settingsManager, request.agentDir);
     const installedPath = request.managedSubagents?.verify();
     return installedPath ? [{ source: MANAGED_SUBAGENTS_SOURCE, scope: "user", filtered: false, installedPath }] : [];
   } catch { return []; }

@@ -6,6 +6,29 @@ import XCTest
 @MainActor
 final class SettingsLayoutStyleTests: XCTestCase {
 
+    func testIgnoredManagedPackageDetailInLightAndDark() async throws {
+        let message = "Tron manages pi-subagents; this user declaration is ignored. Remove it with `pi remove npm:pi-subagents`."
+        let package = try JSONValue.object([
+            "source": .string("npm:pi-subagents@0.59.0"), "scope": .string("user"), "filtered": .bool(false),
+            "conflict": .object(["code": .string("managed-provider"), "message": .string(message)]),
+            "provides": .object(["skills": .array([]), "prompts": .array([]), "themes": .array([]),
+                                  "subagents": .array([]), "tools": .array([]), "commands": .array([])]),
+        ]).decode(PackageSummary.self)
+        // A wire conflict must reach native state before capturing its actual sheet.
+        let encoded = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(package))
+        XCTAssertEqual(encoded.objectValue?["conflict"]?.objectValue?["message"], .string(message))
+        for scheme in [ColorScheme.light, .dark] {
+            try await withHost(PackageDetailSheet(package: package, providesDiagnostic: nil).tronPresentation(),
+                               size: CGSize(width: 404, height: 800), scheme: scheme) { host in
+                XCTAssertNotNil(host.view.window)
+                let capture = XCTAttachment(image: image(host))
+                capture.name = "ignored-pi-subagents-\(scheme == .dark ? "dark" : "light")"
+                capture.lifetime = .keepAlways
+                add(capture)
+            }
+        }
+    }
+
     func testKnowledgeMutationSettlementRejoinsAfterPresentationSuspension() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)

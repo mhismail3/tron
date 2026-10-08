@@ -75,9 +75,6 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 // its legacy roots. The operator cutover is explicit and runs before Pi loads
 // the provider, so an old run cannot be silently stranded.
 await assertDelegatedRootCutoverReady(config.tronHome);
-// Activate this payload's exact offline closure before any Pi discovery. A
-// restart verifies/reuses the immutable root; damaged roots fail startup closed.
-const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. Existing installed packages are never rewritten in place.
@@ -106,6 +103,9 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
+// Activate this payload's exact offline closure before any Pi discovery. A
+// restart verifies/reuses the immutable root; damaged roots fail startup closed.
+const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
   logger.log(

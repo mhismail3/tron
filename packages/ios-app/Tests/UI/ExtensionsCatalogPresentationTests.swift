@@ -191,6 +191,19 @@ struct PackageDetailPresentationTests {
         #expect(withoutDiagnostic.providesDiagnostic == nil)
     }
 
+    @Test("package conflict survives decoding with known and unknown codes, and remains optional")
+    func conflictDecoding() throws {
+        for code in [nil, "managed-provider", "future-provider"] as [String?] {
+            var wire: [String: JSONValue] = ["source": .string("npm:pi-subagents@0.59.0"), "scope": .string("user"), "filtered": .bool(false)]
+            if let code {
+                wire["conflict"] = .object(["code": .string(code), "message": .string("Tron manages pi-subagents; this declaration is ignored.")])
+            }
+            let package = try JSONValue.object(wire).decode(PackageSummary.self)
+            let encoded = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(package))
+            #expect(encoded.objectValue?["conflict"] == wire["conflict"])
+        }
+    }
+
     @Test("Provides groups keep plan order and hide every empty kind")
     func groupOrderAndEmptyHiding() {
         #expect(PackageProvidesKind.allCases.map(\.rawValue) ==

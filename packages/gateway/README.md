@@ -411,9 +411,28 @@ The exact loaded extension gets a build-bound `tron:pi-subagents@…#…` owner;
 user npm sources and provider-shaped local paths grant no delegated authority.
 The existing per-extension registration admission also reserves `subagent` for
 that owner at load and for late registrations; it is not a one-shot load check.
-A user `pi-subagents` npm manifest dependency or configured npm source is a hard
-conflict: remove that declaration explicitly before loading delegated work.
-Tron neither silently overrides it nor warns and runs it. Missing installation
+User or project `npm:pi-subagents` declarations are ignored, never executed,
+and never contribute resources or the reserved tool. The managed pinned provider
+still loads; no settings or user npm-tree bytes are changed. `packages.list`
+retains the declaration with a typed `conflict` (`code: managed-provider`) and
+empty `provides`, alongside the managed provider's row. Settings labels it
+“Ignored” and displays: “Tron manages pi-subagents; this user declaration is
+ignored. Remove it with `pi remove npm:pi-subagents`.” Cleanup is optional.
+One `pi-subagents.user-package-ignored` warning per runtime startup/reload or
+session-free load reports the exclusion without exposing user paths/specs.
+
+The pinned Pi SDK's `DefaultResourceLoader.extensionsOverride` executes after
+module loading, so it is not an exclusion seam. `managedProviderSettingsView`
+supplies the resolver's `getGlobalSettings`/`getProjectSettings` package reads
+(and `getSettings`/`getPackages`) with a read-only filtered projection, including
+pre-trust, final and reload passes. The SDK's `DefaultPackageManager.resolve`
+uses these scoped reads; its package persistence paths use `setPackages` or
+`setProjectPackages`, which the view refuses, as it does package-bearing
+`applyOverrides`. Other calls bind to the canonical manager; non-package writes
+persist canonical unfiltered snapshots. Package admin retains its canonical
+manager for inventory/mutations and uses the view only for resource resolution.
+Any other extension claiming `subagent` still fails admission, including late
+registrations. Missing installation
 leaves delegated discovery unavailable in read-only/unactivated fixtures; managed
 startup activates it before discovery. Corrupt bytes or receipts fail closed. Catalog and package reads retain their
 bounded unavailable diagnostic. `managed-subagents.test.ts` installs one real

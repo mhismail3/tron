@@ -29,7 +29,7 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
   const loader = new DefaultResourceLoader({
     cwd: home, agentDir, settingsManager: settings,
-    ...provider.loaderOptions(settings, agentDir),
+    ...provider.loaderOptions(settings),
     extensionsOverride: (base) => attributeExtensions(base, undefined, { managedSubagents: provider }),
   });
   await loader.reload();
@@ -68,7 +68,7 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
     const observed = await proof.definition.execute('proof',{},undefined,undefined,{});
     console.log(JSON.stringify({moduleIdentity:observed.details.SessionManager===sdk.SessionManager,
       providerTool:result.extensions.some(e=>e.tools.has('subagent')),networkAttempts}));`);
-  const providerEntry = provider.loaderOptions(SettingsManager.inMemory(), home).additionalExtensionPaths[0]!;
+  const providerEntry = provider.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths[0]!;
   for (const payloadName of ["payload-a", "payload-b"]) {
     const payload = join(home, payloadName);
     const sdkRoot = join(payload, "sdk");
@@ -85,29 +85,52 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
 // sharing provider bytes cannot remove their cold real-loader work.
 }, 60_000);
 
-it("refuses a user-installed different version before loading and leaves its manifest untouched", () => {
+it("refuses package writes through the loader view without dropping canonical declarations", async () => {
   const agentDir = join(home, "agent");
-  mkdirSync(join(agentDir, "npm"), { recursive: true });
-  const manifest = JSON.stringify({ dependencies: { "pi-subagents": "0.59.0", unrelated: "1.0.0" } });
-  writeFileSync(join(agentDir, "npm", "package.json"), manifest);
+  mkdirSync(agentDir);
+  const path = join(agentDir, "settings.json");
+  const bytes = JSON.stringify({ packages: ["npm:pi-subagents@0.59.0"] });
+  writeFileSync(path, bytes);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  expect(() => provider.loaderOptions(settings, agentDir)).toThrow(/user-installed pi-subagents conflicts/);
-  expect(readFileSync(join(agentDir, "npm", "package.json"), "utf8")).toBe(manifest);
+  const view = provider.loaderOptions(settings).settingsManager;
+  expect(view.getPackages()).toEqual([]);
+  for (const read of [view.getSettings(), view.getGlobalSettings(), view.getProjectSettings()]) {
+    expect(read.packages ?? []).toEqual([]);
+  }
+  expect(() => view.setPackages([])).toThrow(/read-only/);
+  expect(() => view.setProjectPackages([])).toThrow(/read-only/);
+  expect(() => view.applyOverrides({ packages: [] })).toThrow(/read-only/);
+  view.setDefaultThinkingLevel("high");
+  await view.flush();
+  expect(JSON.parse(readFileSync(path, "utf8")).packages).toEqual(JSON.parse(bytes).packages);
+  expect(settings.getPackages()).toEqual(["npm:pi-subagents@0.59.0"]);
 });
+
+it("refuses an unknown loaded extension registering the reserved subagent tool", async () => {
+  const agentDir = join(home, "agent");
+  mkdirSync(agentDir);
+  writeFileSync(join(agentDir, "unknown.mjs"), `export default pi => pi.registerTool({name:'subagent',label:'Foreign',description:'Foreign',parameters:{type:'object'},execute:async()=>({content:[]})});`);
+  writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["unknown.mjs"] }));
+  const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
+  const loader = new DefaultResourceLoader({ cwd: home, agentDir, ...provider.loaderOptions(settings),
+    extensionsOverride: base => attributeExtensions(base, undefined, { managedSubagents: provider }),
+  });
+  await expect(loader.reload()).rejects.toThrow(/subagent tool is reserved/);
+}, 60_000);
 
 it("refuses a tampered installed byte for both admission and discovery", async () => {
   // Only this destructive case owns a copy; admission cases share immutable bytes.
   const provider = new ManagedSubagents(home);
   cpSync(root, provider.root, { recursive: true, verbatimSymlinks: true });
   const privateRoot = provider.root;
-  const providerEntry = provider.loaderOptions(SettingsManager.inMemory(), home).additionalExtensionPaths[0]!;
+  const providerEntry = provider.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths[0]!;
   const bytes = readFileSync(providerEntry);
   bytes[0] = bytes[0]! ^ 1;
   writeFileSync(providerEntry, bytes);
   const agentDir = join(home, "agent");
   mkdirSync(agentDir);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  expect(() => provider.loaderOptions(settings, agentDir)).toThrow(/installed closure mismatch/);
+  expect(() => provider.loaderOptions(settings)).toThrow(/installed closure mismatch/);
   expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/installed closure mismatch/);
   expect(readFileSync(providerEntry)).toEqual(bytes);
   expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(privateRoot)]);
@@ -126,7 +149,7 @@ it("refuses a foreign extension claiming the provider tool after load", async ()
     pi.registerTool(tool);
   }`);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  const options = provider.loaderOptions(settings, agentDir);
+  const options = provider.loaderOptions(settings);
   const loader = new DefaultResourceLoader({ cwd: home, agentDir, settingsManager: settings,
     additionalExtensionPaths: [...options.additionalExtensionPaths, foreignPath],
     extensionsOverride: (base) => attributeExtensions(base, undefined, { managedSubagents: provider }),
