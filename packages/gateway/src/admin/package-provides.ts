@@ -129,6 +129,7 @@ export interface PackageProvidesRequest {
 }
 
 export interface PackageProvidesResult {
+  resources: ResolvedPaths;
   entries: PackageProvidesEntry[];
   diagnostic?: string;
 }
@@ -140,6 +141,14 @@ export interface PackageProvidesResult {
 export async function loadPackageProvides(request: PackageProvidesRequest): Promise<PackageProvidesResult> {
   const diagnostics: string[] = [];
   let extensions: Extension[] = [];
+  let resources = request.resources;
+  if (request.managedSubagents) {
+    try {
+      const managed = await request.managedSubagents.resources();
+      resources = { extensions: [...resources.extensions, ...managed.extensions], skills: [...resources.skills, ...managed.skills],
+        prompts: [...resources.prompts, ...managed.prompts], themes: resources.themes };
+    } catch (error) { diagnostics.push(`managed resources are unavailable: ${errorText(error)}`); }
+  }
   try {
     const loaded = await (request.loadExtensions ?? loadSessionFreeExtensions)(
       request.agentDir,
@@ -163,12 +172,13 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
   });
   if (catalog.diagnostic) diagnostics.push(catalog.diagnostic);
   return {
+    resources,
     entries: [...request.packages, ...managedPackage(request)].map((pkg) => ({
       ...pkg,
       ...(request.managedSubagents && isUserSubagentsPackage(pkg.source) ? {
         conflict: { code: "managed-provider" as const, message: IGNORED_SUBAGENTS_MESSAGE },
         provides: { skills: [], prompts: [], themes: [], subagents: [], tools: [], commands: [] },
-      } : { provides: packageProvides({ pkg, resources: request.resources, extensions, subagents: catalog.subagents }) }),
+      } : { provides: packageProvides({ pkg, resources, extensions, subagents: catalog.subagents }) }),
     })),
     ...(diagnostics.length > 0 ? { diagnostic: boundedDiagnostic(diagnostics.join("; ")) } : {}),
   };

@@ -61,16 +61,21 @@ it.each([
     if (conflict) {
       for (const [index, base] of [agentDir, join(cwd, ".pi")].entries()) {
         const packageRoot = join(base, "npm", "node_modules", "pi-subagents");
-        await mkdir(packageRoot, { recursive: true });
+        await mkdir(join(packageRoot, "skills", "ignored-user-skill"), { recursive: true });
+        await mkdir(join(packageRoot, "prompts"), { recursive: true });
         const files = {
           [settingsFiles[index]!]: JSON.stringify({ packages: index ? [{ source: "npm:pi-subagents@0.59.0", extensions: ["index.mjs"] }] : ["npm:pi-subagents@0.59.0"] }),
           [join(base, "npm", "package.json")]: JSON.stringify({ dependencies: { "pi-subagents": "0.59.0" } }),
-          [join(packageRoot, "package.json")]: JSON.stringify({ name: "pi-subagents", version: "0.59.0", pi: { extensions: ["index.mjs"] } }),
+          [join(packageRoot, "package.json")]: JSON.stringify({ name: "pi-subagents", version: "0.59.0", pi: { extensions: ["index.mjs"], skills: ["skills"], prompts: ["prompts"] } }),
+          [join(packageRoot, "skills", "ignored-user-skill", "SKILL.md")]: "---\nname: ignored-user-skill\ndescription: Must not load\n---\nIgnored",
+          [join(packageRoot, "prompts", "ignored-user-prompt.md")]: "Ignored",
           [join(packageRoot, "index.mjs")]: `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(loadedMarker)}, 'loaded'); export default pi => pi.registerTool({name:'subagent',label:'Foreign',description:'Foreign',parameters:{type:'object'},execute:async()=>({content:[]})});`,
         };
         for (const [path, bytes] of Object.entries(files)) { await writeFile(path, bytes); untouched.set(path, bytes); }
       }
     }
+    await mkdir(join(agentDir, "skills", "ordinary-local"), { recursive: true });
+    await writeFile(join(agentDir, "skills", "ordinary-local", "SKILL.md"), "---\nname: ordinary-local\ndescription: Local resource control\n---\nLocal");
     const logger = new GatewayLogger();
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome, logger);
     const installedRoot = managedSubagents.verify();
@@ -88,6 +93,8 @@ it.each([
     const model = faux.getModel();
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
     await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"), `---\nname: offline-worker\ndescription: Offline activation probe\nmodel: ${model.provider}/${model.id}\ntools: read\n---\nReturn the requested probe marker.\n`);
+    const invalidDefinition = join(cwd, ".pi", "agents", "invalid-worker.md");
+    if (conflict) await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Invalid definition probe\nfallbackModels: [provider/model]\n---\nRead only.\n");
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", {
         agent: "offline-worker", task: "Return CHILD_OFFLINE_COMPLETE", async: false,
@@ -130,18 +137,49 @@ it.each([
     const resources = await slot.resources() as unknown as {
       subagents: Array<{ name: string }>; tools: Array<{ name: string; source: string }>;
       subagentDiagnostics?: string;
+      skills: { skills: Array<{ name: string; path: string; source: string; distribution?: string }> };
+      prompts: { prompts: Array<{ name: string; path: string; source: string; distribution?: string }> };
     };
-    expect(resources.subagentDiagnostics).toBeUndefined();
+    if (conflict) {
+      expect(resources.subagentDiagnostics).toContain("fallbackModels");
+      expect(resources.subagentDiagnostics).toContain("invalid-worker");
+      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toMatchObject([
+        { counts: { definitions: 1 } },
+      ]);
+      await slot.resources();
+      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(1);
+    } else expect(resources.subagentDiagnostics).toBeUndefined();
+    const assertManagedResources = (value: typeof resources) => {
+      for (const name of ["pi-subagents", "council-mode"]) {
+        expect(value.skills.skills.find(skill => skill.name === name)?.path.startsWith(`${installedRoot}/skills/`)).toBe(true);
+      }
+      expect(value.skills.skills.find(skill => skill.name === "pi-subagents")).toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE, distribution: "external" });
+      expect(value.skills.skills.find(skill => skill.name === "ordinary-local")).toMatchObject({ source: "auto", distribution: "local" });
+      for (const prompt of value.prompts.prompts.filter(prompt => prompt.path.startsWith(`${installedRoot}/prompts/`))) {
+        expect(prompt).toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE, distribution: "external" });
+      }
+      expect(value.skills.skills.some(skill => skill.name === "ignored-user-skill")).toBe(false);
+      expect(value.prompts.prompts.some(prompt => prompt.path.startsWith(`${installedRoot}/prompts/`))).toBe(true);
+      expect(value.prompts.prompts.some(prompt => prompt.name === "ignored-user-prompt")).toBe(false);
+    };
+    assertManagedResources(resources);
+    facts.managedResources = {
+      skills: resources.skills.skills.filter(skill => skill.path.startsWith(`${installedRoot}/skills/`)).map(({ name, source, distribution }) => ({ name, source, distribution })),
+      prompts: resources.prompts.prompts.filter(prompt => prompt.path.startsWith(`${installedRoot}/prompts/`)).map(({ name, source, distribution }) => ({ name, source, distribution })),
+      localControl: resources.skills.skills.find(skill => skill.name === "ordinary-local")?.source,
+      ignoredUserResourcesAbsent: true,
+    };
     expect(resources.subagents.some((agent) => agent.name === "offline-worker")).toBe(true);
     expect(resources.subagents.some((agent) => agent.name === "researcher")).toBe(true);
-    expect(resources.tools.some((tool) => tool.name === "subagent")).toBe(true);
+    expect(resources.tools.find(tool => tool.name === "subagent")).toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE });
     if (conflict) {
       for (const trusted of [false, true]) {
         await trust.set(cwd, trusted);
         await slot.reload(trusted, true, true);
+        assertManagedResources(await slot.resources() as unknown as typeof resources);
       }
       const inventory = await new PackageService(agentDir, trust, () => {}, undefined, managedSubagents).list(cwd) as {
-        packages: Array<{source: string; conflict?: {code: string; message: string}; provides: {tools: string[]; subagents: string[]}}>;
+        packages: Array<{source: string; conflict?: {code: string; message: string}; provides: {tools: string[]; subagents: string[]; skills: string[]; prompts: string[]}}>;
       };
       const ignored = inventory.packages.filter(row => row.source === "npm:pi-subagents@0.59.0");
       expect(ignored).toHaveLength(2);
@@ -149,10 +187,20 @@ it.each([
         expect(row.conflict).toEqual({ code: "managed-provider", message: "Tron manages pi-subagents; this user declaration is ignored. Remove it with `pi remove npm:pi-subagents`." });
         expect(Object.values(row.provides).flat()).toEqual([]);
       }
-      expect(inventory.packages.find(row => row.source === MANAGED_SUBAGENTS_SOURCE)?.provides.tools).toContain("subagent");
+      const provided = inventory.packages.find(row => row.source === MANAGED_SUBAGENTS_SOURCE)!.provides;
+      expect(provided.tools).toContain("subagent");
+      expect(provided.skills).toEqual(["council-mode", "pi-subagents"]);
+      expect(provided.prompts).toEqual(resources.prompts.prompts.filter(prompt => prompt.path.startsWith(`${installedRoot}/prompts/`)).map(prompt => prompt.name).sort());
+      expect(provided.prompts.length).toBeGreaterThan(0);
       expect(logger.recent(100).filter(row => row.event === "pi-subagents.user-package-ignored")).toHaveLength(4);
       expect(await stat(loadedMarker).then(() => true, () => false)).toBe(false);
       for (const [path, bytes] of untouched) expect(await readFile(path, "utf8")).toBe(bytes);
+      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(4);
+      await writeFile(invalidDefinition, "---\nname: invalid-worker\ndescription: Repaired definition\n---\nRead only.\n");
+      await slot.reload(true, true, true);
+      expect((await slot.resources() as Record<string, unknown>).subagentDiagnostics).toBeUndefined();
+      expect(logger.recent(100).filter(row => row.event === "pi-subagents.agent-definition-invalid")).toHaveLength(4);
+      facts.invalidDefinition = { field: "fallbackModels", reportCount: 4, readsDoNotReport: true, clearedAfterRepair: true };
       facts.ignoredPackage = { scopes: 2, diagnosticCount: 4, userCodeLoaded: false, filesUnchanged: true };
     }
     facts.discovery = { agent: "offline-worker", packagedAgent: "researcher", source: MANAGED_SUBAGENTS_SOURCE };

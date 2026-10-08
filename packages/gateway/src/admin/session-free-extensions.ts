@@ -45,7 +45,7 @@ export async function loadSessionFreeExtensions(
   if (settings.drainErrors().length > 0) {
     throw new GatewayError("conflict", "Canonical extension settings could not be loaded");
   }
-  const managedOptions = managedSubagents?.loaderOptions(settings);
+  const managedOptions = await managedSubagents?.loaderOptions(settings);
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -59,7 +59,7 @@ export async function loadSessionFreeExtensions(
       ? false
       : (await trust.inspect(cwd)).effectiveDecision === true,
   });
-  managedSubagents?.reportIgnoredPackages(settings);
+  await managedSubagents?.completeLoad(settings, cwd, agentDir, loader.getExtensions().extensions);
   const loaded = loader.getExtensions();
   return { extensions: loaded.extensions, errors: loaded.errors, warnings: loaded.warnings ?? [] };
 }

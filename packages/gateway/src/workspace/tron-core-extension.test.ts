@@ -22,7 +22,7 @@ describe("Tron operating context", () => {
     expect(text).not.toContain("Use ask_user");
     const all = tronContext(descriptor, "/project", ["display", "notify", "ask_user", "subagent"]);
     expect(all).toContain("source.kind=internal_file");
-    expect(all).toContain("workflowScript/workflowScriptPath");
+    expect(all).toContain("workflow: true");
     expect(tronContext({ ...descriptor, available: false }, "/project", [])).toContain("Do not recreate");
   });
 
@@ -44,8 +44,11 @@ describe("Tron operating context", () => {
 
   it("does not rewrite workflow programs, management requests, or other tools", async () => {
     for (const input of [
-      { workflowScript: 'return await runs.run("child", {agent:"worker", task:"review"});' },
-      { workflowScriptPath: "workflow.js" },
+      { workflow: true },
+      { workflow: "./workflow.js" },
+      { workflow: "named-resource" },
+      { agent: "worker", task: "unchanged", workflow: true },
+      { action: "resume", id: "run-id", message: "unchanged", workflow: "./workflow.js" },
       { action: "list" },
       { action: "update", agent: "worker", config: { task: "keep" } },
     ]) {

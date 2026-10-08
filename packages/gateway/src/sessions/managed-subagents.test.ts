@@ -37,19 +37,19 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-it.each([undefined, "", "another-home"])("refuses missing or foreign artifact binding %s before load and admission", (binding) => {
+it.each([undefined, "", "another-home"])("refuses missing or foreign artifact binding %s before load and admission", async (binding) => {
   if (binding === undefined) delete process.env[DELEGATED_PROVIDER_ROOT_ENV];
   else process.env[DELEGATED_PROVIDER_ROOT_ENV] = binding === "another-home" ? delegatedArtifactRoot(home) : binding;
-  expect(() => provider.loaderOptions(SettingsManager.inMemory())).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
+  await expect(provider.loaderOptions(SettingsManager.inMemory())).rejects.toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
   expect(() => provider.admit([])).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
 });
 
-it("revalidates artifact ownership on admission and reload after the process binding changes", () => {
+it("revalidates artifact ownership on admission and reload after the process binding changes", async () => {
   const settings = SettingsManager.inMemory();
-  expect(provider.loaderOptions(settings).extensionFactories.length).toBeGreaterThan(0);
+  expect((await provider.loaderOptions(settings)).extensionFactories.length).toBeGreaterThan(0);
   delegatedProviderEnvironment(delegatedArtifactRoot(home));
   expect(() => provider.admit([])).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
-  expect(() => provider.loaderOptions(settings)).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
+  await expect(provider.loaderOptions(settings)).rejects.toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
   delegatedProviderEnvironment(join(delegatedArtifactRoot(installHome), "..", "subagents"));
   expect(() => provider.admit([])).not.toThrow();
 });
@@ -60,7 +60,7 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
   const loader = new DefaultResourceLoader({
     cwd: home, agentDir, settingsManager: settings,
-    ...provider.loaderOptions(settings),
+    ...await provider.loaderOptions(settings),
     extensionsOverride: (base) => attributeExtensions(base, undefined, { managedSubagents: provider }),
   });
   await loader.reload();
@@ -132,7 +132,7 @@ it("refuses package writes through the loader view without dropping canonical de
   const bytes = JSON.stringify({ packages: ["npm:pi-subagents@0.59.0"] });
   writeFileSync(path, bytes);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  const view = provider.loaderOptions(settings).settingsManager;
+  const view = (await provider.loaderOptions(settings)).settingsManager;
   expect(view.getPackages()).toEqual([]);
   for (const read of [view.getSettings(), view.getGlobalSettings(), view.getProjectSettings()]) {
     expect(read.packages ?? []).toEqual([]);
@@ -152,7 +152,7 @@ it("refuses an unknown loaded extension registering the reserved subagent tool",
   writeFileSync(join(agentDir, "unknown.mjs"), `export default pi => pi.registerTool({name:'subagent',label:'Foreign',description:'Foreign',parameters:{type:'object'},execute:async()=>({content:[]})});`);
   writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["unknown.mjs"] }));
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  const loader = new DefaultResourceLoader({ cwd: home, agentDir, ...provider.loaderOptions(settings),
+  const loader = new DefaultResourceLoader({ cwd: home, agentDir, ...await provider.loaderOptions(settings),
     extensionsOverride: base => attributeExtensions(base, undefined, { managedSubagents: provider }),
   });
   await expect(loader.reload()).rejects.toThrow(/subagent tool is reserved/);
@@ -171,7 +171,7 @@ it("refuses a tampered installed byte for both admission and discovery", async (
   const agentDir = join(home, "agent");
   mkdirSync(agentDir);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  expect(() => provider.loaderOptions(settings)).toThrow(/installed closure mismatch/);
+  await expect(provider.loaderOptions(settings)).rejects.toThrow(/installed closure mismatch/);
   expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/installed closure mismatch/);
   expect(readFileSync(providerEntry)).toEqual(bytes);
   expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(privateRoot)]);
@@ -190,7 +190,7 @@ it("refuses a foreign extension claiming the provider tool after load", async ()
     pi.registerTool(tool);
   }`);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
-  const options = provider.loaderOptions(settings);
+  const options = await provider.loaderOptions(settings);
   const loader = new DefaultResourceLoader({ cwd: home, agentDir, ...options,
     additionalExtensionPaths: [foreignPath],
     extensionsOverride: (base) => attributeExtensions(base, undefined, { managedSubagents: provider }),

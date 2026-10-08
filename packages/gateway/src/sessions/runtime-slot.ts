@@ -1569,7 +1569,7 @@ export class RuntimeSlot {
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
-      const managedLoaderOptions = this.dependencies.managedSubagents?.loaderOptions(settingsManager);
+      const managedLoaderOptions = await this.dependencies.managedSubagents?.loaderOptions(settingsManager);
       const services = await createAgentSessionServices({
         settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
@@ -1627,7 +1627,7 @@ export class RuntimeSlot {
       // Only the loader keeps the read-only package view. Session settings
       // mutations keep their canonical owner, never the filtered projection.
       services.settingsManager = settingsManager;
-      this.dependencies.managedSubagents?.reportIgnoredPackages(settingsManager);
+      await this.dependencies.managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
       // owner handoff is the independent fail-safe when that signal was stale.
@@ -1750,8 +1750,8 @@ export class RuntimeSlot {
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
+    await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
-    this.dependencies.managedSubagents?.reportIgnoredPackages(session.settingsManager);
   }
 
   /** Pi's replacement hooks for each runtime this slot constructs. */

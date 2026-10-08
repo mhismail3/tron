@@ -419,6 +419,16 @@ install has no SDK ancestor. Restart/rollback selects the new process's host;
 no SDK files or links are added to the provider install. They never resolve from
 user or global npm. Arbitrary shell commands still filter `PI_*`; this binding
 is for the provider's own children, not a shell command environment.
+The verified manifest also supplies its declared `pi.skills` and `pi.prompts`
+paths to Pi's `additionalSkillPaths` and `additionalPromptTemplatePaths`. Files
+and directories must remain inside the same verified root; user-package
+resource resolution is not used to recover these declarations. The same manifest
+owner uses Pi's local-package resolver to expand exact admitted resource files
+and attach managed package provenance. Both session resources and `packages.list`
+consume that result; ordinary local resources are not relabelled. Pi finalizes
+extension metadata after its override, so load completion also restores exact
+managed tool/command provenance before publishing the load. The SDK owns resource
+loading and replacement on reload.
 The exact loaded extension gets a build-bound `tron:pi-subagents@…#…` owner;
 user npm sources and provider-shaped local paths grant no delegated authority.
 The existing per-extension registration admission also reserves `subagent` for
@@ -2687,6 +2697,13 @@ Tron-reserved package's own discovery, loaded through its bundled `jiti` depende
 discovery spawns nothing, is capped at 128 rows, is never cached across calls,
 and fails soft to an empty list plus one bounded `subagentDiagnostics` string
 when the package is absent, cannot load, or exposes an unexpected shape.
+The provider's own `agentDiagnostics` report is also projected into that existing
+string (at most 512 characters, count plus the first error), without discarding
+healthy catalog rows or revalidating definitions in Tron. Settings already
+presents it in the Subagents Diagnostics row. A count-only
+`pi-subagents.agent-definition-invalid` warning is emitted once per successful
+runtime load/reload or session-free extension load, never on resources reads.
+Repairing a definition clears the next discovery result; validity is not cached.
 `session.tree` returns the existing newest-first-selected, chronologically restored
 flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.
@@ -3179,12 +3196,16 @@ definitions, or workflow scripts to force-load
 `tron-core`, and must not claim automatic identity/workspace propagation to an
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing
 `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, preserving
-the task verbatim and never truncating it. Native tasks above 8,000 UTF-16 code
+the task verbatim and never truncating it. Direct execution selects `agent` and
+excludes `workflow`. `workflow: true` runs the single fenced JavaScript workflow
+block in the same assistant reply; a string containing `/` names a script path
+relative to the request cwd, and other strings select a named workflow resource.
+The hook never rewrites workflow source or mixed `agent`/`workflow` requests. Native tasks above 8,000 UTF-16 code
 units use the launcher's private task-file delivery; that is not a task rejection
 limit. Workflow/structured delegation stage limits remain runner-owned (1 MiB
 UTF-8 in the pinned native implementation).
 
-Workflow VM launches, slash/RPC/structured delegation, and further children do not
+Workflow child launches, slash/RPC/structured delegation, and further children do not
 emit this parent tool event: explicitly repeat identity, root, availability and
 ownership in every stage/task. The handoff does not grant authorization, change
 cwd, load extensions, or give a child parent tools. Explicitly configured child
