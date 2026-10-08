@@ -359,8 +359,19 @@ leaves delegated discovery unavailable without installing during startup; corrup
 bytes or receipts fail closed. Catalog and package reads retain their
 bounded unavailable diagnostic. `managed-subagents.test.ts` exercises the real
 closure and SDK loader/discovery in an isolated empty home, plus exact host SDK
-export identity across two payload paths sharing one install; real child execution,
-managed payload activation and rollback qualification are separate release gates.
+export identity across two payload paths sharing one install.
+`managed-subagents.integration.test.ts` activates the checked-in closure from an
+empty agent home and npm cache with npm offline and all TCP denied, then runs a
+real foreground child through `RuntimeRegistry` / `RuntimeSlot` and the host SDK.
+Only model output is scripted. It checks packaged/project discovery, the
+build-bound canonical activity owner, successful child completion, canonical
+child JSONL and the Gateway's matching child-session reference. Regenerate its
+sanitized evidence with
+`npx vitest run src/sessions/managed-subagents.integration.test.ts --maxWorkers=2` from the
+Gateway directory; the report is `test-results/managed-subagents.integration.json`
+(or `TRON_SUBAGENTS_REPORT` for an external evidence destination). Managed
+payload activation, detached/control scenarios and previous → candidate → previous
+rollback qualification remain separate release gates.
 
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
 layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote
