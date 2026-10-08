@@ -499,6 +499,11 @@ export class GatewayService {
           if (!model) throw new GatewayError("invalid_request", "home.configureMemory requires model");
           return safeJson(await this.requireHome().configureMemory({ model }));
         });
+      case "home.pauseMemory":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().pauseMemory());
+        });
       case "home.resumeMemory":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);

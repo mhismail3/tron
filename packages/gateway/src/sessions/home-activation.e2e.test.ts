@@ -63,6 +63,7 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import { EpisodicMemory } from "../episodic/episodic-memory.js";
 import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
@@ -311,6 +312,8 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
 /** Dispose the Gateway and open a new one over the same installation: the same
  * thing a Gateway restart does. */
 async function restart(f: Fixture): Promise<void> {
+  f.service.dispose();
+  await f.receipts.dispose();
   await f.registry.dispose();
   const registeredIndex = registries.indexOf(f.registry);
   if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
@@ -1379,6 +1382,160 @@ describe("Tron Home activations end to end", () => {
     expect(row.maxRequestChars / 4).toBeLessThan(WINDOW / 4);
   }, 300_000);
 
+  describe("memory pause contract", () => {
+    async function pausedFixture(label: string) {
+      const f = await fixture(`pause-${label}`);
+      disposals.push(async () => {
+        f.compactor.release?.();
+        f.service.dispose();
+        await f.receipts.dispose();
+        await f.registry.dispose();
+        await rm(f.root, { recursive: true, force: true });
+      });
+      const slot = await designateHome(f, `pause-designate-${label}`);
+      return { f, slot };
+    }
+    const pause = (f: Fixture, commandId = "pause-command") => f.service.invoke(client, "home.pauseMemory", { commandId });
+    const resume = (f: Fixture, commandId = "resume-command") => f.service.invoke(client, "home.resumeMemory", { commandId });
+
+    it("persists pause through configuration, profile transitions and restart without replaying input", async () => {
+      const { f, slot } = await pausedFixture("idle");
+      f.faux.setResponses([fauxAssistantMessage("pause durable baseline")]);
+      await slot.prompt("pause baseline canonical flush");
+      await waitUntil(() => !slot.isBusy);
+      await pause(f);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
+        phase: "paused", readiness: { ready: false, gaps: ["memory-paused"] },
+        recovery: { action: "resume-memory" }, memory: { paused: true },
+      });
+      await f.service.invoke(client, "home.configureMemory", { commandId: "pause-configure", model: OTHER_MEMORY_MODEL });
+      await f.registry.homeOwner().disable();
+      await f.registry.homeOwner().designate({}, () => MODEL);
+      await restart(f);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: true, open: false } });
+      const reopened = await f.registry.acquire(slot.id);
+      f.faux.setResponses([fauxAssistantMessage("must not be dispatched")]);
+      await f.service.invoke(client, "home.prompt", { commandId: "pause-input", text: "pause input retained and explicitly refused" });
+      await waitUntil(() => !reopened.isBusy);
+      expect(f.faux.state.callCount).toBe(1);
+      expect(await sessionJsonl(reopened)).toContain("pause input retained and explicitly refused");
+      expect(f.registry.homeOwner().contextStatus()).toMatchObject({ lastRefusalReason: "memory-paused" });
+      await resume(f);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: false } });
+      expect(f.faux.state.callCount).toBe(1);
+      const record = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8"));
+      expect(record.memory.paused).toBeUndefined();
+      report.cases.push({ case: "pause-idle-restart-input", inputRetained: true, explicitRefusal: true, automaticReplay: false });
+    }, 60_000);
+
+    it("resumes an idle pause before any canonical file exists", async () => {
+      const { f } = await pausedFixture("no-source");
+      await pause(f);
+      await expect(resume(f)).resolves.toMatchObject({ configured: true, open: false, paused: false });
+      expect(f.compactor.calls).toBe(0);
+      report.cases.push({ case: "pause-no-source", resumedWithoutStore: true });
+    });
+
+    it("lets an activation with a frozen view finish its tool loop while paused", async () => {
+      const { f, slot } = await pausedFixture("active");
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      let entered = false;
+      const requests: CapturedRequest[] = [];
+      f.faux.setResponses([
+        async context => { requests.push(record(context)); entered = true; await gate; return fauxAssistantMessage(fauxToolCall("read", { path: "note.txt" })); },
+        responsesOf(f, requests)("finished while memory paused"),
+      ]);
+      const running = slot.prompt("pause active input");
+      try {
+        await waitUntil(() => entered);
+        await pause(f);
+        expect(slot.isBusy).toBe(true);
+      } finally { release(); }
+      await running;
+      await waitUntil(() => !slot.isBusy);
+      expect(requests).toHaveLength(2);
+      expect(viewOf(requests[1]!)).toBe(viewOf(requests[0]!));
+      expect(await sessionJsonl(slot)).toContain("finished while memory paused");
+      expect(f.registry.homeOwner().contextStatus()).not.toHaveProperty("lastRefusalReason");
+      report.cases.push({ case: "pause-frozen-activation", toolLoopCompleted: true, viewUnchanged: true });
+    }, 60_000);
+
+    it.each(["before-settlement", "after-restart"] as const)("releases a readiness wait and resumes %s without duplicate summarization", async ordering => {
+      const { f, slot } = await pausedFixture("wait-pump");
+      f.compactor.gate = new Promise<void>(resolve => { f.compactor.release = resolve; });
+      f.faux.setResponses([fauxAssistantMessage(longInput("pause first reply"))]);
+      await slot.prompt(longInput("pause first input"));
+      await waitUntil(() => !slot.isBusy && f.compactor.entered > 0);
+      let waitingForMemory = false;
+      const whenReady = EpisodicMemory.prototype.whenReady;
+      vi.spyOn(EpisodicMemory.prototype, "whenReady").mockImplementation(function (cut, options) {
+        if (cut > 0) waitingForMemory = true;
+        return whenReady.call(this, cut, options);
+      });
+      const waiting = slot.prompt("pause readiness input");
+      await waitUntil(() => waitingForMemory);
+      await pause(f);
+      await awaitsWithin(waiting, "pause readiness settlement");
+      await waitUntil(() => !slot.isBusy);
+      expect(f.registry.homeOwner().contextStatus()).toMatchObject({ lastRefusalReason: "memory-paused" });
+      expect(f.faux.state.callCount).toBe(1);
+      if (ordering === "before-settlement") await resume(f);
+      f.compactor.release?.();
+      await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).episodic?.pump.busy === 0);
+      if (ordering === "after-restart") {
+        expect(f.compactor.calls).toBe(1);
+        expect((await f.registry.homeOwner().memoryStatus()).episodic?.coverage.summarized).toBe(1);
+        await restart(f);
+        await resume(f);
+      }
+      await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt ?? 1) === 0);
+      // Only the long first input and reply require compactor calls; the committed input leaf is not rebuilt.
+      expect(f.compactor.calls).toBe(2);
+      expect(f.faux.state.callCount).toBe(1);
+      report.cases.push({ case: "pause-wait-pump-restart", ordering, waitRefused: true, committedLeafRetained: true, totalCompactorCalls: f.compactor.calls });
+    }, 60_000);
+
+    it.each(["before-effect", "after-effect"] as const)("keeps a pause receipt unresolved across the %s crash boundary", async boundary => {
+      const { f } = await pausedFixture(boundary);
+      const store = f.receipts as unknown as { writeReceipt(path: string, receipt: { status: string }): Promise<void> };
+      const write = store.writeReceipt.bind(store);
+      const fault = vi.spyOn(store, "writeReceipt").mockImplementation(async (path, receipt) => {
+        if (boundary === "before-effect" && receipt.status === "pending") {
+          await write(path, receipt);
+          throw new Error("simulated process exit after pending publication");
+        }
+        if (boundary === "after-effect" && receipt.status === "completed") throw new Error("simulated process exit before completion publication");
+        return write(path, receipt);
+      });
+      try { await expect(pause(f)).rejects.toThrow("simulated process exit"); }
+      finally { fault.mockRestore(); }
+      await restart(f);
+      expect(await f.receipts.status(client.identity, "home.pauseMemory", "pause-command")).toMatchObject({ status: "pending" });
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: boundary === "after-effect" } });
+      await expect(pause(f)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+      report.cases.push({ case: "pause-receipt-crash-cut", boundary, receipt: "pending", effectObserved: boundary === "after-effect" });
+    }, 60_000);
+
+    it("replays completed pause receipts without repeating effect and reports sanitized control outcomes", async () => {
+      const { f } = await pausedFixture("receipt");
+      const accepted = await pause(f);
+      await expect(pause(f)).resolves.toEqual(accepted);
+      await resume(f);
+      await expect(pause(f)).resolves.toEqual(accepted);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: false } });
+      await expect(resume(f, "resume-not-stopped")).rejects.toMatchObject({ code: "conflict" });
+      const signals = f.homeLogger.recent(100).filter(row => row.event === "home.client-control");
+      expect(new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100).filter(row => row.event === "home.client-control")).toEqual(signals);
+      expect(signals.filter(row => row.operation === "pauseMemory")).toHaveLength(1);
+      expect(signals.filter(row => row.operation === "resumeMemory")).toHaveLength(2);
+      expect(signals.some(row => row.level === "warning" && row.reason === "conflict")).toBe(true);
+      expect(JSON.stringify(signals)).not.toContain("pause-command");
+      expect(JSON.stringify(signals)).not.toContain(MEMORY_MODEL_ID);
+      report.cases.push({ case: "pause-receipt-replay-signal", effectRepeated: false, sanitizedSignals: signals.length });
+    }, 60_000);
+  });
+
   it("runs activation two on the view of activation one, frozen across its tool loop", async () => {
     const f = await fixture("view");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
@@ -1571,7 +1728,7 @@ describe("Tron Home activations end to end", () => {
       configured: status.memory,
     };
     report.cases.push({ case: "configure", ...row });
-    expect(row.unconfiguredMemory).toEqual({ configured: false, open: false });
+    expect(row.unconfiguredMemory).toEqual({ configured: false, open: false, paused: false });
     expect(row.providerRequestsWhileUnconfigured).toBe(0);
     expect(row.refusalReasons).toContain("memory-not-configured");
     // The refusal is the activation's own evidence, even though it never
@@ -2290,9 +2447,9 @@ describe("Tron Home activations end to end", () => {
       unknownField: "invalid_request",
       missingModel: "invalid_request",
     });
-    expect(status.memory).toEqual({ configured: false, open: false });
+    expect(status.memory).toEqual({ configured: false, open: false, paused: false });
     expect(accepted).toBe("accepted");
-    expect(after.memory).toEqual({ configured: true, open: false, model: MEMORY_MODEL });
+    expect(after.memory).toEqual({ configured: true, open: false, model: MEMORY_MODEL, paused: false });
   }, 60_000);
 
   it("refuses a blocked memory with zero provider requests and reports the blocked reason", async () => {

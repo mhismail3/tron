@@ -58,7 +58,7 @@ export interface HomeRecord {
   /** Home's memory model. Absent on a record written before
    * Home's memory existed, and absent until `home.configureMemory` records one:
    * there are no defaults (decision D4), so an unconfigured memory refuses. */
-  memory?: { model: ModelRef };
+  memory?: { model: ModelRef; paused?: true };
 }
 
 /** What the Home record says about one session id. `unnamed` means the record
@@ -213,17 +213,18 @@ export class HomeOwner {
     if (!sessionPresent) gaps.push("session-missing");
     if (!memory.configured) gaps.push("memory-not-configured");
     if (memory.blocked) gaps.push(`memory-${memory.blocked}`);
+    if (memory.paused) gaps.push("memory-paused");
     const recovery: HomeStatus["recovery"] = !record.enabled || !sessionPresent
       ? { action: "designate", ...(!sessionPresent ? { reason: "Home session is missing" } : {}) }
       : !memory.configured ? { action: "configure-memory" }
-        : memory.blocked ? { action: "resume-memory", reason: memory.blocked }
+        : memory.paused || memory.blocked ? { action: "resume-memory", reason: memory.paused ? "memory-paused" : memory.blocked! }
           : { action: "none" };
     const ready = gaps.length === 0;
     const phase: HomeStatus["phase"] = !record.enabled ? "disabled"
       : record.chapters.at(-1)!.state === "reserved" || record.chapters.at(-1)!.state === "materializing" ? "rollover-pending"
         : !sessionPresent ? "missing-session"
           : memory.blocked || !memory.configured ? "blocked"
-          : activation.available && activation.activationOpen ? "active" : "ready";
+          : activation.available && activation.activationOpen ? "active" : memory.paused ? "paused" : "ready";
     return {
       phase, activation, readiness: { ready, gaps }, recovery,
       available: true,
@@ -563,7 +564,7 @@ export class HomeOwner {
    * a different model resumes a blocked memory without losing the nodes it built.
    */
   async configureMemory(input: { model: ModelRef }): Promise<HomeMemoryStatus> {
-    return this.mutex.run(async () => {
+    return this.clientControl("configureMemory", () => this.mutex.run(async () => {
       this.assertAvailable();
       const record = this.record;
       if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
@@ -572,7 +573,7 @@ export class HomeOwner {
         // name spending nothing can use. Designate it first.
         throw new GatewayError("conflict", "Tron Home is disabled: designate it before configuring its memory");
       }
-      const memory = { model: { ...input.model } };
+      const memory = { ...record.memory, model: { ...input.model } };
       const owner = this.ownerFor(record.homeId);
       await owner.configure(memory);
       await this.recordMutex.run(async () => {
@@ -582,39 +583,74 @@ export class HomeOwner {
         }
         await this.writeLocked({ ...current, memory, updatedAt: new Date().toISOString() });
       });
-      // No designation diagnostic: configuring the memory is not a Home
-      // lifecycle outcome. The memory reports itself on its own channel.
-      return owner.status();
-    });
+      // Configuration is not a designation/profile transition.
+      return this.memoryStatus();
+    }));
   }
 
-  /**
-   * `home.resumeMemory`: clear a block, re-read the source and restart the pump.
-   * The operator's answer to a `permanent-failure` (a model that refused a whole
-   * batch) or a `source-unavailable` block whose cause is gone. The memory resumes
-   * a `retries-exhausted` block by itself on the next activation.
-   */
+  /** Durable suspension is a memory decision, not a runtime profile change.
+   * Already-frozen activations retain their view; outstanding readiness waits
+   * refuse explicitly. The pump finishes accepted nodes, then stops admission. */
+  async pauseMemory(): Promise<HomeMemoryStatus> {
+    return this.clientControl("pauseMemory", () => this.mutex.run(async () => {
+      const record = this.requireEnabledMemory();
+      await this.commitMemoryPause(record, true);
+      this.memory?.owner.notePause();
+      return this.memoryStatus();
+    }));
+  }
+
+  /** Resume operator pause and/or block recovery. Committed nodes remain owned
+   * by the same store, so resuming never rebuilds them merely due to suspension. */
   async resumeMemory(): Promise<HomeMemoryStatus> {
-    return this.mutex.run(async () => {
-      this.assertAvailable();
-      const record = this.record;
-      if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
-      if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before resuming its memory");
-      if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: configure it with home.configureMemory");
+    return this.clientControl("resumeMemory", () => this.mutex.run(async () => {
+      const record = this.requireEnabledMemory();
       const owner = this.ownerFor(record.homeId);
-      await owner.configure(record.memory);
-      const blocked = owner.status().blocked;
-      if (!blocked) {
-        throw new GatewayError("conflict", "Home memory is not blocked");
+      await owner.configure(record.memory!);
+      if (!record.memory!.paused && !owner.status().blocked) {
+        throw new GatewayError("conflict", "Home memory is neither paused nor blocked");
       }
-      try {
-        await owner.resumeBlock();
-      } catch (error) {
+      await this.commitMemoryPause(record, false);
+      try { await owner.resume(); }
+      catch (error) {
         if (error instanceof HomeMemoryRefusal) throw new GatewayError("conflict", error.message);
         throw error;
       }
-      return owner.status();
-    });
+      return this.memoryStatus();
+    }));
+  }
+
+  private requireEnabledMemory(): HomeRecord {
+    this.assertAvailable();
+    const record = this.record;
+    if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
+    if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before controlling its memory");
+    if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: configure it with home.configureMemory");
+    return record;
+  }
+
+  private async commitMemoryPause(record: HomeRecord, paused: boolean): Promise<void> {
+    await this.options.sessions.serializeSessionMutation(homeSessionId(record), () => this.recordMutex.run(async () => {
+      const current = this.requireEnabledMemory();
+      if (current.homeId !== record.homeId) throw new GatewayError("conflict", "Tron Home changed during memory control");
+      if (Boolean(current.memory!.paused) === paused) return;
+      await this.writeLocked({
+        ...current,
+        memory: { model: { ...current.memory!.model }, ...(paused ? { paused: true as const } : {}) },
+        updatedAt: new Date().toISOString(),
+      });
+    }));
+  }
+
+  private async clientControl<T>(operation: "configureMemory" | "pauseMemory" | "resumeMemory", run: () => Promise<T>): Promise<T> {
+    try {
+      const result = await run();
+      this.options.diagnostic?.({ outcome: "client-control", operation, reason: "completed" });
+      return result;
+    } catch (error) {
+      this.options.diagnostic?.({ outcome: "client-control", operation, reason: error instanceof GatewayError ? error.code : "failed" });
+      throw error;
+    }
   }
 
   /**
@@ -625,13 +661,14 @@ export class HomeOwner {
    */
   async memoryStatus(): Promise<HomeMemoryStatus> {
     const record = this.record;
-    if (!record) return { configured: false, open: false };
-    const sessionId = homeSessionId(record);
+    if (!record) return { configured: false, open: false, paused: false };
+    const paused = Boolean(record.memory?.paused);
     const owner = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
-    if (owner?.open) return owner.status();
+    if (owner?.open) return { ...owner.status(), paused };
     const base: HomeMemoryStatus = record.memory
       ? { configured: true, open: false, model: { ...record.memory.model } }
       : { configured: false, open: false };
+    base.paused = paused;
     const persisted = await (owner ?? this.ownerFor(record.homeId)).persistedState().catch(() => undefined);
     if (!persisted) return base;
     return {
@@ -706,6 +743,9 @@ export class HomeOwner {
     if (!record.memory) {
       throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     }
+    if (record.memory.paused) {
+      throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
+    }
     const owner = this.ownerFor(record.homeId);
     // After a Gateway restart the record still holds the configuration; the
     // first activation opens the store from it.
@@ -765,6 +805,7 @@ export class HomeOwner {
         branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits); },
       },
       modelSummarizer: this.options.memorySummarizer,
+      isPaused: () => Boolean(this.record?.memory?.paused),
       ...(this.options.memoryDiagnostic ? { diagnostic: this.options.memoryDiagnostic } : {}),
     });
     this.memory = { sessionId: homeId, owner };
@@ -861,9 +902,8 @@ export class HomeOwner {
           enabled: true,
           model: { ...model },
           // The memory's configuration is the user's decision about *how* Home
-          // remembers, so a replacement session keeps it; the spend is the old
-          // session's, and a new store starts its own (docs/home.md).
-          ...(existing?.memory ? { memory: { model: { ...existing.memory.model } } } : {}),
+          // remembers, so a replacement chapter keeps it and its pause decision.
+          ...(existing?.memory ? { memory: { ...existing.memory, model: { ...existing.memory.model } } } : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
@@ -1132,15 +1172,15 @@ function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): 
 
 /** `undefined` for an absent field, the admitted value for a valid one, and
  * `null` for a field this build cannot use. */
-function admitMemory(value: unknown): { model: ModelRef } | null | undefined {
+function admitMemory(value: unknown): HomeRecord["memory"] | null {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const model = record.model;
-  if (!hasOnlyKeys(record, ["model"]) || !model || typeof model !== "object" || Array.isArray(model)) return null;
+  if (!hasOnlyKeys(record, ["model", "paused"]) || (record.paused !== undefined && record.paused !== true) || !model || typeof model !== "object" || Array.isArray(model)) return null;
   const modelRecord = model as Record<string, unknown>;
   if (!hasOnlyKeys(modelRecord, ["provider", "id"])
     || !boundedString(modelRecord.provider, MAXIMUM_PROVIDER_BYTES)
     || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)) return null;
-  return { model: { provider: modelRecord.provider, id: modelRecord.id } };
+  return { model: { provider: modelRecord.provider, id: modelRecord.id }, ...(record.paused === true ? { paused: true } : {}) };
 }

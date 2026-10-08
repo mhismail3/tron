@@ -127,6 +127,8 @@ export interface HomeMemoryOptions {
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
   diagnostic?: (record: HomeMemoryDiagnostic) => void;
   limits?: Partial<EpisodicLimits>;
+  /** Home ledger is the single pause authority, including across store replacement. */
+  isPaused?: () => boolean;
 }
 
 interface MemoryBinding {
@@ -232,11 +234,15 @@ export class HomeMemory {
    * `home.resumeMemory`. The re-read and the pump start happen under the lock;
    * the drain does not.
    */
-  async resumeBlock(): Promise<void> {
-    const binding = await this.mutex.run(() => this.bindingForViewLocked());
-    if (!binding.memory.status().blocked) return;
-    await binding.memory.resumeIngested();
+  async resume(): Promise<void> {
+    // Configuration opens an existing canonical source. An empty new Home has
+    // no store to resume yet; removing its ledger pause is sufficient.
+    const binding = await this.mutex.run(async () => this.binding);
+    await binding?.memory.resumeIngested();
   }
+
+  /** Notify existing waiters only; no copied pause state or store opening. */
+  notePause(): void { this.binding?.memory.notePause(); }
 
   /** The persisted state of this memory's store, without opening it: its recorded
    * spend and the block that refuses every activation. */
@@ -291,6 +297,7 @@ export class HomeMemory {
    * the log, unanswered.
    */
   async activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
+    if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     const binding = await this.mutex.run(() => this.bindingForViewLocked());
     try {
       // Ingest only: the wait below is for the lines this activation will send,
@@ -326,6 +333,7 @@ export class HomeMemory {
       await binding.memory.whenReady(cut, signal ? { signal } : {});
     } catch (error) {
       if (signal?.aborted) throw new HomeMemoryRefusal("memory-wait-cancelled", "the activation's wait for the Home memory was cancelled");
+      if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory was paused while preparing this activation");
       const blocked = binding.memory.status().blocked;
       if (blocked) throw this.blockedRefusal(blocked);
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not cover the activation start: ${messageOf(error)}`);
@@ -523,6 +531,7 @@ export class HomeMemory {
         sessionFile,
         ...(this.options.sessionSource ? { sessionSource: this.options.sessionSource } : {}),
         summarizer,
+        ...(this.options.isPaused ? { isPaused: this.options.isPaused } : {}),
         ...(this.options.limits ? { limits: this.options.limits } : {}),
         ...(this.options.diagnostic ? { diagnostic: this.options.diagnostic } : {}),
       });

@@ -440,6 +440,31 @@ view at step 8 of a 300-message run. A uniform exponent shift provably cannot
 diverge — `(T-s1)/2^(l1+e) > (T-s2)/2^(l2+e)` is independent of `e` — which is
 why that control was removed rather than kept as a permanent test.
 
+## Home operator pause
+
+Home's durable ledger owns operator pause, not `state.json` and not a runtime
+slot. Home supplies the memory a live `isPaused` admission authority; reopening
+or replacing a store cannot lose it. Ingestion and cursor publication continue
+while paused, but the pump admits no new nodes. Already-started nodes finish
+bounded compactor tries/retries and publish valid results. Pause is therefore not
+an immediate cancellation or zero-spend promise, and it does not invalidate a
+node generation or discard results that resume would have to summarize again.
+
+Home notifies the memory at durable pause publication to reject all outstanding
+`whenReady` waits with the typed `paused` error. New waits reject even when their
+cut is already covered: a paused memory cannot admit a new activation's view.
+An activation already holding a frozen view belongs to HomeRequestPolicy, not
+the pump, and continues. Resume re-reads canonical deltas and drains the same
+single-flight pump; a resume joining a retiring pump drains remaining work once
+that exact pump retires. Disposal alone aborts accepted compactor work.
+
+Nodes and spend remain durable across pause/restart/resume. The store cannot
+promise exactly-once external provider calls if a process crashes before their
+result is committed. `home-activation.e2e.test.ts`'s pause contract covers a gated
+readiness wait and compactor, resume before node settlement and after restart,
+and retention of committed nodes without duplicate compaction. The retained
+report is `test-results/home-activation/report.json`.
+
 ## Retries, spend and blocked states
 
 - **Transient** provider failures (a thrown call, or an error the pinned

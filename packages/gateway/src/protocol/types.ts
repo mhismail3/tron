@@ -1046,7 +1046,7 @@ export interface HomeOpen {
 
 export interface HomeStatus {
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
-  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "active" | "ready";
+  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
   activation: HomeContextProjection;
   readiness: { ready: boolean; gaps: string[] };
@@ -1081,6 +1081,8 @@ export interface HomeStatus {
  * even when the store is not open.
  */
 export interface HomeMemoryStatus {
+  /** Durable operator suspension. Independent of a compactor/source block. */
+  paused?: boolean;
   configured: boolean;
   open: boolean;
   model?: ModelRef;

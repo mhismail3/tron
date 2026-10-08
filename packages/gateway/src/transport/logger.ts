@@ -51,6 +51,7 @@ export interface LogRecord {
   code?: string;
   reason?: string;
   /** Home chapter diagnostics: approved enums and non-negative safe counters. */
+  operation?: "configureMemory" | "pauseMemory" | "resumeMemory";
   category?: "open" | CommandReceiptRouteCategory;
   boundary?: HomeHardBoundary;
   chapterOrdinal?: number;
@@ -87,7 +88,7 @@ export interface LogRecord {
   error?: LogError;
 }
 
-export interface LogMetadata extends Pick<LogRecord, "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries"> {
+export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries"> {
   event?: string;
   source?: string;
   sessionId?: string;
@@ -285,6 +286,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
     ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
+    ...(value.operation === "configureMemory" || value.operation === "pauseMemory" || value.operation === "resumeMemory" ? { operation: value.operation } : {}),
     ...(value.category === "open" || value.category === "fresh" || value.category === "replay" ? { category: value.category } : {}),
     ...(value.boundary === "hard-bytes" || value.boundary === "hard-entries" ? { boundary: value.boundary } : {}),
     ...(counterField(value.chapterOrdinal) !== undefined ? { chapterOrdinal: value.chapterOrdinal } : {}),

@@ -263,6 +263,7 @@ export class EpisodicMemory {
     if (!Number.isSafeInteger(cut) || cut < 0) throw new EpisodicMemoryError("invalid-request", "whenReady cut must be a non-negative integer");
     const signal = options.signal;
     if (signal?.aborted) throw new EpisodicMemoryError("closed", "whenReady wait was cancelled");
+    if (this.dependencies.isPaused?.()) throw new EpisodicMemoryError("paused", "Episodic memory is paused");
     if (this.blocked) throw this.blockedError();
     if (cut > this.messages.size) throw new EpisodicMemoryError("invalid-request", `whenReady cut ${cut} is beyond the ${this.messages.size} messages this memory holds`);
     if (this.viewReady(cut)) return;
@@ -461,11 +462,15 @@ export class EpisodicMemory {
       if (this.blocked) {
         this.blocked = null;
         await this.saveState();
-        await this.ingest();
       }
+      await this.ingest();
     });
     void this.drain().catch(() => {});
   }
+
+  /** Pause authority already committed by Home; release disposable waits while
+   * accepted node work retains its result and bounded spend. */
+  notePause(): void { this.settleWaiters(); }
 
   status(): EpisodicMemoryStatus {
     const byLevel = new Map<number, number>();
@@ -864,29 +869,36 @@ export class EpisodicMemory {
   // ---- the pump (gist §4.1) ------------------------------------------------------
 
   private async drain(): Promise<void> {
-    if (this.closed || this.blocked) return;
-    if (!this.draining) {
-      this.draining = (async () => {
-        try {
-          await this.pump();
-        } catch (error) {
-          // The pump handles every failure it can classify; anything that
-          // escapes it (a store append that fails on I/O, say) would otherwise
-          // leave the pump dead, the memory unblocked and every waiter waiting
-          // for a node that can never come. For a caller that never awaits the
-          // drain — the turn loop, which only waits on `whenReady` — an
-          // unexpected failure of the owner's own loop is a permanent failure,
-          // so it blocks with the reason and releases the waiters. The
-          // settlement runs in a `finally`: a block that cannot be persisted
-          // still must not strand a waiter.
-          try {
-            await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
-          } finally {
-            this.settleWaiters();
-          }
-        }
-      })().finally(() => { this.draining = null; });
+    if (this.closed || this.blocked || this.dependencies.isPaused?.()) return;
+    const draining = this.draining;
+    if (draining) {
+      await draining;
+      // A joining resume/ingest may arrive while this pump retires its paused
+      // exit. That admission starts remaining work after the exact pump retires;
+      // a pump's own completion never schedules itself again without admission.
+      if (!this.closed && !this.blocked && !this.dependencies.isPaused?.() && this.nextStartable()) await this.drain();
+      return;
     }
+    this.draining = (async () => {
+      try {
+        await this.pump();
+      } catch (error) {
+        // The pump handles every failure it can classify; anything that
+        // escapes it (a store append that fails on I/O, say) would otherwise
+        // leave the pump dead, the memory unblocked and every waiter waiting
+        // for a node that can never come. For a caller that never awaits the
+        // drain — the turn loop, which only waits on `whenReady` — an
+        // unexpected failure of the owner's own loop is a permanent failure,
+        // so it blocks with the reason and releases the waiters. The
+        // settlement runs in a `finally`: a block that cannot be persisted
+        // still must not strand a waiter.
+        try {
+          await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
+        } finally {
+          this.settleWaiters();
+        }
+      }
+    })().finally(() => { this.draining = null; });
     await this.draining;
   }
 
@@ -898,7 +910,7 @@ export class EpisodicMemory {
     try {
       for (;;) {
         if (this.closed || this.blocked) break;
-        while (running.size < this.limits.jobs) {
+        while (!this.dependencies.isPaused?.() && running.size < this.limits.jobs) {
           const next = this.nextStartable();
           if (!next) break;
           const key = nodeAddress(next.level, next.index);
@@ -1166,6 +1178,11 @@ export class EpisodicMemory {
     if (this.waiters.length === 0) return;
     const remaining: Waiter[] = [];
     for (const waiter of this.waiters) {
+      if (this.dependencies.isPaused?.()) {
+        if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
+        waiter.reject(new EpisodicMemoryError("paused", "Episodic memory is paused"));
+        continue;
+      }
       if (this.blocked) {
         if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
         waiter.reject(this.blockedError());

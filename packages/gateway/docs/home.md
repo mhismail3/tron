@@ -356,7 +356,9 @@ owner.
   chapter?, memory }`. `chapter` contains a bounded ledger count, current canonical
   byte/entry measurements when available, and the current recovery decision. `phase` and the recovery action are derived on each read; they are
   not additional lifecycle state. Readiness gaps identify an unavailable record,
-  missing/disabled designation, unconfigured memory or blocked memory. `activation`
+  missing/disabled designation, unconfigured, blocked or operator-paused memory
+  (`memory-paused`). An idle paused Home has `phase: "paused"`; an activation
+  already holding its frozen view remains `active` until it settles. `activation`
   is the same body-free projection returned by `home.context`. The memory
   projection includes only bounded counters and memory state, never canonical
   messages or frozen memory-view text. The terminal reports admitted/summarized
@@ -394,9 +396,15 @@ owner.
   `{ model }` must name a registered physical model; a virtual or unavailable
   one is refused. There is no budget to set (#493): memory spend is bounded by
   construction and reported. It is refused on a disabled Home, and it resumes a block its change
-  addresses (see [Recovery](#recovery)). It returns the bounded memory projection.
-- `home.resumeMemory` is a mutation with a command-id receipt. It clears any block
-  and returns the bounded memory projection.
+  addresses (see [Recovery](#recovery)), but never clears operator pause. It returns
+  the bounded memory projection.
+- `home.pauseMemory` is a mutation with a command-id receipt and no parameters
+  besides `commandId`. It requires an enabled, configured Home, durably pauses
+  memory, and returns the bounded memory projection. Repeated pause is idempotent.
+- `home.resumeMemory` is a mutation with a command-id receipt. It clears operator
+  pause and/or a block, re-reads canonical deltas and restarts the pump without
+  awaiting catch-up. A memory neither paused nor blocked refuses with conflict.
+  An empty Home without a canonical file resumes without creating a store.
 - `home.context` is a read with no parameters: the bounded request context of
   Home's current or last activation (see [Activations](#activations)), never a
   message body.
@@ -604,7 +612,7 @@ the memory re-reads the log after its cursor and builds its tree in the backgrou
 under its own bounds.
 
 There is **no default model** (decision D4). The record's optional `memory` field
-holds the model: `home.configureMemory` (a command-id-receipted mutation,
+holds the model and optional `paused: true` (absence means running): `home.configureMemory` (a command-id-receipted mutation,
 `{ model }`, refusing a virtual or unregistered model) writes it, and its result
 is the same bounded memory projection `home.status` carries as `memory`.
 Reconfiguring with the same model changes nothing.
@@ -616,12 +624,12 @@ only after its source changed, so spend grows only with the conversation and its
 edits. Token spend is persisted with the memory's state and reported as
 `spentTokens`, as information.
 
-A fresh-session designation keeps the memory configuration (the model is the
-user's decision about *how* Home remembers), but the replacement session gets a
-NEW memory store with its own spend, because the store is keyed by session id. Disabling Home and re-enabling it keeps the same session and store,
-so nothing is re-spent.
+A fresh-session designation, chapter rollover and disable/re-enable preserve
+the memory configuration and pause decision. The store is keyed by stable
+`homeId`, so runtime or physical-session replacement cannot reset its nodes or
+spend.
 
-A Home whose memory is unconfigured, blocked, or unable to place the activation's
+A Home whose memory is unconfigured, operator-paused, blocked, or unable to place the activation's
 start entry refuses every activation with a readable reason and makes zero
 provider requests. `home.context` is the bounded read for the other side of that:
 for Home's current or last activation it returns the activation's start entry id,
@@ -629,6 +637,42 @@ whether it is still open, the frozen view's line and byte counts, the effective
 token estimate the request was measured at, the model's window, and *that*
 activation's refusal reason and detail (the sizes are absent when it was refused
 before it prepared a request) — never a message body and never the view text.
+
+### Operator pause
+
+HomeOwner's ledger is the single durable pause authority; the episodic store
+has no duplicate pause flag. Every open/reconfiguration reads the same authority.
+`home.status.memory.paused` is returned even with no open store. Pause/resume
+commit under the existing Home lifecycle mutex, Registry session serializer and
+then the ledger record lock. Unlike Disable, they do not change the runtime
+profile or rebuild a busy session.
+
+An activation that already obtained its frozen view continues normally, including
+its tool loop, steering and bounded retries. An activation preparing that view
+(including an outstanding readiness wait), or a new activation while paused,
+fails closed with `memory-paused`: canonical input and the explicit assistant
+refusal remain visible, with zero provider requests for that activation. Resume
+never replays that input. Stop remains the owner of response cancellation.
+
+Canonical ingestion may continue while paused; no new summary node starts.
+Already-started nodes finish their bounded calls and durable append, so pause is
+not an immediate zero-spend promise and never throws away an accepted summary
+only to rebuild it on resume. Committed nodes survive resume and restart. A crash
+before an external call's result is durably committed cannot guarantee exactly-once
+provider spend; this is the existing compactor crash boundary, not a replay queue.
+
+Pause/resume use the normal receipt contract: pending is durable before effects,
+completed before a success response. At a crash after pending publication but
+before completion, the receipt stays pending/outcome-unknown regardless of whether
+the ledger effect landed. Status reports the ledger's actual pause decision, not
+command completion. Completed receipt replay returns its original result without
+repeating an effect, even after a later resume. Reconcile status rather than
+blindly resubmitting unresolved commands. The `memory pause contract` cases in
+`src/sessions/home-activation.e2e.test.ts` retain the real Registry/RPC/canonical
+memory journey and injected receipt-write crash cuts in
+`test-results/home-activation/report.json`; these cuts are not SIGKILL or power-loss
+proof. `home.client-control` is the one-step diagnostic for terminal configure,
+pause and resume owner outcomes; no poll emits a record.
 
 ### Recovery
 
@@ -643,8 +687,7 @@ the block's reason:
 
 None of these waits for the summary catch-up: the block is cleared, the canonical
 log is re-read and the pump restarts, while the activation that asked waits only
-for the lines it will send. Resuming a memory that is *not* blocked, or one whose
-block a budget raise would not address, is refused as a conflict with the reason,
+for the lines it will send. Resuming a memory that is neither blocked nor operator-paused is refused as a conflict with the reason,
 so the caller learns what is actually wrong rather than being told a no-op
 succeeded.
 
