@@ -85,6 +85,7 @@ included in the error.
 | `Connector credential tests require an explicit keychain path` | `MacKeychainConnectorCredentialStore` constructor / test-runner failure | A test attempted to use the default keychain; no `security` process starts. This diagnoses unsafe fixture ownership before a Keychain prompt or timeout. |
 | `Connector credential is invalid: expected printable ASCII` (`TypeError`) | Adapter write admission / caller error | A secret contains Unicode or control characters that cannot be read back unambiguously with `security -w`; no child starts. |
 | `Mac Keychain credential command is too long` | Adapter write admission / caller error | The escaped UTF-8 stdin command would reach the CLI's 4096-byte input-buffer limit; rejection prevents truncation or loss of an explicit keychain target. |
+| `owned fault proxy exited (<exit code|signal>)` | `scripts/ios-gateway-e2e-test` / command stderr captured by CI | An owned fault proxy exited before readiness; the diagnostic reports its wait status as an exit code or signal and includes the last 20 lines of `proxy.log`. Regression: [`GatewayE2EFixture.test_proxy_startup_failure_reports_process_status_and_stderr_tail`](../../../scripts/test-ios-test-infrastructure.py); see [iOS Gateway E2E diagnostics](../../ios-app/docs/development.md#efficient-focused-tests). |
 
 ## External provider diagnostics
 
