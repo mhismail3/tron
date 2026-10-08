@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
+import { borrowedOpenAIModelEligibility, OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
@@ -538,6 +539,7 @@ class RequestSpanLane extends AsyncMutex {
 
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
+  private readonly openAIModelEligibility: OpenAIModelEligibility;
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first user or assistant message. Weak ownership cannot outlive
    * the RuntimeSlot and is never a second session catalog. */
@@ -692,6 +694,7 @@ export class RuntimeRegistry {
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
+      openAIModelEligibility?: OpenAIModelEligibility;
       trust: TrustService;
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -768,6 +771,7 @@ export class RuntimeRegistry {
       homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
     },
   ) {
+    this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.workspace = new TronWorkspace(options.tronHome, options.workspaceUnavailable
@@ -1830,14 +1834,21 @@ export class RuntimeRegistry {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      homeModelRuntime: async () => applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
-      createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
-        authPath: join(this.options.agentDir, "auth.json"),
-        modelsPath: join(this.options.agentDir, "models.json"),
-        modelsStorePath: join(this.options.agentDir, "models-store.json"),
-        refreshOnCreate: true,
-        allowModelNetwork: false,
-      })))())),
+      homeModelRuntime: async () => ({
+        runtime: applyHomeCacheRetention(sessionRuntimeView(this.options.gatewayModelRuntime ?? await this.dependencies().createModelRuntime())),
+        ownership: this.options.gatewayModelRuntime ? "borrowed" as const : "owned" as const,
+      }),
+      openAIModelEligibility: this.openAIModelEligibility,
+      createModelRuntime: async () => {
+        const runtime = applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
+          authPath: join(this.options.agentDir, "auth.json"),
+          modelsPath: join(this.options.agentDir, "models.json"),
+          modelsStorePath: join(this.options.agentDir, "models-store.json"),
+          refreshOnCreate: true,
+          allowModelNetwork: false,
+        })))()));
+        return runtime;
+      },
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,
@@ -4916,11 +4927,14 @@ export class RuntimeRegistry {
  * such a write stays with that one runtime, so it neither changes Gateway-wide
  * lookups nor stacks under the next replacement runtime. Every other read and
  * call reaches the shared runtime, bound to it, so provider packages registered
- * there stay visible. No write through the view can reach the shared runtime. */
+ * there stay visible. Property writes stay local; mutating method calls still
+ * reach the shared runtime and must be invoked only by its owner. */
 function sessionRuntimeView(shared: ModelRuntime): ModelRuntime {
   const own = new Map<PropertyKey, unknown>();
   return new Proxy(shared, {
     get: (target, property) => {
+      // Borrowed eligibility is a read-only lookup, never a new filter installation.
+      if (property === borrowedOpenAIModelEligibility) return openAIModelEligibility(target);
       if (own.has(property)) return own.get(property);
       const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;

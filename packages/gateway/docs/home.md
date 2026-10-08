@@ -228,14 +228,20 @@ packages (for example CortexKit's `anthropic` override, which carries a Claude
 subscription) register their providers there through `GlobalProviderResources`,
 so Home reaches its designated model through the same provider the catalog
 offered. Ordinary sessions keep a runtime each, because a project extension may
-register a provider into it. Sharing is safe for Home only because of two
-properties:
+register a provider into it. Sharing is safe for Home only because of these
+ownership boundaries:
 - Home loads no extension that can register a provider.
 - Each Home runtime sees the shared runtime through its own view. Reads and
-  calls reach the shared runtime, while a write stays with the view. The session
-  context-window policy replaces `getModel` to project its budget, so without
-  the view a Home override would change Gateway-wide lookups and stack under
-  every replacement runtime.
+  calls reach the shared runtime, while property writes stay with the view. The
+  session context-window policy replaces `getModel` to project its budget, so
+  without the view a Home override would change Gateway-wide lookups and stack
+  under every replacement runtime.
+- Model eligibility installation belongs to the model runtime's owner. A Home
+  slot borrowing the Gateway runtime delegates eligibility lookup to its shared
+  installation; it never registers provider filters or detaches that installation.
+  Rebuilding or disposing Home therefore cannot stack filters or retain old views
+  in shared provider closures. Ordinary slots and standalone Home runtimes own
+  their model runtime and attach/detach eligibility with their slot lifecycle.
 
 Without this, Home reached Pi's built-in provider instead (#480).
 
@@ -654,8 +660,9 @@ The recipe's tree navigation is otherwise unchanged, and both surfaces are
 exercised end to end by
 `packages/gateway/src/sessions/home-memory-tools.e2e.test.ts`
 (`test-results/home-memory-tools/report.json`). The runtime lifecycle cases also
-retain `packages/gateway/test-results/home-provider-runtime/report.json`;
-regenerate it with `npx vitest run
+retain `packages/gateway/test-results/home-provider-runtime/report.json`, including
+shared eligibility/filter identity across three Home rebuilds and disposal, and
+ordinary-runtime eligibility retirement; regenerate it with `npx vitest run
 src/sessions/home-provider-runtime.e2e.test.ts`.
 
 ## Not built yet

@@ -66,6 +66,7 @@ import { AutomationPaginationStore } from "../automations/automation-pagination.
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
+import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
@@ -1626,7 +1627,11 @@ export class GatewayService {
         ));
       case "session.setModel":
         return this.mutation(client, method, params, async (workToken) => {
-          const revision = await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }), workToken, this.configurationExpectation(params));
+          const slot = await this.openedSlot(client, params);
+          const provider = string(params.provider, "provider", { max: 120 });
+          const modelId = string(params.modelId, "modelId", { max: 300 });
+          await assertNewModelChoice(slot.modelRuntime, provider, modelId, client.signal);
+          const revision = await slot.setModel(provider, modelId, workToken, this.configurationExpectation(params));
           return { updated: true, revision };
         });
       case "session.setContextWindow":
@@ -1766,8 +1771,8 @@ export class GatewayService {
       case "provider.list": {
         const modelRuntime = await this.modelRuntime(params);
         return params.sessionId === undefined
-          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.providers(modelRuntime), client.signal)
-          : this.providers(modelRuntime);
+          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.providers(modelRuntime, client.signal), client.signal)
+          : this.providers(modelRuntime, client.signal);
       }
       case "provider.usage": {
         if (Object.keys(params).some((key) => key !== "sessionId" && key !== "providerId")) {
@@ -1792,8 +1797,8 @@ export class GatewayService {
       case "model.list": {
         const modelRuntime = await this.modelRuntime(params);
         return params.sessionId === undefined
-          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit), client.signal)
-          : this.models(modelRuntime, params.cursor, params.limit);
+          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit, client.signal), client.signal)
+          : this.models(modelRuntime, params.cursor, params.limit, client.signal);
       }
       case "model.recent":
         // Global and session-free: usage recency is one Gateway-wide preference,
@@ -2454,8 +2459,10 @@ export class GatewayService {
     return (await this.dependencies.sessions.acquire(string(params.sessionId, "sessionId", { max: 200 }))).modelRuntime;
   }
 
-  private async providers(modelRuntime: ModelRuntime): Promise<JsonValue> {
-    const credentials = new Map((await modelRuntime.listCredentials()).map((credential) => [credential.providerId, credential.type]));
+  private async providers(modelRuntime: ModelRuntime, signal?: AbortSignal): Promise<JsonValue> {
+    await openAIModelEligibility(modelRuntime)?.refresh(signal);
+    const credentialEntries = await modelRuntime.listCredentials().catch(() => []);
+    const credentials = new Map(credentialEntries.map((credential) => [credential.providerId, credential.type]));
     const providers = await Promise.all(modelRuntime.getProviders().map(async (provider) => {
       const auth = await modelRuntime.checkAuth(provider.id).catch(() => undefined);
       return {
@@ -2469,17 +2476,22 @@ export class GatewayService {
         credentialType: credentials.get(provider.id) ?? null,
         authMethods: [provider.auth.apiKey?.login ? "api_key" : null, provider.auth.oauth ? "oauth" : null]
           .filter((value): value is string => value !== null),
-        modelCount: provider.getModels().length,
+        modelCount: openAIModelEligibility(modelRuntime)?.countChoices(provider.id, modelRuntime) ?? provider.getModels().length,
       };
     }));
     validateProviderCatalog(providers);
     return safeJson({ providers });
   }
 
-  private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown): Promise<JsonValue> {
+  private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown, signal?: AbortSignal): Promise<JsonValue> {
+    await openAIModelEligibility(modelRuntime)?.refresh(signal);
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
-      const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
-      return Promise.all(modelRuntime.getModels().map(async (model) => {
+      const providerIds = new Set(modelRuntime.getModels().map(model => model.provider));
+      const available = new Set((await Promise.all([...providerIds].map(async providerId => {
+        try { return await modelRuntime.getAvailable(providerId, signal ? { signal } : undefined); }
+        catch (error) { if (signal?.aborted) throw error; return []; }
+      }))).flat().map((model) => `${model.provider}\0${model.id}`));
+      const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
         // Undated models simply omit the field; the picker's provider sections
         // list them without a release date.
         const releaseDate = await this.modelReleaseDates.modelReleaseDate(model.provider, model.id);
@@ -2489,18 +2501,22 @@ export class GatewayService {
         return {
           provider: model.provider,
           id: model.id,
-          name: model.name,
+          name: openAIModelEligibility(modelRuntime)?.displayName(model.provider, model.id) ?? model.name,
           virtual: model.api === "pi-virtual",
           reasoning: model.reasoning,
           input: model.input,
           contextWindow: model.contextWindow,
           contextWindowLimits: contextWindowLimits(model),
           maxTokens: model.maxTokens,
-          available: available.has(`${model.provider}\0${model.id}`),
+          // The owner is checked directly as well: an extension contribution that
+          // re-registers openai/openai-codex replaces the SDK filter decoration.
+          available: available.has(`${model.provider}\0${model.id}`)
+            && (openAIModelEligibility(modelRuntime)?.isEligibleInRuntime(modelRuntime, model.provider, model.id) ?? true),
           ...(releaseDate === undefined ? {} : { releaseDate }),
           ...(priced ? { cost: { input: model.cost.input, output: model.cost.output } } : {}),
         };
       }));
+      return openAIModelEligibility(modelRuntime)?.orderAccountModels(projected) ?? projected;
     });
     return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
   }

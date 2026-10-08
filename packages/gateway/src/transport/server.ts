@@ -146,6 +146,16 @@ function diagnosticErrorCode(error: unknown): string {
   return "unknown";
 }
 
+function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?: number } {
+  if (!(error instanceof GatewayError) || error.diagnosticReason !== "attention-pending"
+    || !error.details || typeof error.details !== "object" || Array.isArray(error.details)) return {};
+  const details = error.details as Record<string, unknown>;
+  return {
+    ...(typeof details.operationId === "string" ? { operationId: details.operationId } : {}),
+    ...(typeof details.ageMs === "number" && Number.isFinite(details.ageMs) ? { ageMs: details.ageMs } : {}),
+  };
+}
+
 // HTTP admission is intentionally independent from route payload limits: it
 // bounds the lifetime of transport requests while UploadStore, BlobStore and
 // live-view leases retain ownership of their own staged bytes/readers/viewers.
@@ -2770,6 +2780,7 @@ export class GatewayServer {
           // Structured detail only for faults; a caller mistake keeps its code.
           ...(level === "error" ? { error } : {}),
           ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
+          ...diagnosticErrorDetails(error),
         });
       }
       if (!responseAttempted && inFlightRpc.cancelledStage === undefined) {
@@ -2901,6 +2912,7 @@ export class GatewayServer {
           code: diagnosticErrorCode(error), outcome: "failure",
           ...(level === "error" ? { error } : {}),
           ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
+          ...diagnosticErrorDetails(error),
         });
         runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
       }
