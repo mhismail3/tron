@@ -7,7 +7,7 @@ import {
   type BackgroundBacklogRecord,
   type BackgroundSliceRecord,
 } from "./background-work.js";
-import { waitFor } from "../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../test-support/wait-for.js";
 
 // Failure modes this file covers, written before the scheduler existed:
 // 1. A slice starts while a request is in flight: the request shares the loop
@@ -215,7 +215,7 @@ describe("BackgroundWorkScheduler", () => {
     });
     scheduler.register({ name: "job.one", intervalMs: 1, slice: () => {} });
     try {
-      await sliceObserved;
+      await awaitsWithin(sliceObserved, "a background slice with the scheduler's own event-loop reading");
       expect(slices[0]).toMatchObject({ job: "job.one", outcome: "completed" });
     } finally {
       scheduler.stop();
