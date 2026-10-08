@@ -471,7 +471,7 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
         const home = this.requireHome();
         const binding = home.open();
-        home.noteRouteBound();
+        home.noteRouteBound("open");
         return safeJson(binding);
       }
       case "home.designate":
@@ -1476,7 +1476,6 @@ export class GatewayService {
             bindingRevision: binding.bindingRevision,
             physicalSessionId: binding.physicalSessionId,
           });
-          this.requireHome().noteRouteBound();
           let resolveAdmission!: (result: { operationId: string }) => void;
           let rejectAdmission!: (error: unknown) => void;
           const admission = new Promise<{ operationId: string }>((resolve, reject) => {
@@ -2404,7 +2403,9 @@ export class GatewayService {
           ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
           : () => offLoop(() => operation(work?.token)),
         (respondBeforeReceiptCompletion || resolveBinding) ? {
-          ...(resolveBinding ? { resolveBinding } : {}),
+          ...(resolveBinding ? { resolveBinding,
+            onRouteBound: category => this.requireHome().noteRouteBound(category),
+          } : {}),
           ...(respondBeforeReceiptCompletion ? {
           respondBeforeCompletion: true,
           onCompletion: completion => {

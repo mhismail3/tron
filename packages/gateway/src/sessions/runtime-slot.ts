@@ -38,6 +38,7 @@ import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
 import { assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
+import type { HomeHardBoundary } from "../home/home-diagnostic.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
@@ -398,7 +399,7 @@ interface RuntimeSlotHooks {
   homeChapterRefused?: (reason: "sealed-write") => void;
   homeChapterLimitStopped?: (details: {
     chapterOrdinal: number;
-    boundary: "hard-bytes" | "hard-entries";
+    boundary: HomeHardBoundary;
     crossingBytes: number;
     crossingEntries: number;
     settledBytes: number;
@@ -851,7 +852,7 @@ export class RuntimeSlot {
    * runtime creation. */
   private explicitHomeSessionId: string | undefined;
   private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
-  private homeLimitStop?: { operationId: string; boundary: "hard-bytes" | "hard-entries"; crossingBytes: number; crossingEntries: number };
+  private homeLimitStop?: { operationId: string; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number };
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */

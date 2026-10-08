@@ -18,6 +18,7 @@ import {
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 import { HOME_MAX_CHAPTERS, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
+import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
@@ -107,18 +108,6 @@ export interface HomeMemoryPort {
    * admission or a slot lane. */
   entriesCommitted(sessionId: string): void;
 }
-
-export type HomeDiagnostic = (diagnostic: {
-  outcome: "designated" | "enabled" | "disabled" | "refused" | "unavailable"
-    | "chapter-rollover" | "chapter-recovery" | "chapter-refused" | "chapter-limit-stop" | "route-bound";
-  reason?: string;
-  chapterOrdinal?: number;
-  boundary?: "hard-bytes" | "hard-entries";
-  crossingBytes?: number;
-  crossingEntries?: number;
-  settledBytes?: number;
-  settledEntries?: number;
-}) => void;
 
 export interface HomeOwnerOptions {
   tronHome: string;
@@ -284,8 +273,8 @@ export class HomeOwner {
    * Replacing an older attempt is recovery after the prior Gateway process exited. */
   /** Stable logical route target. A reserved successor's next binding revision
    * is fixed before it can receive a command. */
-  noteRouteBound(): void {
-    this.options.diagnostic?.({ outcome: "route-bound", reason: "logical-home" });
+  noteRouteBound(category: Extract<HomeDiagnosticRecord, { outcome: "route-bound" }>["category"]): void {
+    this.options.diagnostic?.({ outcome: "route-bound", category });
   }
 
   /** Hard admission is a durable chapter transition before the command receipt binds a target. */
@@ -294,6 +283,8 @@ export class HomeOwner {
     if (!chapter || chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
     const metrics = await this.options.sessions.chapterMetrics(chapter.sessionId);
     if (metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES) return;
+    this.options.diagnostic?.({ outcome: "chapter-refused", chapterOrdinal: chapter.ordinal,
+      reason: metrics.bytes >= HOME_HARD_BYTES ? "hard-bytes" : "hard-entries" });
     if (!metrics.quiescent) {
       throw new GatewayError("busy", "Tron Home is stopping an activation at the chapter limit; retry after it settles", true);
     }
@@ -494,7 +485,7 @@ export class HomeOwner {
       return true;
     });
     if (rolled) this.options.diagnostic?.({
-      outcome: "chapter-rollover",
+      outcome: "chapter-rollover", chapterOrdinal: chapter.ordinal,
       reason: metrics.bytes >= HOME_HARD_BYTES ? "hard-byte-limit"
         : metrics.entries >= HOME_HARD_ENTRIES ? "hard-entry-limit"
           : metrics.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
@@ -918,7 +909,7 @@ export class HomeOwner {
 
   private assertAvailable(): void {
     if (!this.unavailable) return;
-    this.options.diagnostic?.({ outcome: "unavailable", reason: this.unavailable });
+    this.options.diagnostic?.({ outcome: "unavailable", reason: "owner-fenced" });
     throw new GatewayError("conflict", `Tron Home is unavailable: ${this.unavailable}. The existing record was preserved.`);
   }
 

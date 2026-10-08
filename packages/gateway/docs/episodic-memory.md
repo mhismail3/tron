@@ -195,6 +195,17 @@ Everything else — a `custom_message` with `display: false`, a system message, 
 is not a message. A null context edit only omits an entry that held a slot in
 its own right; it never invents one for a hidden custom message or a state entry.
 
+Home receipts bind a command to its exact physical chapter before effects.
+Completed replay returns that result without ingesting or submitting the input
+again, even after rollover or disable; pending uncertainty does not authorize
+resubmission. A running chapter-limit Stop keeps every SDK emission through abort
+settlement canonical, so projectable partial assistant/tool output is ingested
+normally under the same `homeId`. The hidden terminal receipt records the
+stopped-at-limit outcome but is not a memory message. Crossing/settled counts and
+fresh/replay route categories are bounded operational signals, never memory
+source data; their privacy contract is owned by `home/home-diagnostic.ts` and the
+[observability catalog](observability.md).
+
 - **No renumbering, ever.** Indices are assigned to entries in branch order and
   never reassigned. An entry the branch no longer holds (a navigation) keeps its
   index and becomes `[omitted]`; so does a projectable entry whose own text

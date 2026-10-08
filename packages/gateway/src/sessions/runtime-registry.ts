@@ -104,7 +104,8 @@ import {
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { HomeOwner, type HomeDiagnostic } from "../home/home-owner.js";
+import { HomeOwner } from "../home/home-owner.js";
+import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
@@ -1312,7 +1313,7 @@ export class RuntimeRegistry {
       },
       homeChapterLimitStopped: (details: {
         chapterOrdinal: number;
-        boundary: "hard-bytes" | "hard-entries";
+        boundary: HomeHardBoundary;
         crossingBytes: number;
         crossingEntries: number;
         settledBytes: number;

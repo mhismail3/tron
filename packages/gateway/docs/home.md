@@ -69,10 +69,30 @@ process-abandonment recovery, not power-loss durability.
 persists an idempotency receipt containing the Home identity, binding revision,
 and selected physical chapter before materialization or dispatch, then verifies
 that binding again before sending the input. A stale binding cannot silently
-redirect a command. Replaying a command receipt returns its original result;
-accepted prompts are never replayed by a reconnect. Terminal chat uses these
+redirect a command. Completed receipt replay returns the original result and
+physical target, even after rollover or disable, without resolving a new route,
+materializing a chapter, or dispatching the input again. Pending or uncertain
+receipts remain outcome-unknown fences; a reconnect never resends accepted input.
+The receipt owner emits `home.route-bound` with `category=fresh|replay` at its
+durable-target/replay decision. `home.open` emits `category=open` and is not an
+activation or receipt. Terminal chat uses these
 logical RPCs when Home is enabled and subscribes to the physical runtime only
 after a chapter is active. Ordinary session routes are unchanged.
+
+Home transition signals are typed in `home/home-diagnostic.ts` and go through
+one privacy-preserving logger boundary. Recovery uses `absent|adopt` (not
+`create`) and `conversation-published`. Hard admission refusal uses
+`home.chapter-refused` with `hard-bytes|hard-entries` and the measured chapter
+ordinal, before rollover or a busy response awaiting settlement. A running
+crossing instead emits `home.chapter-limit-stop` at warning level after exact
+Stop settlement: chapter ordinal, boundary, crossing bytes/entries and settled
+bytes/entries survive both JSONL persistence and tail reload. No canonical IDs,
+paths, transcript, credentials or free-text owner failure explanation belong in
+these signals; owner unavailability is the bounded reason `owner-fenced`.
+The observability catalog owns the complete emitted reason vocabulary.
+`home-activation.e2e.test.ts` retains `test-results/home-activation/report.json`
+for exact receipt replay and signal privacy. Threshold diagnostic tests inject
+measurements at the owning metrics seam; they are not actual large-file proofs.
 
 Home memory remains one bounded projection keyed by stable `homeId`, not by a
 physical chapter. Its canonical source reads active, sealed, and materializing

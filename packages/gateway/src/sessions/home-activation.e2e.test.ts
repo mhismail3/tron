@@ -37,6 +37,8 @@ import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { invocationReceipts } from "../sessions/invocation-receipts.js";
+import { logHomeDiagnostic } from "../home/home-diagnostic.js";
+import { GatewayLogger } from "../transport/logger.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
@@ -167,6 +169,7 @@ interface Fixture {
   runtime: ModelRuntime;
   registry: RuntimeRegistry;
   service: GatewayService;
+  receipts: CommandReceiptStore;
   server?: GatewayServer;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
@@ -175,6 +178,7 @@ interface Fixture {
   /** Every record Home's memory reported. */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
   homeDiagnostics: Array<Record<string, unknown>>;
+  homeLogger: GatewayLogger;
   openChatProvider: () => FauxProviderHandle;
 }
 
@@ -191,15 +195,16 @@ function openRegistry(f: Fixture): void {
     homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
-    homeDiagnostic: (record) => f.homeDiagnostics.push(record),
+    homeDiagnostic: (record) => { f.homeDiagnostics.push(record); logHomeDiagnostic(f.homeLogger, record); },
   });
   registries.push(registry);
+  const receipts = new CommandReceiptStore(join(f.tronHome, "receipts"));
   const service = new GatewayService({
     config: { tronHome: f.tronHome } as unknown as GatewayConfig,
     modelRuntime: f.runtime,
     sessions: registry,
     home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
+    receipts,
     settings: new SettingsService(f.agentDir, f.runtime),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
@@ -211,6 +216,7 @@ function openRegistry(f: Fixture): void {
   } as unknown as GatewayServiceDependencies);
   f.registry = registry;
   f.service = service;
+  f.receipts = receipts;
 }
 
 async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number } = {}): Promise<Fixture> {
@@ -248,7 +254,8 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     requestRecords: [],
     memoryDiagnostics: [],
     homeDiagnostics: [],
-    registry: undefined!, service: undefined!,
+    homeLogger: new GatewayLogger(join(root, "home-signals.jsonl")),
+    registry: undefined!, service: undefined!, receipts: undefined!,
     openChatProvider: () => faux,
   };
   openRegistry(f);
@@ -327,6 +334,85 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
 }
 
 describe("Tron Home activations end to end", () => {
+  it("replays the exact completed Home target after rollover and disable without resolving or dispatching again", async () => {
+    const f = await fixture("receipt-exact-replay");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-home-receipt-designate");
+    f.faux.setResponses([fauxAssistantMessage("original receipt reply")]);
+    const params = { commandId: "home-receipt-exact-command", text: "receipt-only-secret-marker" };
+    const accepted = await f.service.invoke(client, "home.prompt", params);
+    await waitUntil(() => !slot.isBusy);
+    // Drain the early-response completion write before reconstructing the receipt owner.
+    await f.receipts.dispose();
+    const before = await sessionJsonl(slot);
+    const calls = f.faux.state.callCount;
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 0, entries: 50_001, quiescent: true });
+    await f.registry.homeOwner().chapterQuiescent(slot.id);
+    await f.registry.homeOwner().disable();
+    // A new durable receipt owner is enough to prove replay does not depend on volatile lanes.
+    const receipts = new CommandReceiptStore(join(f.tronHome, "receipts"));
+    const replayCategories: string[] = [];
+    try {
+      const replay = await receipts.execute(client.identity, "home.prompt", params.commandId,
+        async () => { throw new Error("completed receipt dispatched again"); }, {
+          resolveBinding: () => { throw new Error("completed receipt resolved the disabled successor"); },
+          onRouteBound: category => replayCategories.push(category),
+        });
+      expect(replay).toEqual(accepted);
+      expect(replayCategories).toEqual(["replay"]);
+      expect(f.homeDiagnostics.filter(record => record.outcome === "route-bound")).toEqual([
+        { outcome: "route-bound", category: "fresh" },
+      ]);
+      expect(await sessionJsonl(slot)).toBe(before);
+      expect(f.faux.state.callCount).toBe(calls);
+      report.cases.push({ case: "exact-home-receipt-replay", originalTargetRetained: true,
+        replayProviderCalls: f.faux.state.callCount - calls, categories: ["fresh", ...replayCategories] });
+    } finally { await receipts.dispose(); }
+  });
+
+  it("keeps Home signals private through recovery, refusal, replay and an owner fence", async () => {
+    const f = await fixture("diagnostic-privacy");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-privacy-designate-command");
+    const secret = "HOME-PRIVATE-TRANSCRIPT-MARKER";
+    f.faux.setResponses([fauxAssistantMessage(secret)]);
+    const params = { commandId: "privacy-original-command", text: secret };
+    await f.service.invoke(client, "home.prompt", params);
+    await waitUntil(() => !slot.isBusy);
+    await f.service.invoke(client, "home.prompt", params);
+    const owner = f.registry.homeOwner() as unknown as {
+      unavailable?: string;
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+    };
+    owner.options.sessions.chapterMetrics = async id => ({ bytes: 0, entries: id === slot.id ? 100_000 : 3, quiescent: true });
+    f.faux.setResponses([fauxAssistantMessage("privacy successor reply")]);
+    const successor = await f.service.invoke(client, "home.prompt", { commandId: "privacy-successor-command", text: secret }) as unknown as { sessionId: string };
+    const next = await f.registry.acquire(successor.sessionId);
+    await waitUntil(() => !next.isBusy);
+    // Simulate the owner-facing explanation from a failed storage/reload seam;
+    // it is useful to clients, but never safe as a diagnostic reason enum.
+    owner.unavailable = `${secret} ${f.root} ${slot.id}`;
+    try { await expect(f.service.invoke(client, "home.open", {})).rejects.toMatchObject({ code: "conflict" }); }
+    finally { owner.unavailable = undefined; }
+    const signals = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100);
+    expect(signals.some(record => record.event === "home.route-bound" && record.category === "replay")).toBe(true);
+    expect(signals.some(record => record.event === "home.chapter-recovery" && record.reason === "absent")).toBe(true);
+    expect(signals.some(record => record.event === "home.chapter-refused" && record.reason === "hard-entries")).toBe(true);
+    const approved = new Set(["timestamp", "level", "message", "process", "event", "source", "reason", "category", "chapterOrdinal",
+      "boundary", "crossingBytes", "crossingEntries", "settledBytes", "settledEntries"]);
+    for (const signal of signals) expect(Object.keys(signal).every(key => approved.has(key))).toBe(true);
+    const encoded = JSON.stringify(signals);
+    for (const privateValue of [secret, f.root, slot.id, successor.sessionId, params.commandId, client.identity]) {
+      expect(encoded).not.toContain(privateValue);
+    }
+    expect(signals.some(record => record.event === "home.unavailable" && record.reason === "owner-fenced")).toBe(true);
+    report.cases.push({ case: "home-diagnostic-privacy", events: [...new Set(signals.map(record => record.event))],
+      privateValuesAbsent: true, recovery: "absent", routeCategories: ["fresh", "replay"] });
+  });
+
   it("exports Home through a temporary artifact without targeting its chapter file", async () => {
     const f = await fixture("export-destination");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
@@ -383,7 +469,7 @@ describe("Tron Home activations end to end", () => {
 
   it.each(["hard bytes", "hard entries"] as const)("rolls Home admission over before effects at the %s threshold", async boundary => {
     const f = await fixture(`hard-boundary-${boundary.replaceAll(" ", "-")}`);
-    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, `e2e-hard-boundary-${boundary.replaceAll(" ", "-")}`);
     const owner = f.registry.homeOwner() as unknown as {
       options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
@@ -410,11 +496,17 @@ describe("Tron Home activations end to end", () => {
     });
     expect(stored.chapters[1]).toMatchObject({ sessionId: accepted.sessionId, ordinal: 2 });
     expect(providerCalls).toBe(0);
+    expect(f.homeDiagnostics.filter(record => record.outcome === "chapter-refused")).toEqual([
+      { outcome: "chapter-refused", chapterOrdinal: 1, reason: boundary === "hard bytes" ? "hard-bytes" : "hard-entries" },
+    ]);
+    expect(f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop")).toBe(false);
+    report.cases.push({ case: "hard-admission-signal", boundary: boundary === "hard bytes" ? "hard-bytes" : "hard-entries",
+      metricsInjected: true, refusalBeforeEffects: true, successorTarget: true });
   });
 
   it("stops one running Home operation on its first canonical hard-entry crossing and retains its writes", async () => {
     const f = await fixture("hard-running-crossing");
-    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, "e2e-hard-running-crossing");
     Object.defineProperty(slot, "canonicalEntryCount", { configurable: true, get: () => 100_000 });
     let providerCalls = 0;
@@ -430,6 +522,14 @@ describe("Tron Home activations end to end", () => {
     expect(invocationReceipts(branch, slot.id).find(receipt => receipt.receiptKind === "terminal" && receipt.operationId)?.errorCode).toBe("chapter-limit");
     expect(providerCalls).toBe(0);
     expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === "hard-entries")).toBe(false);
+    const persisted = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100)
+      .filter(record => record.event === "home.chapter-limit-stop");
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ level: "warning", chapterOrdinal: 1, boundary: "hard-entries",
+      crossingBytes: stopped[0]!.crossingBytes, crossingEntries: 100_000,
+      settledBytes: stopped[0]!.settledBytes, settledEntries: 100_000 });
+    report.cases.push({ case: "persisted-home-running-stop", canonicalMatchesSdk: true, metricsInjected: true,
+      crossingEntries: 100_000, settledEntries: 100_000, signalRetainedOnReload: true });
   });
 
   // Failure-first race contract: admission must be revalidated after async

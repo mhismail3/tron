@@ -43,7 +43,11 @@ export interface CommandReceiptBinding {
   physicalSessionId: string;
 }
 
+export type CommandReceiptRouteCategory = "fresh" | "replay";
+
 export interface CommandReceiptExecutionOptions {
+  /** The receipt decision owns route signaling: no identities or result data. */
+  onRouteBound?: (category: CommandReceiptRouteCategory) => void;
   /** Resolve and persist a logical route after replay/fence lookup but before effects. */
   resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>;
   /** Only prompts may answer once admitted while their completed receipt is still being fsynced. */
@@ -369,7 +373,10 @@ export class CommandReceiptStore {
             if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
               throw outcomeUnknown("Idempotency receipt identity mismatch; refresh authoritative state instead of replaying");
             }
-            if (existing.status === "completed") return { exists: true, result: existing.result ?? null } as const;
+            if (existing.status === "completed") {
+              if (existing.binding) options.onRouteBound?.("replay");
+              return { exists: true, result: existing.result ?? null } as const;
+            }
             throw new GatewayError("conflict", "Previous command outcome is uncertain; refresh authoritative state instead of replaying", false, { outcomeUnknown: true });
           }
           const binding = await options.resolveBinding?.();
@@ -438,6 +445,7 @@ export class CommandReceiptStore {
 
         let result: JsonValue;
         try {
+          if (pending.binding) options.onRouteBound?.("fresh");
           result = await operation();
         } catch (error) {
           // An owner that reports an uncertain outcome may already have applied its
