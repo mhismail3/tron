@@ -15,6 +15,6 @@ export default defineConfig({
     // OAuth sign-in and two Gateway sessions, then reopens the corpus. Its
     // internal waits still use the shared hang bound.
     testTimeout: 180_000,
-    setupFiles: ["test-support/network-isolation.ts"],
+    setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },
 });

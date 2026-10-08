@@ -418,8 +418,7 @@ final class ProviderAuthCoordinator {
 
     func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
         let available = catalog(for: target)?.models.filter(\.available) ?? []
-        return available.first(where: { $0.provider == "openai-codex" && $0.id == "gpt-5.6-sol" })?.ref
-            ?? available.first?.ref
+        return available.first?.ref
     }
 
     @discardableResult

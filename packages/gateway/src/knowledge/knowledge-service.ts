@@ -312,6 +312,7 @@ export class KnowledgeService {
     private readonly curationGate?: KnowledgeCurationGate,
     private readonly jobs: KnowledgeCurationJobs = new KnowledgeCurationJobs(),
     private readonly tagging?: KnowledgeTaggingRuntime,
+    private readonly admitModelChoice?: (model: string) => Promise<void>,
   ) { this.observer = observer; }
 
   private async assertJevAssessable(sourceId: string, expectedRevision: string): Promise<void> {
@@ -659,7 +660,7 @@ export class KnowledgeService {
         return { hash: action.request.hash, mediaType: action.request.mediaType, bytes: chunk.byteLength, totalBytes: bytes.byteLength, offset, ...(offset + chunk.byteLength < bytes.byteLength ? { nextOffset: offset + chunk.byteLength } : {}), base64: Buffer.from(chunk).toString("base64") };
       }
       case "knowledge.previews.read": return this.store.readPreviewsBatch(action.request);
-      case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config);
+      case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config, this.admitModelChoice);
       case "knowledge.tags.configure": {
         const priorConfig = await this.store.config();
         const config = await this.store.configureTags(action.request);
@@ -1035,7 +1036,7 @@ export class KnowledgeService {
       }
       case "setKnowledgeModel": {
         if (!parameters.commandId || parameters.expectedConfigRevision === undefined || (!parameters.clearKnowledgeModel && !parameters.knowledgeModel) || (parameters.clearKnowledgeModel && parameters.knowledgeModel)) throw new GatewayError("invalid_request", "setKnowledgeModel requires commandId, expectedConfigRevision, and knowledgeModel or clearKnowledgeModel=true");
-        const config = await this.store.setKnowledgeModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearKnowledgeModel ? undefined : parameters.knowledgeModel!);
+        const config = await this.store.setKnowledgeModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearKnowledgeModel ? undefined : parameters.knowledgeModel!, this.admitModelChoice);
         return { text: `Knowledge model ${config.knowledgeModel?.model ?? "cleared"} saved at Knowledge config revision ${config.revision}; Knowledge generation never uses observation.model as fallback.`, details: config };
       }
       case "configureTags": {

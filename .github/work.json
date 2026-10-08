@@ -327,6 +327,28 @@
         "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi"
       },
       {
+        "name": "gateway-scale",
+        "paths": [
+          "packages/gateway/src/knowledge/*.scale.test.ts",
+          "packages/gateway/src/knowledge/knowledge-catalog.ts",
+          "packages/gateway/src/knowledge/knowledge-contract.ts",
+          "packages/gateway/src/knowledge/knowledge-curation.ts",
+          "packages/gateway/src/knowledge/knowledge-observation.ts",
+          "packages/gateway/src/knowledge/paid-budget-ledger.ts",
+          "packages/gateway/src/knowledge/knowledge-service.ts",
+          "packages/gateway/src/knowledge/knowledge-store.ts",
+          "packages/gateway/src/knowledge/knowledge-tagger.ts",
+          "packages/gateway/src/knowledge/connectors.ts",
+          "packages/gateway/src/knowledge/jev-assessment.ts",
+          "packages/gateway/src/knowledge/source-capture.ts",
+          "packages/gateway/src/workspace/tron-workspace.ts",
+          "packages/gateway/src/protocol/json-budget.ts",
+          "packages/gateway/test-support/connector-credentials.ts",
+          "packages/gateway/vitest.scale.config.ts"
+        ],
+        "command": "cd packages/gateway && npx vitest run --config vitest.scale.config.ts --maxWorkers=2"
+      },
+      {
         "name": "push-relay",
         "paths": [
           "packages/push-relay/**",
@@ -395,6 +417,8 @@
         "name": "mac-scripts",
         "paths": [
           "packages/mac-app/scripts/**",
+          "scripts/install-ci-tools.sh",
+          "scripts/test-install-ci-tools-node.sh",
           "scripts/validate-push-service-config.sh",
           "config/PushService.xcconfig",
           "scripts/gateway-payload-deploy.mjs",
@@ -402,7 +426,7 @@
           "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
+        "command": "scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
       },
       {
         "name": "mac-native-computer-control",
