@@ -1170,7 +1170,7 @@ class Reinstall:
     def offline_confirmation(self, args):
         if args.confirm_offline:
             return True
-        print('NEXT: In the old app, successfully Disable Helper for Update, Pause Tron, then quit.\n'
+        print('NEXT: In the old app, successfully Disable Helper for Update, then quit Tron.\n'
               'Stop Debug, standalone clients, workers and package operations. Re-run with --confirm-offline.\n'
               'This flag attests to successful retirement and writer quiescence; process absence alone is insufficient.')
         return False
@@ -1185,10 +1185,10 @@ class Reinstall:
         self.before_activation(app_replaced=app_replaced)
         if app_replaced:
             self.save('awaiting-resume')
-            print('NEXT: Launch /Applications/Tron.app, choose Resume Tron, approve macOS prompts, then run with --verify.')
+            print('NEXT: Launch /Applications/Tron.app, approve any required macOS prompts, then run with --verify.')
             return
         print(f'NEXT: In Finder replace /Applications/Tron.app with {self.receipt["app"]}.\n'
-              'Launch the replacement, choose Resume Tron and approve required prompts. Then re-run with --verify.\n'
+              'Launch the replacement and approve any required prompts. Then re-run with --verify.\n'
               f'Rollback app and verified data backups: {self.operation / "backups"}')
 
 

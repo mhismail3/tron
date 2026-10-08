@@ -2484,9 +2484,20 @@ resource boundary; Tron does not pretend those SDK objects were explicitly dispo
 `gateway.drain.status` returns a bounded in-memory `AdministrativeDrainSnapshot` before
 and during a drain. The accepted `gateway.restart` response includes the same initial
 drain identity and revision while retaining its legacy fields; `{ commandId,
-restartNow: true }` can escalate an existing drain without waiting behind it. Because the
-drain has already closed ordinary work admission, its receipt write is admitted as derived
-settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
+restartNow: true }` can escalate an existing drain without waiting behind it. The
+authenticated `gateway.stop` request uses the same receipt, terminal-admission, and
+administrative-drain owners. It does not cancel accepted provider-login work: the
+login remains a blocker until its own response/completion settles. After the stop receipt
+settles, the process owner awaits the canonical drain and exits successfully only after
+an exact zero-blocker completion proof. While that proof is pending, status remains
+`preparing`/`waiting` and the app stays open; a rejected wait or failed final proof
+records `failed`, keeps work admission closed, and permits an explicit new stop or
+restart request. An explicit Restart Now retains restart's existing relaunch behavior;
+intentional stop itself never requests a restart. Intentional stop uses exit 0, while
+restart uses the relaunch code. The Stable LaunchAgent's `KeepAlive.SuccessfulExit=false`
+therefore suppresses relaunch only for intentional successful stop while retaining
+crash and restart recovery. Because the drain has already closed ordinary work
+admission, its receipt write is admitted as derived settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
 same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
 64 blocker summaries with session identity, category, state, age, and progress timestamp
 when available (plus the method for an `rpc-mutation`: a receipt-backed RPC still
@@ -2509,8 +2520,8 @@ when one blocker is stuck, and avoids waiting 180 s when only unresolved owners 
 Persistence retry, blocked and terminal-receipt failures are also written to
 `gateway.jsonl` with session identity. Active log rotation keeps the previous file
 within its one-MiB bound; fast successful RPCs are omitted.
-Live PTYs block restart because process replacement cannot preserve them. Restart closes
-terminal admission atomically only after proving no PTY is live, so an already-dispatched
+Live PTYs block restart and stop because process retirement cannot preserve them. Both
+close terminal admission atomically only after proving no PTY is live, so an already-dispatched
 `terminal.open` cannot resume across the cutoff and spawn a shell.
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.

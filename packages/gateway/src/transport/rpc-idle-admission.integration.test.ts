@@ -5,6 +5,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import WebSocket from "ws";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { AuthBroker } from "../admin/auth-broker.js";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -19,8 +20,10 @@ import { waitFor } from "../../test-support/wait-for.js";
 const REPORT_PATH = join(process.cwd(), "test-results", "rpc-idle-admission.integration.json");
 const report: {
   generatedAt: string;
+  processID: number;
+  ports: number[];
   cases: Array<{ name: string; passed: boolean; evidence: Record<string, unknown> }>;
-} = { generatedAt: new Date().toISOString(), cases: [] };
+} = { generatedAt: new Date().toISOString(), processID: process.pid, ports: [], cases: [] };
 
 function record(name: string, evidence: Record<string, unknown>): void {
   report.cases.push({ name, passed: true, evidence });
@@ -48,14 +51,20 @@ interface Fixture {
   root: string;
   registry: RuntimeRegistry;
   faux: ReturnType<typeof fauxProvider>;
+  port: number;
   logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
   connect(): Promise<Client>;
   coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
   snapshot(client: Client, sessionId: string): Promise<any>;
   openSession(client: Client, sessionId: string): Promise<any>;
+  retirementState(): string;
 }
 
-async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixture> {
+async function fixture(options: {
+  tokensPerSecond?: number;
+  authRuntime?: ModelRuntime;
+  onStopRequested?: (registry: RuntimeRegistry) => void;
+} = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "tron-rpc-idle-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -106,14 +115,32 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     materialize: vi.fn(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
     removeSession: vi.fn(async () => {}),
   };
+  const auth = options.authRuntime ? new AuthBroker(
+    options.authRuntime,
+    (clientId, topic, payload) => server?.emitToClient(clientId, topic, payload),
+    (topic, payload) => server?.broadcast(topic, payload),
+    { workRegistry: registry.administrativeWorkRegistry },
+  ) : undefined;
+  let retirement = "running";
+  let retirementTask: Promise<void> | undefined;
   const service = new GatewayService({
     config: { tronHome: root },
     devices,
     sessions: registry,
     receipts: new CommandReceiptStore(root),
     uploads,
-    terminals: { belongsToSession: () => false },
+    terminals: { belongsToSession: () => false, beginRestartDrain: () => true, activeTerminalIds: () => [] },
     logger: diagnosticLogger,
+    ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
+    ...(auth ? { auth } : {}),
+    workRegistry: registry.administrativeWorkRegistry,
+    requestStop: () => {
+      retirement = "draining";
+      retirementTask = Promise.resolve().then(() => options.onStopRequested?.(registry)).then(
+        () => { retirement = "drained"; },
+        () => { retirement = "failed"; },
+      );
+    },
     sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
   } as never);
   server = new GatewayServer({
@@ -129,9 +156,12 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
   });
   await server.listen();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+  report.ports.push(port);
 
   cleanup.push(async () => {
     sockets.forEach((socket) => socket.terminate());
+    auth?.cancelWaitingForRestart();
+    await retirementTask;
     await server?.close();
     await registry.dispose();
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -189,7 +219,8 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
-  return { root, registry, faux, logRecords, connect, coldSession, snapshot, openSession };
+  return { root, registry, faux, port, logRecords, connect, coldSession, snapshot, openSession,
+    retirementState: () => retirement };
 }
 
 describe("diagnostic export RPC boundary", () => {
@@ -455,6 +486,118 @@ describe("receipt-backed mutations against their own session work entry", () => 
     record("still rejects a mutation while the session is running or another mutation holds it", {
       rejectedByRun,
       rejectedByConcurrentBash: "session.setTools",
+    });
+  });
+});
+
+describe("authenticated intentional stop preserves accepted provider login", () => {
+  it("replays the accepted stop receipt while provider login keeps the drain waiting", async () => {
+    let completedCredential = "";
+    const authRuntime = {
+      getProvider: () => ({ auth: { apiKey: { login: async () => "" } } }),
+      login: async (_providerId: string, _authType: string, interaction: { prompt(input: { type: "secret"; message: string }): Promise<string> }) => {
+        completedCredential = await interaction.prompt({ type: "secret", message: "Fixture-only replay credential" });
+      },
+    } as unknown as ModelRuntime;
+    let retirementAttempts = 0;
+    const f = await fixture({ authRuntime, onStopRequested: (registry) => {
+      retirementAttempts += 1;
+      return registry.waitUntilIdle();
+    } });
+    const client = await f.connect();
+    const login = await client.request("replay-login-begin", "auth.begin", {
+      commandId: "replay-login-command", providerId: "rpc-idle-fixture", authType: "api_key",
+    });
+    expect(login.ok, JSON.stringify(login)).toBe(true);
+    const prompt = await waitFor(() => client.frames.find(frame => frame.topic === "auth.prompt"), "held provider login prompt");
+    const first = await client.request("replay-stop-first", "gateway.stop", { commandId: "pending-stop-command" });
+    expect(first.ok, JSON.stringify(first)).toBe(true);
+    await waitFor(() => f.registry.administrativeDrainSnapshot().phase === "waiting", "accepted stop to wait on provider login");
+    expect(f.registry.administrativeDrainSnapshot().blockerCounts["provider-login"]).toBe(1);
+    const replay = await client.request("replay-stop-same-command", "gateway.stop", { commandId: "pending-stop-command" });
+    expect(replay.ok, JSON.stringify(replay)).toBe(true);
+    expect(replay.result).toEqual(first.result);
+    expect(retirementAttempts).toBe(1);
+    const answer = await client.request("replay-login-answer", "auth.respond", {
+      operationId: login.result.operationId, promptId: prompt.payload.promptId, value: "synthetic-replay-fixture-key",
+    });
+    expect(answer.ok, JSON.stringify(answer)).toBe(true);
+    await waitFor(() => f.retirementState() === "drained", "the one accepted retirement to drain");
+    expect(completedCredential).toBe("synthetic-replay-fixture-key");
+    expect(f.registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
+    record("accepted stop receipt replays while provider login blocks the drain", {
+      pid: process.pid, port: f.port, retirementAttempts, identicalAcknowledgement: true,
+      finalDrainPhase: f.registry.administrativeDrainSnapshot().phase,
+    });
+  });
+
+  it("keeps accepted auth work through stop failure, refuses new work, and completes only after explicit retry", async () => {
+    let completedCredential = "";
+    const authRuntime = {
+      getProvider: () => ({ auth: { apiKey: { login: async () => "" } } }),
+      login: async (_providerId: string, _authType: string, interaction: { prompt(input: { type: "secret"; message: string }): Promise<string> }) => {
+        completedCredential = await interaction.prompt({ type: "secret", message: "Fixture-only credential" });
+      },
+    } as unknown as ModelRuntime;
+    let retirementAttempts = 0;
+    const f = await fixture({
+      authRuntime,
+      onStopRequested: (registry) => {
+        retirementAttempts += 1;
+        if (retirementAttempts === 1) {
+          registry.failAdministrativeDrain();
+          throw new Error("fixture process-owner proof failure");
+        }
+        return registry.waitUntilIdle();
+      },
+    });
+    const client = await f.connect();
+    const authStarted = await client.request("accepted-login-begin", "auth.begin", {
+      commandId: "accepted-login-command", providerId: "rpc-idle-fixture", authType: "api_key",
+    });
+    expect(authStarted.ok, JSON.stringify(authStarted)).toBe(true);
+    const promptFrame = await waitFor(() => client.frames.find(frame => frame.topic === "auth.prompt"), "accepted provider login prompt");
+    const acceptedWork = f.registry.administrativeWorkRegistry.facts();
+    expect(acceptedWork.some(fact => fact.kind === "provider-login"), JSON.stringify(acceptedWork)).toBe(true);
+
+    const stop = await client.request("intentional-stop", "gateway.stop", { commandId: "intentional-stop-command" });
+    expect(stop.ok, JSON.stringify(stop)).toBe(true);
+    expect(stop.result).toMatchObject({ scheduled: true, stopping: false });
+    await waitFor(() => f.retirementState() === "failed", "failed intentional-stop retirement proof");
+    const duringFailure = await client.request("drain-snapshot-before-login-answer", "gateway.drain.status", {});
+    expect(duringFailure.ok, JSON.stringify(duringFailure)).toBe(true);
+    expect(duringFailure.result.phase).toBe("failed");
+    expect(duringFailure.result.blockerCounts["provider-login"], JSON.stringify(duringFailure.result)).toBe(1);
+
+    const lateLogin = await client.request("late-login-during-stop", "auth.begin", {
+      commandId: "late-login-command", providerId: "rpc-idle-fixture", authType: "api_key",
+    });
+    expect(lateLogin).toMatchObject({ ok: false, error: { code: "busy" } });
+
+    const answer = await client.request("complete-accepted-login", "auth.respond", {
+      operationId: authStarted.result.operationId,
+      promptId: promptFrame.payload.promptId,
+      value: "synthetic-stop-fixture-key",
+    });
+    expect(answer).toMatchObject({ ok: true, result: { answered: true } });
+    await waitFor(() => completedCredential === "synthetic-stop-fixture-key", "accepted provider login completion");
+    expect(f.retirementState()).toBe("failed");
+
+    const retry = await client.request("intentional-stop-retry", "gateway.stop", { commandId: "intentional-stop-retry-command" });
+    expect(retry).toMatchObject({ ok: true, result: { scheduled: true } });
+    await waitFor(() => f.retirementState() === "drained", "explicit stop recovery retirement completion");
+    const afterDrain = await client.request("drain-snapshot-after-login", "gateway.drain.status", {});
+    expect(afterDrain).toMatchObject({ ok: true, result: { phase: "complete", blockerCount: 0 } });
+    record("intentional stop preserves accepted provider login through failure and explicit retry", {
+      pid: process.pid,
+      port: f.port,
+      providerLoginBlockerAtFailedStop: duringFailure.result.blockerCounts["provider-login"],
+      failedStopPhase: duringFailure.result.phase,
+      loginCompleted: completedCredential === "synthetic-stop-fixture-key",
+      retirementAfterExplicitRetry: f.retirementState(),
+      finalDrainPhase: afterDrain.result.phase,
+      finalBlockerCount: afterDrain.result.blockerCount,
+      retirementAttempts,
     });
   });
 });
