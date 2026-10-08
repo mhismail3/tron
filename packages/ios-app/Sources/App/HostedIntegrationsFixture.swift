@@ -107,7 +107,7 @@ struct HostedIntegrationsFixtureView: View {
                 } else if ollamaDetailScenario {
                     NavigationStack {
                         Button("Details for Ollama") { showingOllamaDetails = true }
-                            .sheet(isPresented: $showingOllamaDetails) {
+                            .tronManagedSheet(isPresented: $showingOllamaDetails, identity: "fixture.ollama-detail") {
                                 ProviderConfigurationSheet(
                                     provider: ProviderSummary(
                                         id: "ollama", name: "Ollama", configured: true,
