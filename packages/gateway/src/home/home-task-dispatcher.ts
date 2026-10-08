@@ -8,7 +8,7 @@ import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/inv
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
-import { HomeTaskStore, type HomeTaskRecord, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
+import { HomeTaskStore, HomeTaskStoreError, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
@@ -23,6 +23,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number; unpriced: true }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted"; controllerGeneration: number }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
+export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 export interface HomeTaskDispatchRequest { taskId: string; intent: string; target: string }
 export interface HomeTaskControlRequest { taskId: string; operationId: string; controllerGeneration: number }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
@@ -33,13 +34,33 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
  * owns its lease, cancellation signal, terminal promise and report lifetime. */
 export class HomeTaskDispatcher {
   private readonly setup = new AsyncMutex();
+  private recovery: Promise<HomeTaskRecoveryStatus> | undefined;
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
     private readonly sessions: RuntimeRegistry, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
     private readonly inbox: WakeInboxOwner) {}
 
   /** Only startup calls this, before live dispatch closures can exist. The
    * durable record outlives a process; its executable lease never does. */
-  async recover(): Promise<void> {
+  recover(): Promise<HomeTaskRecoveryStatus> {
+    return this.recovery ??= this.recoverOwned().then(() => ({ available: true as const }), error => {
+      const reason = error instanceof HomeTaskStoreError ? error.code : "unsafe-state";
+      // Store errors already emitted their single owning diagnostic. Refusal
+      // is a process-lifetime result, not a retry or an unrelated Gateway stop.
+      if (!(error instanceof HomeTaskStoreError)) this.diagnostic?.({ event: "home.task.store-refused", reason });
+      return { available: false as const, reason };
+    });
+  }
+
+  recoveryStatus(): Promise<HomeTaskRecoveryStatus> {
+    return this.recovery ?? Promise.resolve({ available: false, reason: "not-started" });
+  }
+
+  async assertAvailable(): Promise<void> {
+    const result = await this.recoveryStatus();
+    if (!result.available) throw new GatewayError("conflict", "Home task recovery is unavailable", false, { reason: result.reason });
+  }
+
+  private async recoverOwned(): Promise<void> {
     const tasks: HomeTaskRecord[] = [];
     await this.store.list(task => { if (task.lifecycle !== "terminal" || task.wake?.push === "pending") tasks.push(task); });
     for (const task of tasks) {
@@ -62,7 +83,10 @@ export class HomeTaskDispatcher {
             const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
             entryIds = entryId ? [entryId] : last ? [last.id] : [];
             if (report) reason = "cold-explicit-report";
-          } catch {
+          } catch (error) {
+            // Namespace refusal is not missing report evidence: retire this
+            // process's capability instead of attempting a terminal write.
+            if (error instanceof HomeTaskStoreError) throw error;
             // Contradictory or unproven bytes cannot qualify a result. Retain
             // already published spend/authority; never repair or replay work.
             report = undefined; entryId = undefined; entryIds = []; reason = "cold-evidence-unavailable";
@@ -83,7 +107,7 @@ export class HomeTaskDispatcher {
   private async reportEvidence(task: HomeTaskRecord, entries: readonly FileEntry[]): Promise<{ report: HomeTaskReport; entryId: string } | undefined> {
     const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
     if (markers.length !== 1 || markers[0]?.type !== "custom" || !task.sessionId) throw new GatewayError("conflict", "Task marker is missing or contradictory");
-    await this.validateWorkerMarker(task.sessionId, markers[0].data);
+    await this.validateMarkerEvidence(task.sessionId, markers[0].data);
     const reports = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_REPORT);
     if (reports.length > 1) throw new GatewayError("conflict", "Conflicting canonical task reports");
     const entry = reports[0];
@@ -95,6 +119,7 @@ export class HomeTaskDispatcher {
   }
 
   async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest): Promise<HomeTaskHandle> {
+    await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
     try {
@@ -229,6 +254,11 @@ export class HomeTaskDispatcher {
   }
 
   async validateWorkerMarker(sessionId: string, marker: unknown): Promise<void> {
+    await this.assertAvailable();
+    await this.validateMarkerEvidence(sessionId, marker);
+  }
+
+  private async validateMarkerEvidence(sessionId: string, marker: unknown): Promise<void> {
     const value = marker as Record<string, unknown>;
     if (!value || Object.keys(value).sort().join(",") !== "generation,homeId,intentRevision,operationId,receiptId,sessionId,taskId,version"
       || value.version !== 1 || typeof value.taskId !== "string" || value.sessionId !== sessionId) throw new GatewayError("conflict", "Invalid task marker");
@@ -238,6 +268,7 @@ export class HomeTaskDispatcher {
   }
 
   async reconfirmPermissions(): Promise<void> {
+    await this.assertAvailable();
     await this.setup.run(async () => {
       const epoch = await this.store.restoreEpoch();
       await this.authorization.reconfirmPermissions(epoch);
@@ -259,12 +290,14 @@ export class HomeTaskDispatcher {
   }
 
   private async activeControl(control: HomeTaskControlRequest): Promise<HomeTaskRecord> {
+    await this.assertAvailable();
     const task = await this.store.read(control.taskId);
     if (!task || task.lifecycle !== "active" || !task.sessionId || task.operationId !== control.operationId || task.controllerGeneration !== control.controllerGeneration) throw new GatewayError("conflict", "Stale or terminal task operation");
     return task;
   }
 
   async result(taskId: string): Promise<HomeTaskRecord> {
+    await this.assertAvailable();
     let task = await this.store.read(taskId);
     if (!task) throw new GatewayError("conflict", "Referenced task is missing");
     if (task.lifecycle === "active" && task.sessionId && task.operationId) {

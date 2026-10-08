@@ -341,7 +341,7 @@ describe("Tron Home designation", () => {
     expect(registeredTools(ordinaryContext)).toEqual(registeredTools(controlContext));
 
     expect(await homeStatus(f)).toEqual({
-      available: true, enabled: false, live: false, sessionPresent: false,
+      available: true, enabled: false, live: false, sessionPresent: false, taskRecovery: { available: true },
       memory: { configured: false, open: false },
       // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
       phase: "undesignated", activation: { available: false },

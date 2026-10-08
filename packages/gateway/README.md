@@ -789,7 +789,7 @@ future managed-state contract are owned by
 Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns one bounded projection
-`{ phase, activation, readiness, recovery, available, reason?, enabled, homeId?,
+`{ phase, activation, readiness, recovery, taskRecovery?, available, reason?, enabled, homeId?,
   sessionId?, generation?, model?, live, sessionPresent, memory }`. Phase,
 readiness and recovery are derived from the existing designation, memory and
 activation owners rather than stored as separate lifecycle state. `memory` is
@@ -831,7 +831,11 @@ Reports seal exact canonical evidence, never the latest assistant reply; absent
 report is limited/unknown. A fixed internal 24-hour deadline cancels and joins
 operation-owned work, and terminal usage remains explicitly unpriced. Unknown
 tracked detached work yields unknown, not a clean stop claim. Separate strict
-Home task state is initialized on first dispatch; recreated task directory
+Home task state is initialized on first dispatch. Startup retires abandoned tasks
+from exact canonical reports or terminal unknown, never replaying a prompt, and
+co-commits the same result outbox. A recovery refusal fences task surfaces until
+the next start, exposed by `home.status.taskRecovery`; ordinary Gateway sessions
+still work. Recreated task directory
 identity requires explicit `home.reconfirmPermissions` (terminal
 `/home reconfirm-permissions`); this renews active standing scopes only, never
 revoked scopes or one-use grants. `home.taskStatus`, `home.steerTask` and

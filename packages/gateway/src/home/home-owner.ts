@@ -209,7 +209,8 @@ export class HomeOwner {
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or
    * disabled chapter. Home does not inherit a project's executable resources. */
-  dispatchTask(sessionId: string, request: HomeTaskDispatchRequest) {
+  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest) {
+    await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) {
       throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
@@ -221,13 +222,19 @@ export class HomeOwner {
    * admission. Recovery has no executable session lifetime to resurrect. */
   async recoverTasks(): Promise<void> { await this.tasks?.recover(); }
 
-  async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
+  private async taskOwner(): Promise<HomeTaskDispatcher> {
     if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
-    await this.tasks.reconfirmPermissions();
+    await this.tasks.assertAvailable();
+    return this.tasks;
+  }
+
+  async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
+    await (await this.taskOwner()).reconfirmPermissions();
     return { reconfirmed: true };
   }
 
   async steerTask(sessionId: string, control: HomeTaskControlRequest & { text: string }): Promise<void> {
+    await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task steering is unavailable");
     const task = await this.tasks.store.read(control.taskId);
@@ -236,6 +243,7 @@ export class HomeOwner {
   }
 
   async taskTool(sessionId: string, request: import("./tron-home-extension.js").HomeTaskToolRequest): Promise<unknown> {
+    await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task control is unavailable");
     const task = await this.tasks.store.read(request.taskId);
@@ -248,23 +256,19 @@ export class HomeOwner {
   }
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
-    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
-    await this.tasks.steer(control);
+    await (await this.taskOwner()).steer(control);
   }
 
   async stopTask(control: HomeTaskControlRequest): Promise<void> {
-    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
-    await this.tasks.stop(control);
+    await (await this.taskOwner()).stop(control);
   }
 
   async validateTaskMarker(sessionId: string, marker: unknown): Promise<void> {
-    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
-    await this.tasks.validateWorkerMarker(sessionId, marker);
+    await (await this.taskOwner()).validateWorkerMarker(sessionId, marker);
   }
 
-  taskResult(taskId: string) {
-    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
-    return this.tasks.result(taskId);
+  async taskResult(taskId: string) {
+    return (await this.taskOwner()).result(taskId);
   }
 
   private wakeRoute(sessionId?: string): HomeWakeRoute | undefined {
@@ -275,6 +279,7 @@ export class HomeOwner {
   }
 
   async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>): Promise<void> {
+    await this.taskOwner();
     const route = this.wakeRoute(sessionId);
     if (!route?.enabled || !this.inbox) return;
     await this.inbox.recover(route);
@@ -282,11 +287,13 @@ export class HomeOwner {
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
+    await this.taskOwner();
     const route = this.wakeRoute(sessionId);
     if (route && this.inbox) await this.inbox.settle(route, operationId);
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {
+    await this.taskOwner();
     return this.recordMutex.run(async () => {
       const route = this.wakeRoute();
       if (!route || !this.inbox || expected.homeId !== route.homeId || expected.routeGeneration !== route.routeGeneration) throw new GatewayError("conflict", "Home inbox route is unavailable or stale");
@@ -329,18 +336,19 @@ export class HomeOwner {
   }
 
   async status(): Promise<HomeStatus> {
+    const taskRecovery = this.tasks ? { taskRecovery: await this.tasks.recoveryStatus() } : {};
     const memory = await this.memoryStatus();
     const activation = this.contextStatus();
     if (this.unavailable) {
       return {
-        phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
+        ...taskRecovery, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
         recovery: { action: "inspect-record", reason: this.unavailable },
         available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false, memory,
       };
     }
     const record = this.record;
     if (!record) return {
-      phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
+      ...taskRecovery, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
       recovery: { action: "designate" },
       available: true, enabled: false, live: false, sessionPresent: false, memory,
     };
@@ -369,7 +377,7 @@ export class HomeOwner {
           : memory.blocked || !memory.configured ? "blocked"
           : activation.available && activation.activationOpen ? "active" : "ready";
     return {
-      phase, activation, readiness: { ready, gaps }, recovery,
+      ...taskRecovery, phase, activation, readiness: { ready, gaps }, recovery,
       available: true,
       enabled: record.enabled,
       homeId: record.homeId,

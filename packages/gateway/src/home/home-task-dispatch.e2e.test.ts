@@ -1,6 +1,6 @@
 import * as fileSystem from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -149,7 +149,7 @@ describe("Home task cold reconciliation", () => {
     evidence.push({ case: `cold-${cut}`, frozen, task, providers, effect: await readFile(effect, "utf8"), authorizationUnchanged: true });
   }, 20_000);
 
-  it.each(["missing-marker", "duplicate-marker", "wrong-marker", "missing-report", "malformed-report", "wrong-report", "duplicate-report", "torn", "interrupted", "off-branch", "missing-session", "bad-header", "old-format", "bad-graph", "sync-refused"])("reconciles %s evidence conservatively without constructing a worker", async mode => {
+  it.each(["missing-marker", "duplicate-marker", "wrong-marker", "missing-report", "malformed-report", "wrong-report", "duplicate-report", "torn", "interrupted", "off-branch", "report-without-terminal", "missing-session", "bad-header", "old-format", "bad-graph", "sync-refused"])("reconciles %s evidence conservatively without constructing a worker", async mode => {
     const f = await fixture();
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
     const update = store.update.bind(store);
@@ -181,6 +181,14 @@ describe("Home task cold reconciliation", () => {
     if (mode === "wrong-report") report.data.receiptId = "report:other-operation";
     if (mode === "duplicate-report") rows.push({ ...report, id: "duplicate-report", parentId: rows.at(-1).id });
     if (mode === "off-branch") rows.push({ type: "custom", id: "view-other-branch", parentId: marker.id, timestamp: new Date().toISOString(), customType: "view-only", data: {} });
+    if (mode === "report-without-terminal") {
+      for (let index = rows.length - 1; index >= 0; index--) {
+        const row = rows[index];
+        if (row.customType !== "tron.chat-invocation.v1" || row.data.receiptKind !== "terminal") continue;
+        for (const child of rows) if (child.parentId === row.id) child.parentId = row.parentId;
+        rows.splice(index, 1);
+      }
+    }
     vi.restoreAllMocks();
     // Retire the old process owner before changing its frozen canonical cut.
     await f.registry.dispose();
@@ -202,11 +210,57 @@ describe("Home task cold reconciliation", () => {
     const recovered = await f.restart();
     expect(open).not.toHaveBeenCalled();
     const task = await (recovered.homeOwner() as any).tasks.store.read(run.taskId);
-    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: mode === "off-branch" ? "final" : "unknown" }, wake: { state: "pending", push: "decided" } });
+    const reportProven = mode === "off-branch" || mode === "report-without-terminal";
+    expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: reportProven ? "final" : "unknown" }, wake: { state: "pending", push: "decided" } });
     expect(f.notifications).toHaveLength(1);
     if (frozenCanonical !== undefined) expect(await readFile(path, "utf8")).toBe(frozenCanonical);
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: mode === "off-branch" ? "cold-explicit-report" : expect.stringMatching(/^cold-/) }));
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: reportProven ? "cold-explicit-report" : expect.stringMatching(/^cold-/) }));
     evidence.push({ case: `cold-evidence-${mode}`, task, runtimeConstructed: false });
+  }, 20_000);
+
+  it("confines a typed recovery refusal to every task surface until the next start", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    const taskPath = join(f.tronHome, "gateway/home/tasks", `${run.taskId}.json`);
+    const authPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
+    const taskBytes = await readFile(taskPath, "utf8"); const authBytes = await readFile(authPath, "utf8");
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    await chmod(f.tronHome, 0o755);
+    const cold = await f.restart();
+    const owner = cold.homeOwner();
+    expect(await owner.status()).toMatchObject({ taskRecovery: { available: false, reason: "unsafe-state" } });
+    const control = { taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1, text: "Steer" };
+    const operations: Array<[string, () => Promise<unknown>]> = [
+      ["dispatch", () => owner.dispatchTask(f.home.sessionId, { taskId: "new-task", intent: "Finite", target: f.cwd })],
+      ["status", () => owner.taskResult(run.taskId)],
+      ["task-tool", () => owner.taskTool(f.home.sessionId, { action: "status", taskId: run.taskId })],
+      ["home-steer", () => owner.steerTask(f.home.sessionId, control)],
+      ["maintainer-steer", () => owner.maintainTask(control)],
+      ["stop", () => owner.stopTask(control)],
+      ["reconfirm", () => owner.reconfirmTaskPermissions()],
+      ["redelivery", () => owner.redeliverTaskResult(run.taskId, { homeId: f.home.homeId, routeGeneration: 1 })],
+      ["inbox-admit", () => owner.admitTaskResults(f.home.sessionId, "activation", async () => { throw new Error("delivery while fenced"); })],
+      ["inbox-ack", () => owner.settleTaskResults(f.home.sessionId, "activation")],
+      ["worker-open", () => cold.acquire(run.sessionId)],
+    ];
+    const result: string[] = [];
+    // Repair does not lift the per-process refusal or re-attempt recovery.
+    await chmod(f.tronHome, 0o700);
+    for (const [name, operation] of operations) {
+      await expect(operation(), name).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
+      result.push(name);
+    }
+    expect(f.signals.filter(signal => signal.event === "home.task.store-refused" && signal.reason === "unsafe-state")).toHaveLength(1);
+    const ordinary = await cold.create(f.cwd);
+    f.faux.setResponses([fauxAssistantMessage("Ordinary sessions still work")]);
+    await ordinary.prompt("ordinary input"); await waitFor(() => !ordinary.isBusy, "ordinary fenced-owner prompt");
+    expect(ordinary.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "message", message: expect.objectContaining({ role: "assistant", content: expect.arrayContaining([expect.objectContaining({ text: "Ordinary sessions still work" })]) }) }));
+    expect(await readFile(taskPath, "utf8")).toBe(taskBytes); expect(await readFile(authPath, "utf8")).toBe(authBytes);
+    const again = await f.restart();
+    expect(await again.homeOwner().status()).toMatchObject({ taskRecovery: { available: true } });
+    expect(await again.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+    evidence.push({ case: "task-recovery-fence", operations: result, ordinaryPrompt: true, bytesPreserved: true, restartAvailable: true });
   }, 20_000);
 
   it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {

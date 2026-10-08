@@ -443,12 +443,28 @@ inbox described below, never a result-triggered Home model call.
 ### Cold task reconciliation
 
 Gateway startup retires abandoned `pending` and `active` task records before
-exposing runtime admission. It does not construct an executable worker runtime,
+exposing task admission. It does not construct an executable worker runtime,
 resume an operation, recreate control callbacks, or replay a prompt/tool. Pending
 identities (including authorization consumed before worker binding) become
 terminal `unknown`. Scopes and unspent grants remain byte-identical; consumed
 grants stay consumed. Restart never initializes an absent namespace or enables,
 renews, revokes or re-stamps authority.
+
+Task recovery is an optional capability, not a Gateway startup dependency. The
+Dispatcher owns one per-process recovery result; all task surfaces join it. A
+store/workspace refusal is retained with its typed reason until the next Gateway
+start (no in-process repair/retry), emits `home.task.store-refused` once, and
+leaves ordinary sessions functional. `home.status.taskRecovery` exposes
+`{ available: true }` or `{ available: false, reason }`, independently of the
+Home conversation's phase. Dispatch, task tools/status, steering/Stop, permission
+reconfirmation, redelivery and inbox admission/ack refuse with that same
+`conflict` reason while fenced; no task/inbox writes or effects are attempted.
+A readable canonical task marker also refuses worker construction before any
+executable resources are loaded. If both the task namespace and canonical marker
+are unreadable/missing, ownership cannot be inferred: there is no second
+session-to-task index. That limitation does not authorize recreation or replay.
+Successful recovery writes preceding a later publication refusal remain durable
+evidence; the refusal does not roll them back.
 
 An active task becomes report-backed only if the Registry's read-only canonical
 file boundary proves exactly one matching `tron-home-task` marker and one valid
