@@ -8915,6 +8915,12 @@ export class RuntimeSlot {
     }
   }
 
+  /** Queue a retirement barrier behind admitted lane work without disposing the
+   * slot. The Registry remains the sole owner of disposal and publication. */
+  async retireAfterSettled(): Promise<void> {
+    await this.lane.run(() => {});
+  }
+
   async dispose(exceptWorkToken?: string): Promise<void> {
     if (this.disposed) return;
     this.assertOwnershipPersistence();

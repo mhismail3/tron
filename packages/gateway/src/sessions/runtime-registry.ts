@@ -209,7 +209,7 @@ export type RuntimeLoadReason = "open" | "create" | "automation" | "import" | "o
  * `disposed` is the slot that was already disposed when a later open cleared it
  * from the live set, with no other reason recorded for it. */
 export type RuntimeEvictionReason =
-  | "idle" | "capacity" | "bytes" | "heap" | "closed" | "disposed" | "deleted" | "shutdown";
+  | "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain" | "closed" | "disposed" | "deleted" | "shutdown";
 
 export type RuntimeLifecycleReason = RuntimeLoadReason | RuntimeEvictionReason;
 
@@ -572,6 +572,8 @@ export class RuntimeRegistry {
   private knowledgeService: KnowledgeService | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
+  /** Global gate while a visible Home ledger write invalidates every live Home projection. */
+  private homePublicationUncertain = false;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
@@ -844,6 +846,8 @@ export class RuntimeRegistry {
           }
           await slot.replaceRuntimeForProfile(commit);
         },
+        beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
+        retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
@@ -3177,6 +3181,7 @@ export class RuntimeRegistry {
    * release uses the slot's shared automation/operation lease authority. */
   retainLiveSession(sessionId: string): (() => void) | undefined {
     this.assertSlotAdmissionOpen();
+    if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) return undefined;
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed || this.deletingSessionIds.has(sessionId)
       || this.ambiguousSessionIds.has(sessionId)) return undefined;
@@ -3188,6 +3193,9 @@ export class RuntimeRegistry {
 
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
+    if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) {
+      throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
+    }
     const existing = this.slots.get(sessionId);
     if (existing && !existing.isDisposed && !this.ambiguousSessionIds.has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
@@ -4476,7 +4484,7 @@ export class RuntimeRegistry {
   private async retireIdleRuntime(input: {
     sessionId: string;
     slot: RuntimeSlot;
-    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap">;
+    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain">;
     eligible: () => boolean;
   }): Promise<boolean> {
     const { sessionId: id, slot, eligible, reason } = input;
@@ -4518,6 +4526,27 @@ export class RuntimeRegistry {
     } finally {
       if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
     }
+  }
+
+  /** Drop every live Home projection after an uncertain ledger replacement.
+   * Acquisitions are globally stale-marked until every old slot is retired. */
+  private async retireUncertainHomeRuntimes(reloaded: boolean): Promise<void> {
+    const homes = [...this.slots].filter(([sessionId]) => this.home.chapterStateFor(sessionId).homeId);
+    for (const [sessionId, slot] of homes) {
+      await slot.retireAfterSettled();
+      const retired = await this.retireIdleRuntime({
+        sessionId,
+        slot,
+        reason: "publication-uncertain",
+        eligible: () => this.homePublicationUncertain
+          && this.slots.get(sessionId) === slot
+          && !slot.isBusy,
+      });
+      if (!retired && this.slots.get(sessionId) === slot && !slot.isDisposed) {
+        throw new GatewayError("conflict", "A stale Home runtime could not be retired after ledger publication uncertainty", true);
+      }
+    }
+    this.homePublicationUncertain = !reloaded;
   }
 
   /** The canonical file behind one session id: the live runtime's when it has

@@ -93,6 +93,11 @@ export interface HomeSessionPort {
    * profile decision for it, so the next prompt uses the new profile. A busy
    * session refuses retryably before `commit` runs. */
   replaceRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void>;
+  /** Synchronously stale-mark Home slots before any asynchronous reload work. */
+  beginHomePublicationReconciliation(): void;
+  /** Retire every live Home slot after uncertain publication; next admission
+   * rebuilds from the record reloaded by this owner. */
+  retireHomeRuntimes(reloaded: boolean): Promise<void>;
 }
 
 /** What the session runtime reports to Home's memory. Narrow on purpose: the
@@ -955,7 +960,10 @@ export class HomeOwner {
         // A visible replacement makes the caller's prior in-memory record
         // untrustworthy. Fence synchronous route readers before reloading.
         this.unavailable = "Home ledger publication is being reconciled";
-        await this.load();
+        this.options.sessions.beginHomePublicationReconciliation();
+        const reloaded = await this.load(false);
+        await this.options.sessions.retireHomeRuntimes(reloaded);
+        if (reloaded) this.unavailable = undefined;
       }
       if (error instanceof Error && error.message === "JSON document exceeds its byte limit") {
         throw new GatewayError("conflict", "The Home chapter ledger exceeds its persisted size limit");
@@ -965,35 +973,36 @@ export class HomeOwner {
     this.record = record;
   }
 
-  private async load(): Promise<void> {
+  private async load(clearAvailability = true): Promise<boolean> {
     let loaded: unknown;
     try {
       const read = await readSecureJson<unknown>(this.recordPath, MAXIMUM_RECORD_BYTES);
       if (!read.present) {
         this.record = undefined;
-        this.unavailable = undefined;
-        return;
+        if (clearAvailability) this.unavailable = undefined;
+        return true;
       }
       loaded = read.value;
     } catch (error) {
       // An empty, symlinked or permissively-readable file is not an absent one:
       // it is preserved and reported, never replaced.
-      this.record = undefined;
+      if (clearAvailability) this.record = undefined;
       this.unavailable = error instanceof SecureJsonFileError && error.kind === "invalid"
         ? "The Home record is malformed"
         : "The Home record is not a bounded owner-only regular file";
       this.options.diagnostic?.({ outcome: "unavailable", reason: "unreadable" });
-      return;
+      return false;
     }
     const admitted = admitRecord(loaded);
     if (!admitted) {
-      this.record = undefined;
+      if (clearAvailability) this.record = undefined;
       this.unavailable = "The Home record has an unsupported shape or version";
       this.options.diagnostic?.({ outcome: "unavailable", reason: "unsupported-record" });
-      return;
+      return false;
     }
     this.record = admitted;
-    this.unavailable = undefined;
+    if (clearAvailability) this.unavailable = undefined;
+    return true;
   }
 }
 
