@@ -135,6 +135,28 @@ The observability catalog owns the complete emitted reason vocabulary.
 `home-activation.e2e.test.ts` retains `test-results/home-activation/report.json`
 for exact receipt replay and signal privacy. Threshold diagnostic tests inject
 measurements at the owning metrics seam; they are not actual large-file proofs.
+The canonical-admission and response/input-crossing cases instead append real SDK
+entries and lower only the shared hard constants in the test module (64 KiB / 100
+entries); their artifact records measured bytes/entries and the test thresholds.
+They prove cold logical rollover, immutable physical refusal, post-await
+revalidation before canonical effects, a pre-provider input crossing, and both
+completion-first and abort-first settlement of a successful assistant crossing.
+They do not prove the unrelated full writer/crash matrix.
+
+HomeOwner owns one hard-admission policy for both logical routes and physical
+prompt targets. Cold Registry metrics stream the actual canonical file under a
+stat fence, excluding its header from the entry count; missing, torn or changing
+metrics refuse rather than pretending the chapter is empty. Logical admission
+rolls over before binding its command receipt. Every physical prompt (including
+explicit terminal targets, held prompts and steer/follow-up admissions) rechecks
+the policy in its slot lane after admission awaits, before invocation/SDK effects;
+a full physical target refuses without silently redirecting. Ordinary sessions
+are not subject to Home thresholds. The exact Stop owner synchronously records
+its reason on the live invocation before cancellation yields. Every terminal
+observer reads that reason at the common receipt boundary, so a successful
+assistant crossing is interrupted with `chapter-limit`, never `user-abort`,
+regardless of completion/abort settlement ordering. Receipt retirement owns
+retirement of that volatile reason; no parallel cancellation-reason map exists.
 
 Home memory remains one bounded projection keyed by stable `homeId`, not by a
 physical chapter. Its canonical source reads active, sealed, and materializing

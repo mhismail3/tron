@@ -829,7 +829,7 @@ export class RuntimeRegistry {
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
         chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
-          if (!slot) return { bytes: 0, entries: 0, quiescent: false };
+          if (!slot) return this.coldHomeChapterMetrics(sessionId);
           const path = slot.sessionFile;
           const bytes = path ? await stat(path).then(info => info.size).catch(error => {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
@@ -1899,6 +1899,7 @@ export class RuntimeRegistry {
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
+      homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
@@ -4591,6 +4592,34 @@ export class RuntimeRegistry {
       }
     }
     this.homePublicationUncertain = !reloaded;
+  }
+
+  /** Cold admission measures the finite canonical file cut, not a zero-valued
+   * live projection. Streaming newline counts retain no transcript bodies; SDK
+   * construction separately validates the canonical graph before opening it. */
+  private async coldHomeChapterMetrics(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }> {
+    const path = await this.homeSessionFile(sessionId);
+    if (!path) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
+    const handle = await open(path, "r");
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size === 0) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
+      let lines = 0;
+      let lastByte: number | undefined;
+      const stream = handle.createReadStream({ autoClose: false, end: before.size - 1, highWaterMark: 64 * 1_024 });
+      for await (const chunk of stream) {
+        const bytes = chunk as Buffer;
+        for (let index = bytes.indexOf(0x0a); index !== -1; index = bytes.indexOf(0x0a, index + 1)) lines += 1;
+        lastByte = bytes.at(-1);
+      }
+      const after = await handle.stat();
+      const current = await lstat(path);
+      if (lastByte !== 0x0a || lines < 1 || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+        || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino || current.size !== before.size) {
+        throw new GatewayError("conflict", "Home chapter changed while measuring admission", true);
+      }
+      return { bytes: before.size, entries: lines - 1, quiescent: true };
+    } finally { await handle.close(); }
   }
 
   /** The canonical file behind one session id: the live runtime's when it has

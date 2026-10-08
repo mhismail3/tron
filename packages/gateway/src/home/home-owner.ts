@@ -17,7 +17,7 @@ import {
   type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
-import { HOME_MAX_CHAPTERS, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
+import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 
 /** One Gateway installation keeps at most one Home. */
@@ -31,8 +31,6 @@ const MAXIMUM_MODEL_ID_BYTES = 300;
 const HOME_POLICY_REVISION = 1;
 const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
 const HOME_SOFT_ENTRIES = 50_000;
-const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
-const HOME_HARD_ENTRIES = 100_000;
 
 export interface HomeChapter {
   sessionId: string;
@@ -204,11 +202,12 @@ export class HomeOwner {
     };
     const sessionId = homeSessionId(record);
     const currentChapter = record.chapters.at(-1)!;
-    const activeMetrics = currentChapter.state === "active" && this.options.sessions.chapterMetrics
-      ? await this.options.sessions.chapterMetrics(currentChapter.sessionId)
-      : undefined;
     const live = this.options.sessions.hasLiveRuntime(sessionId);
     const sessionPresent = await this.options.sessions.sessionPresent(sessionId);
+    // Missing-session recovery is a status, never zero-valued admission metrics.
+    const activeMetrics = sessionPresent && currentChapter.state === "active" && this.options.sessions.chapterMetrics
+      ? await this.options.sessions.chapterMetrics(currentChapter.sessionId)
+      : undefined;
     const gaps: string[] = [];
     if (!record.enabled) gaps.push("disabled");
     if (!sessionPresent) gaps.push("session-missing");
@@ -280,18 +279,31 @@ export class HomeOwner {
     this.options.diagnostic?.({ outcome: "route-bound", category });
   }
 
+  /** One admission policy for logical binding and serialized physical prompts.
+   * A physical target cannot silently transfer to the successor. */
+  assertChapterAdmission(sessionId: string, metrics: { bytes: number; entries: number }): void {
+    const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
+    if (!chapter) return;
+    const reason = metrics.bytes >= HOME_HARD_BYTES ? "hard-bytes"
+      : metrics.entries >= HOME_HARD_ENTRIES ? "hard-entries" : undefined;
+    if (!reason) return;
+    this.options.diagnostic?.({ outcome: "chapter-refused", chapterOrdinal: chapter.ordinal, reason });
+    throw new GatewayError("conflict", "This Home chapter has reached its hard limit; continue through Home", true, { reason });
+  }
+
   /** Hard admission is a durable chapter transition before the command receipt binds a target. */
   async ensureChapterBelowHardLimit(): Promise<void> {
     const chapter = this.record?.chapters.at(-1);
     if (!chapter || chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
     const metrics = await this.options.sessions.chapterMetrics(chapter.sessionId);
-    if (metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES) return;
-    this.options.diagnostic?.({ outcome: "chapter-refused", chapterOrdinal: chapter.ordinal,
-      reason: metrics.bytes >= HOME_HARD_BYTES ? "hard-bytes" : "hard-entries" });
-    if (!metrics.quiescent) {
-      throw new GatewayError("busy", "Tron Home is stopping an activation at the chapter limit; retry after it settles", true);
+    try { this.assertChapterAdmission(chapter.sessionId, metrics); }
+    catch (error) {
+      if (!(error instanceof GatewayError) || error.code !== "conflict") throw error;
+      if (!metrics.quiescent) {
+        throw new GatewayError("busy", "Tron Home is stopping an activation at the chapter limit; retry after it settles", true);
+      }
+      await this.chapterQuiescent(chapter.sessionId);
     }
-    await this.chapterQuiescent(chapter.sessionId);
   }
 
   open(): HomeOpen {
@@ -472,7 +484,8 @@ export class HomeOwner {
     // mutations settle, then take recordMutex only for the final ledger write.
     const rolled = await this.options.sessions.serializeSessionMutation(sessionId, async () => {
       const metrics = await this.options.sessions.chapterMetrics!(sessionId);
-      if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES)) return undefined;
+      if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES
+        && metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES)) return undefined;
       const sealed = await this.recordMutex.run(async () => {
         const current = this.record;
         const active = current?.chapters.find(candidate => candidate.sessionId === sessionId);

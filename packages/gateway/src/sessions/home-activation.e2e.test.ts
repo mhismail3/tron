@@ -24,6 +24,13 @@ import { ModelRuntime, AgentSession, SessionManager } from "@earendil-works/pi-c
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
+const admissionLimits = vi.hoisted(() => ({ bytes: 200 * 1_024 * 1_024, entries: 100_000 }));
+vi.mock("../home/home-chapter-state.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../home/home-chapter-state.js")>(),
+  get HOME_HARD_BYTES() { return admissionLimits.bytes; },
+  get HOME_HARD_ENTRIES() { return admissionLimits.entries; },
+}));
+
 const materializationScan = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
 vi.mock("../home/home-session-recovery.js", async importOriginal => {
   const actual = await importOriginal<typeof import("../home/home-session-recovery.js")>();
@@ -171,6 +178,8 @@ const disposals: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   materializationScan.hold = undefined;
+  admissionLimits.bytes = 200 * 1_024 * 1_024;
+  admissionLimits.entries = 100_000;
   vi.restoreAllMocks();
   for (const dispose of disposals.splice(0).reverse()) await dispose();
 });
@@ -689,6 +698,159 @@ describe("Tron Home activations end to end", () => {
       metricsInjected: true, refusalBeforeEffects: true, successorTarget: true });
   });
 
+  it.each(["bytes", "entries"] as const)("measures cold canonical %s before logical hard admission", async boundary => {
+    const f = await fixture(`cold-hard-${boundary}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `cold-hard-${boundary}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize cold threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
+    for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
+      slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
+    }
+    const path = slot.sessionFile!;
+    const bytes = await readFile(path);
+    const entries = slot.canonicalEntryCount;
+    await restart(f);
+    f.faux.setResponses([fauxAssistantMessage("cold successor")]);
+    const accepted = await f.service.invoke(client, "home.prompt", { commandId: `cold-hard-next-${boundary}`, text: "continue cold Home" }) as unknown as { sessionId: string };
+    expect(accepted.sessionId === slot.id).toBe(false);
+    expect(await readFile(path)).toEqual(bytes);
+    expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === `hard-${boundary}`)).toBe(true);
+    report.cases.push({ case: "cold-canonical-hard-admission", boundary, bytes: bytes.length, entries,
+      hardBytes: admissionLimits.bytes, hardEntries: admissionLimits.entries, metricsInjected: false, successorTarget: true, predecessorUnchanged: true });
+  });
+
+  it.each(["bytes", "entries"] as const)("refuses physical prompt effects at real canonical hard %s", async boundary => {
+    const f = await fixture(`physical-hard-${boundary}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `physical-hard-${boundary}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize physical threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
+    for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
+      slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
+    }
+    const bytes = await readFile(slot.sessionFile!);
+    const calls = f.faux.state.callCount;
+    f.faux.setResponses([fauxAssistantMessage("must not run")]);
+    const physicalClient = { ...client, isSubscribed: (id: string) => id === slot.id } as ClientContext;
+    await expect(f.service.invoke(physicalClient, "session.prompt", { sessionId: slot.id, commandId: `physical-hard-next-${boundary}`, text: "must refuse without redirect" }))
+      .rejects.toMatchObject({ code: "conflict", details: { reason: `hard-${boundary}` } });
+    expect(await readFile(slot.sessionFile!)).toEqual(bytes);
+    expect(f.faux.state.callCount).toBe(calls);
+    report.cases.push({ case: "physical-canonical-hard-admission", boundary, bytes: bytes.length, entries: slot.canonicalEntryCount,
+      metricsInjected: false, providerCallsAdded: 0, canonicalEffectsAdded: 0, redirected: false });
+  });
+
+  it.each(["settings", "archive"] as const)("revalidates physical Home admission after the %s await before canonical effects", async boundary => {
+    const f = await fixture(`admission-await-${boundary}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `admission-await-${boundary}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize await threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered = false;
+    const hold = async () => { entered = true; await gate; };
+    const dependencies = slot as unknown as { dependencies: { beforeRunAdmission(): Promise<void> } };
+    const held = boundary === "settings"
+      ? vi.spyOn(sessionOf(slot).settingsManager, "flush").mockImplementation(hold)
+      : vi.spyOn(dependencies.dependencies, "beforeRunAdmission").mockImplementation(hold);
+    f.faux.setResponses([fauxAssistantMessage("must not run")]);
+    const running = slot.prompt("wait and then refuse before effects");
+    void running.catch(() => {});
+    let bytes!: Buffer;
+    try {
+      await waitUntil(() => entered);
+      for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < admissionLimits.bytes; index += 1) {
+        slot.sessionManager.appendCustomEntry("await-fixture", { padding: "x".repeat(4_096) });
+      }
+      bytes = await readFile(slot.sessionFile!);
+    } finally { release(); }
+    await expect(running).rejects.toMatchObject({ code: "conflict", details: { reason: "hard-bytes" } });
+    held.mockRestore();
+    expect(await readFile(slot.sessionFile!)).toEqual(bytes);
+    expect(f.faux.state.callCount).toBe(1);
+    report.cases.push({ case: "physical-admission-await", boundary, metricsInjected: false,
+      canonicalEffectsAdded: 0, providerCallsAdded: 0 });
+  });
+
+  it.each(["completion-first", "abort-first"] as const)("records successful assistant crossings as chapter-limit with %s settlement", async ordering => {
+    const f = await fixture(`successful-crossing-${ordering}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `successful-crossing-${ordering}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize successful threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    // Canonical custom entries bring the chapter near the byte boundary without
+    // crossing it; only the provider's finalized successful message crosses.
+    for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 40 * 1_024; index += 1) {
+      slot.sessionManager.appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
+    }
+    const before = statSync(slot.sessionFile!).size;
+    expect(before).toBeLessThan(admissionLimits.bytes);
+    const internal = slot as unknown as { terminalizeInvocation(...args: unknown[]): Promise<void> };
+    const terminalize = internal.terminalizeInvocation.bind(slot);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let losingObserverEntered = false;
+    const held = vi.spyOn(internal, "terminalizeInvocation").mockImplementation(async (...args) => {
+      const abortObserver = args[2] === "chapter-limit";
+      if (abortObserver === (ordering === "completion-first")) {
+        losingObserverEntered = true;
+        await gate;
+      }
+      return terminalize(...args);
+    });
+    f.faux.setResponses([fauxAssistantMessage("successful response ".repeat(2_048))]);
+    const running = slot.prompt("cross only on the successful response");
+    void running.catch(() => {});
+    try {
+      await waitUntil(() => losingObserverEntered);
+      await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id)
+        .filter(receipt => receipt.receiptKind === "terminal").length === 2);
+      expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
+        .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
+    } finally { release(); held.mockRestore(); }
+    await running;
+    await waitUntil(() => !slot.isBusy && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    const lastTerminal = invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)!;
+    expect(lastTerminal).toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
+    expect(slot.sessionManager.getBranch().some(entry => entry.type === "message" && entry.message.role === "assistant"
+      && entry.message.stopReason === "stop" && JSON.stringify(entry.message.content).includes("successful response"))).toBe(true);
+    expect(f.faux.state.callCount).toBe(2);
+    report.cases.push({ case: "successful-response-hard-crossing", ordering, beforeBytes: before, settledBytes: statSync(slot.sessionFile!).size,
+      hardBytes: admissionLimits.bytes, metricsInjected: false, providerCallsAdded: 1, lifecycle: lastTerminal.lifecycle, reason: lastTerminal.errorCode });
+  });
+
+  it("stops a real canonical input crossing before provider dispatch", async () => {
+    const f = await fixture("real-input-crossing");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "real-input-crossing");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize input crossing evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    const before = statSync(slot.sessionFile!).size;
+    f.faux.setResponses([fauxAssistantMessage("must not reach provider")]);
+    await slot.prompt("input crossing ".repeat(5_000));
+    await waitUntil(() => !slot.isBusy);
+    expect(f.faux.state.callCount).toBe(1);
+    await waitUntil(() => f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
+      .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
+    report.cases.push({ case: "real-input-hard-crossing", beforeBytes: before, settledBytes: statSync(slot.sessionFile!).size,
+      hardBytes: admissionLimits.bytes, metricsInjected: false, providerCallsAdded: 0, reason: "chapter-limit" });
+  });
+
   it("continues in a successor after a real hard-byte stop retains an oversized chapter", async () => {
     const f = await fixture("real-byte-stop-successor");
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
@@ -766,28 +928,46 @@ describe("Tron Home activations end to end", () => {
     const f = await fixture("hard-running-crossing");
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, "e2e-hard-running-crossing");
-    Object.defineProperty(slot, "canonicalEntryCount", { configurable: true, get: () => 100_000 });
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize entry crossing evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.entries = 100;
+    for (let index = 0; index < 100 && slot.canonicalEntryCount < 90; index += 1) {
+      slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
+    }
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
     let providerCalls = 0;
-    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("settlement response retained"); }]);
-    await slot.prompt("cross while running");
-    await waitUntil(() => !slot.isBusy, 30_000);
+    f.faux.setResponses([async () => { providerCalls += 1; await gate; return fauxAssistantMessage("settlement response retained"); }]);
+    const running = slot.prompt("cross while running");
+    void running.catch(() => {});
+    try {
+      await waitUntil(() => providerCalls === 1);
+      for (let index = 0; index < 100 && slot.canonicalEntryCount < admissionLimits.entries; index += 1) {
+        slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
+      }
+    } finally { release(); }
+    await running;
+    await waitUntil(() => !slot.isBusy && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
     const stopped = f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop");
     const branch = slot.sessionManager.getBranch();
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
     expect(stopped).toHaveLength(1);
-    expect(stopped[0]).toMatchObject({ boundary: "hard-entries", crossingEntries: 100_000, settledEntries: 100_000 });
+    expect(stopped[0]).toMatchObject({ boundary: "hard-entries", crossingEntries: 100 });
+    expect(stopped[0]!.settledEntries).toBeGreaterThanOrEqual(100);
     expect(branch).toEqual(canonical.slice(1));
-    expect(invocationReceipts(branch, slot.id).find(receipt => receipt.receiptKind === "terminal" && receipt.operationId)?.errorCode).toBe("chapter-limit");
-    expect(providerCalls).toBe(0);
+    expect(invocationReceipts(branch, slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)?.errorCode).toBe("chapter-limit");
+    expect(providerCalls).toBe(1);
     expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === "hard-entries")).toBe(false);
     const persisted = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100)
       .filter(record => record.event === "home.chapter-limit-stop");
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({ level: "warning", chapterOrdinal: 1, boundary: "hard-entries",
-      crossingBytes: stopped[0]!.crossingBytes, crossingEntries: 100_000,
-      settledBytes: stopped[0]!.settledBytes, settledEntries: 100_000 });
-    report.cases.push({ case: "persisted-home-running-stop", canonicalMatchesSdk: true, metricsInjected: true,
-      crossingEntries: 100_000, settledEntries: 100_000, signalRetainedOnReload: true });
+      crossingBytes: stopped[0]!.crossingBytes, crossingEntries: 100,
+      settledBytes: stopped[0]!.settledBytes, settledEntries: stopped[0]!.settledEntries });
+    report.cases.push({ case: "persisted-home-running-stop", canonicalMatchesSdk: true, metricsInjected: false,
+      hardEntries: admissionLimits.entries, crossingEntries: 100, settledEntries: stopped[0]!.settledEntries,
+      providerCallsAdded: providerCalls, signalRetainedOnReload: true });
   });
 
   it.each([

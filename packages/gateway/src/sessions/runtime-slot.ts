@@ -36,7 +36,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
-import { assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
+import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
@@ -212,9 +212,6 @@ type PromptQueueDisplay = {
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
 
-const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
-const HOME_HARD_ENTRIES = 100_000;
-
 type HomeMaterializationAuthority = Readonly<{
   homeId: string;
   ordinal: number;
@@ -346,6 +343,9 @@ const MAX_EXTENSION_EVENT_LINES = 256;
 export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
+
+/** Volatile cancellation attribution shares the invocation's receipt lifetime. */
+type LiveInvocation = InvocationProjection & { stopReason?: string };
 
 interface OperationObservation {
   cursor?: { entryIndex: number; branchId: string };
@@ -493,6 +493,8 @@ export interface RuntimeSlotDependencies {
    * begins; a rejection aborts the run retryably. It must be a no-op with no
    * I/O while the session is not archived. */
   beforeRunAdmission: (sessionId: string) => Promise<void>;
+  /** HomeOwner policy, revalidated synchronously after prompt admission awaits. */
+  homeChapterAdmission?: (sessionId: string, metrics: { bytes: number; entries: number }) => void;
   /** Gateway-owned archive projection for one session, read at snapshot time.
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
@@ -689,7 +691,7 @@ export class RuntimeSlot {
   private pendingExtensionCommand: SessionOperationState | undefined;
   /** Gateway-owned causal graph. Canonical receipts remain the durable source;
    * these bounded maps are only the live projection used by snapshots. */
-  private readonly invocations = new Map<string, InvocationProjection>();
+  private readonly invocations = new Map<string, LiveInvocation>();
   private readonly invocationFailures = new Map<string, string>();
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
@@ -3370,7 +3372,7 @@ export class RuntimeSlot {
     return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
   }
 
-  private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
+  private invocationForOperation(operationId: string | undefined): LiveInvocation | undefined {
     if (!operationId) return undefined;
     const live = [...this.invocations.values()]
       .filter(invocation => invocation.operationId === operationId)
@@ -3409,6 +3411,12 @@ export class RuntimeSlot {
     this.assertOwnershipPersistence();
     const invocation = this.invocationForOperation(operationId);
     if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
+    // Stop records attribution before cancellation yields. All terminal
+    // observers, including successful completion, publish that same fact.
+    if (invocation.stopReason) {
+      lifecycle = "interrupted";
+      errorCode = invocation.stopReason;
+    }
     // SDK append is synchronous, but receipt acknowledgement and live-map
     // retirement yield. A second terminal observer must join the first exact
     // receipt, not manufacture a second timestamp/lifecycle while that live map
@@ -3907,8 +3915,7 @@ export class RuntimeSlot {
           : terminalNotification?.outcome === "unknown" ? "outcomeUnknown" as const
           : "completed" as const;
         const terminalErrorCode = terminalLifecycle === "interrupted"
-          ? (settledOperationId && this.homeLimitStop?.operationId === settledOperationId ? "chapter-limit"
-            : settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
+          ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
         // Observation admission is issued only after the exact terminal receipt
         // path below settles; before that point canonical durability is still
@@ -7029,8 +7036,7 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
-    this.assertHomeLimitNotStopping();
-    this.assertChapterWritable();
+    this.assertHomePromptAdmission();
     if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
@@ -7201,8 +7207,7 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
-      this.assertHomeLimitNotStopping();
-      this.assertChapterWritable();
+      this.assertHomePromptAdmission();
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -7270,7 +7275,7 @@ export class RuntimeSlot {
       const invocationName = isExactExtensionCommand
         ? extensionCommandName
         : queueDisplay?.resourceInvocation?.name;
-      const invocation: InvocationProjection = {
+      const invocation: LiveInvocation = {
         version: 1,
         invocationId,
         operationId,
@@ -7333,6 +7338,9 @@ export class RuntimeSlot {
         // above. A prompt can therefore never start while the session is hidden
         // from the dashboard, and a store failure rejects the prompt retryably.
         await this.dependencies.beforeRunAdmission(this.id);
+        // Attention, settings and archive I/O can yield to canonical writes or
+        // a seal. Recheck the physical target before invocation/SDK effects.
+        this.assertHomePromptAdmission();
         this.invocations.set(invocationId, invocation);
         while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
         operationWork = this.beginOperationWork(operationId);
@@ -7366,6 +7374,7 @@ export class RuntimeSlot {
         // never emit output before Gateway has recorded its invocation owner.
         await this.persistInvocationReceipt(startReceipt, operationWork);
         startPersisted = true;
+        this.assertHomePromptAdmission();
 
         // Receipt persistence and extension hooks may outlive the run that was
         // active at RPC entry. Re-evaluate at the last Gateway-owned boundary,
@@ -7463,7 +7472,8 @@ export class RuntimeSlot {
             }
             // agent_start can fire synchronously before this Gateway promise
             // resumes. Record the SDK's disposition now, not one turn later.
-            this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            invocation.lifecycle = "accepted";
+            this.invocations.set(invocationId, invocation);
             acceptedResolve(true);
           },
         }));
@@ -7724,11 +7734,11 @@ export class RuntimeSlot {
           message: error instanceof Error ? error.message : String(error),
         }));
       }
-      this.invocations.set(invocationId, {
-        ...invocation,
-        lifecycle: queuesIntoActiveRun ? "queued" : "accepted",
-        updatedAt: new Date().toISOString(),
-      });
+      // Admission and Stop retain the same invocation object across receipt
+      // awaits; a late accepted transition cannot replace its recorded reason.
+      invocation.lifecycle = queuesIntoActiveRun ? "queued" : "accepted";
+      invocation.updatedAt = new Date().toISOString();
+      this.invocations.set(invocationId, invocation);
       finalizeAdmission();
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
@@ -7878,7 +7888,14 @@ export class RuntimeSlot {
     const agentOperationId = this.activeOperationId;
     const invocationOperationId = agentOperationId
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
-    if (invocationOperationId) this.abortedOperations.add(invocationOperationId);
+    if (invocationOperationId) {
+      const invocation = this.invocationForOperation(invocationOperationId);
+      if (invocation) {
+        // A limit crossing is authoritative even if a user Stop races it.
+        if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
+      }
+      this.abortedOperations.add(invocationOperationId);
+    }
     if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
     const session = this.runtime.session;
@@ -9406,6 +9423,19 @@ export class RuntimeSlot {
       if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
       throw error;
     }
+  }
+
+  private assertHomePromptAdmission(): void {
+    this.assertHomeLimitNotStopping();
+    this.assertChapterWritable();
+    if (!this.dependencies.homeChapterState?.(this.id).homeId) return;
+    const path = this.sessionFile;
+    let bytes = 0;
+    if (path) {
+      try { bytes = statSync(path).size; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+    this.dependencies.homeChapterAdmission?.(this.id, { bytes, entries: this.canonicalEntryCount });
   }
 
   private assertHomeLimitNotStopping(): void {
