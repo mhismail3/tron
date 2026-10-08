@@ -25,9 +25,19 @@ struct ChatInteractionTraceTests {
             "presentation=\(ChatInteractionTrace.maximumRecords + 19)"
         ) == true)
         #expect(records.last?.record.event == "chat.context.begin")
-        #expect(zip(records, records.dropFirst()).allSatisfy { pair in
-            pair.0.record.timestamp > pair.1.record.timestamp
-        })
+        let sequences = records.compactMap { record in
+            record.record.message
+                .split(separator: " ")
+                .first { $0.hasPrefix("sequence=") }
+                .flatMap { Int($0.dropFirst("sequence=".count)) }
+        }
+        func isNewestFirst(_ values: [Int]) -> Bool {
+            zip(values, values.dropFirst()).allSatisfy { pair in pair.0 > pair.1 }
+        }
+        #expect(sequences.count == records.count)
+        #expect(isNewestFirst(sequences))
+        #expect(!isNewestFirst(Array(sequences.reversed())))
+
     }
 
     @Test("diagnostic priority survives routine ring pressure")
