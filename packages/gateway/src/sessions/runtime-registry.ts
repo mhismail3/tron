@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -675,6 +676,7 @@ export class RuntimeRegistry {
       tronHome: string;
       /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
+      managedSubagents?: ManagedSubagents;
       mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
@@ -1564,6 +1566,7 @@ export class RuntimeRegistry {
   private dependencies() {
     return {
       agentDir: this.options.agentDir,
+      ...(this.options.managedSubagents ? { managedSubagents: this.options.managedSubagents } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
       openAIModelEligibility: this.openAIModelEligibility,

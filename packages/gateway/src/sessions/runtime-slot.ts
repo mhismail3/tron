@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
@@ -30,6 +31,7 @@ import {
   type ModelRuntime,
   type ToolDefinition,
   SessionManager,
+  SettingsManager,
   type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
@@ -409,6 +411,7 @@ interface PromptOwnership {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
@@ -1564,11 +1567,15 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
+      const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      const managedLoaderOptions = this.dependencies.managedSubagents?.loaderOptions(settingsManager);
       const services = await createAgentSessionServices({
+        settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
+          ...(managedLoaderOptions ?? {}),
           extensionFactories: [
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
@@ -1611,10 +1618,14 @@ export class RuntimeSlot {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
-          } : undefined, { requireTronAskUser: true }),
+          } : undefined, { requireTronAskUser: true, ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}) }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
+      // Only the loader keeps the read-only package view. Session settings
+      // mutations keep their canonical owner, never the filtered projection.
+      services.settingsManager = settingsManager;
+      this.dependencies.managedSubagents?.reportIgnoredPackages(settingsManager);
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
       // owner handoff is the independent fail-safe when that signal was stale.
@@ -1738,6 +1749,7 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
+    this.dependencies.managedSubagents?.reportIgnoredPackages(session.settingsManager);
   }
 
   /** Pi's replacement hooks for each runtime this slot constructs. */
@@ -8556,6 +8568,7 @@ export class RuntimeSlot {
       agentDir: this.dependencies.agentDir,
       cwd: this.cwd,
       settingsManager: this.runtime.session.settingsManager,
+      ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}),
     });
   }
 

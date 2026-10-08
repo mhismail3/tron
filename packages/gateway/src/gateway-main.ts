@@ -1,3 +1,4 @@
+import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,7 +77,7 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await assertDelegatedRootCutoverReady(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
-// extensions. No source or installed package is rewritten at startup.
+// extensions. Existing installed packages are never rewritten in place.
 delegatedProviderEnvironment(delegatedRoot);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
@@ -102,6 +103,9 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
+// Activate this payload's exact offline closure before any Pi discovery. A
+// restart verifies/reuses the immutable root; damaged roots fail startup closed.
+const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
   logger.log(
@@ -213,6 +217,7 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  managedSubagents,
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
@@ -430,10 +435,11 @@ const packages = new PackageService(
   trust,
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
+  managedSubagents,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
-const hookResources = new HookResources(config.agentDir, trust, workRegistry);
+const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,
