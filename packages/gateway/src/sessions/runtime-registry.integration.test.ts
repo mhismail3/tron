@@ -9,7 +9,7 @@ import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -28,7 +28,7 @@ import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
-import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
+import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import {
@@ -202,7 +202,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     /** Admit one explicit delegated artifact root, as the production cutover
      * does, so ambient discovery scans exactly that root. */
     delegatedRoot?: string;
-    beforeInitialize?: (sessionFile: string) => Promise<void>;
+    beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;
     notifications?: NotificationService;
     resources?: ResourceRecorder;
     runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
@@ -248,7 +248,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
     });
     registries.push(registry);
-    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
+    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!, registry);
     await initializeRegistry(registry, options.phaseObserver);
     await registry.recoverCanonicalAttention();
     return {
@@ -12907,7 +12907,19 @@ export default function (pi) {
   // no request-path walks to the criterion this file measures above.
   it("publishes an external append to a catalog row without a walk", async () => {
     const recorded = resourceRecorder();
-    const fixture = await coldFixture("external-append", { resources: recorded });
+    let watchRequest: SessionCatalogWatchRequest | undefined;
+    const fixture = await coldFixture("external-append", {
+      resources: recorded,
+      beforeInitialize: async (_sessionFile, registry) => {
+        // Inject at the catalog's existing backend seam before it starts; the
+        // registry keeps its production discovery/index/row publication owners.
+        (catalogOwner(registry) as unknown as { watchCatalog: SessionCatalogOptions["watchCatalog"] }).watchCatalog = (request) => {
+          watchRequest = request;
+          return { close: () => {} };
+        };
+      },
+    });
+    onTestFinished(() => rm(fixture.root, { recursive: true, force: true }));
     const catalog = catalogOwner(fixture.registry);
     await catalog.settled();
 
@@ -12917,19 +12929,31 @@ export default function (pi) {
     await writeFile(child, `${JSON.stringify({
       type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
     })}\n`);
-    await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
+    expect(watchRequest?.root).toBe(await realpath(join(fixture.agentDir, "sessions")));
+    const deliverHint = async (): Promise<void> => {
+      // Advance only the owner's debounce. No FSEvents delivery or latency is
+      // part of the oracle; the serial lane is the row-publication barrier.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        watchRequest!.onEvent(relative(watchRequest!.root, child));
+        await vi.advanceTimersByTimeAsync(CATALOG_EVENT_DEBOUNCE_MS);
+        await catalog.awaitQueuedChanges();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    await deliverHint();
+    expect(catalog.row(child)?.id).toBe("id-child");
     expect(catalog.row(child)?.delegated).toBe(true);
 
     const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
-    const appendedAt = Date.now();
     await appendFile(child, `${JSON.stringify({
       type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
     })}\n`);
-    await waitFor(() => catalog.row(child)?.messageCount === 1, "the child's first catalog message");
+    await deliverHint();
 
-    // The watcher's own hint, not a walk: the row is current within a second of
-    // the append and the sampler saw no catalog structure walk at all.
-    expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
+    // The watcher's hint, not a walk, publishes the canonical append facts.
+    expect(catalog.row(child)?.messageCount).toBe(1);
     expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
     expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
   });
