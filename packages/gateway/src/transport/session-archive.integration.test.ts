@@ -279,15 +279,16 @@ async function fixture(options: {
 
 /** An extension-owned trigger that starts a turn of its own. */
 const wakeExtension = (root: string) => `
-        import { existsSync, writeFileSync } from "node:fs";
+        import { existsSync, unlinkSync, writeFileSync } from "node:fs";
         import { setTimeout as delay } from "node:timers/promises";
         export default function (pi) {
-          writeFileSync(${JSON.stringify(join(root, "wake-ready"))}, "ready");
+          writeFileSync(${JSON.stringify(join(root, "wake-polling"))}, "polling");
           void (async () => {
             for (;;) {
               if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
                 pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
                 writeFileSync(${JSON.stringify(join(root, "wake-sent"))}, "sent");
+                unlinkSync(${JSON.stringify(join(root, "wake-polling"))});
                 return;
               }
               await delay(5);
@@ -1816,10 +1817,6 @@ describe("session archive over the real Gateway", () => {
     const client = await f.connect();
     const session = await f.coldSession("started-during-write");
     await openSession(client, session.id);
-    // Do not let the filesystem trigger race extension initialization. The
-    // extension confirms that its external-turn watcher is live before the
-    // archive write is opened.
-    await waitFor(() => existsSync(join(f.root, "wake-ready")), "external wake ready");
     const store = (f.current().registry as unknown as {
       archive: { archive(sessionId: string): Promise<string> };
     }).archive;
@@ -1828,10 +1825,21 @@ describe("session archive over the real Gateway", () => {
     const inWrite = new Promise<void>((resolve) => { enteredWrite = resolve; });
     let releaseWrite!: () => void;
     const writeBarrier = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let archiveWriteHeld = false;
     store.archive = async (sessionId) => {
+      archiveWriteHeld = true;
       enteredWrite();
       await writeBarrier;
+      archiveWriteHeld = false;
       return durableArchive(sessionId);
+    };
+    const stallState = () => `archive stall: watcherPolling=${existsSync(join(f.root, "wake-polling"))}, externalRunSubmitted=${existsSync(join(f.root, "wake-sent"))}, archiveWriteHeld=${archiveWriteHeld}`;
+    const waitWithStallState = async (condition: () => boolean, label: string) => {
+      try {
+        await waitFor(condition, label);
+      } catch (error) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; ${stallState()}`);
+      }
     };
     let releaseRun!: () => void;
     const runBarrier = new Promise<void>((resolve) => { releaseRun = resolve; });
@@ -1840,14 +1848,15 @@ describe("session archive over the real Gateway", () => {
       const archiving = client.request("started-during-write-request", "session.archive.set", {
         commandId: "started-during-write-command", sessionId: session.id, archived: true,
       });
+      void archiving.catch(() => {});
       await inWrite;
       // The extension's turn never passes Gateway run admission, so only the
       // active projection the commit rechecks can notice it. Its frames arrive
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
-      await waitFor(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
-      await waitFor(() => snapshotFrames(client, session.id).some(
+      await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
+      await waitWithStallState(() => snapshotFrames(client, session.id).some(
         (frame) => frame.payload?.phase === "running"), "externally started run");
       releaseWrite();
       const response = await archiving;
