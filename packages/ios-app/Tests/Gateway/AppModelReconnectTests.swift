@@ -1956,6 +1956,47 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("captured Home authority cannot send a delayed action after profile replacement")
+    func homeControlStaleAdmissionDoesNotSend() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let authority = try fixture.model.homeMutations.authority(profileID: profile.id)
+            try fixture.model.profiles.save(GatewayProfile(id: "replacement", label: "Other Mac", host: "other.test", port: 9847, machineId: "other-machine"), token: "fixture-token")
+            var finished = false
+            let delayed = Task {
+                defer { finished = true }
+                do { try await fixture.model.performHomeControl(.pauseMemory, authority: authority); Issue.record("stale action claimed completion") }
+                catch is CancellationError { }
+                catch { Issue.record("unexpected stale admission error: \(error)") }
+            }
+            defer { delayed.cancel() }
+            var mutationSent = false
+            // A bounded response driver also settles an incorrectly admitted
+            // command in the negative control; a failed assertion cannot hang.
+            for _ in 0..<100 {
+                let frames = try await socket.sentFrames().map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+                if let frame = frames.first(where: { $0.objectValue?["method"]?.stringValue == "home.pauseMemory" }) {
+                    mutationSent = true
+                    let id = try #require(frame.objectValue?["id"]?.stringValue)
+                    await socket.enqueue(successResponse(id: id, result: .object(["paused": .bool(true)])))
+                    break
+                }
+                if finished { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(!mutationSent)
+            #expect(finished || mutationSent)
+            guard finished || mutationSent else { return }
+            await delayed.value
+            #expect(!fixture.model.homeMutations.isRunning)
+        }
+    }
+
     @Test("Home controls carry receipts, refuse duplicate admission and refresh only on completion")
     func homeControlsRefreshAfterReceipt() async throws {
         let socket = ScriptedGatewaySocket()
@@ -1981,12 +2022,35 @@ struct AppModelReconnectTests {
                 if case .configureMemory = command {
                     #expect(frame.objectValue?["params"]?.objectValue?["model"]?.objectValue?["id"]?.stringValue == "memory")
                 }
-                do {
-                    try await fixture.model.performHomeControl(.disable, authority: fixture.model.homeMutations.authority(profileID: profile.id))
-                    Issue.record("duplicate Home mutation admitted")
-                } catch let failure as GatewayFailure { #expect(failure.code == "conflict") }
+                var duplicateFinished = false
+                let duplicate = Task {
+                    defer { duplicateFinished = true }
+                    do {
+                        try await fixture.model.performHomeControl(.disable, authority: fixture.model.homeMutations.authority(profileID: profile.id))
+                        Issue.record("duplicate Home mutation admitted")
+                    } catch let failure as GatewayFailure { #expect(failure.code == "conflict") }
+                }
+                defer { duplicate.cancel() }
+                var answered = Set<String>()
+                for _ in 0..<100 {
+                    let frames = try await socket.sentFrames().dropFirst(sent.index + 1).map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+                    for frame in frames {
+                        guard let id = frame.objectValue?["id"]?.stringValue, answered.insert(id).inserted else { continue }
+                        let method = frame.objectValue?["method"]?.stringValue
+                        #expect(method != "home.disable", "duplicate command reached transport")
+                        // Settle an erroneously admitted command and its refresh
+                        // too, so this regression has a bounded negative control.
+                        await socket.enqueue(successResponse(id: id, result: method == "home.status" ? homeStatusResult() : .object(["enabled": .bool(false)])))
+                    }
+                    if duplicateFinished { break }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                #expect(duplicateFinished)
+                guard duplicateFinished else { return }
+                try await duplicate.value
+                let afterDuplicate = await socket.sentFrames().count
                 await socket.enqueue(successResponse(id: sent.id, result: .object(["configured": .bool(true), "open": .bool(true)])))
-                latest = try await waitForMethod("home.status", on: socket, afterIndex: sent.index + 1)
+                latest = try await waitForMethod("home.status", on: socket, afterIndex: afterDuplicate)
                 await socket.enqueue(successResponse(id: latest.id, result: homeStatusResult()))
                 try await task.value
                 #expect(!fixture.model.homeMutations.isRunning)

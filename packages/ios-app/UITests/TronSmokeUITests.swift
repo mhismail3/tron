@@ -5,6 +5,78 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testHomeHeaderRejectsStaleRouteAction() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-stale-route"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
+        app.buttons["fixture.invoke-stale-home-action"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.stale-action-finished"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 3))
+        XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("competing-profile"))
+        keepScreenshot(named: "home-header-stale-route-refused")
+    }
+
+    @MainActor
+    func testHomeHeaderAcceptedControlContinuesInBackground() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-control-delayed"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
+        app.buttons["home-controls"].tap()
+        app.buttons["Pause memory"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 3))
+        XCTAssertTrue(app.staticTexts["fixture.home-command-state"].label.contains("running"))
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 3))
+        // The fixture resolves after six seconds, while presentation is retired.
+        Thread.sleep(forTimeInterval: 7)
+        app.activate()
+        XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 10))
+        if app.alerts["Home change"].exists { app.alerts.buttons["OK"].tap() }
+        if app.staticTexts["home-header-memory"].label.contains("unresolved") {
+            app.buttons["home-controls"].tap()
+            app.buttons["Check completion"].tap()
+        }
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-command-state"], containing: "idle", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["home-header-state"], containing: "Paused", timeout: 5))
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"))
+        XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
+        keepScreenshot(named: "home-header-background-accepted-paused")
+    }
+
+    @MainActor
+    func testHomeHeaderLightDarkAndAccessibilityCaptures() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for type in ["normal", "accessibility"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-header-state-paused"]
+                if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
+                app.launch()
+                defer { app.terminate() }
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                app.buttons["home-pinned-row"].tap()
+                XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["home-header-state"].label.contains("Paused"))
+                XCTAssertTrue(app.staticTexts["home-header-memory"].label.contains("New responses are blocked"))
+                XCTAssertTrue(app.buttons["home-controls"].isHittable)
+                XCTAssertTrue(app.textViews.firstMatch.isHittable)
+                keepScreenshot(named: "home-header-\(appearance)-\(type)")
+            }
+        }
+    }
+
+    @MainActor
     func testHomeHeaderStatesAndStopOwner() {
         for (phase, label) in [("ready", "Ready"), ("active", "Working"), ("paused", "Paused"),
                                ("blocked", "Memory blocked"), ("unconfigured", "Memory setup needed"),
@@ -42,8 +114,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
         app.buttons["home-controls"].tap()
         app.buttons["Disable Home"].tap()
-        XCTAssertTrue(app.alerts["Home change"].waitForExistence(timeout: 5))
-        app.alerts.buttons["OK"].tap()
+        let completionAlert = app.alerts["Home change"]
+        if completionAlert.waitForExistence(timeout: 5) { completionAlert.buttons["OK"].tap() }
         XCTAssertTrue(waitForLabel(app.staticTexts["home-header-state"], containing: "Disabled", timeout: 8))
         XCTAssertTrue(app.buttons["home-controls"].exists, "Authoritative disable does not resolve an unknown command receipt")
         XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)

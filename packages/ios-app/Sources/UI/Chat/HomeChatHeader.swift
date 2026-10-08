@@ -4,10 +4,16 @@ import SwiftUI
 /// the menu and composer always use the same canonical operation authority.
 struct HomeChatHeader: View {
     let status: HomeStatusDTO
+    /// The mounted chat owns this identity; a delayed menu callback must not
+    /// acquire authority from a successor profile selected in the meantime.
+    let profileID: String
     let canStop: Bool
     let onStop: () -> Void
     @Environment(AppModel.self) private var model
     @State private var failure: String?
+    #if HOSTED_TEST
+    @Environment(\.hostedHomeHeaderActionProbe) private var hostedActionProbe
+    #endif
 
     private var stateLabel: String {
         switch status.phase {
@@ -78,6 +84,9 @@ struct HomeChatHeader: View {
         .alert("Home change", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK", role: .cancel) { failure = nil }
         } message: { Text(failure ?? "") }
+        #if HOSTED_TEST
+        .onAppear { hostedActionProbe?.pause = { perform(.pauseMemory) } }
+        #endif
         .onChange(of: model.homeMutations.hasUnresolvedCommand) { _, unresolved in
             if unresolved { failure = "Completion is unresolved. Check completion on the original Gateway; do not repeat the change." }
         }
@@ -86,8 +95,7 @@ struct HomeChatHeader: View {
     private func perform(_ command: HomeMutationCoordinator.Command) {
         // An unstructured accepted domain task is intentionally not a View.task:
         // navigation/background retires reads, not command receipt ownership.
-        guard let profileID = model.profiles.selected?.id,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
+        guard let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
         Task { @MainActor in
             do { try await model.performHomeControl(command, authority: authority) }
             catch is CancellationError { }
@@ -96,8 +104,7 @@ struct HomeChatHeader: View {
     }
 
     private func checkCompletion() {
-        guard let profileID = model.profiles.selected?.id,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
+        guard let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
         Task { @MainActor in
             do { try await model.checkHomeControlCompletion(authority: authority) }
             catch is CancellationError { }

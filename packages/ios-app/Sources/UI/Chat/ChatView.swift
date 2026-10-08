@@ -147,12 +147,15 @@ struct ChatView: View {
                 )
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if model.homeStatus.isCapabilityEnabled,
+                if let profileID = composerScope?.profileID,
+                   profileID == model.profiles.selected?.id,
+                   model.homeStatus.isCapabilityEnabled,
                    let status = model.homeStatus.status,
                    status.sessionId == sessionID,
-                   status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: model.profiles.selected?.id ?? "") {
+                   status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                     HomeChatHeader(
                         status: status,
+                        profileID: profileID,
                         canStop: admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil,
                         onStop: abortCurrentOperation
                     )

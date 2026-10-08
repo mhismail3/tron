@@ -44,13 +44,23 @@ profile/lifecycle authority before its asynchronous task starts; mutations are
 not cancelled with presentation reads. Hosted `TronSmokeUITests` Home-header
 journeys mount production chat and cover represented states, the existing Stop
 owner, active-response pause, resume, disable, background/reconnect and explicit
-unresolved completion. Run these with `TRON_IOS_TEST_TIER=ui-validation` through
-`scripts/tron-ios-test`; screenshots are xcresult attachments, not public source.
+unresolved completion. `testHomeHeaderRejectsStaleRouteAction` retains an actual
+mounted header callback, authenticates a successor profile, and proves the old
+callback cannot send a Home control there. `testHomeHeaderAcceptedControlContinuesInBackground`
+backgrounds after acceptance but before the delayed response, then requires terminal
+receipt convergence without a second command. The native delayed-admission and
+duplicate-control drivers settle erroneously sent requests too, so negative
+controls fail bounded assertions rather than hanging on unanswered responses.
+Run these with `TRON_IOS_TEST_TIER=ui-validation` through `scripts/tron-ios-test`;
+screenshots are xcresult attachments, not public source.
 These fixtures prove native wiring, not durable Gateway pause semantics (owned
 by Gateway Home activation E2E) or physical iPhone behavior. Configuring the model
-from a sheet, preparing/task-state contracts, and full visual/accessibility proof
-remain separate work.
- These scripted journeys are not live Gateway or physical-device proof.
+from a sheet and preparing/task-state contracts remain separate work.
+`testHomeHeaderLightDarkAndAccessibilityCaptures` mounts the production chat in
+light/dark at normal and accessibility Dynamic Type, captures its wrapping memory
+copy, and checks menu/composer reachability. Export its attachments with
+`xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
+These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
 
 To inspect the Home row visual fixture, run `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowLightDarkAndAccessibilityCaptures`. The four retained XCTest screenshot attachments are private simulator captures; export them from that command's `.xcresult` to a private evidence directory with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`. Do not add captures to the public source tree.
 

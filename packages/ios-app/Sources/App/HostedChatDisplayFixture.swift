@@ -88,6 +88,16 @@ struct HostedChatDisplayFixture: View {
     }
 }
 
+/// Retains the actual mounted menu action to exercise a callback after route replacement.
+@MainActor
+final class HostedHomeHeaderActionProbe {
+    var pause: (() -> Void)?
+}
+
+extension EnvironmentValues {
+    @Entry var hostedHomeHeaderActionProbe: HostedHomeHeaderActionProbe? = nil
+}
+
 @MainActor
 struct HostedHomeDashboardFixture: View {
     @State private var model: AppModel
@@ -96,6 +106,9 @@ struct HostedHomeDashboardFixture: View {
     @State private var homeStatusCount = 0
     @State private var controlCount = 0
     @State private var abortCount = 0
+    @State private var staleActionFinished = false
+    private let actionProbe = HostedHomeHeaderActionProbe()
+    private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
     private let gateway: HostedHomeShellGateway
     private let homeActivity = PresentationActivityCoordinator()
@@ -106,7 +119,8 @@ struct HostedHomeDashboardFixture: View {
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
         let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
             headerState: arguments.first(where: { $0.hasPrefix("-home-header-state-") })?.replacingOccurrences(of: "-home-header-state-", with: ""),
-            unresolved: arguments.contains("-home-control-unresolved"))
+            unresolved: arguments.contains("-home-control-unresolved"),
+            delayed: arguments.contains("-home-control-delayed"))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -122,11 +136,17 @@ struct HostedHomeDashboardFixture: View {
             if ready {
                 SessionShellView()
                     .environment(model)
+                    .environment(\.hostedHomeHeaderActionProbe, actionProbe)
                     .environment(\.tronPresentationActivityCoordinator, homeActivity)
                     .tronPresentation()
                     .tronSettingsLayout()
                     .overlay(alignment: .top) {
                         VStack {
+                            if staleActionFinished {
+                                Text("Stale action finished").accessibilityIdentifier("fixture.stale-action-finished")
+                            }
+                            Text(model.homeMutations.isRunning ? "running" : model.homeMutations.hasUnresolvedCommand ? "unresolved" : "idle")
+                                .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
                             Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
@@ -136,12 +156,33 @@ struct HostedHomeDashboardFixture: View {
                         }
                         .font(.system(size: 1)).opacity(0.01)
                     }
+                    .overlay(alignment: .center) {
+                        if arguments.contains("-home-stale-route") {
+                            Button("Invoke stale Home action") {
+                                let callback = actionProbe.pause
+                                Task { @MainActor in
+                                    do {
+                                        let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
+                                        try model.profiles.save(other, token: "other-fixture-token")
+                                        try await model.connectHostedGateway(profile: other, token: "other-fixture-token")
+                                        callback?()
+                                        // Allow the menu's task and fixture count observer to settle.
+                                        try await Task.sleep(for: .seconds(1))
+                                        staleActionFinished = true
+                                    } catch { self.error = error.localizedDescription }
+                                }
+                            }
+                            .accessibilityIdentifier("fixture.invoke-stale-home-action")
+                        }
+                    }
             } else if let error {
                 Text(error)
             } else {
                 ProgressView()
             }
         }
+        .preferredColorScheme(arguments.contains("-home-dark") ? .dark : .light)
+        .dynamicTypeSize(arguments.contains("-home-accessibility-type") ? .accessibility3 : .large)
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
@@ -270,9 +311,10 @@ private actor HostedHomeShellGateway {
     private var paused = false
     private var configured = true
     private let unresolved: Bool
+    private let delayed: Bool
     private var acceptedControl: JSONValue?
     private var receiptChecks = 0
-    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false) {
+    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false) {
         self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
         designated = initialState == "ready"
@@ -280,12 +322,13 @@ private actor HostedHomeShellGateway {
         paused = headerState == "paused"
         configured = headerState != "unconfigured"
         self.unresolved = unresolved
+        self.delayed = delayed
     }
     func statusCount() -> Int { homeStatusCount }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] : ["sessions.v1"] }
 
-    func handle(_ method: String, _ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
+    func handle(_ method: String, _ params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
         switch method {
         case "session.list":
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
@@ -306,6 +349,10 @@ private actor HostedHomeShellGateway {
             if method == "home.configureMemory" { configured = true; phase = "ready" }
             if method == "home.disable" { designated = false; phase = "disabled" }
             let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
+            if delayed {
+                acceptedControl = result
+                try? await Task.sleep(for: .seconds(6))
+            }
             if unresolved {
                 acceptedControl = result
                 return (nil, .object(["code": .string("response_too_large"), "message": .string("Completion unavailable"), "retryable": .bool(false)]))
@@ -313,7 +360,7 @@ private actor HostedHomeShellGateway {
             return (result, nil)
         case "command.status":
             receiptChecks += 1
-            if receiptChecks == 1 { return (.object(["status": .string("pending")]), nil) }
+            if unresolved && receiptChecks == 1 { return (.object(["status": .string("pending")]), nil) }
             return (.object(["status": .string("completed"), "result": acceptedControl ?? .null]), nil)
         case "session.abort":
             if params["sessionId"]?.stringValue == "home-session", params["operationId"]?.stringValue == "home-operation",

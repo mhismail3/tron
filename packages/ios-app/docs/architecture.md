@@ -1471,7 +1471,11 @@ immediate revocation; revoking this iPhone also removes its local profile.
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners.
 `HomeChatHeader` adds a compact native top safe-area inset only for the current
 capable Home session, with shared semantic typography, the emerald glass surface,
-wrapping secondary memory copy and a native 44-point menu target. Gateway `active`
+wrapping secondary memory copy and a native 44-point menu target. The existing
+mounted composer scope supplies the header's immutable profile identity. Both
+rendered admission and delayed menu callbacks use that owner identity, never the
+profile selected later; the mutation coordinator then captures and fences the
+lifecycle generation before asynchronous work. Gateway `active`
 is Working, `ready` is Ready, `paused` is Paused, `blocked` distinguishes missing
 configuration from Memory blocked, and `rollover-pending` is Recovery needed.
 No task or preparing state is guessed from unrelated runtime fields. An active
