@@ -491,7 +491,9 @@ async function runTerminalChat(): Promise<void> {
               const current = assistantText(snapshot);
               const messageId = assistantMessageId(snapshot);
               const delta = renderDelta(rendered, current, messageId !== renderedMessageId);
-              if (awaitingOperation && delta) process.stdout.write(delta);
+              // Resync is authoritative presentation even before an accepted
+              // response identifies its operation. Never consume unseen text.
+              if (delta) process.stdout.write(delta);
               rendered = current;
               renderedMessageId = messageId;
             });

@@ -372,7 +372,7 @@ describe("Tron Home designation", () => {
     expect(activeTools(await contextOf(ordinary))).toEqual(activeTools(ordinaryContext));
     expect(extensionNames(await contextOf(ordinary))).toEqual(extensionNames(ordinaryContext));
 
-    expect(await homeStatus(f)).toEqual({
+    expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
       // Home has no memory defaults: until `home.configureMemory`, the

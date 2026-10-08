@@ -25,11 +25,19 @@ activation effect. The next `home.prompt` activation is the only path that
 materializes that reservation. A sealed chapter remains readable but refuses
 mutation regardless of Home's enabled state or the runtime's ordinary/Home
 profile. The chapter-state check is physical-session-owned and is not bypassed
-when Home is disabled. The Registry materializer claims one attempt per reserved
+when Home is disabled. Registry serializes attention set/acknowledge, archive,
+delete and sealing per physical session: admitted mutation work settles before
+seal; seal-first refuses later mutations. The session serializer precedes the
+existing Registry/slot/attention lanes; HomeOwner takes its record lock only for
+the final ledger replacement, never before the session serializer. Queue tails
+retire at settlement and a failed mutation cannot poison the next one.
+The Registry materializer claims one attempt per reserved
 chapter, scans every candidate before adoption or creation. The same strict
 complete-file scan runs before a cold Home runtime is opened and before a Home
-chapter is used as a fork source; unknown entry shapes and non-newline-terminated
-evidence block before Pi's loader can repair it. Sealed chapter memory reads use
+chapter is used as a fork source. It scans the exact canonical file's owning
+directory, not a directory re-encoded from cwd: workspace aliases must not change
+evidence ownership, including cold search. Unknown entry shapes and
+non-newline-terminated evidence block before Pi's loader can repair it. Sealed chapter memory reads use
 the read-only canonical JSONL projection, never a writer-capable SessionManager.
 The materializer durably records
 the exact SDK path and attempt ID before the caller can receive the runtime.
@@ -379,7 +387,9 @@ An accepted operation can settle before its response. A new authoritative idle
 snapshot settles it immediately, whether it arrives on the same chapter,
 reconnect or successor transfer. The idle cut preceding prompt submission is
 not proof of that operation's settlement. Reconnect reconciles the receipt and
-snapshot without replaying accepted input.
+snapshot without replaying accepted input. New assistant text in that authoritative
+snapshot is rendered even while the command response is pending; consuming it
+silently would lose a settled refusal before its operation ID arrives.
 
 The real terminal child cases in `home-activation.e2e.test.ts` retain
 `test-results/terminal-chat-home/attachments-rollover.json` and

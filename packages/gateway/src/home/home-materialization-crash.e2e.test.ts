@@ -116,6 +116,7 @@ async function fixture() {
     sessionFile: async () => expectedPath,
     hasLiveRuntime: () => false,
     hasConversation: async () => manager.getEntries().some(entry => entry.type === "message"),
+    serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (_id, commit) => commit(),
     beginHomePublicationReconciliation: () => {},
     retireHomeRuntimes: async () => {},

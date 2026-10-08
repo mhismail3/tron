@@ -438,20 +438,14 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     disposals.push(() => coldRegistry.dispose());
     await coldRegistry.initialize();
     await coldRegistry.recoverCanonicalAttention();
-    const coldSlot = await coldRegistry.acquire(item.slot.id);
-    const coldSession = (coldSlot as unknown as { runtime: { session: AgentSession } }).runtime.session;
     expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
-    const entries = coldSession.sessionManager.getEntries();
-    const leaf = coldSession.sessionManager.getLeafId();
-    const bytes = await readFile(coldSlot.sessionFile!, "utf8");
-    await expect(coldSlot.setThinking("low")).rejects.toMatchObject({
-      code: "conflict", details: { reason: "sealed-chapter", sessionId: item.slot.id },
-    });
-    expect(coldSession.sessionManager.getEntries()).toEqual(entries);
-    expect(coldSession.sessionManager.getLeafId()).toBe(leaf);
-    expect(await readFile(coldSlot.sessionFile!, "utf8")).toBe(bytes);
-    expect(bytes).toBe(oldBytes);
-    item.record("disabled-sealed-chapter", { profile: "ordinary", refused: true, bytesUnchanged: true });
+    const callsBefore = item.faux.state.callCount;
+    // Disabled changes the profile, not sealed evidence ownership. A cold
+    // chapter must never enter the writer-capable SDK constructor at all.
+    await expect(coldRegistry.acquire(item.slot.id)).rejects.toMatchObject({ code: "conflict" });
+    expect(item.faux.state.callCount).toBe(callsBefore);
+    expect(await item.jsonl()).toBe(oldBytes);
+    item.record("disabled-sealed-chapter", { profile: "ordinary", refusedBeforeConstruction: true, bytesUnchanged: true });
   });
 
   it("refuses sealed Slot mutation paths before changing SDK state or the canonical file", async () => {

@@ -59,6 +59,7 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
     sessionFile: async (sessionId) => (present.has(sessionId) ? join(root, "sessions", `${sessionId}.jsonl`) : undefined),
     sessionPresent: async (sessionId) => present.has(sessionId),
     hasLiveRuntime: (sessionId) => live.has(sessionId),
+    serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (sessionId, commit) => {
       replaced.push(sessionId);
       if (replaceGate) {
@@ -553,6 +554,7 @@ describe("Tron Home record", () => {
         sessionFile: async () => undefined,
         sessionPresent: async () => true,
         hasLiveRuntime: () => false,
+        serializeSessionMutation: async (_id, commit) => commit(),
         replaceRuntimeForProfile: async (_sessionId, commit) => { await commit(); },
       },
       workspace: new TronWorkspace(join(h.root, "tron")),

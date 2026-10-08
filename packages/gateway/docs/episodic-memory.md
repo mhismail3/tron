@@ -282,16 +282,20 @@ text.
   `id + n > T`. A child whose node is not built right now renders the
   placeholder, and a revoked node's text is gone from the map, so a stale child
   cannot be served.
-- **`entryTimestamp(id)`** returns the catalog record's own instant, or — for a
-  record written before the optional field — the instant the canonical source
-  proves for that entry id. That read is the bounded canonical reader the owner
+- **`entryTimestamp(id)`** returns the catalog record's own instant. Ordinary
+  single-file memory also supports records written before the optional field:
+  it returns the instant the canonical source proves for that entry id. That read is the bounded canonical reader the owner
   already uses, it is not `SessionManager`, and it covers **every parsed entry of
   the file, not only the branch the last entry follows**: a record that has since
   left the branch is still an entry the source can date. It happens at most once
   per memory and is remembered, because an entry's instant never changes —
   including across a navigation, since the map is keyed by entry id.
   `unavailable` is the source's answer that it holds no such entry, or that it
-  cannot read the file at all — the memory never invents a time.
+  cannot read the file at all — the memory never invents a time. Home's strict
+  chapter projection records carry instants and do not use legacy backfill;
+  malformed Home projection evidence missing an instant reports `unavailable`.
+  `episodic-memory-recovery.test.ts` retains the ordinary restart/navigation proof
+  at `test-results/episodic-memory/ordinary-instants.json`.
 - **`searchMessages(query, from, to)`** is Tron's addition to the recipe's tools:
   one case-insensitive substring pass over the projected catalog, bounded by
   `EPISODIC_SEARCH_HITS` (20) lines whose snippets are bounded by

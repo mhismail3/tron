@@ -548,6 +548,21 @@ export class RuntimeRegistry {
     automationId: string;
   }>();
   private readonly mutex = new RequestSpanLane("registry.mutex");
+  private readonly sessionMutations = new Map<string, Promise<void>>();
+
+  /** Registry session ordering precedes the existing registry/slot/attention
+   * lanes; seal takes HomeOwner's recordMutex last, never in reverse. SDK work
+   * keeps its own slot lane. Only this boundary creates/retires queue entries. */
+  private async serializeSessionMutation<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionMutations.get(sessionId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(() => {}, () => {});
+    this.sessionMutations.set(sessionId, tail);
+    try { return await result; }
+    finally {
+      if (this.sessionMutations.get(sessionId) === tail) this.sessionMutations.delete(sessionId);
+    }
+  }
   /** One disposable flight per admission scope. All-scope work may wait for a
    * user cut, but a dashboard never inherits child-only delay or failure. */
   private readonly catalogMaterializations = new Map<"user" | "all", {
@@ -851,6 +866,7 @@ export class RuntimeRegistry {
           }
           await slot.replaceRuntimeForProfile(commit);
         },
+        serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
         beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
         retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
       },
@@ -1156,7 +1172,7 @@ export class RuntimeRegistry {
         const candidate = candidates[0]!;
         let manager: SessionManager;
         try {
-          await this.scanHomeBeforeManager(candidate.id, candidate.path, candidate.cwd);
+          await this.scanHomeBeforeManager(candidate.id, candidate.path);
           manager = SessionManager.open(candidate.path, this.sessionDirectoryFor(candidate.cwd));
           const current = await lstat(candidate.path);
           if (!current.isFile() || current.isSymbolicLink()
@@ -1266,7 +1282,7 @@ export class RuntimeRegistry {
       const path = candidates[0]!.path;
       let manager: SessionManager;
       try {
-        await this.scanHomeBeforeManager(sessionId, path, dirname(path));
+        await this.scanHomeBeforeManager(sessionId, path);
         manager = SessionManager.open(path);
       }
       catch { continue; }
@@ -1706,6 +1722,10 @@ export class RuntimeRegistry {
   }
 
   async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
+    return this.serializeSessionMutation(sessionId, () => this.setAttentionSerialized(sessionId, unread, throughCompletionRevision));
+  }
+
+  private async setAttentionSerialized(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
     this.assertChapterWritable(sessionId);
     // Membership resolution is deliberately outside the attention lane. A cold
     // catalog read must not block completion/rekey/delete ordering for every
@@ -2132,7 +2152,7 @@ export class RuntimeRegistry {
     if (!entry || entry.structuralSubagent) return {};
     let manager: SessionManager;
     try {
-      await this.scanHomeBeforeManager(sessionId, entry.path, entry.canonicalCwd);
+      await this.scanHomeBeforeManager(sessionId, entry.path);
       manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd));
     }
     catch { return {}; }
@@ -2381,7 +2401,7 @@ export class RuntimeRegistry {
     // reader for its canonical leaf/branch. Physical line order is not branch
     // authority when sibling forks are present.
     const entries = parseStrictSessionJSONL(bytes);
-    await this.scanHomeBeforeManager(sessionId, info.path, this.sessionDirectoryFor(info.cwd));
+    await this.scanHomeBeforeManager(sessionId, info.path);
     const coldManager = SessionManager.open(info.path);
     const selectedEntries = coldManager.getBranch();
     // Full-file graph validation is an admission gate; retain the SDK-selected
@@ -3324,15 +3344,17 @@ export class RuntimeRegistry {
     return pending.operation;
   }
 
-  private async scanHomeBeforeManager(sessionId: string, path: string, cwd: string): Promise<void> {
+  private async scanHomeBeforeManager(sessionId: string, path: string): Promise<void> {
     const chapter = this.home.chapterStateFor(sessionId);
     if (!chapter.homeId) return;
     if (chapter.sealed || chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
       throw new GatewayError("conflict", "Home chapter cannot be opened as a writable runtime");
     }
     const canonicalPath = resolve(path);
+    // The exact file owns its evidence directory. Re-encoding cwd can select
+    // another folder after alias canonicalization, or encode a directory twice.
     const scan = await scanReservedHomeSession({
-      directory: this.sessionDirectoryFor(cwd), expectedPath: canonicalPath, sessionId,
+      directory: dirname(canonicalPath), expectedPath: canonicalPath, sessionId,
     });
     if (scan.action !== "adopt" || scan.path !== canonicalPath) {
       throw new GatewayError("conflict", "Home chapter is blocked by uncertain canonical evidence");
@@ -3356,7 +3378,7 @@ export class RuntimeRegistry {
       if (resolve(canonicalPath) !== entry.path) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
-      await this.scanHomeBeforeManager(sessionId, canonicalPath, entry.canonicalCwd);
+      await this.scanHomeBeforeManager(sessionId, canonicalPath);
       if (await this.projectTrustReloading(entry.canonicalCwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
@@ -3592,6 +3614,12 @@ export class RuntimeRegistry {
     archived: boolean,
     initiatingWorkToken?: string,
   ): Promise<{ archived: boolean; archivedAt?: string }> {
+    return this.serializeSessionMutation(sessionId, () => this.setArchivedSerialized(sessionId, archived, initiatingWorkToken));
+  }
+
+  private async setArchivedSerialized(
+    sessionId: string, archived: boolean, initiatingWorkToken?: string,
+  ): Promise<{ archived: boolean; archivedAt?: string }> {
     this.assertChapterWritable(sessionId);
     return this.mutex.run(async () => {
       // Archive state is written for an admitted canonical session, so it needs
@@ -3675,6 +3703,10 @@ export class RuntimeRegistry {
   }
 
   async delete(sessionId: string, initiatingWorkToken?: string): Promise<void> {
+    return this.serializeSessionMutation(sessionId, () => this.deleteSerialized(sessionId, initiatingWorkToken));
+  }
+
+  private async deleteSerialized(sessionId: string, initiatingWorkToken?: string): Promise<void> {
     this.assertChapterWritable(sessionId);
     await this.attentionLane.run(async () => {
       await this.flushPendingProjectionRemovals();

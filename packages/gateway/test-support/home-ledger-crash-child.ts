@@ -9,6 +9,7 @@ const owner = new HomeOwner({
   trust: {} as never,
   workspace: new TronWorkspace(tronHome),
   sessions: {
+    serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
     chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
   } as never,
   memorySummarizer: () => ({ summarizer: async () => { throw new Error("unused"); } }),

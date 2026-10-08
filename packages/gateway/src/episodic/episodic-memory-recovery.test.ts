@@ -207,6 +207,40 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 }
 
 describe("episodic memory crash recovery", () => {
+  it("keeps ordinary single-file legacy instants available after restart and navigation", async () => {
+    const fx = await fixture("ordinary-legacy-instants", 2);
+    let memory: EpisodicMemory | undefined = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      await memory.dispose();
+      memory = undefined;
+      const store = new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
+      const snapshot = await store.read();
+      if (!snapshot.state) throw new Error("Ordinary fixture has no persisted state");
+      const records = [...snapshot.messages.values()];
+      const first = records.find(record => record.index === 0)!;
+      const later = records.find(record => record.index === 2)!;
+      const firstInstant = fx.manager.getEntry(first.entryId)!.timestamp;
+      const laterInstant = fx.manager.getEntry(later.entryId)!.timestamp;
+      await store.checkpoint({
+        messages: records.map(record => { const old = { ...record }; delete old.timestamp; return old; }),
+        nodes: snapshot.nodes.values(), state: snapshot.state, watermark: snapshot.highestRevision,
+      });
+      fx.manager.branch(first.entryId);
+      const bytes = await readFile(fx.sessionFile, "utf8");
+      memory = await openMemory(fx);
+      const firstResult = await memory.entryTimestamp(0);
+      const offBranchResult = await memory.entryTimestamp(2);
+      expect(firstResult).toEqual({ kind: "timestamp", timestamp: firstInstant });
+      expect(offBranchResult).toEqual({ kind: "timestamp", timestamp: laterInstant });
+      expect(await readFile(fx.sessionFile, "utf8")).toBe(bytes);
+      const directory = join(process.cwd(), "test-results", "episodic-memory");
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "ordinary-instants.json"), `${JSON.stringify({
+        first: firstResult, offBranch: offBranchResult, canonicalBytesUnchanged: true,
+      }, null, 2)}\n`);
+    } finally { await memory?.dispose(); }
+  });
   it("completes an interrupted chunked invalidation before serving memory", async () => {
     const fx = await fixture("chunk-boundary", 0);
     // Persist a realistic-sized dependency fanout directly through the store's

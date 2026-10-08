@@ -85,6 +85,9 @@ export interface HomeSessionPort {
   sessionFile(sessionId: string): Promise<string | undefined>;
   /** Whether the session currently holds a live runtime. */
   hasLiveRuntime(sessionId: string): boolean;
+  /** Registry owns session mutation ordering. Seal enters it before taking the
+   * Home recordMutex, so admitted attention/archive/delete work settles first. */
+  serializeSessionMutation<T>(sessionId: string, commit: () => Promise<T>): Promise<T>;
   /** Quiescent canonical size used to seal a chapter at its soft boundary. */
   chapterMetrics?(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }>;
   /** Whether the exact current SDK file has a complete durable conversation message. */
@@ -465,30 +468,35 @@ export class HomeOwner {
       return;
     }
     if (chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
-    const metrics = await this.options.sessions.chapterMetrics(sessionId);
-    if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES)) return;
-    const rolled = await this.recordMutex.run(async () => {
-      const current = this.record;
-      const active = current?.chapters.find(candidate => candidate.sessionId === sessionId);
-      if (!current || !active || active.state !== "active") return false;
-      const now = new Date().toISOString();
-      const successor: HomeChapter = {
-        sessionId: randomUUID(), ordinal: active.ordinal + 1, state: "reserved", createdAt: now,
-      };
-      await this.writeLocked({
-        ...current,
-        chapters: current.chapters.map(candidate => candidate.sessionId === sessionId
-          ? { ...candidate, state: "sealed" as const, sealedAt: now, sizeAtSeal: metrics.bytes, entriesAtSeal: metrics.entries }
-          : candidate).concat(successor),
-        updatedAt: now,
+    // Registry session ordering is outermost; remeasure after admitted
+    // mutations settle, then take recordMutex only for the final ledger write.
+    const rolled = await this.options.sessions.serializeSessionMutation(sessionId, async () => {
+      const metrics = await this.options.sessions.chapterMetrics!(sessionId);
+      if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES)) return undefined;
+      const sealed = await this.recordMutex.run(async () => {
+        const current = this.record;
+        const active = current?.chapters.find(candidate => candidate.sessionId === sessionId);
+        if (!current || !active || active.state !== "active") return false;
+        const now = new Date().toISOString();
+        const successor: HomeChapter = {
+          sessionId: randomUUID(), ordinal: active.ordinal + 1, state: "reserved", createdAt: now,
+        };
+        await this.writeLocked({
+          ...current,
+          chapters: current.chapters.map(candidate => candidate.sessionId === sessionId
+            ? { ...candidate, state: "sealed" as const, sealedAt: now, sizeAtSeal: metrics.bytes, entriesAtSeal: metrics.entries }
+            : candidate).concat(successor),
+          updatedAt: now,
+        });
+        return true;
       });
-      return true;
+      return sealed ? metrics : undefined;
     });
     if (rolled) this.options.diagnostic?.({
       outcome: "chapter-rollover", chapterOrdinal: chapter.ordinal,
-      reason: metrics.bytes >= HOME_HARD_BYTES ? "hard-byte-limit"
-        : metrics.entries >= HOME_HARD_ENTRIES ? "hard-entry-limit"
-          : metrics.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
+      reason: rolled.bytes >= HOME_HARD_BYTES ? "hard-byte-limit"
+        : rolled.entries >= HOME_HARD_ENTRIES ? "hard-entry-limit"
+          : rolled.bytes >= HOME_SOFT_BYTES ? "soft-byte-limit" : "soft-entry-limit",
     });
   }
 
