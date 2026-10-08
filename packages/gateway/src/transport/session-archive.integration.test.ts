@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -278,13 +279,15 @@ async function fixture(options: {
 
 /** An extension-owned trigger that starts a turn of its own. */
 const wakeExtension = (root: string) => `
-        import { existsSync } from "node:fs";
+        import { existsSync, writeFileSync } from "node:fs";
         import { setTimeout as delay } from "node:timers/promises";
         export default function (pi) {
+          writeFileSync(${JSON.stringify(join(root, "wake-ready"))}, "ready");
           void (async () => {
             for (;;) {
               if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
                 pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
+                writeFileSync(${JSON.stringify(join(root, "wake-sent"))}, "sent");
                 return;
               }
               await delay(5);
@@ -1813,6 +1816,10 @@ describe("session archive over the real Gateway", () => {
     const client = await f.connect();
     const session = await f.coldSession("started-during-write");
     await openSession(client, session.id);
+    // Do not let the filesystem trigger race extension initialization. The
+    // extension confirms that its external-turn watcher is live before the
+    // archive write is opened.
+    await waitFor(() => existsSync(join(f.root, "wake-ready")), "external wake ready");
     const store = (f.current().registry as unknown as {
       archive: { archive(sessionId: string): Promise<string> };
     }).archive;
@@ -1839,6 +1846,7 @@ describe("session archive over the real Gateway", () => {
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
+      await waitFor(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
       await waitFor(() => snapshotFrames(client, session.id).some(
         (frame) => frame.payload?.phase === "running"), "externally started run");
       releaseWrite();
