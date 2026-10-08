@@ -108,7 +108,7 @@ const defaultModel = () => MODEL;
 
 function chapterRecordBytes(overrides: Record<string, unknown> = {}): string {
   return `${JSON.stringify({
-    version: 2, homeId: "home-1", generation: 2, policyRevision: 1, bindingRevision: 1,
+    version: 2, homeId: "home-1", generation: 2, routeGeneration: 1, policyRevision: 1, bindingRevision: 1,
     enabled: true, model: MODEL,
     chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -120,7 +120,7 @@ function recordBytes(overrides: Record<string, unknown> = {}): string {
   const { sessionId = "session-1", ...fields } = overrides;
   return `${JSON.stringify({
     version: 2, homeId: "home-1", chapters: [{ sessionId, ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
-    bindingRevision: 1, generation: 2, policyRevision: 1, enabled: true, model: MODEL,
+    bindingRevision: 1, generation: 2, routeGeneration: 1, policyRevision: 1, enabled: true, model: MODEL,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     ...fields,
   })}\n`;
@@ -128,7 +128,7 @@ function recordBytes(overrides: Record<string, unknown> = {}): string {
 
 function legacyRecordBytes(): string {
   return `${JSON.stringify({
-    version: 1, homeId: "home-1", sessionId: "session-1", generation: 2,
+    version: 1, homeId: "home-1", sessionId: "session-1", generation: 2, routeGeneration: 1,
     policyRevision: 1, enabled: true, model: MODEL,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   })}\n`;
@@ -352,7 +352,7 @@ describe("Tron Home record", () => {
       ...(index === 99_999 ? {} : { sealedAt: now }),
     }));
     const oversized: HomeRecord = {
-      version: 2, homeId: "home-large", chapters, bindingRevision: 1, generation: 1,
+      version: 2, homeId: "home-large", chapters, bindingRevision: 1, generation: 1, routeGeneration: 1,
       policyRevision: 1, enabled: true, model: MODEL, createdAt: now, updatedAt: now,
     };
     const writer = f.owner as unknown as { writeLocked(record: HomeRecord): Promise<void> };

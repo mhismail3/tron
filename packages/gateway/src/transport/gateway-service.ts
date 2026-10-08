@@ -472,6 +472,14 @@ export class GatewayService {
         rejectUnknownFields(params, ["taskId"], method);
         return safeJson(await this.requireHome().taskResult(string(params.taskId, "taskId", { max: 160 })));
       }
+      case "home.redeliverTaskResult":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "taskId", "homeId", "routeGeneration"], method);
+          if (!Number.isSafeInteger(params.routeGeneration) || (params.routeGeneration as number) < 1) throw new GatewayError("invalid_request", "Invalid routeGeneration");
+          return safeJson(await this.requireHome().redeliverTaskResult(string(params.taskId, "taskId", { max: 160 }), {
+            homeId: string(params.homeId, "homeId", { max: 200 }), routeGeneration: params.routeGeneration as number,
+          }));
+        });
       case "home.reconfirmPermissions":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);

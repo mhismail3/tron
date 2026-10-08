@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
+import { WakeInboxOwner } from "./home-wake-inbox.js";
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
 
 const roots: string[] = [];
@@ -30,11 +31,11 @@ async function fixture() {
 function task(): HomeTaskRecord {
   const intent = { revision: 1, text: "Investigate a trusted project" };
   return {
-    version: 1, taskId: "task-1", revision: 1, homeId: "home-1", generation: 1,
+    version: 1, taskId: "task-1", revision: 1, homeId: "home-1", generation: 1, routeGeneration: 1,
     intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
     target: "/trusted/project", workerProfile: "home-task-v1", policyRevision: 1,
     grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
-    controllerGeneration: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
+    controllerGeneration: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null, wake: null,
   };
 }
 
@@ -92,7 +93,7 @@ describe("HomeTaskStore durable namespace", () => {
 
   it("never replaces an already terminal immutable result", async () => {
     const f = await fixture(); await f.store.initialize();
-    const terminal: HomeTaskRecord = { ...task(), lifecycle: "terminal", terminalEvidence: { outcome: "unknown", sessionId: null, entryIds: [], reason: "no-report" } };
+    const terminal: HomeTaskRecord = { ...task(), wake: new WakeInboxOwner(f.store, {} as never).event(task()), lifecycle: "terminal", terminalEvidence: { outcome: "unknown", sessionId: null, entryIds: [], reason: "no-report" } };
     await f.store.put(terminal, null);
     await expect(f.store.put({ ...terminal, revision: 2, terminalEvidence: { ...terminal.terminalEvidence!, reason: "edited" } }, 1)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await f.store.read(terminal.taskId)).toEqual(terminal);

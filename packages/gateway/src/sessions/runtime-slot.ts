@@ -519,6 +519,8 @@ export interface RuntimeSlotDependencies {
   /** Tron Home's request seam for one session id. Asked once per runtime
    * creation, never for a fork or an ordinary session. */
   homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
+  homeInboxAdmission?: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>) => Promise<void>;
+  homeInboxSettlement?: (sessionId: string, operationId: string) => Promise<void>;
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
   homeMemory?: HomeMemoryPort;
@@ -3423,9 +3425,12 @@ export class RuntimeSlot {
     );
   }
 
-  private persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
-    if (this.handedOffInvocations.has(receipt.invocationId)) return Promise.resolve();
-    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+  private async persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
+    if (this.handedOffInvocations.has(receipt.invocationId)) return;
+    await this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+    if (receipt.receiptKind === "terminal" && this.homeRequestPolicy) {
+      await this.dependencies.homeInboxSettlement?.(this.id, receipt.operationId);
+    }
   }
 
   private invocationForOperation(operationId: string | undefined): LiveInvocation | undefined {
@@ -7527,6 +7532,15 @@ export class RuntimeSlot {
           // `session.prompt` below, and steering later inserts entries after it,
           // never before it.
           this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
+          if (this.homeRequestPolicy) await this.dependencies.homeInboxAdmission?.(this.id, operationId, async message => {
+            await session.sendCustomMessage(message, { triggerTurn: false });
+            const entry = session.sessionManager.getLeafEntry();
+            if (entry?.type !== "custom_message" || entry.customType !== message.customType
+              || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
+            await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
+              safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
+                owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
+          });
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
           this.phase = "running";

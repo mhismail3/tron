@@ -1058,6 +1058,7 @@ export interface HomeStatus {
   sessionId?: string;
   bindingRevision?: number;
   generation?: number;
+  routeGeneration?: number;
   model?: ModelRef;
   chapter?: {
     count: number;

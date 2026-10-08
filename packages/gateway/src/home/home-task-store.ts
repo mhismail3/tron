@@ -6,6 +6,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import type { HomeTaskAuthorizationState, HomeTaskAuthorizationStore } from "./home-task-authorization.js";
+import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
@@ -18,6 +19,8 @@ export interface HomeTaskRecord {
   revision: number;
   homeId: string;
   generation: number;
+  routeGeneration: number;
+  wake: HomeWakeEvent | null;
   intent: { revision: number; text: string };
   /** SHA-256 of JSON.stringify({ revision, text }), in that key order. */
   intentDigest: string;
@@ -197,6 +200,25 @@ export class HomeTaskStore {
     });
   }
 
+  /** Inbox is the sole mutable portion of a terminal task. Its result and
+   * authority cannot be rewritten by delivery, recovery or notification. */
+  async updateWake(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent): Promise<HomeTaskRecord> {
+    return this.run(async () => {
+      if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
+      if (!(await this.inspect())) throw new HomeTaskStoreError("not-initialized");
+      const current = await this.readTask(taskId);
+      if (!current || current.lifecycle !== "terminal" || !current.wake) throw new HomeTaskStoreError("missing-state");
+      const wake = structuredClone(change(structuredClone(current.wake)));
+      if (JSON.stringify(wake) === JSON.stringify(current.wake)) return current;
+      if (wake.eventId !== current.wake.eventId || wake.createdAt !== current.wake.createdAt
+        || current.wake.state === "acknowledged" || (current.wake.push === "decided" && wake.push !== "decided")) throw new HomeTaskStoreError("invalid-record");
+      const next = { ...current, revision: current.revision + 1, wake };
+      validateTask(next);
+      await this.publish(join(this.directory, `${taskId}.json`), next, TASK_BYTES);
+      return next;
+    });
+  }
+
   private async run<T>(operation: () => Promise<T>): Promise<T> {
     return this.mutex.run(async () => {
       try {
@@ -295,7 +317,7 @@ function timestamp(value: unknown): boolean { return typeof value === "number" &
 function unique(records: Record<string, unknown>[]): boolean { return new Set(records.map(record => record.id)).size === records.length; }
 function invalid(): never { throw new HomeTaskStoreError("invalid-record"); }
 function immutableTask(task: HomeTaskRecord): string {
-  return JSON.stringify([task.taskId, task.homeId, task.generation, task.intent.revision, task.intent.text, task.intentDigest,
+  return JSON.stringify([task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.revision, task.intent.text, task.intentDigest,
     task.target, task.workerProfile, task.policyRevision]);
 }
 
@@ -306,9 +328,9 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "homeId", "generation", "intent", "intentDigest", "target", "workerProfile",
-    "policyRevision", "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "controllerGeneration", "stopIntent", "spend", "reportRefs", "terminalEvidence"])
+    "policyRevision", "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "controllerGeneration", "stopIntent", "spend", "reportRefs", "terminalEvidence", "routeGeneration", "wake"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
-    || !identifier(value.homeId) || !positive(value.generation)
+    || !identifier(value.homeId) || !positive(value.generation) || !positive(value.routeGeneration)
     || !keys(value.intent, ["revision", "text"]) || !positive(value.intent.revision) || !text(value.intent.text, 64 * 1_024)
     || value.intentDigest !== createHash("sha256").update(JSON.stringify({ revision: value.intent.revision, text: value.intent.text })).digest("hex")
     || !text(value.target, 4_096) || !isAbsolute(value.target) || !identifier(value.workerProfile) || !positive(value.policyRevision)
@@ -338,6 +360,23 @@ function validateTask(value: unknown): HomeTaskRecord {
     || (value.lifecycle === "active" && (value.sessionId === null || value.operationId === null || value.controllerGeneration === null
       || (value.grantRef === null && value.scopeRef === null)))
     || (evidence !== null && evidence.outcome === "final" && (value.reportRefs === null || value.reportRefs.length === 0))) invalid();
+  const wake = value.wake;
+  if ((value.lifecycle === "terminal") !== (wake !== null)) invalid();
+  if (wake !== null) {
+    if (value.lifecycle !== "terminal" || !keys(wake, ["eventId", "routeGeneration", "createdAt", "state", "push", "delivery", "acknowledgedAt", "redeliveries"])
+      || wake.eventId !== `task-result-${createHash("sha256").update(value.taskId as string).digest("hex")}` || !positive(wake.routeGeneration)
+      || !text(wake.createdAt, 64) || !Number.isFinite(Date.parse(wake.createdAt))
+      || !["pending", "claimed", "admitted", "terminal", "acknowledged", "cancelled-before-admission", "blocked", "outcome-unknown"].includes(wake.state as string)
+      || !["pending", "decided"].includes(wake.push as string)
+      || !Array.isArray(wake.redeliveries) || wake.redeliveries.some(item => !keys(item, ["from", "to"]) || !positive(item.from) || !positive(item.to))
+      || ((wake.state === "acknowledged") !== (wake.acknowledgedAt !== null))
+      || (wake.acknowledgedAt !== null && (!text(wake.acknowledgedAt, 64) || !Number.isFinite(Date.parse(wake.acknowledgedAt))))) invalid();
+    if (wake.delivery !== null && (!keys(wake.delivery, ["sessionId", "operationId", "generation", "routeGeneration", "messageDigest"])
+      || !identifier(wake.delivery.sessionId) || !identifier(wake.delivery.operationId) || !positive(wake.delivery.generation)
+      || typeof wake.delivery.messageDigest !== "string" || !/^[a-f0-9]{64}$/u.test(wake.delivery.messageDigest)
+      || wake.delivery.routeGeneration !== wake.routeGeneration)) invalid();
+    if (["claimed", "admitted", "terminal", "acknowledged", "outcome-unknown"].includes(wake.state as string) === (wake.delivery === null)) invalid();
+  }
   return value as unknown as HomeTaskRecord;
 }
 

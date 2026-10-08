@@ -6,7 +6,7 @@ Home does today: its designation record, its curated runtime, its memory, and th
 request seam that sends each activation the memory's view instead of the
 canonical transcript. Home delegates finite project work through `delegate` into
 ordinary worker sessions with explicit immutable reports, shared task controls
-and durable spend status. Wake delivery and Home's own client surface are later slices. Ordinary sessions
+and durable spend status. Results wait in Home's durable inbox for the next user message, with one advisory push at most. Home's own client surface is a later slice. Ordinary sessions
 are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
@@ -234,7 +234,8 @@ record per installation:
 | `homeId` | Stable identity of this installation's Home, generated once |
 | `chapters` | Ordered, unique physical sessions; designation starts with one `active` chapter, then quiescent rollover appends one `reserved` successor |
 | `bindingRevision` | Advances when designation or reserved-chapter activation binds Home to a different physical session |
-| `generation` | Advances on every profile change (designate, re-enable, disable) |
+| `generation` | Advances on every profile change (designate, re-enable, disable); fences in-flight operations |
+| `routeGeneration` | Required positive route epoch: set at designation, unchanged through disable/re-enable and chapter rollover, advanced only on missing-session replacement |
 | `policyRevision` | The curated-profile revision in force; a re-enable writes this build's |
 | `enabled` | Whether Home is currently designated |
 | `model` | The model applied at the last designation, updated when the Home session's model changes |
@@ -278,15 +279,16 @@ strict v1 format requires exactly these keys:
 | fields | contract |
 | --- | --- |
 | `version`, `taskId`, `revision` | Version 1, filename-matching identity, positive safe-integer revision; create at 1, replace only at expected revision + 1 |
-| `homeId`, `generation` | Immutable originating Home identity and enabled generation |
+| `homeId`, `generation`, `routeGeneration` | Immutable originating Home identity, enabled operation generation and logical route epoch |
 | `intent`, `intentDigest` | Immutable `{ revision, text }` snapshot (text at most 64 KiB UTF-8); SHA-256 of `JSON.stringify({ revision, text })` in that key order |
 | `target`, `workerProfile`, `policyRevision` | Immutable absolute target (at most 4 KiB UTF-8), qualified worker-profile identity and positive policy revision; storage is not trust/admission authority |
 | `grantRef`, `scopeRef` | Nullable authority references; at most one, must name an existing authorization record, fill once then cannot swap |
-| `lifecycle` | `pending`, `active`, or `terminal`; active requires authority and session/operation/controller identity; terminal requires terminal evidence |
+| `lifecycle` | `pending`, `active`, or `terminal`; active requires authority and session/operation/controller identity; terminal requires terminal evidence and a co-committed wake event |
 | `sessionId`, `operationId`, `controllerGeneration` | Nullable execution identity, populated by dispatch; shared control fences the active operation/controller generation |
 | `stopIntent` | Null or exact `{ operationId, controllerGeneration, requestedAt }`; durable exact-operation Stop intent, never cleared or replaced |
 | `spend` | Null or exact `{ sourceDigest, inputTokens, outputTokens, knownCostUSD, pricingProvenance, unpriced }`; safe nonnegative token counts, finite nonnegative known cost only with bounded price provenance, and an explicit unpriced flag |
 | `reportRefs` | Null or at most 256 unique result references, each exact `{ resultId, sessionId, entryId, digest }`; SHA-256 pins the exact canonical report payload, which the result owner verifies |
+| `wake` | Null before terminal; terminal outbox/inbox event with stable identity, logical route epoch, creation time, delivery state, push decision, exact activation binding/message digest, acknowledgement time and explicit redelivery audit |
 | `terminalEvidence` | Null or exact `{ outcome, sessionId, entryIds, reason }`; outcome is `progress`, `needs-input`, `final`, `limited`, `interrupted`, or `unknown`, at most 256 unique entry IDs and a bounded coded reason; `final` requires a report reference, never a last-reply substitution |
 
 `authorization.json` is independently owned by `HomeTaskAuthorization` through
@@ -311,11 +313,11 @@ pruning. A listing that later refuses is not a publishable complete projection.
 
 There is deliberately no task-membership index. The result and canonical
 worker-marker owners preserve and block on missing/invalid referenced tasks;
-future inbox consumers must do the same. An absent unreferenced task is
+the inbox does the same. An absent unreferenced task is
 indistinguishable from one never created and has no consumer. Immutable reports
 live in the worker's canonical history, pinned by task references and payload
-digests, not in a second transcript store. Terminal task records cannot be
-replaced. Inbox persistence arrives with its owner, not as an empty store.
+digests, not in a second transcript store. Terminal result/authority fields cannot be replaced. Only WakeInboxOwner may
+advance the nested delivery event through the store's terminal-only adapter.
 
 Ordinary restart reloads scopes and unused grants unchanged; consumed grants
 stay consumed. HomeTaskStore derives authority from the physical task directory's
@@ -333,14 +335,16 @@ acknowledged task/result/event evidence only 90 days after ack; pending,
 unacknowledged, blocked and outcome-unknown evidence is never age-pruned.
 There is no deletion API yet.
 
-**Rollback target:** the held pre-task Home-capable build already reads the same
-strict v2 ledger. It entirely ignores `gateway/home/tasks/` and its setup marker,
-so populated task data does not make Home unavailable or alter its profile,
-status, model selection, or record bytes. `home-task-rollback.integration.test.ts`
-executes that build's actual `home-owner.ts` from the held base ref, using unchanged
-Home/memory dependencies, against populated task and authorization files. It
-compares Home behavior and all namespace/marker bytes before and after. This is
-an owner-level rollback integration proof, not a full installed older Gateway
+**Rollback contract:** A build older than the record format refuses the record
+(Home unavailable) and preserves it unchanged; there is no down-conversion.
+The unreleased held pre-route build rejects the required `routeGeneration` field
+in v2 without changing the format version or adding a version gate. Home is
+unavailable for the Home-workspace cwd; ordinary chats elsewhere are unaffected.
+`home-task-rollback.integration.test.ts` executes that build's actual
+`home-owner.ts` from the held base ref against populated task and authorization
+files. It verifies unavailable status, unchanged record/namespace/marker bytes,
+and that the current owner afterwards still reads the enabled Home record. This
+is an owner-level rollback integration proof, not a full installed older Gateway
 binary or power-loss test.
 
 HomeOwner constructs the store, its authorization adapter and dispatcher beside
@@ -431,11 +435,74 @@ Input totals include cache read/write; output tokens are always shown. Pi's
 computed `usage.cost` has no authoritative billing provenance, so all current
 provider amounts are explicitly unpriced, never estimated bills.
 `home.task.transition`, `home.task.spend` and `home.task.runaway-stop` emit only
-bounded/hash references after durable publication. Reports are stored but are
-not yet delivered: no wake inbox, task push or
-result-triggered Home model call is added in this slice. Restart never replays
-accepted work; reconciliation of abandoned active tasks is a later recovery
-slice, so this change does not claim crash-cut task recovery.
+bounded/hash references after durable publication. Reports enter the task-owned
+inbox described below, never a result-triggered Home model call. Restart never
+replays accepted work; reconciliation of abandoned active tasks is required
+before task release and is not yet implemented. Terminal-task inbox recovery is
+separate from that in-flight execution recovery.
+
+## Task wake inbox and terminal push
+
+The terminal task and its wake event share one atomic/fsynced record: there is no
+terminal-to-outbox publication gap, orphan event catalog or independent retention
+sweep. Event identity is SHA-256-qualified by task identity. Immutable result IDs,
+canonical report references, terminal evidence and spend remain authoritative.
+Tombstones remain for the entire task lifetime; no task deletion or age pruning
+surface is currently implemented. Unknown/blocked/pending events never expire.
+
+WakeInboxOwner transitions `pending → claimed → admitted → terminal → acknowledged`.
+It also preserves `blocked`, `outcome-unknown` and `cancelled-before-admission`
+states. Only a new actual user Home activation admits pending results, in
+creation/event-ID order. RuntimeSlot inserts context-bearing
+`tron.home-task-result.v1` messages after that activation's exact start boundary,
+with an exact Gateway-owned `tron.context-delivery.v4` attribution receipt. The
+existing inbound-context presentation carries the Home-task sender. The model
+receives the immutable attributed report alongside the user's input, not a new
+background prompt; ordinary chats/steers/continuations do not drain the inbox.
+
+Admission records the physical chapter, exact operation, lifecycle generation,
+route epoch and SHA-256 message digest before canonical mutation. Acknowledgement
+requires exactly one canonical work message with matching digest and immutable
+references, its exact attribution, and a validated terminal invocation receipt
+for that operation/chapter. Canonical bytes and parent directory are fsynced
+before ack. A crash after claim but before admission safely returns to pending.
+Unproven admitted work becomes outcome-unknown and is not automatically replayed;
+proven terminal work can be acknowledged on recovery without consuming it twice.
+These cuts are covered by `home-wake-inbox.integration.test.ts` using the
+`test-support/home-ledger-crash-frozen-owner.ts` harness. This proves frozen-owner
+abandonment, not a physical power-loss test. `HOME_WAKE_REPORT=<artifact-path>`
+retains its regeneration artifact.
+
+Events bind `{ homeId, routeGeneration }`, not a chapter ID or the enabled
+operation generation. Disable pauses delivery; any number of disable/re-enable
+cycles preserves the route and event IDs without rebinding. Chapter rollover
+also preserves the route and delivers only into the current writable chapter;
+sealed chapters remain unchanged. Missing-session replacement advances the route
+epoch, so old pending events become blocked, never silently retargeted.
+`home.redeliverTaskResult { commandId, taskId, homeId, routeGeneration }` and
+`/home redeliver <id>` are explicit, receipted maintainer-only controls that
+re-stamp a chosen unadmitted event to the current route, recording old/new epochs.
+The command is idempotent and route-fenced under Home's record owner; model tools
+cannot invoke it. Uncertain admitted work cannot be re-stamped and replayed by
+this control. Stale-route acknowledgements refuse. The unreleased v2 record now
+requires `routeGeneration`; older v2 data missing it is preserved/refused without
+migration.
+
+The task terminal owner suppresses ordinary `agent_finished` for task operations
+only; normal sessions keep their existing terminal alerts. One push at most per
+task terminal result; a crash at that exact boundary may omit it; the Home inbox
+is the guaranteed delivery. The task event durably records `push: decided`
+before a single NotificationService enqueue with its stable event identity.
+There is no retry/re-decision after restart, even beyond NotificationService's
+24-hour dedupe window. Push failure/unavailability/quota refusal cannot reopen a
+task or delay result acknowledgement. The fixed-content hint routes to logical
+`home`, qualified by machine ID, never to the old worker or sealed chapter.
+
+`home.task.inbox` reports only a hashed event ID, state and coded reason. The
+faux-provider `home-task-dispatch.e2e.test.ts` artifact (`HOME_TASK_REPORT`) covers
+input → task → immutable report → one push + pending wake → next Home input →
+canonical attributed consumption/ack, repeated disable/re-enable, receipted
+replacement redelivery, rollover, failed fsync and ordinary-chat isolation.
 
 ## Shared task control and spend status
 
@@ -445,6 +512,8 @@ Status/viewing never changes control. Terminal `/home task <id>` shows lifecycle
 result outcome, input/cache and output tokens, and explicit unpriced money.
 Home's `task` tool exposes `status`, `steer` and `stop`; it can only control tasks
 bound to the enabled Home's exact identity/generation, never reconfirm permissions.
+Read-only status follows Home identity across disable/re-enable; it does not
+transfer executable control.
 
 `home.steerTask { commandId, taskId, operationId, controllerGeneration, text }`
 and `home.stopTask { commandId, taskId, operationId, controllerGeneration }`
@@ -589,7 +658,7 @@ owner.
 
 - `home.status` is one bounded read that composes the record, memory status and
   `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
-  enabled, homeId?, sessionId?, generation?, model?, live, sessionPresent,
+  enabled, homeId?, sessionId?, generation?, routeGeneration?, model?, live, sessionPresent,
   chapter?, memory }`. `chapter` contains a bounded ledger count, current canonical
   byte/entry measurements when available, and the current recovery decision. `phase` and the recovery action are derived on each read; they are
   not additional lifecycle state. Readiness gaps identify an unavailable record,
@@ -970,7 +1039,7 @@ src/sessions/home-provider-runtime.e2e.test.ts`.
 
 ## Not built yet
 
-Home has no task coordination, no wake inbox, no iOS surface of its own, and no
+Home has no iOS surface of its own and no
 scheduled or background work. It is one conversation whose turns run on its
 memory. Those are separately approved slices of the same epic, and none of them
 changes the rules above without updating this document.

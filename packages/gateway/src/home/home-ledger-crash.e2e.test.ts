@@ -28,7 +28,7 @@ function initialRecord() {
     homeId: "home-crash-id",
     chapters: [{ sessionId, ordinal: 1, state: "active", createdAt: now }],
     bindingRevision: 1,
-    generation: 1,
+    generation: 1, routeGeneration: 1,
     policyRevision: 1,
     enabled: true,
     model: { provider: "faux", id: "chat" },

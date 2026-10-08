@@ -1,10 +1,13 @@
+import { WakeInboxOwner, type HomeWakeMessage, type HomeWakeRoute } from "./home-wake-inbox.js";
+import { readCanonicalSession } from "../episodic/episodic-source.js";
+import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeTaskStore } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
-import { chmod, mkdir, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -13,7 +16,7 @@ import type { EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durablePublishBoundedJson, isDurablePublicationUncertain } from "../util/durable-json.js";
+import { durablePublishBoundedJson, isDurablePublicationUncertain, syncDurably } from "../util/durable-json.js";
 import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
@@ -54,6 +57,7 @@ export interface HomeRecord {
   chapters: HomeChapter[];
   bindingRevision: number;
   generation: number;
+  routeGeneration: number;
   policyRevision: number;
   enabled: boolean;
   model: ModelRef;
@@ -130,6 +134,8 @@ export interface HomeOwnerOptions {
    * refusal: the effective size of a turn and the readiness wait it took. */
   requestDiagnostic?: (record: HomeRequestRecord) => void;
   taskSessions?: RuntimeRegistry;
+  notifications?: NotificationService;
+  machineId?: string;
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
 }
 
@@ -170,6 +176,7 @@ export class HomeOwner {
   /** The fenced owner retains retirement work; a slot-lane writer must not await work queued on that same lane. */
   private publicationRetirement: Promise<void> | undefined;
   private readonly tasks: HomeTaskDispatcher | undefined;
+  private readonly inbox: WakeInboxOwner | undefined;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
@@ -183,7 +190,20 @@ export class HomeOwner {
           const inspection = await options.trust.inspect(target);
           return inspection.effectiveDecision === true ? inspection.cwd : undefined;
         } });
-      this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic);
+      this.inbox = new WakeInboxOwner(store, {
+        notify: input => options.notifications?.enqueue(input) ?? Promise.resolve("unavailable"),
+        ...(options.machineId ? { machineId: options.machineId } : {}),
+        ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
+        result: async taskId => {
+          const task = await this.tasks!.result(taskId);
+          const report = task.reportRefs?.[0];
+          const entries = task.sessionId ? (await options.taskSessions!.acquire(task.sessionId)).canonicalTaskEvidence() : [];
+          const entry = report && entries.find(entry => entry.id === report.entryId);
+          return { task, text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
+        },
+        evidence: sessionIds => this.inboxEvidence(sessionIds),
+      });
+      this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
     }
   }
 
@@ -194,7 +214,7 @@ export class HomeOwner {
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) {
       throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
     }
-    return this.tasks.start({ homeId: record.homeId, generation: record.generation }, request);
+    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
   }
 
   async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
@@ -215,8 +235,9 @@ export class HomeOwner {
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task control is unavailable");
     const task = await this.tasks.store.read(request.taskId);
-    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
+    if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
     if (request.action === "status") return this.taskResult(request.taskId);
+    if (task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
     if (request.action === "steer") await this.steerTask(sessionId, request);
     else await this.stopTask(request);
     return { accepted: true };
@@ -240,6 +261,53 @@ export class HomeOwner {
   taskResult(taskId: string) {
     if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
     return this.tasks.result(taskId);
+  }
+
+  private wakeRoute(sessionId?: string): HomeWakeRoute | undefined {
+    const record = this.record;
+    if (this.unavailable || !record || (sessionId && homeSessionId(record) !== sessionId)) return undefined;
+    return { homeId: record.homeId, routeGeneration: record.routeGeneration, generation: record.generation,
+      enabled: record.enabled, sessionId: homeSessionId(record) };
+  }
+
+  async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>): Promise<void> {
+    const route = this.wakeRoute(sessionId);
+    if (!route?.enabled || !this.inbox) return;
+    await this.inbox.recover(route);
+    await this.inbox.admit(route, operationId, append);
+  }
+
+  async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
+    const route = this.wakeRoute(sessionId);
+    if (route && this.inbox) await this.inbox.settle(route, operationId);
+  }
+
+  async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {
+    return this.recordMutex.run(async () => {
+      const route = this.wakeRoute();
+      if (!route || !this.inbox || expected.homeId !== route.homeId || expected.routeGeneration !== route.routeGeneration) throw new GatewayError("conflict", "Home inbox route is unavailable or stale");
+      await this.inbox.redeliver(taskId, route);
+      return { accepted: true };
+    });
+  }
+
+  private async inboxEvidence(sessionIds: string[]): Promise<import("./home-wake-inbox.js").HomeWakeEvidence[]> {
+    const entries: import("./home-wake-inbox.js").HomeWakeEvidence[] = [];
+    for (const chapter of this.record?.chapters ?? []) {
+      if (!sessionIds.includes(chapter.sessionId)) continue;
+      const path = await this.options.sessions.sessionFile(chapter.sessionId);
+      if (!path) continue;
+      // SDK append proves visibility, not power-loss durability. The inbox may
+      // retire only after canonical bytes and their directory entry are synced.
+      for (const durablePath of [path, dirname(path)]) {
+        const handle = await open(durablePath, "r");
+        try { await syncDurably(handle); } finally { await handle.close(); }
+      }
+      const cut = await readCanonicalSession({ path, sessionId: chapter.sessionId, maxLineBytes: 1024 * 1024 });
+      if (cut.tornBytes) throw new GatewayError("conflict", "Home inbox canonical evidence is torn");
+      for (const entry of cut.branch) entries.push({ ...entry.raw, type: entry.type, id: entry.id, sessionId: chapter.sessionId } as import("./home-wake-inbox.js").HomeWakeEvidence);
+    }
+    return entries;
   }
 
   /** Load the durable record once, before any runtime can ask for a profile. */
@@ -304,6 +372,7 @@ export class HomeOwner {
       sessionId,
       bindingRevision: record.bindingRevision,
       generation: record.generation,
+      routeGeneration: record.routeGeneration,
       model: { ...record.model },
       live,
       sessionPresent,
@@ -929,6 +998,7 @@ export class HomeOwner {
           ],
           bindingRevision: (existing?.bindingRevision ?? 0) + 1,
           generation: existing ? existing.generation + 1 : 1,
+          routeGeneration: existing ? existing.routeGeneration + 1 : 1,
           policyRevision: HOME_POLICY_REVISION,
           enabled: true,
           model: { ...model },
@@ -1114,11 +1184,12 @@ function admitRecord(value: unknown): HomeRecord | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const root = value as Record<string, unknown>;
   const model = root.model;
-  if (!hasOnlyKeys(root, ["version", "homeId", "chapters", "bindingRevision", "generation", "policyRevision", "enabled", "model", "createdAt", "updatedAt", "memory"])
+  if (!hasOnlyKeys(root, ["version", "homeId", "chapters", "bindingRevision", "generation", "routeGeneration", "policyRevision", "enabled", "model", "createdAt", "updatedAt", "memory"])
     || root.version !== VERSION
     || !boundedString(root.homeId, 200)
     || !Number.isSafeInteger(root.bindingRevision) || (root.bindingRevision as number) < 1
     || !Number.isSafeInteger(root.generation) || (root.generation as number) < 1
+    || !Number.isSafeInteger(root.routeGeneration) || (root.routeGeneration as number) < 1
     || !Number.isSafeInteger(root.policyRevision) || (root.policyRevision as number) < 1
     || typeof root.enabled !== "boolean"
     || !boundedTimestamp(root.createdAt)
@@ -1141,6 +1212,7 @@ function admitRecord(value: unknown): HomeRecord | undefined {
     chapters,
     bindingRevision: root.bindingRevision as number,
     generation: root.generation as number,
+    routeGeneration: root.routeGeneration as number,
     policyRevision: root.policyRevision as number,
     enabled: root.enabled,
     model: { provider: modelRecord.provider, id: modelRecord.id },

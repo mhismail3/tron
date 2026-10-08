@@ -185,7 +185,7 @@ export async function listSessions(
 function usage(): never {
   process.stderr.write(`Usage: tron-chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]\n\n`);
   process.stderr.write(`Attaches to the Gateway-owned canonical runtime. It never opens Pi JSONL directly.\n`);
-  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id>, /home resume, /home context, /home reconfirm-permissions, /home task <id>, /home steer <id> <text>, /home stop <id>, /abort, /quit\n`);
+  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id>, /home resume, /home context, /home reconfirm-permissions, /home task <id>, /home steer <id> <text>, /home stop <id>, /home redeliver <id>, /abort, /quit\n`);
   process.exit(64);
 }
 
@@ -208,6 +208,7 @@ export type HomeCommand =
   | { kind: "designate"; model?: { provider: string; id: string } }
   | { kind: "disable" }
   | { kind: "reconfirm-permissions" }
+  | { kind: "redeliver-task"; taskId: string }
   | { kind: "task"; taskId: string }
   | { kind: "stop-task"; taskId: string }
   | { kind: "steer-task"; taskId: string; text: string }
@@ -224,6 +225,8 @@ export function parseHomeCommand(input: string): HomeCommand | undefined {
   if (input === "/home" || input === "/home status") return { kind: "status" };
   if (input === "/home disable") return { kind: "disable" };
   if (input === "/home reconfirm-permissions") return { kind: "reconfirm-permissions" };
+  const redeliver = /^\/home redeliver ([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/u.exec(input);
+  if (redeliver) return { kind: "redeliver-task", taskId: redeliver[1]! };
   const task = /^\/home (task|stop|steer) ([A-Za-z0-9][A-Za-z0-9._-]{0,159})(?: (.+))?$/u.exec(input);
   if (task) {
     if (task[1] === "steer" && task[3]?.trim()) return { kind: "steer-task", taskId: task[2]!, text: task[3] };
@@ -255,7 +258,7 @@ export function describeHomeStatus(status: HomeStatusEnvelope): string {
   return `${designation} Phase: ${status.phase}. Readiness: ${status.readiness.ready ? "ready" : `not ready; ${gaps}`}. ${describeHomeMemory(status.memory)} ${describeHomeContext(status.activation)} Recovery: ${recovery}.`;
 }
 
-const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context | /home reconfirm-permissions | /home task <id> | /home steer <id> <text> | /home stop <id>\n";
+const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context | /home reconfirm-permissions | /home task <id> | /home steer <id> <text> | /home stop <id> | /home redeliver <id>\n";
 
 export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
@@ -362,6 +365,12 @@ export async function runHomeCommand(client: Pick<GatewayProtocolClient, "reques
     else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.model)}\n`);
     else if (command.kind === "resume") process.stdout.write(`${await resumeHomeMemory(client)}\n`);
     else if (command.kind === "context") process.stdout.write(`${await homeContextCommand(client)}\n`);
+    else if (command.kind === "redeliver-task") {
+      const route = await client.request("home.status", {}) as unknown as import("../protocol/types.js").HomeStatus;
+      if (!route.enabled || !route.homeId || !route.routeGeneration) throw new Error("Home route is unavailable");
+      await client.request("home.redeliverTaskResult", { commandId: randomUUID(), taskId: command.taskId, homeId: route.homeId, routeGeneration: route.routeGeneration });
+      process.stdout.write(`Task ${command.taskId}: redelivery accepted for the current Home route.\n`);
+    }
     else if (command.kind === "reconfirm-permissions") {
       await client.request("home.reconfirmPermissions", { commandId: randomUUID() });
       process.stdout.write("Home task standing permissions reconfirmed. Revoked scopes and one-use grants were not renewed.\n");

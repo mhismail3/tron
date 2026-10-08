@@ -9,11 +9,13 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
+import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, type HomeTaskReport } from "./home-task-report.js";
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
   | HomeTaskStoreDiagnostic
+  | HomeWakeDiagnostic
   | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
@@ -31,9 +33,10 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 export class HomeTaskDispatcher {
   private readonly setup = new AsyncMutex();
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
-    private readonly sessions: RuntimeRegistry, private readonly diagnostic?: (record: HomeTaskDiagnostic) => void) {}
+    private readonly sessions: RuntimeRegistry, private readonly diagnostic: ((record: HomeTaskDiagnostic) => void) | undefined,
+    private readonly inbox: WakeInboxOwner) {}
 
-  async start(identity: { homeId: string; generation: number }, request: HomeTaskDispatchRequest): Promise<HomeTaskHandle> {
+  async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest): Promise<HomeTaskHandle> {
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
     try {
@@ -44,7 +47,7 @@ export class HomeTaskDispatcher {
     } catch (error) { work.settle(); throw error; }
   }
 
-  private async startOwned(identity: { homeId: string; generation: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
+  private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     if (Object.keys(input).sort().join(",") !== "intent,target,taskId"
       || typeof input.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(input.taskId)
@@ -57,7 +60,7 @@ export class HomeTaskDispatcher {
     });
     if (await this.store.read(input.taskId)) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
     let task: HomeTaskRecord = {
-      version: 1, taskId: input.taskId, revision: 1, homeId: identity.homeId, generation: identity.generation,
+      version: 1, taskId: input.taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
       intent: { revision: 1, text: input.intent }, intentDigest: createHash("sha256").update(JSON.stringify({ revision: 1, text: input.intent })).digest("hex"),
       target: await this.sessions.canonicalTaskTarget(input.target), workerProfile: "home-task-v1", policyRevision: 1,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null,
@@ -140,7 +143,7 @@ export class HomeTaskDispatcher {
               && receipt.operationId === operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
           });
         const interrupted = interruption !== undefined;
-        const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend,
+        const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
           reportRefs: report && reportEntry ? [{ resultId: report.resultId, sessionId: slot.id, entryId: reportEntry.id, digest: reportDigest(report) }] : null,
           terminalEvidence: { outcome: detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
             sessionId: slot.id, entryIds: reportEntry ? [reportEntry.id] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
@@ -154,7 +157,8 @@ export class HomeTaskDispatcher {
           operationHash: deadlineDiagnostic.operationHash, elapsedMs: deadlineDiagnostic.elapsedMs,
           cancelAndJoin: deadlineDiagnostic.cancelAndJoin, spendReference });
         await dispatch.acknowledge(slot.id, operationId, ownedLease);
-        return final;
+        await this.inbox.publish(final.taskId);
+        return (await this.store.read(final.taskId))!;
       })().finally(() => { reports.retire(); ownedLease.release(); });
       // Tool callers return admission immediately, but failures remain observed.
       void completion.catch(() => {});
@@ -162,10 +166,11 @@ export class HomeTaskDispatcher {
     } catch (error) {
       lease?.release();
       // Accepted identity remains durable and cannot be used for prompt replay.
-      const final: HomeTaskRecord = { ...task, revision: task.revision + 1, lifecycle: "terminal",
+      const final: HomeTaskRecord = { ...task, revision: task.revision + 1, lifecycle: "terminal", wake: this.inbox.event(task),
         terminalEvidence: { outcome: "unknown", sessionId: task.sessionId, entryIds: [], reason: "admission-refused" } };
       await this.store.put(final, task.revision);
       this.transition(final, "admission-refused");
+      await this.inbox.publish(final.taskId);
       throw error;
     }
   }

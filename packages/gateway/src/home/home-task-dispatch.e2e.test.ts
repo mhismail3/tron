@@ -1,3 +1,4 @@
+import * as fileSystem from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -91,6 +92,144 @@ async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-o
 }
 
 describe("Home task production dispatch", () => {
+  it("commits one push plus pending wake and consumes the immutable report only on the next Home message", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    let calls = 0;
+    f.faux.setResponses([() => { calls++; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f);
+    const task = await run.completion;
+    expect(task).toMatchObject({ wake: { state: "pending", push: "decided" } });
+    expect(calls).toBe(1);
+    expect(f.notifications).toHaveLength(1);
+    expect(f.notifications[0]).toMatchObject({ sourceId: (task as any).wake.eventId, route: { sessionId: "home" } });
+    const home = await f.registry.acquire(f.home.sessionId);
+    expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
+    let request = "";
+    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Result consumed"); }]);
+    await home.prompt("What happened?");
+    await waitFor(() => !home.isBusy, "Home inbox terminal");
+    const consumed = await f.registry.homeOwner().taskResult(run.taskId);
+    expect(consumed).toMatchObject({ wake: { state: "acknowledged" } });
+    expect(request).toContain("Verified result");
+    const attributed = home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1");
+    expect(attributed).toHaveLength(1);
+    expect(home.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.context-delivery.v4",
+      data: expect.objectContaining({ targetEntryId: attributed[0]!.id, origin: { source: "gateway:home-task", owner: { id: task.taskId, title: "Home task", source: "gateway:home-task" } } }) }));
+    expect(f.signals.filter(record => record.event === "home.task.inbox")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ state: "admitted", reason: "canonical-admission" }), expect.objectContaining({ state: "acknowledged", reason: "canonical-consumed" })]));
+    expect(JSON.stringify(f.signals.filter(record => record.event === "home.task.inbox"))).not.toMatch(/Verified result|task-one|Finite work/);
+    f.faux.setResponses([fauxAssistantMessage("No duplicate")]);
+    await home.prompt("Again"); await waitFor(() => !home.isBusy, "second Home terminal");
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    expect(f.notifications.filter(input => input.sourceId === (task as any).wake.eventId)).toHaveLength(1);
+    evidence.push({ case: "input-task-report-push-pending-consumption", task, consumed, attributed, request });
+  }, 20_000);
+
+  it("refuses inbox acknowledgement until canonical message and terminal receipt are durably synced", async () => {
+    const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const home = await f.registry.acquire(f.home.sessionId);
+    const path = (home as any).sessionManager.getSessionFile();
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor);
+    const sync = prototype.sync;
+    await anchor.close();
+    let failedSync = false;
+    vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+      const target = await fileSystem.stat(path).catch(() => undefined);
+      const current = await this.stat();
+      if (target && current.dev === target.dev && current.ino === target.ino) { failedSync = true; throw new Error("canonical sync refused"); }
+      return sync.call(this);
+    });
+    f.faux.setResponses([fauxAssistantMessage("result received")]);
+    await home.prompt("Read the result").catch(() => {});
+    await waitFor(() => !home.isBusy, "failed sync Home terminal");
+    expect((await owner.taskResult(task.taskId)).wake?.state).not.toBe("acknowledged");
+    expect(failedSync).toBe(true);
+    vi.restoreAllMocks();
+    f.faux.setResponses([fauxAssistantMessage("reconciled")]);
+    await home.prompt("Continue"); await waitFor(() => !home.isBusy, "reconciled sync terminal");
+    expect((await owner.taskResult(task.taskId)).wake?.state).toBe("acknowledged");
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    evidence.push({ case: "canonical-fsync-before-ack", failedSync, recovered: await owner.taskResult(task.taskId) });
+  }, 20_000);
+
+  it("keeps one logical inbox route through repeated disable and re-enable", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const before = (await f.registry.homeOwner().status()) as any;
+    for (let i = 0; i < 3; i++) {
+      await f.registry.homeOwner().disable();
+      expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
+      await f.registry.homeOwner().designate({});
+    }
+    const after = (await f.registry.homeOwner().status()) as any;
+    expect(after.routeGeneration).toBe(before.routeGeneration);
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: task.taskId })], { stopReason: "toolUse" }), fauxAssistantMessage("consumed once")]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("Continue"); await waitFor(() => !home.isBusy, "reenabled inbox terminal");
+    expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    expect(home.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "task")).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ isError: false }) }));
+    evidence.push({ case: "inbox-disable-reenable", before, after });
+  }, 20_000);
+  it("blocks replacement until receipted maintainer redelivery and follows the logical route across chapter rollover", async () => {
+    const f = await fixture();
+    const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    let home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
+    await home.prompt("Start Home"); await waitFor(() => !home.isBusy, "initial Home terminal");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const port = (owner as any).options.sessions;
+    const present = port.sessionPresent.bind(port);
+    const missing = vi.spyOn(port, "sessionPresent").mockImplementation((id: string) => id === f.home.sessionId ? Promise.resolve(false) : present(id));
+    const replacement = await owner.designate({ model: { provider: model.provider, id: model.id } }); missing.mockRestore();
+    expect(replacement.sessionId).not.toBe(f.home.sessionId);
+    expect((await owner.status() as any).routeGeneration).toBe(task.routeGeneration + 1);
+    home = await f.registry.acquire(replacement.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("replacement sees no old result")]);
+    await home.prompt("Continue after replacement"); await waitFor(() => !home.isBusy, "replacement terminal");
+    expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
+    expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
+      receipts: new CommandReceiptStore(join(f.root, "redelivery-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "inbox-terminal", identity: "device:inbox-test", isLocal: true } as unknown as ClientContext;
+    let command: unknown;
+    const terminal = { request: async (method: string, params: unknown) => { if (method === "home.redeliverTaskResult") command = params; return service.invoke(client, method, params); } };
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runHomeInput(terminal as any, `/home redeliver ${task.taskId}`);
+    expect(output).toHaveBeenCalledWith(expect.stringContaining("redelivery accepted")); output.mockRestore();
+    expect(await service.invoke(client, "home.redeliverTaskResult", command)).toEqual({ accepted: true });
+    const pending = await owner.taskResult(task.taskId);
+    expect(pending).toMatchObject({ wake: { state: "pending", redeliveries: [{ from: task.routeGeneration, to: task.routeGeneration + 1 }] } });
+    const oldPath = (await port.sessionFile(replacement.sessionId))!;
+    const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
+    await owner.chapterQuiescent(replacement.sessionId); metrics.mockRestore();
+    const sealed = await readFile(oldPath);
+    f.faux.setResponses([fauxAssistantMessage("current chapter receives result")]);
+    const accepted = await service.invoke(client, "home.prompt", { commandId: "next-chapter-message", text: "Review the task" }) as any;
+    expect(accepted.sessionId).not.toBe(replacement.sessionId);
+    const current = await f.registry.acquire(accepted.sessionId);
+    await waitFor(() => !current.isBusy, "rollover result terminal");
+    expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    // Once consumed, redelivery is ineligible. Only the original command's
+    // receipt may still return its accepted result without invoking the owner.
+    const consumed = await owner.taskResult(task.taskId);
+    expect(await service.invoke(client, "home.redeliverTaskResult", command)).toEqual({ accepted: true });
+    expect(await owner.taskResult(task.taskId)).toEqual(consumed);
+    expect(current.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    expect(await readFile(oldPath)).toEqual(sealed);
+    evidence.push({ case: "replacement-redelivery-rollover", pending, accepted, consumed: await owner.taskResult(task.taskId), sealedBytesUnchanged: true });
+  }, 20_000);
+
   it("wires Home's real task tool to exact-operation shared steering", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
