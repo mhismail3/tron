@@ -445,23 +445,41 @@ and disconnect both retire the previous protocol client before replacement,
 including a still-connected resync client: otherwise its server subscriptions
 would survive without a terminal owner and prevent idle eviction.
 
-An accepted operation can settle before its response. A new authoritative idle
-snapshot settles it immediately, whether it arrives on the same chapter,
-reconnect or successor transfer. The idle cut preceding prompt submission is
-not proof of that operation's settlement. Reconnect reconciles the receipt and
-snapshot without replaying accepted input. New assistant text in that authoritative
-snapshot is rendered even while the command response is pending; consuming it
-silently would lose a settled refusal before its operation ID arrives.
+The prompt loop owns one accepted operation, including its physical chapter,
+submission leaf and any settlement read. Only that chapter's validated canonical
+`tron.chat-invocation.v1` terminal receipt for the exact operation retires the
+waiter. `command.status` proves acceptance, not completion; an outgoing idle
+chapter, assistant reply, or newly idle snapshot is never terminal evidence.
+Foreground retirement schedules the receipt read even while Home quiescence
+still projects `running`. The existing `session.history.list` supplies a finite
+canonical-entry bound; `session.history.entry` reads directly from the synchronized
+leaf through parent identities, stopping at the exact terminal receipt, the
+submission leaf, or that invocation's start in a newly attached chapter. No older
+history-page traversal or transcript-row fallback is used. This also handles
+paged-out user rows and ordinary input hooks that create no user row at all.
+Every await is fenced to the accepted operation, client, physical session and
+runtime/branch cut; a changed cut is re-evaluated, never published as settlement.
+
+Reconnect preserves that operation and renders new assistant text even before
+its response arrives. It joins recovery of the exact failed transport, while a
+pending command receipt is polled on the healthy replacement without repeatedly
+closing it. Token-matched `session.rebaseline` frames install their nested
+snapshot as authority across coalesced sequences; they are not ordinary
+sequenced events. Neither chapter transfer nor subscription close requires a
+WebSocket disconnect. The terminal's reconnect reason and event-gap marker
+are catalogued in `docs/observability.md`.
 
 The real terminal child cases in `home-activation.e2e.test.ts` retain
-`test-results/terminal-chat-home/attachments-rollover.json` and
-`attachments-failed-sync.json` (run that file with `-t 'owns exact Home attachments'`).
-They cover response loss after acceptance, same-chapter settlement, a still-running
-operation whose response precedes presentation events, repeated idle-baseline
-rollover, actual outgoing-runtime eviction, exact-token retirement, and failed
-candidate sync. The fixture injects soft-limit metrics to request rollover and
-holds selected presentation broadcasts to isolate snapshot/response orderings;
-it is not a large-chapter or Gateway-process-crash proof.
+`test-results/terminal-chat-home/attachments-rollover.json`,
+`attachments-failed-sync.json` and `attachments-handled-input.json`
+(run that file with `-t 'owns exact Home attachments'`). They cover response loss,
+held command-receipt completion, exact receipt settlement before phase becomes
+idle, a held successor across reconnect, settlement during transfer sync, a
+paged-out user invocation, an ordinary input-hook-handled operation, actual
+outgoing-runtime eviction, exact-token retirement, and failed candidate sync.
+The fixture injects soft-limit metrics, owns all gates, publishes sequenced cuts
+through RuntimeSlot, and uses public SDK context appends for page pressure. It
+is not a large-chapter, real-provider or Gateway-process-crash proof.
 
 Its `/home` line is resolved without touching the Gateway, so a bad argument is
 answered before any RPC. Malformed
