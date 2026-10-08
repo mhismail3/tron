@@ -51,6 +51,8 @@ export interface NotificationStatus {
   enabledDeviceCount: number;
   pendingCount: number;
   notifyWhenAskPresented: boolean;
+  notifyWhenFinished: boolean;
+  notifyWhenWaiting: boolean;
   relayOrigin?: string;
   requiresGrantRotation: boolean;
 }
@@ -206,6 +208,8 @@ export interface PushRegistrationInput {
   previewsEnabled: boolean;
   relayOrigin: string;
   notifyWhenAskPresented?: boolean;
+  notifyWhenFinished?: boolean;
+  notifyWhenWaiting?: boolean;
 }
 
 /** True when `previous` is exactly the grant this registration describes and the
@@ -226,6 +230,8 @@ function isUnchangedRegistration(
     && previous.previewsEnabled === input.previewsEnabled
     && previous.active && previous.disabledReason === undefined
     && (input.notifyWhenAskPresented === undefined || document.policy.notifyWhenAskPresented === input.notifyWhenAskPresented)
+    && (input.notifyWhenFinished === undefined || document.policy.notifyWhenFinished === input.notifyWhenFinished)
+    && (input.notifyWhenWaiting === undefined || document.policy.notifyWhenWaiting === input.notifyWhenWaiting)
     && before === JSON.stringify(document);
 }
 
@@ -380,6 +386,8 @@ export class NotificationService {
       document.grants = [...document.grants.filter((grant) => grant.deviceId !== input.deviceId && grant.grantId !== input.grantId), next];
       if (document.grants.length > MAXIMUM_PUSH_GRANTS) throw new GatewayError("busy", "Too many notification-enabled devices are registered", true);
       if (input.notifyWhenAskPresented !== undefined) document.policy.notifyWhenAskPresented = input.notifyWhenAskPresented;
+      if (input.notifyWhenFinished !== undefined) document.policy.notifyWhenFinished = input.notifyWhenFinished;
+      if (input.notifyWhenWaiting !== undefined) document.policy.notifyWhenWaiting = input.notifyWhenWaiting;
       return document;
     });
     if (rotated) void this.drain();
@@ -466,6 +474,8 @@ export class NotificationService {
       enabledDeviceCount: active.length,
       pendingCount: document.pending.length,
       notifyWhenAskPresented: document.policy.notifyWhenAskPresented,
+      notifyWhenFinished: document.policy.notifyWhenFinished,
+      notifyWhenWaiting: document.policy.notifyWhenWaiting,
       ...(relayOrigin ? { relayOrigin } : {}),
       requiresGrantRotation: deviceGrant !== undefined && (deviceGrant.relayOrigin !== relayOrigin
         || !deviceGrant.active || deviceGrant.disabledReason === "invalid_token"),
@@ -654,6 +664,7 @@ export class NotificationService {
     kind: NotificationKind;
     message: string;
     title?: string;
+    interruptionLevel?: "time-sensitive";
     route?: { sessionId: string; machineId: string };
     /** Internal admission fence for semantic ask notifications. */
     requireAskPolicy?: boolean;
@@ -674,7 +685,9 @@ export class NotificationService {
       // admission transaction must recheck the canonical policy immediately
       // before appending an intent, otherwise a concurrent disable can still
       // deliver an ask notification.
-      if (input.requireAskPolicy && input.kind === "ask" && !current.policy.notifyWhenAskPresented) {
+      if (input.kind === "ask" && !current.policy.notifyWhenAskPresented
+        || input.kind === "agent_finished" && !current.policy.notifyWhenFinished
+        || input.kind === "waiting" && !current.policy.notifyWhenWaiting) {
         result = "suppressed";
         return undefined;
       }
@@ -695,10 +708,11 @@ export class NotificationService {
       const admitted = recent.filter((receipt) => receipt.result !== "rate_limited" && receipt.result !== "suppressed");
       const targetLimited = grants.some((grant) => admitted
         .filter((receipt) => receipt.grantIds.includes(grant.grantId)).length >= this.rateLimits.targetDailyIntents);
-      if (admitted.length >= this.rateLimits.dailyIntents
+      const dailyExempt = input.kind === "ask" || input.kind === "explicit";
+      if ((!dailyExempt && (admitted.length >= this.rateLimits.dailyIntents || targetLimited))
         || admitted.filter((receipt) => receipt.sessionKey === sessionKey
           && Date.parse(receipt.createdAt) > hour).length >= this.rateLimits.sessionHourlyIntents
-        || targetLimited || current.pending.length >= MAXIMUM_PENDING_INTENTS) {
+        || current.pending.length >= MAXIMUM_PENDING_INTENTS) {
         // Rejection is returned synchronously but is not persisted: a rejected
         // attempt owns no delivery and must not displace durable quota authority.
         result = "rate_limited";
@@ -712,6 +726,7 @@ export class NotificationService {
           requestId: notificationHash(`${intentId}\0${grant.grantId}`),
           message: exposesModelText ? message : GENERIC_MESSAGE,
           ...(title ? { title: exposesModelText ? title : "Tron" } : {}),
+          ...(input.interruptionLevel ? { interruptionLevel: input.interruptionLevel } : {}),
           ...(route ? { route } : {}),
           attempts: 0, nextAttemptAt: iso(now), outcome: "pending" as const,
         };
@@ -769,6 +784,7 @@ export class NotificationService {
       kind: "ask",
       title: "Input needed",
       message: "Tron needs your input. Open Tron to respond.",
+      interruptionLevel: "time-sensitive",
       ...(input.machineId ? { route: { sessionId: input.sessionId, machineId: input.machineId } } : {}),
       requireAskPolicy: true,
     });
@@ -798,6 +814,8 @@ export class NotificationService {
               grantId: item.grant.grantId, secret: item.grant.secret, requestId: item.target.requestId,
               message: item.target.message,
               ...(item.target.title ? { title: item.target.title } : {}),
+              notificationKind: item.intent.kind,
+              ...(item.target.interruptionLevel ? { interruptionLevel: item.target.interruptionLevel } : {}),
               ...(item.target.route ? item.target.route : {}),
               expiresAt: item.intent.expiresAt,
             });

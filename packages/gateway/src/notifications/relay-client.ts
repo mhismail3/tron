@@ -80,6 +80,8 @@ export class PushRelayClient {
     grantId: string;
     secret: string;
     requestId: string;
+    notificationKind: "ask" | "explicit" | "agent_finished" | "waiting";
+    interruptionLevel?: "time-sensitive";
     message: string;
     title?: string;
     sessionId?: string;
@@ -91,6 +93,8 @@ export class PushRelayClient {
     const body = JSON.stringify({
       version: 1,
       kind: "agent_alert",
+      notificationKind: input.notificationKind,
+      ...(input.interruptionLevel ? { interruptionLevel: input.interruptionLevel } : {}),
       requestId: input.requestId,
       message: input.message,
       ...(input.title ? { title: input.title } : {}),

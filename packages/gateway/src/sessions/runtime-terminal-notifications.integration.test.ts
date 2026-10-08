@@ -127,6 +127,46 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     expect(value.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("announces live background work as waiting once, then finished after its wake-up", async () => {
+    const started = barrier();
+    const release = barrier();
+    const value = await fixture([
+      async () => { started.release(); await release.promise; return fauxAssistantMessage("working while child runs"); },
+      fauxAssistantMessage("still waiting on child"),
+      fauxAssistantMessage("background work is complete"),
+    ]);
+    const background = {
+      processId: "background-run",
+      kind: "subagent",
+      lifecycle: { state: "running" },
+    };
+    const activities = (value.slot as unknown as { processActivities: Map<string, unknown> }).processActivities;
+    try {
+      const first = value.slot.prompt("background task");
+      await started.promise;
+      activities.set("background-run", background);
+      release.release();
+      await first;
+      await value.settle();
+      expect(value.enqueue.mock.calls.map(([input]) => input.kind)).toEqual(["waiting"]);
+      expect(value.enqueue.mock.calls[0]?.[0].message).toMatch(/background task/i);
+
+      value.enqueue.mockClear();
+      await value.slot.prompt("background task still pending");
+      await waitFor(() => !value.slot.isBusy, "the still-waiting response to settle");
+      expect(value.enqueue).not.toHaveBeenCalled();
+
+      value.enqueue.mockClear();
+      activities.delete("background-run");
+      await value.slot.prompt("background task resumed");
+      await value.settle();
+      expect(value.enqueue.mock.calls.map(([input]) => input.kind)).toEqual(["agent_finished"]);
+    } finally {
+      activities.delete("background-run");
+      release.release();
+    }
+  });
+
   it("waits through retries and announces only the exhausted final error", async () => {
     const resumed = barrier();
     const release = barrier();

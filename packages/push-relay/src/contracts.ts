@@ -58,6 +58,8 @@ export type InstallationRegistration = AttestationRegistration | AssertionRegist
 export interface NotificationRequest {
   version: 1;
   kind: "agent_alert";
+  notificationKind: "ask" | "explicit" | "agent_finished" | "waiting";
+  interruptionLevel?: "time-sensitive";
   requestId: string;
   message: string;
   title?: string;
