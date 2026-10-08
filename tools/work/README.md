@@ -1066,8 +1066,10 @@ Project state and records every call. The live E2E covers GitHub itself.
     tab-indented code is never structural. Closing ATX hashes require preceding
     whitespace, and raw `<pre>` blocks remain literal rather than supplying
     sections. A closing fence may trail only ASCII spaces or tabs; other Unicode
-    whitespace is payload, not a delimiter. Non-empty fenced evidence—including
-    heading-shaped literal output—and balanced harmless comments remain valid.
+    whitespace is payload, not a delimiter. Raw `<pre>` blocks keep their
+    contents literal, and an unclosed raw block is rejected so it cannot hide
+    generated sections. Non-empty fenced evidence—including heading-shaped
+    literal output—and balanced harmless comments remain valid.
     Valid non-bug summaries remain unchanged;
     stewarding and merged-resume paths preserve the generated Verification and
     Maintainer validation sections.

@@ -735,6 +735,25 @@ class TypeSpecificPullBodyTests(LandFixture):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("## Verification", self.state()["pulls"][0]["body"])
 
+    def test_unclosed_preformatted_block_is_refused_before_generated_verification(self):
+        self.assert_rejected_without_publication(self.BUG_SUMMARY + "\n<pre>\n")
+
+    def test_closed_preformatted_block_allows_generated_verification(self):
+        result = self.cli_land(self.BUG_SUMMARY + "\n<pre>\nLiteral evidence.\n</pre>\n",
+                               labels=["task", "kind:bug"])
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("## Verification", self.state()["pulls"][0]["body"])
+
+    def test_unclosed_preformatted_block_is_refused_in_adopted_body(self):
+        body = ("Closes #7\n\n## Summary\n\n" + self.BUG_SUMMARY +
+                "\n## Verification\n\nGenerated.\n\n<pre>\n")
+        before = len(self.calls())
+        result = self.cli_land("", labels=["task", "kind:bug"], summary_file=False,
+                               existing_body=body)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.writes(before), [])
+        self.assertEqual(self.remote_head(), self.claim_sha)
+
     def test_preformatted_html_headings_cannot_supply_required_sections(self):
         summary = ("## Repro\n\nFailure.\n\n<pre>\n## Cause\n\nKnown.\n\n"
                    "## Fix\n\nDone.\n</pre>\n")
