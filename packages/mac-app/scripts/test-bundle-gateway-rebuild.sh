@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Two real builds, then refused runtime mutations. Runs in this checkout and
-# restores the valid published runtimes on every exit. The first build downloads
-# Node; --skip-download skips runtime downloads, not production npm installation.
+# Three real builds, stale-receipt refusal, then refused runtime mutations. Runs
+# in this checkout and restores the valid published runtimes on every exit. The
+# first build downloads Node; --skip-download skips downloads, not npm install.
 # Retains packages/mac-app/test-results/bundle-gateway-rebuild.log.
 # --cleanup-only exercises disposal without downloading or building a payload.
 set -euo pipefail
@@ -26,6 +26,9 @@ source "$REPO_ROOT/config/ci-toolchain.env"
 mkdir -p "$RESULTS_DIR"
 : > "$LOG"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-bundle-rebuild.XXXXXX")"
+INSTALLER_SOURCE="$GATEWAY_DIR/scripts/install-pi-subagents.mjs"
+cp -p "$INSTALLER_SOURCE" "$TMP/install-pi-subagents.mjs"
+installer_dirty=0
 tampered=0
 restore_runtime() {
     chmod u+w "$PAYLOAD_DIR/runtime"
@@ -45,6 +48,7 @@ restore_runtime() {
 }
 restore() {
     local status=$?
+    if ((installer_dirty)); then cp -p "$TMP/install-pi-subagents.mjs" "$INSTALLER_SOURCE"; fi
     if ((tampered)); then restore_runtime; fi
     find "$TMP" -type d -exec chmod u+w {} +
     rm -rf "$TMP"
@@ -123,6 +127,41 @@ install_args=(--skip-install)
 step "first build downloads the pinned runtimes"
 bundle ${install_args[@]+"${install_args[@]}"} || fail "first build failed"
 first_epoch="$(manifest_field runtimeEpoch)"
+
+step "read-only verify works without a source Node/npm toolchain"
+valid_payload_snapshot="$(snapshot)"
+valid_launcher_sha="$(sha "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")"
+set +e
+PATH="/usr/bin:/bin" HOME="$TMP/no-source-home" NVM_DIR="$TMP/no-source-nvm" \
+    TRON_NODE_BIN="$TMP/no-source-node/bin/node" \
+    "$SCRIPT_DIR/bundle-gateway.sh" --verify-only >"$TMP/verify-without-source-node.log" 2>&1
+verify_status=$?
+set -e
+cat "$TMP/verify-without-source-node.log" >> "$LOG"
+[[ "$verify_status" -eq 0 ]] || fail "read-only verification required an ambient/source Node/npm toolchain (status $verify_status)"
+[[ "$(snapshot)" == "$valid_payload_snapshot" ]] || fail "read-only verification changed the published tree"
+[[ "$(sha "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")" == "$valid_launcher_sha" ]] || fail "read-only verification changed the published launcher"
+[[ -z "$(leftovers)" ]] || fail "read-only verification left temporary publication roots: $(leftovers)"
+if grep -Eq 'installing locked gateway dependencies|downloading pinned Node' "$TMP/verify-without-source-node.log"; then
+    fail "read-only verification attempted an install or download"
+fi
+
+step "Mac verification refuses a receipt after its copied provider installer is reverted"
+chmod u+w "$INSTALLER_SOURCE"
+printf '\n// temporary receipt regression\n' >> "$INSTALLER_SOURCE"
+installer_dirty=1
+bundle --skip-install --skip-download || fail "dirty provider-helper build failed"
+dirty_payload_snapshot="$(snapshot)"
+cp -p "$TMP/install-pi-subagents.mjs" "$INSTALLER_SOURCE"
+installer_dirty=0
+set +e
+"$SCRIPT_DIR/bundle-gateway.sh" --verify-only >"$TMP/reverted-provider-input.log" 2>&1
+stale_receipt_status=$?
+set -e
+cat "$TMP/reverted-provider-input.log" >> "$LOG"
+[[ "$stale_receipt_status" -eq 78 ]] || fail "Mac verification accepted a receipt from a reverted provider helper (status $stale_receipt_status)"
+grep -q 'build-input receipt does not match current build inputs' "$TMP/reverted-provider-input.log" || fail "stale receipt refusal did not name changed provider build inputs"
+[[ "$(snapshot)" == "$dirty_payload_snapshot" ]] || fail "read-only stale receipt verification changed the published payload"
 
 step "second build reuses the published runtimes (--skip-install --skip-download)"
 bundle --skip-install --skip-download || fail "second build with --skip-download failed"
