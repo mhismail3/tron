@@ -132,6 +132,7 @@ required=(
     "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py"
     "$REPO_ROOT/scripts/gateway_protocol_contract.py"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
+    "$REPO_ROOT/scripts/gateway-install-inputs.mjs"
     "$GATEWAY_DIR/scripts/check-pi-sdk.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$SCRIPT_DIR/verify-gateway-payload.sh"
@@ -153,8 +154,14 @@ fi
 python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" >/dev/null
 
 if ((verify_only)); then
+    # Validate the immutable artifact before using its Node runtime. Verification
+    # is read-only and must not depend on an unrelated source Node/npm install.
     "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
     python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-payload "$PAYLOAD_DIR" >/dev/null
+    cmp -s "$GATEWAY_DIR/package.json" "$APP_DIR/package.json" && cmp -s "$GATEWAY_DIR/package-lock.json" "$APP_DIR/package-lock.json" || {
+        echo "staged Gateway package manifest/lockfile do not match source; rebuild the Gateway payload" >&2
+        exit 78
+    }
     cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig" || {
         echo "staged Gateway PushService.xcconfig does not match canonical product configuration" >&2
         exit 3
@@ -163,6 +170,14 @@ if ((verify_only)); then
         echo "staged Gateway deployment helper does not match canonical source" >&2
         exit 3
     }
+    case "$(uname -m)" in
+        arm64|aarch64) verify_runtime_arch=arm64 ;;
+        x86_64) verify_runtime_arch=x64 ;;
+        *) echo "unsupported host architecture for Gateway payload verification: $(uname -m)" >&2; exit 2 ;;
+    esac
+    verify_node="$PAYLOAD_DIR/runtime/bin-$verify_runtime_arch/node"
+    source_revision="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+    "$verify_node" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" verify-receipt "$REPO_ROOT" "$APP_DIR" "$source_revision"
     exit 0
 fi
 
@@ -269,13 +284,21 @@ export PYTHONDONTWRITEBYTECODE=1
 
 if ((!skip_install)); then
     echo "==> installing locked gateway dependencies"
-    (cd "$GATEWAY_DIR" && "$NPM_BIN" ci --ignore-scripts=false && "$NPM_BIN" run build)
+    (cd "$GATEWAY_DIR" && "$NPM_BIN" ci --ignore-scripts=false)
 else
-    [[ -d "$GATEWAY_DIR/node_modules" && -f "$GATEWAY_DIR/dist/index.js" ]] || {
-        echo "--skip-install requires packages/gateway/node_modules and dist/index.js" >&2
+    [[ -d "$GATEWAY_DIR/node_modules" ]] || {
+        echo "--skip-install requires packages/gateway/node_modules" >&2
         exit 2
     }
 fi
+"$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" check "$GATEWAY_DIR" full
+CURRENT_INPUT_FINGERPRINT="$("$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" fingerprint "$REPO_ROOT")"
+INPUT_FINGERPRINT="${TRON_GATEWAY_INPUT_FINGERPRINT:-$CURRENT_INPUT_FINGERPRINT}"
+[[ "$INPUT_FINGERPRINT" =~ ^[a-f0-9]{64}$ && "$INPUT_FINGERPRINT" == "$CURRENT_INPUT_FINGERPRINT" ]] || {
+    echo "Gateway source inputs changed before compilation; retry from the current checkout" >&2
+    exit 78
+}
+(cd "$GATEWAY_DIR" && "$NPM_BIN" run build)
 
 # This is a deterministic, offline check of the already-installed source tree;
 # it intentionally does not perform another install or registry lookup.
@@ -497,6 +520,7 @@ bash "$SCRIPT_DIR/stage-gateway-app.sh" "$GATEWAY_DIR" "$APP_DIR"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
+"$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" check "$APP_DIR" production
 # node-pty loads only prebuilds/${process.platform}-${process.arch}, so the
 # Windows prebuilds npm ci installs can never load from this signed payload.
 for windows_prebuild in win32-arm64 win32-x64; do
@@ -580,6 +604,7 @@ SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
     exit 3
 }
 RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+"$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" write-receipt "$REPO_ROOT" "$APP_DIR" "$SOURCE_REVISION" "$INPUT_FINGERPRINT"
 # Hash the complete staged dependency tree, not merely the compiled entrypoint.
 # The helper is standalone so release validation can exercise the same coverage.
 # The signed launcher hashes the complete tree in-process; the shell helper
