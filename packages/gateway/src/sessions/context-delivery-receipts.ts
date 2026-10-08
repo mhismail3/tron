@@ -29,10 +29,13 @@ function parseOrigin(value: unknown): ExtensionToolOrigin | undefined {
   if (!record.owner || typeof record.owner !== "object" || Array.isArray(record.owner)) return undefined;
   const owner = record.owner as Record<string, unknown>;
   if (!boundedText(owner.id, 256) || !boundedText(owner.title, 256)
-      || !boundedText(owner.source, 256)) return undefined;
+      || !boundedText(owner.source, 256)
+      || (owner.kind !== undefined && owner.kind !== "subagent" && owner.kind !== "extension")) return undefined;
   return {
     source: record.source,
-    owner: { id: owner.id, title: owner.title, source: owner.source },
+    owner: { id: owner.id, title: owner.title, source: owner.source,
+      ...(owner.kind === "subagent" || owner.kind === "extension" ? { kind: owner.kind } : {}),
+    },
   };
 }
 

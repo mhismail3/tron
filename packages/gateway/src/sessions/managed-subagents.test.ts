@@ -46,7 +46,7 @@ it.each([undefined, "", "another-home"])("refuses missing or foreign artifact bi
 
 it("revalidates artifact ownership on admission and reload after the process binding changes", () => {
   const settings = SettingsManager.inMemory();
-  expect(provider.loaderOptions(settings).additionalExtensionPaths.length).toBeGreaterThan(0);
+  expect(provider.loaderOptions(settings).extensionFactories.length).toBeGreaterThan(0);
   delegatedProviderEnvironment(delegatedArtifactRoot(home));
   expect(() => provider.admit([])).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
   expect(() => provider.loaderOptions(settings)).toThrow(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/);
@@ -71,6 +71,13 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
   expect(catalog.diagnostic).toBeUndefined();
   expect(catalog.subagents.length).toBeGreaterThan(0);
   expect(catalog.subagents.some((agent) => agent.filePath?.startsWith(root))).toBe(true);
+  // Admission is idempotent only for the original verified selection. An
+  // extension object admitted in one home cannot become another home's owner.
+  expect(() => provider.admit(loaded.extensions)).not.toThrow();
+  const foreign = new ManagedSubagents(home);
+  cpSync(root, foreign.root, { recursive: true, verbatimSymlinks: true });
+  delegatedProviderEnvironment(delegatedArtifactRoot(home));
+  expect(() => foreign.admit(loaded.extensions)).toThrow(/different verified root/);
 // Cold real-extension loading measured 22s alongside rollback, even with the
 // install shared. Bound only this real I/O case at roughly 3x that duration.
 }, 60_000);
@@ -99,7 +106,7 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
     const observed = await proof.definition.execute('proof',{},undefined,undefined,{});
     console.log(JSON.stringify({moduleIdentity:observed.details.SessionManager===sdk.SessionManager,
       providerTool:result.extensions.some(e=>e.tools.has('subagent')),networkAttempts}));`);
-  const providerEntry = provider.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths[0]!;
+  const providerEntry = join(provider.verify(), JSON.parse(readFileSync(join(provider.root, "package.json"), "utf8")).pi.extensions[0]);
   for (const payloadName of ["payload-a", "payload-b"]) {
     const payload = join(home, payloadName);
     const sdkRoot = join(payload, "sdk");
@@ -157,7 +164,7 @@ it("refuses a tampered installed byte for both admission and discovery", async (
   delegatedProviderEnvironment(delegatedArtifactRoot(home));
   cpSync(root, provider.root, { recursive: true, verbatimSymlinks: true });
   const privateRoot = provider.root;
-  const providerEntry = provider.loaderOptions(SettingsManager.inMemory()).additionalExtensionPaths[0]!;
+  const providerEntry = join(provider.verify(), JSON.parse(readFileSync(join(provider.root, "package.json"), "utf8")).pi.extensions[0]);
   const bytes = readFileSync(providerEntry);
   bytes[0] = bytes[0]! ^ 1;
   writeFileSync(providerEntry, bytes);
@@ -184,8 +191,8 @@ it("refuses a foreign extension claiming the provider tool after load", async ()
   }`);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
   const options = provider.loaderOptions(settings);
-  const loader = new DefaultResourceLoader({ cwd: home, agentDir, settingsManager: settings,
-    additionalExtensionPaths: [...options.additionalExtensionPaths, foreignPath],
+  const loader = new DefaultResourceLoader({ cwd: home, agentDir, ...options,
+    additionalExtensionPaths: [foreignPath],
     extensionsOverride: (base) => attributeExtensions(base, undefined, { managedSubagents: provider }),
   });
   await loader.reload();

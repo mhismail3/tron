@@ -66,7 +66,10 @@ function ownerValue(value: unknown): ExtensionOwner | undefined {
   const source = bounded(candidate.source, 256);
   // Extension source is an opaque package identity, never a filesystem path.
   if (!id || !title || !source || /(?:[\\/]|^[A-Za-z]:|^file:)/u.test(source)) return undefined;
-  return { id, title, source };
+  if (candidate.kind !== undefined && candidate.kind !== "subagent" && candidate.kind !== "extension") return undefined;
+  return { id, title, source,
+    ...(candidate.kind === "subagent" || candidate.kind === "extension" ? { kind: candidate.kind } : {}),
+  };
 }
 
 function terminalState(value: unknown): ExtensionActivityReceipt["state"] | undefined {
@@ -204,7 +207,7 @@ export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?
     version: 1,
     activityId,
     sessionId,
-    ...(owner?.id ? { owner: { id: owner.id, title: owner.title!, source: owner.source! } } : {}),
+    ...(owner ? { owner } : {}),
     ...(owner ? {} : { source: source! }),
     toolCallId,
     ...(runId ? { runId } : {}),

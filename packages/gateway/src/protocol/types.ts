@@ -680,6 +680,9 @@ export interface ExtensionOwner {
   id: string;
   title: string;
   source: string;
+  /** Gateway-classified capability, independent of the package source spelling.
+   * Canonical receipts written before classification may omit it. */
+  kind?: "extension" | "subagent";
 }
 
 export interface ExtensionWidget {

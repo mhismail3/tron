@@ -111,6 +111,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
+import { capturedMessageProducer, isManagedProducerContent } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
@@ -1577,6 +1578,7 @@ export class RuntimeSlot {
         resourceLoaderOptions: {
           ...(managedLoaderOptions ?? {}),
           extensionFactories: [
+            ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
               if (!operationId || !this.dependencies.mcpAuth) {
@@ -4098,7 +4100,9 @@ export class RuntimeSlot {
           const storedTarget = latest && (latest.type === "custom_message"
               || (latest.type === "message" && latest.message.role === "custom"))
             ? latest.id : undefined;
-          const origin = this.currentExtensionContextOrigin();
+          const origin = isManagedProducerContent(event.message.content)
+            ? capturedMessageProducer(event.message.content)
+            : this.currentExtensionContextOrigin();
           const toolSegmentOwnerId = event.message.display
             ? (storedTarget ? (this.presentationIDs.get(storedTarget) ?? storedTarget) : randomUUID())
             : undefined;

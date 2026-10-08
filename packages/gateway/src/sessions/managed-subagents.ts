@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, opendirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
-import type { Extension, SettingsManager, PackageSource } from "@earendil-works/pi-coding-agent";
+import type { Extension, ExtensionFactory, InlineExtension, SettingsManager, PackageSource } from "@earendil-works/pi-coding-agent";
 import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
+import { managedProducerAPI } from "../extensions/managed-producer.js";
+import { producerIdentity, withExtensionOwner } from "../extensions/owner-attribution.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
@@ -247,18 +250,62 @@ export class ManagedSubagents {
     }
   }
 
-  loaderOptions(settings: SettingsManager): { settingsManager: SettingsManager; additionalExtensionPaths: string[] } {
+  loaderOptions(settings: SettingsManager): { settingsManager: SettingsManager; extensionFactories: Exclude<InlineExtension, ExtensionFactory>[] } {
     // Check before executing extension code; admission repeats it for reloads
     // and to refuse a process binding changed while the loader was awaiting I/O.
     this.requireBoundArtifactRoot(this.tronHome);
-    return { settingsManager: managedProviderSettingsView(settings), additionalExtensionPaths: existsSync(this.root) ? this.extensionPaths() : [] };
+    const paths = existsSync(this.root) ? this.extensionPaths() : [];
+    return { settingsManager: managedProviderSettingsView(settings),
+      extensionFactories: paths.map((path, index) => ({
+        name: `tron-managed-subagents-${index + 1}`,
+        factory: async (pi) => {
+          this.requireBoundArtifactRoot(this.tronHome);
+          this.verify();
+          const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents");
+          await withExtensionOwner(owner, async () => {
+            const factory = await this.loadFactory(path);
+            await factory(managedProducerAPI(pi, owner));
+          });
+        },
+      })),
+    };
+  }
+
+  /** Use the closure's declared TypeScript loader with exact host peer aliases.
+   * No user package tree or copied SDK participates in factory execution. */
+  private async loadFactory(path: string): Promise<ExtensionFactory> {
+    const require = createRequire(join(this.root, "package.json"));
+    const { createJiti } = await import(pathToFileURL(require.resolve("jiti")).href) as {
+      createJiti: (base: string, options: { moduleCache: boolean; alias: Record<string, string> }) => { import: (path: string, options: { default: true }) => Promise<unknown> };
+    };
+    const hostRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const aliases: Record<string, string> = {};
+    for (const name of ["@earendil-works/pi-coding-agent", "@earendil-works/pi-agent-core", "@earendil-works/pi-tui",
+      "@earendil-works/pi-ai/compat", "@earendil-works/pi-ai/oauth", "@earendil-works/pi-ai/providers/all"]) {
+      aliases[name] = fileURLToPath(import.meta.resolve(name));
+    }
+    aliases["@earendil-works/pi-ai"] = aliases["@earendil-works/pi-ai/compat"]!;
+    for (const name of ["typebox", "typebox/compile", "typebox/value"]) aliases[name] = hostRequire.resolve(name);
+    const factory = await createJiti(import.meta.url, { moduleCache: false, alias: aliases }).import(path, { default: true });
+    if (typeof factory !== "function") throw new GatewayError("conflict", "managed pi-subagents entry does not export a factory");
+    return factory as ExtensionFactory;
   }
 
   admit(extensions: readonly Extension[]): void {
     this.requireBoundArtifactRoot(this.tronHome);
     const paths = existsSync(this.root) ? this.extensionPaths() : [];
     for (const extension of extensions) {
-      if (paths.includes(extension.resolvedPath)) managedExtensions.add(extension);
+      if (managedExtensions.has(extension)) {
+        if (!paths.includes(extension.resolvedPath)) throw new GatewayError("conflict", "Managed subagent extension belongs to a different verified root");
+        continue;
+      }
+      const index = paths.findIndex((_, index) => extension.path === `<inline:tron-managed-subagents-${index + 1}>`);
+      if (index >= 0) {
+        // Restore the verified entry identity before SDK source finalization.
+        extension.path = paths[index]!;
+        extension.resolvedPath = paths[index]!;
+        managedExtensions.add(extension);
+      }
       else if (extension.tools.has("subagent")) throw new GatewayError("conflict", "The subagent tool is reserved by the Tron-managed provider");
     }
   }

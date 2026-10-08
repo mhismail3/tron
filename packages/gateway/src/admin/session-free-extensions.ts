@@ -45,13 +45,14 @@ export async function loadSessionFreeExtensions(
   if (settings.drainErrors().length > 0) {
     throw new GatewayError("conflict", "Canonical extension settings could not be loaded");
   }
+  const managedOptions = managedSubagents?.loaderOptions(settings);
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
     settingsManager: settings,
-    ...(managedSubagents?.loaderOptions(settings) ?? {}),
+    ...(managedOptions ?? {}),
     extensionsOverride: (base) => attributeExtensions(base, undefined, managedSubagents ? { managedSubagents } : {}),
-    extensionFactories: piBuiltinExtensions(agentDir),
+    extensionFactories: [...(managedOptions?.extensionFactories ?? []), ...piBuiltinExtensions(agentDir)],
   });
   await loader.reload({
     resolveProjectTrust: async () => inspection === undefined
