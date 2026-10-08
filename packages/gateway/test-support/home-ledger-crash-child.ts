@@ -18,6 +18,10 @@ const exposed = owner as unknown as { writeLocked(record: unknown): Promise<void
 const write = exposed.writeLocked.bind(owner);
 exposed.writeLocked = async record => {
   await write(record);
+  // An unresolved top-level promise alone lets Node exit. The parent owns this
+  // pipe and holds it open until SIGKILL, so observing the marker cannot race a
+  // normal child exit and does not depend on a sleep or background timer.
+  process.stdin.resume();
   writeFileSync(marker, "after\n");
   await new Promise<void>(() => {});
 };

@@ -49,7 +49,7 @@ async function runCrashCut() {
   const child = spawn(process.execPath, [
     "--experimental-transform-types", "--import", pathToFileURL(preload).href,
     childProgram, tronHome, sessionId, mode, marker,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  ], { stdio: ["pipe", "pipe", "pipe"] });
   children.push(child);
   let output = "";
   child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });

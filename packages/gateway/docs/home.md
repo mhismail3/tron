@@ -38,11 +38,32 @@ attempt, and path through its disposal; receipt persistence and the first
 conversation append use that same owner. Authority is checked against the live
 ledger and exact session identity, not granted by an individual operation or
 receipt lifetime. Unreadable, malformed, torn, duplicate, symlinked, or
-path-mismatched evidence blocks recovery without changing canonical bytes. If a durable prior attempt names a path that is now absent, recovery also preserves and blocks: the pinned SDK has no verified exact-path constructor, and its ordinary new-session API selects and writes a different timestamped path. A post-rename ledger publication error fences Home routing while the owner securely reloads the visible record; an unreadable or unsupported reload remains unavailable rather than trusting stale memory. Gateway JSONL and HTML exports
+path-mismatched evidence blocks recovery without changing canonical bytes. If a
+durable prior attempt names a path that is now absent, recovery also preserves
+and blocks: the pinned SDK has no verified exact-path constructor, and its
+ordinary new-session API selects a different timestamped path. A post-rename
+ledger publication error fences all Home admissions and profile transitions.
+The owner securely reloads the visible record, and Registry retires every live
+Home slot through its existing disposal path after that slot's current operation
+settles. The writer does not await retirement from inside that operation's lane.
+Home remains unavailable until both reload and retirement complete; the next
+acquisition constructs a fresh slot from the reloaded ledger and canonical
+transcript. A failed reload or retirement keeps the fence closed rather than
+trusting stale memory. Gateway JSONL and HTML exports
 are noncanonical destination writes owned by RuntimeSlot's existing temporary-
 artifact export boundary: it snapshots the canonical source into a fresh temporary
 directory, then registers that artifact. Home does not expose arbitrary SDK export
 destinations, and export leaves the chapter path unchanged.
+
+`home-materialization-crash.e2e.test.ts` freezes the actual old ledger writer at
+claim, path-record, first conversation flush, and post-rename/pre-directory-fsync
+cuts, then opens a fresh Registry over the same files without disposing the old
+owner. It also exercises a live Registry's visible-publication error fence,
+`publication-uncertain` retirement, and fresh disabled-profile reconstruction.
+Run the focused file with `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` to
+retain its JSON report. The separate `home-ledger-crash.e2e.test.ts` exercises
+seal/reserve with a real child process and SIGKILL; frozen-owner cuts prove
+process-abandonment recovery, not power-loss durability.
 
 `home.open` returns Home's logical route and current binding. `home.prompt`
 persists an idempotency receipt containing the Home identity, binding revision,
