@@ -1158,6 +1158,204 @@ describe("Tron Home activations end to end", () => {
     expect(row.configured.open).toBe(true);
   }, 60_000);
 
+  it.each(["rollover", "failed-sync"] as const)("owns exact Home attachments in a real terminal child: %s", async mode => {
+    const f = await fixture(`terminal-attachments-${mode}`);
+    disposals.push(async () => {
+      await f.server?.close();
+      f.server = undefined;
+      f.service.dispose();
+      await f.receipts.dispose();
+      await f.registry.dispose();
+      await rm(f.root, { recursive: true, force: true });
+    });
+    const initial = await designateHome(f, `terminal-attachments-${mode}`);
+    f.faux.setResponses([fauxAssistantMessage("attachment fixture initialized")]);
+    await initial.prompt("initialize attachment evidence");
+    await waitUntil(() => !initial.isBusy);
+    const devices = new DeviceStore(f.tronHome, "fixture-terminal-attachments");
+    await devices.initialize();
+    const opened: Array<{ sessionId: string; subscriptionToken: string; phase: string }> = [];
+    const closed: Array<{ sessionId: string; subscriptionToken: string; closed: boolean }> = [];
+    const accepted: Array<{ sessionId: string; operationId: string }> = [];
+    const prompts: string[] = [];
+    const invoke = f.service.invoke.bind(f.service);
+    let disconnectOnce = mode === "rollover";
+    let failSync = false;
+    let settledSession: string | undefined;
+    let retainIdleBaseline = false;
+    f.service.invoke = async (context, method, params) => {
+      if (method === "home.prompt") {
+        settledSession = undefined;
+        retainIdleBaseline = (params as { text: string }).text === "running-operation";
+      }
+      if (method === "session.sync" && failSync) throw new Error("fixture candidate synchronization failed");
+      const result = await invoke(context, method, params);
+      if (method === "session.open") {
+        const envelope = result as unknown as { session: { sessionId: string; phase: string }; subscriptionToken: string };
+        opened.push({ sessionId: envelope.session.sessionId, subscriptionToken: envelope.subscriptionToken, phase: envelope.session.phase });
+      }
+      if (method === "session.close") closed.push({ ...(params as { sessionId: string; subscriptionToken: string }), ...(result as { closed: boolean }) });
+      if (method === "home.prompt") {
+        prompts.push((params as { text: string }).text);
+        const operation = result as unknown as { sessionId: string; operationId: string };
+        accepted.push(operation);
+        const slot = await f.registry.acquire(operation.sessionId);
+        if ((params as { text: string }).text === "running-operation") return result;
+        // The accepted command's response arrives after its actual settlement.
+        // This exercises both event-before-response and idle-baseline transfer.
+        await waitUntil(() => !slot.isBusy);
+        const connection = (server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.get(context.id);
+        if (!connection) throw new Error("terminal connection missing at accepted-response cut");
+        expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+        server.broadcastSession(slot.id, "session.snapshot", slot.snapshot() as never);
+        // A ping/pong cut proves the terminal has consumed preceding snapshot
+        // frames before this response, without a scheduling sleep.
+        const consumed = once(connection.socket, "pong");
+        connection.socket.ping();
+        await awaitsWithin(consumed, "terminal consumed the settled snapshot");
+        settledSession = slot.id;
+        if (disconnectOnce) {
+          disconnectOnce = false;
+          connection.socket.terminate();
+        }
+      }
+      return result;
+    };
+    const server = new GatewayServer({
+      host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
+      devices, sessions: f.registry, service: f.service,
+      uploads: { removeSession: async () => {} } as never,
+      auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
+      logger: { log: () => {} } as never,
+    });
+    f.server = server;
+    const broadcast = server.broadcastSession.bind(server);
+    server.broadcastSession = (id, topic, payload) => {
+      // No duplicate late idle snapshot may accidentally rescue a waiter that
+      // ignored the authoritative settled cut consumed before its response.
+      if (id !== settledSession && !retainIdleBaseline) broadcast(id, topic, payload);
+    };
+    await server.listen();
+    const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+    const preload = pathToFileURL(join(process.cwd(), "test-support/home-ledger-crash-preload.mjs")).href;
+    const terminal = spawn(process.execPath, ["--experimental-transform-types", "--import", preload,
+      join(process.cwd(), "src/client/terminal-chat.ts")], {
+      cwd: process.cwd(), env: { ...process.env, TRON_DATA_DIR: f.tronHome,
+        TRON_GATEWAY_HOST: "127.0.0.1", TRON_GATEWAY_PORT: String(port) }, stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    terminal.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    terminal.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    const exit = once(terminal, "close");
+    const promptCount = () => stdout.match(/you>/gu)?.length ?? 0;
+    const scrub = (value: string) => value.replaceAll(`/private${f.root}`, "<fixture>").replaceAll(f.root, "<fixture>");
+    const awaitPrompt = async (count: number) => {
+      await waitUntil(() => promptCount() >= count, 8_000).catch(() => {
+        throw new Error(`terminal settlement did not return prompt ${count}; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`);
+      });
+    };
+    const roll = async (id: string) => {
+      const port = (f.registry.homeOwner() as unknown as {
+        options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      }).options.sessions;
+      const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      try { await f.registry.homeOwner().chapterQuiescent(id); } finally { metrics.mockRestore(); }
+    };
+    const send = (input: string) => {
+      f.faux.setResponses([fauxAssistantMessage(`REPLY-${input}`)]);
+      terminal.stdin.write(`${input}\n`);
+    };
+    try {
+      await awaitPrompt(1);
+      if (mode === "failed-sync") {
+        await roll(initial.id);
+        failSync = true;
+        send("failed-transfer");
+        await awaitsWithin(exit, "failed terminal transfer exit", 10_000);
+        expect(terminal.exitCode).toBe(1);
+        expect(opened).toHaveLength(2);
+        expect(closed.map(({ sessionId, subscriptionToken }) => ({ sessionId, subscriptionToken }))).toEqual([
+          { sessionId: opened[1]!.sessionId, subscriptionToken: opened[1]!.subscriptionToken },
+          { sessionId: opened[0]!.sessionId, subscriptionToken: opened[0]!.subscriptionToken },
+        ]);
+        expect(closed.every(item => item.closed)).toBe(true);
+      } else {
+        send("reconnect-settled");
+        await awaitPrompt(2);
+        expect(stderr).toContain("[Tron synchronized]");
+        send("same-chapter-settled");
+        await awaitPrompt(3);
+        let releaseProvider!: () => void;
+        let providerEntered = false;
+        const providerGate = new Promise<void>(resolve => { releaseProvider = resolve; });
+        f.faux.setResponses([async () => {
+          providerEntered = true;
+          await providerGate;
+          return fauxAssistantMessage("REPLY-running-operation");
+        }]);
+        try {
+          terminal.stdin.write("running-operation\n");
+          await waitUntil(() => providerEntered);
+          const connection = [...(server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.values()][0]!;
+          const consumed = once(connection.socket, "pong");
+          connection.socket.ping();
+          await awaitsWithin(consumed, "terminal consumed the running admission");
+          expect(initial.snapshot().phase).not.toBe("idle");
+          expect(promptCount()).toBe(3);
+        } finally { retainIdleBaseline = false; releaseProvider(); }
+        await awaitPrompt(4);
+        let current = initial.id;
+        for (let rollover = 0; rollover < 2; rollover += 1) {
+          await roll(current);
+          send(`rollover-${rollover}`);
+          await awaitPrompt(5 + rollover);
+          const next = accepted.at(-1)!.sessionId;
+          expect(next).not.toBe(current);
+          const previous = opened.findLast(item => item.sessionId === current)!;
+          expect(closed.at(-1)).toEqual({ sessionId: current, subscriptionToken: previous.subscriptionToken, closed: true });
+          // Real idle eviction after outgoing attachment retirement. The current
+          // subscribed chapter stays live; no production protection is bypassed.
+          (f.registry as unknown as { options: { idleRuntimeMs: number } }).options.idleRuntimeMs = 0;
+          const liveSlots = (f.registry as unknown as { slots: Map<string, RuntimeSlot> }).slots;
+          await waitUntil(async () => {
+            await (f.registry as unknown as { evictIdle(): Promise<void> }).evictIdle();
+            return !liveSlots.has(current);
+          }).catch(() => {
+            const old = liveSlots.get(current);
+            const subscribers = (f.registry as unknown as { subscribers: Map<string, Set<string>> }).subscribers;
+            throw new Error(`outgoing eviction stalled: busy=${old?.isBusy} protected=${old?.isEvictionProtected} subscribers=${JSON.stringify([...(subscribers.get(current) ?? [])])} touched=${old?.touchedAt} now=${Date.now()} stderr=${scrub(stderr)}`);
+          });
+          expect(liveSlots.has(current)).toBe(false);
+          expect(liveSlots.has(next)).toBe(true);
+          current = next;
+        }
+        terminal.stdin.write("/quit\n");
+        await awaitsWithin(exit, "terminal attachment exit", 10_000);
+        expect(terminal.exitCode).toBe(0);
+        expect(closed.at(-1)).toEqual({ sessionId: current, subscriptionToken: opened.at(-1)!.subscriptionToken, closed: true });
+        expect(prompts).toEqual(["reconnect-settled", "same-chapter-settled", "running-operation", "rollover-0", "rollover-1"]);
+        expect(f.faux.state.callCount).toBe(6);
+        for (const input of prompts) expect(stdout.match(new RegExp(`REPLY-${input}`, "gu"))).toHaveLength(1);
+        expect(opened.slice(-2).every(item => item.phase === "idle")).toBe(true);
+      }
+      const artifact = { mode, exitCode: terminal.exitCode, opened, closed, accepted,
+        submittedInputs: prompts, stdout: scrub(stdout), stderr: scrub(stderr), injectedSoftMetrics: true,
+        responseBeforeRunningEvents: mode === "rollover" };
+      const directory = join(process.cwd(), "test-results", "terminal-chat-home");
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, `attachments-${mode}.json`), `${JSON.stringify(artifact, null, 2)}\n`);
+      report.cases.push({ case: `terminal-attachments-${mode}`, exitCode: terminal.exitCode,
+        attachments: opened.length, retiredTokens: closed.length, submittedInputs: prompts, injectedSoftMetrics: true });
+    } finally {
+      if (terminal.exitCode === null && terminal.signalCode === null) terminal.kill("SIGKILL");
+      await awaitsWithin(exit, "owned terminal cleanup");
+      terminal.stdin.destroy();
+      await server.close();
+      f.server = undefined;
+    }
+  }, 45_000);
+
   it("shows Gateway refusals in the terminal and keeps its prompt after invalid input", async () => {
     const f = await fixture("terminal-subprocess");
     const slot = await designateHome(f, "e2e-terminal-subprocess", { configure: false });

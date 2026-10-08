@@ -359,6 +359,32 @@ logical Home route; while Home is enabled, ordinary input goes through
 `home.prompt` even as physical chapters change. A reserved successor is not
 opened just to attach the terminal: its first runtime is created only when a
 prompt activates it. `--session` remains an explicit physical-session route.
+
+The connection owns one installed chapter attachment. The synchronization
+boundary owns a candidate token until sync and installation succeed, and closes
+that exact token on failure; failed transfer leaves the prior attachment owned
+by the terminal. Successful transfer installs the successor snapshot/listeners
+before closing the exact outgoing token. Exit closes the current token. Resync
+and disconnect both retire the previous protocol client before replacement,
+including a still-connected resync client: otherwise its server subscriptions
+would survive without a terminal owner and prevent idle eviction.
+
+An accepted operation can settle before its response. A new authoritative idle
+snapshot settles it immediately, whether it arrives on the same chapter,
+reconnect or successor transfer. The idle cut preceding prompt submission is
+not proof of that operation's settlement. Reconnect reconciles the receipt and
+snapshot without replaying accepted input.
+
+The real terminal child cases in `home-activation.e2e.test.ts` retain
+`test-results/terminal-chat-home/attachments-rollover.json` and
+`attachments-failed-sync.json` (run that file with `-t 'owns exact Home attachments'`).
+They cover response loss after acceptance, same-chapter settlement, a still-running
+operation whose response precedes presentation events, repeated idle-baseline
+rollover, actual outgoing-runtime eviction, exact-token retirement, and failed
+candidate sync. The fixture injects soft-limit metrics to request rollover and
+holds selected presentation broadcasts to isolate snapshot/response orderings;
+it is not a large-chapter or Gateway-process-crash proof.
+
 Its `/home` line is resolved without touching the Gateway, so a bad argument is
 answered before any RPC. Malformed
 arguments are caught within the command loop, and assistant refusals are rendered

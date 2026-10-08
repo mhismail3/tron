@@ -104,8 +104,16 @@ export async function synchronizeTerminalSession(
   install: (baseline: SnapshotEnvelope) => void,
 ): Promise<SnapshotEnvelope> {
   const baseline = await client.request("session.open", { sessionId }) as unknown as SnapshotEnvelope;
-  await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
-  install(baseline);
+  // The acquisition owns the candidate until installation succeeds. A sync
+  // failure occurs before callers can see its token, so only this boundary can
+  // retire it without disturbing the previously installed attachment.
+  try {
+    await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
+    install(baseline);
+  } catch (error) {
+    await client.request("session.close", { sessionId, subscriptionToken: baseline.subscriptionToken }).catch(() => null);
+    throw error;
+  }
   void acknowledgeTerminalAttention(client, sessionId, baseline.completionRevision ?? 0);
   return baseline;
 }
@@ -467,6 +475,9 @@ async function runTerminalChat(): Promise<void> {
   reconnect = (): Promise<void> => {
     reconnecting ??= (async () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
+      // Resync can replace a healthy transport too. Retire the connection and
+      // all of its server-owned tokens before losing the only client reference.
+      client.close();
       process.stderr.write("\n[Tron disconnected; reconnecting…]\n");
       while (true) {
         client = new GatewayProtocolClient(socketURL, await readLocalCredential(tronHome));
@@ -559,6 +570,7 @@ async function runTerminalChat(): Promise<void> {
       // or without an attached session's runtime being the Home one.
       if (await runHomeInput(client, prompt)) continue;
       const commandId = randomUUID();
+      const promptSnapshot = snapshot;
       reconciledSettledOperation = undefined;
       const method = logicalHome ? "home.prompt" : "session.prompt";
       pendingCommand = { method, commandId };
@@ -581,18 +593,7 @@ async function runTerminalChat(): Promise<void> {
         const previousSessionId = sessionId;
         const previousSubscriptionToken = subscriptionToken;
         const nextSessionId = result.sessionId;
-        let nextSubscriptionToken: string | undefined;
-        try {
-          await synchronizeTerminalSession(client, nextSessionId, installed => {
-            nextSubscriptionToken = installed.subscriptionToken;
-            installSnapshot(installed);
-          });
-        } catch (error) {
-          if (nextSubscriptionToken) {
-            await client.request("session.close", { sessionId: nextSessionId, subscriptionToken: nextSubscriptionToken }).catch(() => null);
-          }
-          throw error;
-        }
+        await synchronizeTerminalSession(client, nextSessionId, installSnapshot);
         sessionId = nextSessionId;
         attachListeners();
         if (previousSessionId && previousSubscriptionToken) {
@@ -600,8 +601,11 @@ async function runTerminalChat(): Promise<void> {
             sessionId: previousSessionId, subscriptionToken: previousSubscriptionToken,
           }).catch(() => null);
         }
-        if (snapshot?.phase === "idle" && !snapshot.operation) reconciledSettledOperation = result.operationId;
       }
+      // Only a new authoritative cut can settle this command, not the idle
+      // baseline that preceded its submission. Progress mutates streaming text
+      // in place; synchronized/snapshot cuts replace the object.
+      if (snapshot !== promptSnapshot && snapshot?.phase === "idle" && !snapshot.operation) reconciledSettledOperation = result.operationId;
       if (!operationNeedsSettlement(result.operationId, reconciledSettledOperation)) {
         reconciledSettledOperation = undefined;
         continue;
