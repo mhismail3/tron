@@ -1505,6 +1505,74 @@ export async function cleanupPayloadVersions(paths, maximum = MAX_RETAINED_VERSI
   return withStoreLock(paths, () => cleanupPayloadVersionsUnlocked(paths, maximum));
 }
 
+// Signed Node enforces library validation. Its native npm artifacts share the
+// installed snapshot's lifetime and authority, including spawned executables.
+// Detect contents, not addon names, so new native packages cannot bypass staging.
+async function isMachO(path) {
+  const handle = await open(path, "r");
+  try {
+    const header = Buffer.alloc(4);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    if (bytesRead !== header.length) return false;
+    switch (header.readUInt32BE()) {
+      case 0xfeedface: case 0xcefaedfe: // 32-bit, both byte orders
+      case 0xfeedfacf: case 0xcffaedfe: // 64-bit, both byte orders
+      case 0xcafebabe: case 0xbebafeca: // universal
+      case 0xcafebabf: case 0xbfbafeca: // universal 64-bit
+        return true;
+      default: return false;
+    }
+  } finally { await handle.close(); }
+}
+
+async function adoptInstalledNativeFiles(candidateRoot, installedRoot) {
+  const refuse = (reason) => new Error(`Debug native payload ${reason}; rebuild and install a signed app before staging`);
+  const nativeFiles = [];
+  const modulesRoot = await realpath(join(candidateRoot, "app/node_modules"));
+  for (const entry of await regularFiles(candidateRoot, "app/node_modules")) {
+    if (!await isMachO(join(candidateRoot, entry.path))) continue;
+    if (entry.target !== undefined) {
+      // Aliases retain their target text, but cannot reach worktree native bytes
+      // outside the npm inventory. Internal regular targets are replaced below.
+      const target = await realpath(join(candidateRoot, entry.path));
+      if (!under(modulesRoot, target)) throw refuse(`native alias leaves npm tree: ${entry.path}`);
+    } else nativeFiles.push(entry.path);
+  }
+  if (nativeFiles.length === 0) return;
+  const readPackages = async (root) => {
+    try {
+      const lock = JSON.parse(await readBoundedRegular(join(root, "app/package-lock.json"), MAX_PACKAGE_LOCK_BYTES));
+      lockRootPackage(lock);
+      return lock.packages;
+    } catch { throw refuse("package lock is malformed"); }
+  };
+  const candidatePackages = await readPackages(candidateRoot);
+  const installedPackages = await readPackages(installedRoot);
+  for (const path of nativeFiles) {
+    // The nearest node_modules owns nested dependencies; scopes are part of the
+    // exact package-lock key, not a separate package or a name-only lookup.
+    const parts = path.slice("app/".length).split("/");
+    const start = parts.lastIndexOf("node_modules") + 1;
+    const packageKey = parts.slice(0, start + (parts[start]?.startsWith("@") ? 2 : 1)).join("/");
+    const candidate = candidatePackages[packageKey];
+    const installed = installedPackages[packageKey];
+    for (const field of ["version", "integrity"]) {
+      if (typeof candidate?.[field] !== "string" || candidate[field].length === 0
+        || candidate[field] !== installed?.[field]) throw refuse(`package identity differs: ${packageKey} (${field})`);
+    }
+    const installedPath = join(installedRoot, path);
+    const info = await lstat(installedPath).catch((error) => {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info?.isFile() || info.isSymbolicLink() || !await isMachO(installedPath)) {
+      throw refuse(`installed Mach-O file is missing or substituted: ${path}`);
+    }
+    await writeFile(join(candidateRoot, path), await readFile(installedPath));
+    await chmod(join(candidateRoot, path), info.mode & 0o777);
+  }
+}
+
 export async function stagePayload({ home, channel, source, version, sourceRevision, runtimeSource, markCandidate = true }) {
   const paths = store(home, channel);
   const sourceRoot = resolve(source);
@@ -1570,6 +1638,7 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
         await copyPayloadTree(join(runtimeSnapshotRoot, "runtime"), join(temporary, "runtime"));
         const copiedRuntimeFingerprint = await payloadSubtreeFingerprint(temporary, "runtime");
         if (copiedRuntimeFingerprint !== runtimeSourceFingerprint) throw new Error("installed runtime changed during dev staging");
+        await adoptInstalledNativeFiles(temporary, runtimeSnapshotRoot);
       }
       const stagedFingerprint = await payloadFingerprint(temporary);
       if (!useInstalledRuntime && stagedFingerprint !== sourceManifest.payloadFingerprint) {

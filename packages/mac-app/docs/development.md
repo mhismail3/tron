@@ -715,8 +715,20 @@ The handoff proves the selected Debug fingerprint/revision/epoch before and
 after copying, and compares the Node version plus the complete `runtime/` subtree
 byte-for-byte with installed Stable. Debug staging validates the installed app's
 bundled Gateway and uses its signed runtime only when its Node version matches
-the candidate. Otherwise it keeps the official runtime, so changed runtime bytes
-or version refuse handoff and require a manual signed `Tron.app` update. The handoff never changes Stable `current.json`
+the candidate. The same validated installed snapshot supplies every Mach-O file
+under candidate `app/node_modules`, detected by binary contents rather than an
+addon list. This includes both architectures' addons and spawned executables
+such as `spawn-helper` and `esbuild`. Each file's owning package must match the
+installed lockfile's exact version and integrity (including scoped and nested
+packages); missing identities, missing or substituted native files, and native
+aliases outside the npm tree refuse staging with `rebuild and install a signed
+app`. Non-native candidate files remain worktree-owned. Staging neither re-signs
+addons nor changes Node entitlements: signed Node's library validation remains
+in force. The assembled fingerprint covers these installed bytes and must pass
+normal payload validation before immutable publication. Without a matching
+installed Node version, staging keeps the official runtime and worktree native
+files, so changed runtime bytes or version refuse handoff and require a manual
+signed `Tron.app` update. The handoff never changes Stable `current.json`
 or restarts 9847. The confirmed iOS
 **Promote Debug Gateway to Stable** action pins both candidate version and
 fingerprint and invokes the existing asynchronous Stable deployment core.

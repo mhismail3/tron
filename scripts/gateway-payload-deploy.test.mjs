@@ -1841,6 +1841,154 @@ test("Debug stage fails closed for invalid or unsafe installed runtime source", 
   } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
+// Native fixtures model changed signature bytes without requiring signing keys.
+// All Mach-O magic forms and extensionless executables share the same stage owner.
+const nativeStageFiles = [
+  ["node-pty/prebuilds/darwin-arm64/pty.node", "cffaedfe"],
+  ["node-pty/prebuilds/darwin-x64/pty.node", "feedfacf"],
+  ["node-pty/prebuilds/darwin-arm64/spawn-helper", "cefaedfe"],
+  ["node-pty/prebuilds/darwin-x64/spawn-helper", "feedface"],
+  ["@earendil-works/pi-tui/native/darwin/prebuilds/darwin-arm64/darwin-platform.node", "cafebabe"],
+  ["@earendil-works/pi-tui/native/darwin/prebuilds/darwin-x64/darwin-platform.node", "bebafeca"],
+  ["@esbuild/darwin-arm64/bin/esbuild", "cafebabf"],
+  ["outer/node_modules/@scope/native/bin/helper", "bfbafeca"],
+];
+
+async function makeNativeStageFixture(root, signature) {
+  const payload = await makePreflightFixture(root);
+  const packages = { "": {} };
+  for (const [path, magic] of nativeStageFiles) {
+    const parts = path.split("/");
+    const start = parts.lastIndexOf("node_modules") + 1;
+    const owner = parts.slice(0, start + (parts[start].startsWith("@") ? 2 : 1)).join("/");
+    packages[`node_modules/${owner}`] = { version: "1.0.0", integrity: "sha512-native-fixture" };
+    const file = join(payload, "app/node_modules", path);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, Buffer.concat([Buffer.from(magic, "hex"), Buffer.from(signature)]));
+    await chmod(file, 0o755);
+  }
+  await writeFile(join(payload, "app/node_modules/node-pty/index.js"), signature);
+  await writeFile(join(payload, "app/node_modules/node-pty/linux.node"), `ELF-${signature}`);
+  await writeFile(join(payload, "app/package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages }));
+  await refreshFixtureManifest(payload);
+  return payload;
+}
+
+async function assertNativeStageRefused(root, source, runtimeSource, detail) {
+  const home = join(root, "home");
+  const prepared = await stagePayload({ home, channel: "dev", source, version: "prior" });
+  const channel = join(home, "gateway/payloads/dev");
+  const before = await readFile(join(channel, "deployment-state.json"));
+  await assert.rejects(stagePayload({ home, channel: "dev", source, runtimeSource, version: "refused" }),
+    (error) => /rebuild and install a signed app/u.test(error.message) && error.message.includes(detail));
+  assert.deepEqual(await readFile(join(channel, "deployment-state.json")), before);
+  assert.deepEqual(await readdir(join(channel, "versions")), ["prior"]);
+  await validatePayload(prepared.root, {}, true);
+}
+
+test("Debug native staging adopts installed Mach-O files by exact package identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-native-stage-match-"));
+  try {
+    const source = await makeNativeStageFixture(join(root, "source"), "worktree");
+    const runtimeSource = await makeNativeStageFixture(join(root, "installed"), "signed");
+    const alias = "app/node_modules/.bin/native-helper";
+    for (const payload of [source, runtimeSource]) {
+      await symlink("../node-pty/prebuilds/darwin-arm64/spawn-helper", join(payload, alias));
+      await refreshFixtureManifest(payload);
+    }
+    const options = { home: join(root, "home"), channel: "dev", source, runtimeSource, version: "native" };
+    const staged = await stagePayload(options);
+    for (const [path] of nativeStageFiles) {
+      assert.deepEqual(await readFile(join(staged.root, "app/node_modules", path)),
+        await readFile(join(runtimeSource, "app/node_modules", path)), path);
+    }
+    assert.equal(await readlink(join(staged.root, alias)), "../node-pty/prebuilds/darwin-arm64/spawn-helper");
+    assert.deepEqual(await readFile(join(staged.root, alias)), await readFile(join(runtimeSource, alias)));
+    for (const path of ["index.js", "linux.node"]) {
+      assert.deepEqual(await readFile(join(staged.root, "app/node_modules/node-pty", path)),
+        await readFile(join(source, "app/node_modules/node-pty", path)), path);
+    }
+    await validatePayload(staged.root, { payloadFingerprint: staged.manifest.payloadFingerprint }, true);
+    assert.equal((await stagePayload(options)).reused, true);
+    assert.deepEqual(await readdir(join(options.home, "gateway/payloads/dev/versions")), ["native"]);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Debug native staging refuses changed or absent package identities", async (context) => {
+  for (const mutation of ["version", "integrity", "missing-version", "missing-integrity", "missing-package"]) {
+    await context.test(mutation, async () => {
+      const root = await mkdtemp(join(tmpdir(), "tron-native-stage-identity-"));
+      try {
+        const source = await makeNativeStageFixture(join(root, "source"), "worktree");
+        const runtimeSource = await makeNativeStageFixture(join(root, "installed"), "signed");
+        const lockPath = join(runtimeSource, "app/package-lock.json");
+        const lock = JSON.parse(await readFile(lockPath, "utf8"));
+        const owner = "node_modules/outer/node_modules/@scope/native";
+        if (mutation === "missing-package") delete lock.packages[owner];
+        else if (mutation.startsWith("missing-")) delete lock.packages[owner][mutation.slice(8)];
+        else lock.packages[owner][mutation] = "different";
+        await writeFile(lockPath, JSON.stringify(lock));
+        await refreshFixtureManifest(runtimeSource);
+        await assertNativeStageRefused(root, source, runtimeSource, owner);
+      } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+    });
+  }
+});
+
+test("Debug native staging refuses installed native files that are missing or non-Mach-O", async (context) => {
+  for (const mutation of ["missing", "non-Mach-O"]) {
+    await context.test(mutation, async () => {
+      const root = await mkdtemp(join(tmpdir(), "tron-native-stage-file-"));
+      try {
+        const source = await makeNativeStageFixture(join(root, "source"), "worktree");
+        const runtimeSource = await makeNativeStageFixture(join(root, "installed"), "signed");
+        const path = "app/node_modules/@earendil-works/pi-tui/native/darwin/prebuilds/darwin-x64/darwin-platform.node";
+        if (mutation === "missing") await rm(join(runtimeSource, path));
+        else await writeFile(join(runtimeSource, path), "not native");
+        await refreshFixtureManifest(runtimeSource);
+        await assertNativeStageRefused(root, source, runtimeSource, path);
+      } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+    });
+  }
+});
+
+test("Debug native staging refuses malformed package locks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-native-stage-lock-"));
+  try {
+    const source = await makeNativeStageFixture(join(root, "source"), "worktree");
+    const runtimeSource = await makeNativeStageFixture(join(root, "installed"), "signed");
+    await writeFile(join(runtimeSource, "app/package-lock.json"), "{}");
+    await refreshFixtureManifest(runtimeSource);
+    await assertNativeStageRefused(root, source, runtimeSource, "package lock is malformed");
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Debug native staging refuses native aliases outside the npm tree", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-native-stage-alias-"));
+  try {
+    const source = await makePreflightFixture(join(root, "source"));
+    const runtimeSource = await makePreflightFixture(join(root, "installed"));
+    await writeFile(join(source, "app/dist/native-helper"), Buffer.from("cffaedfe01234567", "hex"));
+    const alias = "app/node_modules/.bin/native-helper";
+    await symlink("../../dist/native-helper", join(source, alias));
+    await refreshFixtureManifest(source);
+    await assertNativeStageRefused(root, source, runtimeSource, alias);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Debug native staging without an installed runtime preserves worktree native bytes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-native-stage-official-"));
+  try {
+    const source = await makeNativeStageFixture(join(root, "source"), "worktree");
+    const staged = await stagePayload({ home: join(root, "home"), channel: "dev", source, version: "official" });
+    assert.equal(staged.manifest.payloadFingerprint, await payloadFingerprint(source));
+    for (const [path] of nativeStageFiles) {
+      assert.deepEqual(await readFile(join(staged.root, "app/node_modules", path)),
+        await readFile(join(source, "app/node_modules", path)), path);
+    }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
 test("apply accepts only bounded update controls and fails closed for source mode", async () => {
   assert.throws(() => validateApplyRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1", commandId: "command-1" }), /fingerprint/);
   assert.deepEqual(validateApplyRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1", candidateFingerprint: "a".repeat(64), commandId: "command-1" }), {
