@@ -1,3 +1,4 @@
+import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
@@ -519,7 +520,7 @@ export interface RuntimeSlotDependencies {
   /** Tron Home's request seam for one session id. Asked once per runtime
    * creation, never for a fork or an ordinary session. */
   homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
-  homeInboxAdmission?: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>) => Promise<void>;
+  homeInboxAdmission?: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<void>;
   homeInboxSettlement?: (sessionId: string, operationId: string) => Promise<void>;
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
@@ -7542,16 +7543,6 @@ export class RuntimeSlot {
           // activation start: the input's own entry is appended inside
           // `session.prompt` below, and steering later inserts entries after it,
           // never before it.
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
-          if (this.homeRequestPolicy) await this.dependencies.homeInboxAdmission?.(this.id, operationId, async message => {
-            await session.sendCustomMessage(message, { triggerTurn: false });
-            const entry = session.sessionManager.getLeafEntry();
-            if (entry?.type !== "custom_message" || entry.customType !== message.customType
-              || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
-            await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
-              safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
-                owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
-          });
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
           this.phase = "running";
@@ -7565,6 +7556,27 @@ export class RuntimeSlot {
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
           this.publishSnapshot();
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
+          if (this.homeRequestPolicy) {
+            await this.dependencies.homeInboxAdmission?.(this.id, operationId, async message => {
+              await session.sendCustomMessage(message, { triggerTurn: false });
+              const entry = session.sessionManager.getLeafEntry();
+              if (entry?.type !== "custom_message" || entry.customType !== message.customType
+                || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
+              await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
+                safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
+                  owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
+            }, async () => {
+              const headroom = await this.homeRequestPolicy!.deliveryHeadroom(session, { role: "user", content: [{ type: "text", text }, ...(images ?? [])], timestamp: Date.now() }, `${session.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}`, ownership?.signal);
+              let chapterBytes = 0;
+              if (this.sessionFile) {
+                try { chapterBytes = statSync(this.sessionFile).size; }
+                catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+              }
+              return { ...headroom, bytes: Math.max(0, HOME_HARD_BYTES - chapterBytes - Buffer.byteLength(JSON.stringify({ text, images })) * 4),
+                entries: Math.max(0, HOME_HARD_ENTRIES - this.canonicalEntryCount) };
+            });
+          }
         }
 
         ownership?.signal?.throwIfAborted();
@@ -8023,6 +8035,7 @@ export class RuntimeSlot {
     void kind;
     const target = this.operation ? { ...this.operation } : undefined;
     const agentOperationId = this.activeOperationId;
+    this.homeRequestPolicy?.cancel(agentOperationId);
     const invocationOperationId = agentOperationId
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) {

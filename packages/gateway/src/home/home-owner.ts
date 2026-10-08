@@ -44,6 +44,7 @@ export interface HomeChapter {
   ordinal: number;
   state: "active" | "sealed" | "reserved" | "materializing";
   createdAt: string;
+  activationStarted: boolean;
   sealedAt?: string;
   sizeAtSeal?: number;
   entriesAtSeal?: number;
@@ -167,9 +168,7 @@ export class HomeOwner {
    * open activation rather than dropping it. A fork is a new id, hence a new
    * seam and no activation. */
   private readonly policies = new Map<string, HomeRequestPolicy>();
-  /** True while a designation is creating its session. A brand-new Home
-   * session's first runtime is built before the record can name it, so this
-   * window is the only other reason a session id has a Home seam. */
+  /** A creation-time Home profile exists before designation publishes its chapter. */
   private designating = false;
   private record: HomeRecord | undefined;
   private unavailable: string | undefined;
@@ -194,13 +193,7 @@ export class HomeOwner {
         notify: input => options.notifications?.enqueue(input) ?? Promise.resolve("unavailable"),
         ...(options.machineId ? { machineId: options.machineId } : {}),
         ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
-        result: async taskId => {
-          const task = await this.tasks!.result(taskId);
-          const report = task.reportRefs?.[0];
-          const entries = report && task.sessionId ? await options.taskSessions!.readTaskEvidence(task.sessionId) : [];
-          const entry = report && entries.find(entry => entry.id === report.entryId);
-          return { task, text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
-        },
+        result: taskId => this.immutableTaskReport(taskId),
         evidence: sessionIds => this.inboxEvidence(sessionIds),
       });
       this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
@@ -260,6 +253,16 @@ export class HomeOwner {
     const task = await this.tasks.store.read(request.taskId);
     if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
     if (request.action === "status") return this.taskResult(request.taskId);
+    if (request.action === "report") {
+      if (!Number.isSafeInteger(request.offset) || request.offset < 0 || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 4096) throw new GatewayError("invalid_request", "Invalid report page");
+      const { text } = await this.immutableTaskReport(request.taskId);
+      const bytes = Buffer.from(text);
+      if (request.offset > bytes.length || (request.offset < bytes.length && (bytes[request.offset]! & 0xc0) === 0x80)) throw new GatewayError("invalid_request", "Invalid report page offset");
+      let end = Math.min(bytes.length, request.offset + request.limit);
+      while (end < bytes.length && end > request.offset && (bytes[end]! & 0xc0) === 0x80) end--;
+      if (end === request.offset && end < bytes.length) throw new GatewayError("invalid_request", "Report page is too small for the next UTF-8 character");
+      return { taskId: task.taskId, offset: request.offset, bytes: bytes.length, text: bytes.subarray(request.offset, end).toString("utf8"), nextOffset: end < bytes.length ? end : null };
+    }
     if (request.action !== "steer" && request.action !== "stop") throw new GatewayError("invalid_request", "Unknown Home task action");
     if (task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
     if (request.action === "steer") await this.steerTask(sessionId, request);
@@ -279,6 +282,14 @@ export class HomeOwner {
     await (await this.taskOwner()).validateWorkerMarker(sessionId, marker);
   }
 
+  private async immutableTaskReport(taskId: string): Promise<{ task: import("./home-task-store.js").HomeTaskRecord; text: string }> {
+    const task = await this.tasks!.result(taskId);
+    const report = task.reportRefs?.[0];
+    const entries = report && task.sessionId ? await this.options.taskSessions!.readTaskEvidence(task.sessionId) : [];
+    const entry = report && entries.find(entry => entry.id === report.entryId);
+    return { task, text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
+  }
+
   async taskResult(taskId: string) {
     return (await this.taskOwner()).result(taskId);
   }
@@ -290,12 +301,12 @@ export class HomeOwner {
       enabled: record.enabled, sessionId: homeSessionId(record) };
   }
 
-  async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>): Promise<void> {
+  async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<void> {
     await this.taskOwner();
     const route = this.wakeRoute(sessionId);
     if (!route?.enabled || !this.inbox) return;
     await this.inbox.recover(route);
-    await this.inbox.admit(route, operationId, append);
+    await this.inbox.admit(route, operationId, append, envelope);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
@@ -657,7 +668,7 @@ export class HomeOwner {
         if (!current || !active || active.state !== "active") return false;
         const now = new Date().toISOString();
         const successor: HomeChapter = {
-          sessionId: randomUUID(), ordinal: active.ordinal + 1, state: "reserved", createdAt: now,
+          sessionId: randomUUID(), ordinal: active.ordinal + 1, state: "reserved", createdAt: now, activationStarted: false,
         };
         await this.writeLocked({
           ...current,
@@ -691,7 +702,7 @@ export class HomeOwner {
       await this.writeLocked({
         ...current,
         chapters: current.chapters.map(candidate => candidate.sessionId === sessionId
-          ? { sessionId, ordinal: candidate.ordinal, state: "active", createdAt: candidate.createdAt }
+          ? { sessionId, ordinal: candidate.ordinal, state: "active", createdAt: candidate.createdAt, activationStarted: candidate.activationStarted }
           : candidate),
         bindingRevision: current.bindingRevision + 1,
         updatedAt: now,
@@ -874,8 +885,28 @@ export class HomeOwner {
     const owner = this.ownerFor(record.homeId);
     // After a Gateway restart the record still holds the configuration; the
     // first activation opens the store from it.
+    const chapter = record.chapters.at(-1)!;
+    const path = await this.options.sessions.sessionFile(chapter.sessionId);
+    const present = path ? await stat(path).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }) : false;
+    if (!present && chapter.activationStarted) throw new HomeMemoryRefusal("memory-unavailable", "A started Home chapter has lost its canonical file");
     await owner.configure(record.memory);
-    return owner.activationView(activation, signal);
+    let view: HomeActivationView;
+    if (!present && chapter.ordinal === 1) {
+      view = owner.emptyChapterView(signal);
+    } else if (!present) {
+      // The current chapter has no preceding messages yet. Its prefix is the
+      // validated sealed history, not an installation-wide empty exception.
+      view = await owner.precedingChapterView(signal);
+    } else {
+      view = await owner.activationView(activation, signal);
+    }
+    if (!chapter.activationStarted) await this.recordMutex.run(async () => {
+      const current = this.record;
+      if (!current || current.generation !== record.generation || current.chapters.at(-1)?.sessionId !== chapter.sessionId) throw new HomeMemoryRefusal("memory-unavailable", "Home chapter changed during activation admission");
+      if (!current.chapters.at(-1)!.activationStarted) await this.writeLocked({ ...current,
+        chapters: current.chapters.map(candidate => candidate.sessionId === chapter.sessionId ? { ...candidate, activationStarted: true } : candidate), updatedAt: new Date().toISOString() });
+    });
+    return view;
   }
 
   /** One memory owner and persisted namespace for the stable installation Home. */
@@ -922,8 +953,15 @@ export class HomeOwner {
       workspace: this.options.workspace,
       sessionId: homeId,
       sessionFile: async () => {
-        const record = this.record;
-        return record ? this.options.sessions.sessionFile(homeSessionId(record)) : undefined;
+        // A new chapter's SDK file is staged until its first user entry. Memory
+        // still belongs to the installation and validates all prior chapters.
+        const chapters = this.record?.chapters ?? [];
+        for (let i = chapters.length - 1; i >= 0; i--) {
+          const chapter = chapters[i]!;
+          const path = await this.options.sessions.sessionFile(chapter.sessionId);
+          if (path && await stat(path).then(info => info.isFile(), error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; })) return path;
+        }
+        return undefined;
       },
       sessionSource: {
         read: async function* (cursor, limits) { yield* readCanonicalHomeDeltas(await source(), cursor, limits); },
@@ -1018,7 +1056,7 @@ export class HomeOwner {
           homeId: existing?.homeId ?? randomUUID(),
           chapters: [
             ...(existing?.chapters.map(chapter => chapter.state === "active" ? { ...chapter, state: "sealed" as const, sealedAt: now } : chapter) ?? []),
-            { sessionId, ordinal: (existing?.chapters.at(-1)?.ordinal ?? 0) + 1, state: "active", createdAt: now },
+            { sessionId, ordinal: (existing?.chapters.at(-1)?.ordinal ?? 0) + 1, state: "active", createdAt: now, activationStarted: false },
           ],
           bindingRevision: (existing?.bindingRevision ?? 0) + 1,
           generation: existing ? existing.generation + 1 : 1,
@@ -1254,7 +1292,7 @@ function admitChapters(value: unknown[]): HomeChapter[] | undefined {
     const candidate = value[index];
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
     const chapter = candidate as Record<string, unknown>;
-    if (!hasOnlyKeys(chapter, ["sessionId", "ordinal", "state", "createdAt", "sealedAt", "sizeAtSeal", "entriesAtSeal", "attemptId", "expectedPath"])
+    if (typeof chapter.activationStarted !== "boolean" || !hasOnlyKeys(chapter, ["sessionId", "ordinal", "state", "createdAt", "activationStarted", "sealedAt", "sizeAtSeal", "entriesAtSeal", "attemptId", "expectedPath"])
       || !boundedString(chapter.sessionId, 200)
       || sessionIds.has(chapter.sessionId)
       || chapter.ordinal !== index + 1
@@ -1276,7 +1314,7 @@ function admitChapters(value: unknown[]): HomeChapter[] | undefined {
     sessionIds.add(chapter.sessionId);
     chapters.push({
       sessionId: chapter.sessionId, ordinal: chapter.ordinal as number, state,
-      createdAt: chapter.createdAt as string,
+      createdAt: chapter.createdAt as string, activationStarted: chapter.activationStarted as boolean,
       ...(chapter.sealedAt === undefined ? {} : { sealedAt: chapter.sealedAt as string }),
       ...(chapter.sizeAtSeal === undefined ? {} : { sizeAtSeal: chapter.sizeAtSeal as number }),
       ...(chapter.entriesAtSeal === undefined ? {} : { entriesAtSeal: chapter.entriesAtSeal as number }),

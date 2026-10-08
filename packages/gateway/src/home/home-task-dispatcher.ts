@@ -61,9 +61,8 @@ export class HomeTaskDispatcher {
   }
 
   private async recoverOwned(): Promise<void> {
-    const tasks: HomeTaskRecord[] = [];
-    await this.store.list(task => { if (task.lifecycle !== "terminal" || task.wake?.push === "pending") tasks.push(task); });
-    for (const task of tasks) {
+    for await (const task of this.store.records()) {
+      if (task.lifecycle === "terminal" && task.wake?.push !== "pending") continue;
       if (task.lifecycle !== "terminal") {
         let report: HomeTaskReport | undefined;
         let entryId: string | undefined;

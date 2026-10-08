@@ -110,7 +110,7 @@ function chapterRecordBytes(overrides: Record<string, unknown> = {}): string {
   return `${JSON.stringify({
     version: 2, homeId: "home-1", generation: 2, routeGeneration: 1, policyRevision: 1, bindingRevision: 1,
     enabled: true, model: MODEL,
-    chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
+    chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", activationStarted: true, createdAt: new Date().toISOString() }],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     ...overrides,
   })}\n`;
@@ -119,7 +119,7 @@ function chapterRecordBytes(overrides: Record<string, unknown> = {}): string {
 function recordBytes(overrides: Record<string, unknown> = {}): string {
   const { sessionId = "session-1", ...fields } = overrides;
   return `${JSON.stringify({
-    version: 2, homeId: "home-1", chapters: [{ sessionId, ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
+    version: 2, homeId: "home-1", chapters: [{ sessionId, ordinal: 1, state: "active", activationStarted: true, createdAt: new Date().toISOString() }],
     bindingRevision: 1, generation: 2, routeGeneration: 1, policyRevision: 1, enabled: true, model: MODEL,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     ...fields,
@@ -175,7 +175,7 @@ describe("Tron Home record", () => {
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
     const persisted = chapterRecordBytes({ chapters: [
-      { sessionId: "session-old", ordinal: 1, state: "sealed", createdAt: new Date().toISOString(), sealedAt: new Date().toISOString() },
+      { sessionId: "session-old", ordinal: 1, state: "sealed", activationStarted: true, createdAt: new Date().toISOString(), sealedAt: new Date().toISOString() },
       { sessionId: "session-reserved", ordinal: 2, state, createdAt: new Date().toISOString(),
         ...(state === "materializing" ? { attemptId: "attempt-1", expectedPath: "/sessions/reserved.jsonl" } : {}) },
     ] });
@@ -191,7 +191,7 @@ describe("Tron Home record", () => {
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
     await writeFile(f.recordPath, chapterRecordBytes({ chapters: [
-      { sessionId: "session-reserved", ordinal: 1, state: "reserved", createdAt: new Date().toISOString() },
+      { sessionId: "session-reserved", ordinal: 1, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
     ] }), { mode: 0o600 });
     await f.owner.initialize();
 
@@ -211,8 +211,8 @@ describe("Tron Home record", () => {
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
     const malformed = chapterRecordBytes({ chapters: [
-      { sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() },
-      { sessionId: "session-1", ordinal: 2, state: "active", createdAt: new Date().toISOString() },
+      { sessionId: "session-1", ordinal: 1, state: "active", activationStarted: true, createdAt: new Date().toISOString() },
+      { sessionId: "session-1", ordinal: 2, state: "active", activationStarted: true, createdAt: new Date().toISOString() },
     ] });
     await writeFile(f.recordPath, malformed, { mode: 0o600 });
     await f.owner.initialize();

@@ -32,15 +32,16 @@ afterAll(async () => {
   if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));
 });
 
-async function fixture(providerVersion?: string, codemode = false) {
+async function fixture(providerVersion?: string, codemode = false, contextWindow?: number) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   const tronHome = join(root, "tron");
   await mkdir(agentDir); await mkdir(cwd);
-  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 100_000 });
+  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 100_000, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
   const model = faux.getModel();
   const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
+  if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
   if (codemode) {
     settings.defaultTools = ["+codemode"];
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -76,6 +77,7 @@ async function fixture(providerVersion?: string, codemode = false) {
     notifications: { enqueue: async (input: Record<string, unknown>) => { notifications.push(input); return "queued"; },
       suppressAutomatic: async () => "suppressed", markSessionInboxRead: async () => {} } as unknown as NotificationService,
     homeTaskDiagnostic: (record) => signals.push(record),
+    homeRequestDiagnostic: record => signals.push(record as unknown as Record<string, unknown>),
     scheduleToolOperations: { execute: async () => {
       await writeFile(join(cwd, "schedule-effect"), "producer called");
       return { message: "schedule read", details: { status: "ok" } };
@@ -264,6 +266,175 @@ describe("Home task authorization RPC", () => {
   });
 });
 
+describe("Home task bounded backlogs", () => {
+  it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
+    const f = await fixture(undefined, false, 32_000);
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const tasks = [];
+    for (let i = 0; i < 3; i++) {
+      f.faux.setResponses([fauxAssistantMessage([reportCall(`backlog-${i}`, String(i).repeat(65536))], { stopReason: "toolUse" })]);
+      tasks.push(await (await dispatch(f, `backlog-${i}`)).completion);
+    }
+    const home = await f.registry.acquire(f.home.sessionId);
+    const batches: string[][] = [];
+    f.faux.setResponses([(context) => {
+      expect(JSON.stringify(context)).toContain("3 more task results pending");
+      expect(JSON.stringify(context)).not.toContain("Home task backlog-");
+      return fauxAssistantMessage("Results wait for a shorter activation");
+    }]);
+    await home.prompt("u".repeat(60000)); await waitFor(() => !home.isBusy, "temporarily starved inbox");
+    expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
+    for (const task of tasks) expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
+    for (let i = 0; i < 6; i++) {
+      f.faux.setResponses([(context) => {
+        batches.push([...JSON.stringify(context).matchAll(/Home task (backlog-\d)/g)].map(match => match[1]!));
+        expect(JSON.stringify(context)).toMatch(/more task results pending/);
+        return fauxAssistantMessage("Reviewed results");
+      }]);
+      await home.prompt("Review pending results"); await waitFor(() => !home.isBusy, "bounded inbox activation");
+      if (batches.flat().length === tasks.length) break;
+    }
+    expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
+    expect(batches.length).toBeGreaterThan(1);
+    expect(batches.flat()).toEqual(tasks.map(t => t.taskId));
+    expect(f.signals).not.toContainEqual(expect.objectContaining({ reason: "context-overflow" }));
+    for (const task of tasks) expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    evidence.push({ case: "bounded-backlog", batches });
+  }, 30_000);
+
+  it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
+    const f = await fixture(undefined, false, 6_000); const model = f.faux.getModel();
+    const owner = f.registry.homeOwner();
+    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
+    const large = await (await dispatch(f, "large")).completion;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("small", "Small complete report")], { stopReason: "toolUse" })]);
+    const small = await (await dispatch(f, "small")).completion;
+    const home = await f.registry.acquire(f.home.sessionId); let request = "";
+    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Read references"); }]);
+    await home.prompt("Review"); await waitFor(() => !home.isBusy, "reference inbox");
+    const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
+    expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
+    expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
+    expect(messages[0].content).not.toContain("x".repeat(100));
+    expect(request).toContain("Small complete report");
+    const pages: any[] = []; let offset = 0;
+    for (let i = 0; i < 100; i++) {
+      const page = await owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset, limit: 1024 } as any) as any;
+      pages.push(page); expect(Buffer.byteLength(page.text)).toBeLessThanOrEqual(1024);
+      if (page.nextOffset === null) break;
+      expect(page.nextOffset).toBeGreaterThan(offset); offset = page.nextOffset;
+    }
+    const report = JSON.parse(pages.map(p => p.text).join(""));
+    expect(report.text).toBe("🦊".repeat(16384));
+    await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: -1, limit: 1024 } as any)).rejects.toThrow(/page/);
+    await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: 0, limit: 1_000_000 } as any)).rejects.toThrow(/page/);
+    expect(await owner.taskResult(large.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    expect(await owner.taskResult(small.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    evidence.push({ case: "never-fit-reference-and-pages", messages, pages: pages.length, bytes: pages.reduce((n, p) => n + Buffer.byteLength(p.text), 0) });
+  }, 30_000);
+
+  it.each(["initial", "replacement", "rollover"] as const)("admits the first %s backlog activation and refuses later canonical loss", async kind => {
+    const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    let sessionId = f.home.sessionId;
+    if (kind !== "initial") {
+      const first = await f.registry.acquire(sessionId);
+      f.faux.setResponses([fauxAssistantMessage("Initial conversation")]);
+      await first.prompt("First"); await waitFor(() => !first.isBusy, "first chapter activation");
+      const port = (owner as any).options.sessions;
+      if (kind === "replacement") {
+        const present = port.sessionPresent.bind(port);
+        const missing = vi.spyOn(port, "sessionPresent").mockImplementation((id: string) => id === sessionId ? Promise.resolve(false) : present(id));
+        sessionId = (await owner.designate({ model: { provider: model.provider, id: model.id } })).sessionId;
+        missing.mockRestore();
+      } else {
+        (first as any).sessionManager.appendCustomEntry("large-prior-metadata", { payload: "x".repeat(2 * 1024 * 1024) });
+        const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
+        await owner.chapterQuiescent(sessionId); metrics.mockRestore();
+        sessionId = (await owner.open()).sessionId;
+        await f.registry.materializeReservedHome(sessionId);
+      }
+    }
+    const home = await f.registry.acquire(sessionId);
+    const path = (home as any).sessionManager.getSessionFile();
+    const before = JSON.parse(await readFile(join(f.tronHome, "gateway/home/home.json"), "utf8"));
+    expect(before.chapters.at(-1).activationStarted).toBe(false);
+    f.faux.setResponses([fauxAssistantMessage([reportCall(`report-${kind}`)], { stopReason: "toolUse" })]);
+    const task = await (await owner.dispatchTask(sessionId, { taskId: `task-${kind}`, intent: "Finite work", target: f.cwd })).completion;
+    let request = "";
+    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Reviewed first backlog"); }]);
+    await home.prompt("Review pending"); await waitFor(() => !home.isBusy, "first backlog activation");
+    expect(request).toContain("Verified result");
+    if (kind !== "initial") expect(request).toContain("Initial conversation");
+    expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    await rm(path);
+    await expect((owner as any).memoryView({ operationId: "lost", nonce: "lost", boundaryEntryId: null }, undefined)).rejects.toThrow();
+    let providers = 0;
+    f.faux.setResponses([() => { providers++; return fauxAssistantMessage("Must not see provider"); }]);
+    await home.prompt("After data loss"); await waitFor(() => !home.isBusy, "canonical loss refuses before provider");
+    expect(providers).toBe(0);
+    expect(f.signals.filter(record => record.event === "refused")).toContainEqual(expect.objectContaining({ reason: expect.stringMatching(/memory-blocked|memory-unavailable/) }));
+    evidence.push({ case: `chapter-${kind}-first-backlog-and-loss`, consumed: task.taskId });
+  });
+
+  it("Stop cancels the activation-owned envelope memory wait without admitting results or provider work", async () => {
+    const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f)).completion;
+    const home = await f.registry.acquire(f.home.sessionId);
+    const policy = owner.requestPolicyFor(f.home.sessionId)!;
+    let entered = false; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const view = (policy as any).options.prepareMemoryView;
+    const barrier = vi.spyOn((policy as any).options, "prepareMemoryView").mockImplementation(async (activation: any, signal: any) => {
+      entered = true;
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => { signal?.removeEventListener("abort", abort); reject(new Error("cancelled envelope wait")); };
+        signal?.addEventListener("abort", abort, { once: true });
+        void gate.then(() => { signal?.removeEventListener("abort", abort); resolve(); });
+      });
+      return view(activation, signal);
+    });
+    let settled = false;
+    const prompting = home.prompt("Review").finally(() => { settled = true; }); void prompting.catch(() => {});
+    try {
+      await waitFor(() => entered, "envelope waits for memory", { boundMs: 1000 });
+      const operation = home.snapshot().operation;
+      expect(operation?.kind).toBe("prompt");
+      await home.abort("agent", operation!.id);
+      await waitFor(() => settled, "Stop cancels envelope wait", { boundMs: 1000 });
+      await expect(prompting).rejects.toThrow(/cancelled envelope wait|cancelled/);
+      expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
+      expect(home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1")).toHaveLength(0);
+      evidence.push({ case: "activation-envelope-wait-stop", pending: task.taskId });
+    } finally { release(); barrier.mockRestore(); await prompting.catch(() => {}); }
+  });
+
+  it("cold recovery retains only its current abandoned task", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const base = await (await dispatch(f)).completion;
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null, reportRefs: null, terminalEvidence: null, wake: null, spend: null }, null);
+    const retained = new Set<string>(); let peak = 0;
+    const observe = (task: any) => { if (task.lifecycle !== "terminal") { retained.add(task.taskId); peak = Math.max(peak, retained.size); } };
+    const list = HomeTaskStore.prototype.list;
+    vi.spyOn(HomeTaskStore.prototype, "list").mockImplementation(function(visit) { return list.call(this, task => { observe(task); visit(task); }); });
+    const records = (HomeTaskStore.prototype as any).records;
+    if (records) vi.spyOn(HomeTaskStore.prototype as any, "records").mockImplementation(async function*(this: HomeTaskStore) { for await (const task of records.call(this)) { observe(task); yield task; } });
+    const update = HomeTaskStore.prototype.update;
+    vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function(taskId, change) { const task = await update.call(this, taskId, change); retained.delete(taskId); return task; });
+    const cold = await f.restart();
+    expect(await (cold.homeOwner() as any).tasks.recoveryStatus()).toEqual({ available: true });
+    expect(peak).toBe(1); expect(retained.size).toBe(0);
+    for (let i = 0; i < 24; i++) expect(await cold.homeOwner().taskResult(`abandoned-${i}`)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown" } });
+    evidence.push({ case: "streaming-cold-recovery", tasks: 24, peakRetainedTasks: peak });
+  }, 30_000);
+});
+
 describe("Home task cold reconciliation", () => {
   it.each(["before-report", "after-report", "after-terminal"])("recovers %s without replay and keeps terminal outbox/authorization", async cut => {
     const f = await fixture();
@@ -401,7 +572,7 @@ describe("Home task cold reconciliation", () => {
       ["stop", () => owner.stopTask(control)],
       ["reconfirm", () => owner.reconfirmTaskPermissions()],
       ["redelivery", () => owner.redeliverTaskResult(run.taskId, { homeId: f.home.homeId, routeGeneration: 1 })],
-      ["inbox-admit", () => owner.admitTaskResults(f.home.sessionId, "activation", async () => { throw new Error("delivery while fenced"); })],
+      ["inbox-admit", () => owner.admitTaskResults(f.home.sessionId, "activation", async () => { throw new Error("delivery while fenced"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }))],
       ["inbox-ack", () => owner.settleTaskResults(f.home.sessionId, "activation")],
       ["worker-open", () => cold.acquire(run.sessionId)],
     ];

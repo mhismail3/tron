@@ -43,7 +43,7 @@ it("preserves and refuses a newer Home record in the held build, then reads it u
   const homeBytes = JSON.stringify({
     version: 2, homeId: "home-1", bindingRevision: 1, generation: 1, routeGeneration: 1, policyRevision: 1, enabled: true,
     model: { provider: "test", id: "test-model" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
-    chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", createdAt: "2026-01-01T00:00:00.000Z" }],
+    chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", activationStarted: true, createdAt: "2026-01-01T00:00:00.000Z" }],
   });
   await writeFile(recordPath, homeBytes, { mode: 0o600 });
   const sessions: HomeSessionPort = {

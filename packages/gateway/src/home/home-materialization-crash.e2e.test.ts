@@ -101,8 +101,8 @@ async function fixture() {
   await writeFile(recordPath, `${JSON.stringify({
     version: 2, homeId: "materialization-crash-home",
     chapters: [
-      { sessionId: "prior-session", ordinal: 1, state: "sealed", createdAt: timestamp, sealedAt: timestamp, sizeAtSeal: 1, entriesAtSeal: 1 },
-      { sessionId, ordinal: 2, state: "reserved", createdAt: timestamp },
+      { sessionId: "prior-session", ordinal: 1, state: "sealed", activationStarted: true, createdAt: timestamp, sealedAt: timestamp, sizeAtSeal: 1, entriesAtSeal: 1 },
+      { sessionId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: timestamp },
     ],
     bindingRevision: 1, generation: 2, routeGeneration: 1, policyRevision: 1, enabled: true, model, createdAt: timestamp, updatedAt: timestamp,
   }, null, 2)}\n`, { mode: 0o600 });

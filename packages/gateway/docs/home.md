@@ -232,7 +232,7 @@ record per installation:
 | --- | --- |
 | `version` | `2`; other versions, unknown fields, and invalid chapter topology are preserved and refused |
 | `homeId` | Stable identity of this installation's Home, generated once |
-| `chapters` | Ordered, unique physical sessions; designation starts with one `active` chapter, then quiescent rollover appends one `reserved` successor |
+| `chapters` | Ordered, unique physical sessions; designation starts with one `active` chapter, then quiescent rollover appends one `reserved` successor; each chapter requires its durable one-way `activationStarted` boolean |
 | `bindingRevision` | Advances when designation or reserved-chapter activation binds Home to a different physical session |
 | `generation` | Advances on every profile change (designate, re-enable, disable); fences in-flight operations |
 | `routeGeneration` | Required positive route epoch: set at designation, unchanged through disable/re-enable and chapter rollover, advanced only on missing-session replacement |
@@ -483,6 +483,8 @@ terminal `unknown`. Scopes and unspent grants remain byte-identical; consumed
 grants stay consumed. Restart never initializes an absent namespace or enables,
 renews, revokes or re-stamps authority.
 
+Cold task recovery consumes the secure store stream one record at a time, settles and publishes that record before advancing, and retains no backlog array. Inbox recovery and settlement likewise release each task before the next; the store remains the only task catalog.
+
 Task recovery is an optional capability, not a Gateway startup dependency. The
 Dispatcher owns one per-process recovery result; all task surfaces join it. A
 store/workspace refusal is retained with its typed reason until the next Gateway
@@ -545,6 +547,42 @@ with an exact Gateway-owned `tron.context-delivery.v4` attribution receipt. The
 existing inbound-context presentation carries the Home-task sender. The model
 receives the immutable attributed report alongside the user's input, not a new
 background prompt; ordinary chats/steers/continuations do not drain the inbox.
+
+Each activation has one delivery envelope derived from HomeRequestPolicy's same
+frozen memory prefix, incoming user text/images, effective model window and existing
+response reserve, also bounded by the current chapter's byte/entry headroom.
+Selection scans for the next creation/event-ID minimum using a cursor and one
+candidate, never an unbounded result array or sort. It delivers whole results in
+order; an event that fits the fresh prefix but not this activation stays pending
+and untouched, as do its successors. The attributed `tron.home-task-pending.v1`
+line states how many more results remain, including when none fit now.
+
+A maximal report request is 128 KiB plus canonical identity framing; that cannot
+fit every supported model window, so there is no forced whole-report floor. If a
+result exceeds fresh-prefix headroom for the current model, Home receives an
+attributed immutable **reference** with task ID, outcome and full report byte
+size, rather than truncated content. The exact canonical reference and terminal
+proof acknowledge that event, allowing the next result to proceed in order.
+Home reads its full immutable report with `task { action: "report", taskId,
+offset, limit }`: UTF-8 byte offsets, `limit` 1–4096 bytes, complete characters,
+`nextOffset` or null at EOF. Invalid offsets/oversized pages refuse. Each page is
+bounded, not an unlimited whole-report response; reading many pages within one
+activation still consumes normal request-policy context.
+
+The SDK stages chapter metadata and writes no canonical file until a user or
+assistant entry. All chapter kinds (initial designation, replacement, rollover)
+share one rule: absent file plus `activationStarted: false` admits that chapter's
+empty preceding history after validating all sealed prior memory; absent file
+plus `activationStarted: true` refuses as data loss. HomeOwner durably marks the
+chapter started after freezing its valid prefix and before inbox/provider admission;
+there is no installation-wide empty-view exception or initial-only flag. The
+strict unreleased chapter schema has no migration/down-conversion path.
+
+Existing #547 rollover is driven by chapter growth at its quiescent soft/hard
+boundaries; it is not an inbox-starvation trigger. A temporarily too-large input
+can defer delivery; persistent prefix/current-model capacity constraints require
+a suitable model/input rather than a new limit, pruning or invented rollover
+trigger. No pending event expires or is skipped to deliver a smaller successor.
 
 Admission records the physical chapter, exact operation, lifecycle generation,
 route epoch and SHA-256 message digest before canonical mutation. Acknowledgement

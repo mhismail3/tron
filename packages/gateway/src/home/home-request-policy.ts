@@ -210,6 +210,7 @@ export class HomeRequestPolicyError extends Error {
 }
 
 interface ActivationState extends HomeActivationIdentity {
+  cancellation: AbortController;
   view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
   /** True while this activation's first request has not been recorded yet. */
@@ -324,9 +325,11 @@ export class HomeRequestPolicy {
         nonce: this.activation.nonce,
       });
     }
+    this.activation?.cancellation.abort();
     this.activation = {
       operationId,
       nonce: randomUUID(),
+      cancellation: new AbortController(),
       boundaryEntryId,
       view: undefined,
       viewRefusal: undefined,
@@ -352,6 +355,7 @@ export class HomeRequestPolicy {
       ...(activation.step ? { step: activation.step } : {}),
       ...(activation.refusal ? { refusal: activation.refusal } : {}),
     };
+    activation.cancellation.abort();
     this.activation = undefined;
     this.expectedDigest = undefined;
     this.expectedNonSystemMessages = undefined;
@@ -372,6 +376,29 @@ export class HomeRequestPolicy {
     if (!from || from === to) return;
     if (this.activation?.operationId !== from) return;
     this.activation.operationId = to;
+  }
+
+  /** Stop addresses this exact activation, including its pre-provider view wait. */
+  cancel(operationId: string | undefined): void {
+    if (operationId && this.activation?.operationId === operationId) this.activation.cancellation.abort();
+  }
+
+  /** Use the same frozen view and cut as preparation, before inbox writes.
+   * Fresh headroom excludes the incoming message, not the durable memory prefix. */
+  async deliveryHeadroom(session: AgentSession, input: AgentMessage, systemPrompt: string, signal?: AbortSignal): Promise<{ tokens: number; freshTokens: number; signal: AbortSignal }> {
+    const activation = this.requireActivation();
+    const view = await this.memoryView(activation, signal);
+    activation.cancellation.signal.throwIfAborted();
+    signal?.throwIfAborted();
+    const projection = session.sessionManager.buildSessionProjection();
+    const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view, true);
+    const window = session.model?.contextWindow ?? 0;
+    const nonSystem = cut.messages.filter(message => message.role !== "system").reduce((total, message) => total + estimateTokens(message), 0);
+    const recordedSystem = cut.messages.filter(message => message.role === "system").reduce((total, message) => total + estimateTokens(message), 0);
+    const incomingSystem = estimateTokens({ role: "system", content: systemPrompt, timestamp: Date.now() });
+    const prefix = nonSystem + Math.max(recordedSystem, incomingSystem);
+    const freshTokens = Math.max(0, window - this.reserveTokens - prefix);
+    return { tokens: Math.max(0, freshTokens - estimateTokens(input)), freshTokens, signal: activation.cancellation.signal };
   }
 
   /** Outer `Agent.prepareRequest`: rebuild the request from the activation, not from canonical history. */
@@ -537,7 +564,7 @@ export class HomeRequestPolicy {
     if (activation.viewRefusal) throw activation.viewRefusal;
     activation.view ??= (async () => {
       try {
-        return await this.options.prepareMemoryView(activationIdentity(activation), signal);
+        return await this.options.prepareMemoryView(activationIdentity(activation), signal ? AbortSignal.any([signal, activation.cancellation.signal]) : activation.cancellation.signal);
       } catch (error) {
         throw (activation.viewRefusal = this.viewRefusal(error, activation));
       }

@@ -73,6 +73,20 @@ async function issueGrant(owner: import("./home-task-authorization.js").HomeTask
 }
 
 describe("HomeTaskStore durable namespace", () => {
+  it("refuses a namespace symlink introduced between streamed record yields", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null); await f.store.put({ ...task(), taskId: "task-2" }, null);
+    const stream = f.store.records();
+    try {
+      expect((await stream.next()).done).toBe(false);
+      const copy = join(f.root, "copy");
+      await cp(f.directory, copy, { recursive: true, preserveTimestamps: true });
+      await rename(f.directory, join(f.root, "original"));
+      await symlink(copy, f.directory);
+      await expect(stream.next()).rejects.toMatchObject({ code: "unsafe-state" });
+    } finally { await stream.return(undefined); }
+  });
+
   it("keeps physical authority through restart and atomic writes but refuses restored spent-grant snapshots", async () => {
     const f = await fixture();
     await f.store.initialize();

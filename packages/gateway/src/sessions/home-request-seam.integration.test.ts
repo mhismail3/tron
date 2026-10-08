@@ -287,7 +287,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
 
@@ -363,7 +363,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
     const unknownPath = join(dirname(item.slot.sessionFile!), "unreadable-candidate.jsonl");
@@ -388,7 +388,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
     const refused = owner.recordReservedChapterPath.bind(owner);
@@ -414,7 +414,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
         ...current.chapters.map(chapter => chapter.sessionId === item.slot.id
           ? { ...chapter, state: "sealed" as const, sealedAt: new Date().toISOString() }
           : chapter),
-        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
     expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");

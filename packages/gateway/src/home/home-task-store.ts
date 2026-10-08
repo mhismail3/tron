@@ -144,6 +144,27 @@ export class HomeTaskStore {
     });
   }
 
+  /** Sequential consumers may await mutations between records. Namespace
+   * validation finishes under the mutex; no lock is held across a yield. */
+  async *records(): AsyncGenerator<HomeTaskRecord> {
+    if (!await this.run(() => this.inspect())) return;
+    const directory = await this.run(() => opendir(this.directory, { bufferSize: 32 }));
+    for await (const entry of directory) {
+      if (entry.name === "authorization.json") continue;
+      const task = await this.run(async () => {
+        const match = /^(.+)\.json$/u.exec(entry.name);
+        if (!match || !identifier(match[1]) || match[1] === "authorization") throw new HomeTaskStoreError("invalid-record");
+        const authority = await this.inspectAuthority();
+        if (!authority) throw new HomeTaskStoreError("missing-state");
+        const current = await this.readTask(match[1]!);
+        if (!current) throw new HomeTaskStoreError("missing-state");
+        validateAuthorityReferences(current, authority);
+        return current;
+      });
+      yield task;
+    }
+  }
+
   /** Exact-reference owners must block on undefined, never recreate a missing
    * referenced task. Unreferenced absence carries no initialization evidence. */
   async read(taskId: string): Promise<HomeTaskRecord | undefined> {
@@ -247,7 +268,7 @@ export class HomeTaskStore {
     }
   }
 
-  private async inspect(visit?: (record: HomeTaskRecord) => void): Promise<HomeTaskAuthorizationState | undefined> {
+  private async inspectAuthority(): Promise<HomeTaskAuthorizationState | undefined> {
     if (!(await this.workspace.describe()).available) throw new HomeTaskStoreError("unsafe-state");
     await assertDirectory(this.tronHome);
     await assertDirectory(join(this.tronHome, "gateway"));
@@ -262,7 +283,12 @@ export class HomeTaskStore {
     if (!initialized) throw new HomeTaskStoreError("missing-state");
     const auth = await readSecureJson<unknown>(this.authorizationPath, AUTHORIZATION_BYTES);
     if (!auth.present) throw new HomeTaskStoreError("missing-state");
-    const state = validateAuthorization(auth.value);
+    return validateAuthorization(auth.value);
+  }
+
+  private async inspect(visit?: (record: HomeTaskRecord) => void): Promise<HomeTaskAuthorizationState | undefined> {
+    const state = await this.inspectAuthority();
+    if (!state) return undefined;
     // opendir has a bounded entry buffer. Each file is validated and released
     // before the next one; filename/identity equality makes duplicates impossible.
     const directory = await opendir(this.directory, { bufferSize: 32 });

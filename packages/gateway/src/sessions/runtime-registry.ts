@@ -974,8 +974,9 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
     }
     this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
-    // Pi's public newSession API selects a timestamped path and writes its
-    // header immediately. Once a previous attempt durably named a different
+    // Pi's public newSession API selects a timestamped path but stages setup
+    // entries: no file is persisted until the first user or assistant entry.
+    // Once a previous attempt durably named a different
     // path, absence is not permission to silently replace that binding: no
     // verified exact-path adapter exists in the pinned SDK, so preserve and
     // block rather than create evidence outside the recorded attempt.
@@ -1922,7 +1923,7 @@ export class RuntimeRegistry {
       homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
-      homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>) => this.home.admitTaskResults(sessionId, operationId, append),
+      homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, append, envelope),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),

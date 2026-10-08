@@ -1152,7 +1152,7 @@ describe("Tron Home activations end to end", () => {
       ...current,
       chapters: [
         { ...active, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "materializing", createdAt: new Date().toISOString(), attemptId: "old-attempt", expectedPath },
+        { sessionId: reservedId, ordinal: 2, state: "materializing", activationStarted: false, createdAt: new Date().toISOString(), attemptId: "old-attempt", expectedPath },
       ],
     });
 
@@ -1276,7 +1276,7 @@ describe("Tron Home activations end to end", () => {
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
         {
-          sessionId: pending.id, ordinal: 2, state, createdAt: new Date().toISOString(),
+          sessionId: pending.id, ordinal: 2, state, activationStarted: false, createdAt: new Date().toISOString(),
           ...(state === "materializing" ? { attemptId, expectedPath } : {}),
         },
       ],

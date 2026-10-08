@@ -38,6 +38,7 @@ async function fixture() {
   await store.put(terminal, 1);
   const route = { homeId: "home", routeGeneration: 1, generation: 1, enabled: true, sessionId: "chapter-one" };
   const append = async (message: any) => {
+    if (message.customType === "tron.home-task-pending.v1") return;
     entries.push({ type: "custom_message", id: "work-entry", sessionId: route.sessionId, customType: "tron.home-task-result.v1", details: message.details, content: message.content });
     entries.push({ type: "custom", id: "attribution-entry", sessionId: route.sessionId, customType: "tron.context-delivery.v4", data: makeContextDeliveryReceipt("work-entry", "stored", { source: "gateway:home-task", owner: { id: "task", title: "Home task", source: "gateway:home-task" } }) });
   };
@@ -75,9 +76,9 @@ describe("Wake inbox frozen-owner crash cuts", () => {
         (result: HomeTaskRecord) => result.wake!.state === (cut === "terminal-state" ? "terminal" : cut)));
       if (cut === "canonical") {
         vi.restoreAllMocks();
-        await f.owner.admit(f.route, "activation", async message => { await f.append(message); throw new Error("frozen owner"); }).catch(() => {});
+        await f.owner.admit(f.route, "activation", async message => { await f.append(message); throw new Error("frozen owner"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })).catch(() => {});
       } else {
-        await f.owner.admit(f.route, "activation", f.append).catch(() => {});
+        await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })).catch(() => {});
       }
       if (["terminal-receipt", "terminal-state", "acknowledged"].includes(cut)) {
         f.receipt(); if (cut !== "terminal-receipt") await f.owner.settle(f.route, "activation").catch(() => {});
@@ -88,7 +89,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     await recovered.recover(f.route);
     const task = (await f.store.read("task"))!;
     const before = f.entries.length;
-    await recovered.admit(f.route, "next-activation", f.append);
+    await recovered.admit(f.route, "next-activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     if (["admitted", "canonical"].includes(cut)) {
       expect(task.wake?.state).toBe("outcome-unknown");
       expect(f.entries.length).toBe(before);
@@ -104,7 +105,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
 
   it.each(["missing", "malformed", "duplicate", "contradictory", "missing-attribution"])("never acknowledges %s canonical result evidence", async mode => {
     const f = await fixture();
-    await f.owner.admit(f.route, "activation", f.append);
+    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     f.receipt();
     if (mode === "missing") f.entries.shift();
     if (mode === "missing-attribution") f.entries.splice(1, 1);
@@ -117,13 +118,13 @@ describe("Wake inbox frozen-owner crash cuts", () => {
 
   it("waits while disabled, blocks replacement and refuses stale-route acknowledgement", async () => {
     const f = await fixture();
-    await f.owner.admit({ ...f.route, enabled: false }, "disabled", f.append);
+    await f.owner.admit({ ...f.route, enabled: false }, "disabled", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     expect(f.entries).toHaveLength(0);
-    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "replacement", f.append);
+    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "replacement", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     expect((await f.store.read("task"))?.wake?.state).toBe("blocked");
     expect(f.entries).toHaveLength(0);
     await f.owner.redeliver("task", { ...f.route, routeGeneration: 2 });
-    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "activation", f.append); f.receipt();
+    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })); f.receipt();
     await expect(f.owner.settle(f.route, "activation")).rejects.toThrow(/route/i);
     await f.owner.settle({ ...f.route, routeGeneration: 2 }, "activation");
     expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");

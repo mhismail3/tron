@@ -26,7 +26,7 @@ function initialRecord() {
   return {
     version: 2,
     homeId: "home-crash-id",
-    chapters: [{ sessionId, ordinal: 1, state: "active", createdAt: now }],
+    chapters: [{ sessionId, ordinal: 1, state: "active", activationStarted: true, createdAt: now }],
     bindingRevision: 1,
     generation: 1, routeGeneration: 1,
     policyRevision: 1,
