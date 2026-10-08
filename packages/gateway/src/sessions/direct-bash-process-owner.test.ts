@@ -157,21 +157,32 @@ describe("DirectBashProcessOwner", () => {
       const tool = owner.toolDefinition(root);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
-      const writer = `/*${marker}*/ setInterval(() => process.stdout.write('tick\\n'), 20)`;
+      const readyFile = join(root, "writer-ready");
+      const writer = `/*${marker}*/ const fs = require('node:fs'); process.stdout.write('tick\\n', () => fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready')); setInterval(() => process.stdout.write('tick\\n'), 20)`;
       const launcher = `/*${marker}*/ require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref();`;
       const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; echo started`;
       const failure = (promise: Promise<unknown>) =>
         promise.then(() => "completed", (error: unknown) => error instanceof Error ? error.message : String(error));
 
-      const timedOut = await failure(tool.execute("escaped-timeout", { command, timeout: 1 }, undefined, undefined, undefined));
+      const timeoutExecution = failure(tool.execute("escaped-timeout", { command, timeout: 1 }, undefined, undefined, undefined));
+      await waitFor(async () => {
+        try { return (await readFile(readyFile, "utf8")) === "ready"; }
+        catch { return false; }
+      }, "the escaped timeout writer to start");
+      const timedOut = await timeoutExecution;
       expect(timedOut).toContain("started");
       expect(timedOut).toMatch(/Command timed out after 1 seconds/u);
       expect(owner.hasActiveProcesses).toBe(false);
 
+      await rm(readyFile, { force: true });
       const stop = new AbortController();
-      const stopped = failure(tool.execute("escaped-stop", { command }, stop.signal, undefined, undefined));
-      setTimeout(() => stop.abort(), 1_000);
-      expect(await stopped).toMatch(/Command aborted/u);
+      const stoppedExecution = failure(tool.execute("escaped-stop", { command }, stop.signal, undefined, undefined));
+      await waitFor(async () => {
+        try { return (await readFile(readyFile, "utf8")) === "ready"; }
+        catch { return false; }
+      }, "the escaped stop writer to start");
+      stop.abort();
+      expect(await stoppedExecution).toMatch(/Command aborted/u);
       expect(owner.hasActiveProcesses).toBe(false);
     },
     20_000,
