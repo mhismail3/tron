@@ -1,3 +1,5 @@
+import type { ManagedSubagents } from "../sessions/managed-subagents.js";
+import { attributeExtensions } from "../extensions/owner-attribution.js";
 import { homedir } from "node:os";
 import { DefaultResourceLoader, SettingsManager, type Extension } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -31,6 +33,7 @@ export async function loadSessionFreeExtensions(
   agentDir: string,
   trust: TrustService,
   cwdInput?: string,
+  managedSubagents?: ManagedSubagents,
 ): Promise<SessionFreeExtensionLoad> {
   const inspection = cwdInput === undefined ? undefined : await trust.inspect(cwdInput);
   const cwd = inspection?.cwd ?? homedir();
@@ -46,6 +49,8 @@ export async function loadSessionFreeExtensions(
     cwd,
     agentDir,
     settingsManager: settings,
+    ...(managedSubagents?.loaderOptions(settings, agentDir) ?? {}),
+    extensionsOverride: (base) => attributeExtensions(base, undefined, managedSubagents ? { managedSubagents } : {}),
     extensionFactories: piBuiltinExtensions(agentDir),
   });
   await loader.reload({

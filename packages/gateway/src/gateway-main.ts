@@ -1,3 +1,4 @@
+import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +71,7 @@ import { runtimeIdentity } from "./transport/runtime-identity.js";
 const moduleGraphLoadedAt = performance.now();
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
+const managedSubagents = new ManagedSubagents(config.tronHome);
 // Never switch the provider's root while retained artifacts are discoverable in
 // its legacy roots. The operator cutover is explicit and runs before Pi loads
 // the provider, so an old run cannot be silently stranded.
@@ -213,6 +215,7 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  managedSubagents,
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
@@ -425,10 +428,11 @@ const packages = new PackageService(
   trust,
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
+  managedSubagents,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
-const hookResources = new HookResources(config.agentDir, trust, workRegistry);
+const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,

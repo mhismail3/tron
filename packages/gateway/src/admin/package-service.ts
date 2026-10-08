@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "../sessions/managed-subagents.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -90,6 +91,7 @@ export class PackageService {
     private readonly trust: TrustService,
     private readonly broadcast: (topic: string, payload: JsonValue) => void,
     private readonly workRegistry?: GatewayWorkRegistry,
+    private readonly managedSubagents?: ManagedSubagents,
   ) {}
 
   private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager }> {
@@ -162,6 +164,7 @@ export class PackageService {
       // tools/commands and subagent attribution), so it cannot fail this read.
       const provides = await loadPackageProvides({
         agentDir: this.agentDir,
+        ...(this.managedSubagents ? { managedSubagents: this.managedSubagents } : {}),
         trust: this.trust,
         cwd,
         settingsManager: settings,

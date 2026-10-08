@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
@@ -30,6 +31,7 @@ import {
   type ModelRuntime,
   type ToolDefinition,
   SessionManager,
+  SettingsManager,
   type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
@@ -409,6 +411,7 @@ interface PromptOwnership {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
@@ -1562,11 +1565,14 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
+      const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
       const services = await createAgentSessionServices({
+        settingsManager,
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
+          ...(this.dependencies.managedSubagents?.loaderOptions(settingsManager, this.dependencies.agentDir) ?? {}),
           extensionFactories: [
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
@@ -1608,7 +1614,7 @@ export class RuntimeSlot {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
-          } : undefined, { requireTronAskUser: true }),
+          } : undefined, { requireTronAskUser: true, ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}) }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
@@ -8471,6 +8477,7 @@ export class RuntimeSlot {
       agentDir: this.dependencies.agentDir,
       cwd: this.cwd,
       settingsManager: this.runtime.session.settingsManager,
+      ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}),
     });
   }
 

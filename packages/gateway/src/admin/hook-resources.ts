@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "../sessions/managed-subagents.js";
 import { basename } from "node:path";
 import { projectHookRegistrations, type HookRegistrationProjection } from "../sessions/hook-projection.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -21,6 +22,7 @@ export class HookResources {
     private readonly agentDir: string,
     private readonly trust: TrustService,
     private readonly workRegistry?: GatewayWorkRegistry,
+    private readonly managedSubagents?: ManagedSubagents,
   ) {}
 
   async list(cwd?: string): Promise<HookRegistrationProjection> {
@@ -30,7 +32,7 @@ export class HookResources {
     });
     try {
       return await this.mutex.run(async () => {
-        const loaded = await loadSessionFreeExtensions(this.agentDir, this.trust, cwd);
+        const loaded = await loadSessionFreeExtensions(this.agentDir, this.trust, cwd, this.managedSubagents);
         return projectHookRegistrations(loaded.extensions.map((extension) => ({
           name: basename(extension.path),
           path: extension.path,

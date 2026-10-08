@@ -441,6 +441,18 @@ before the `chat.geometry.*`, `chat.viewport.transition` and
 only as a last resort. A composer flag missing from an export was therefore a
 repeat, or was reclaimed ahead of geometry — not a control the app never sampled.
 
+## Managed delegated-provider admission diagnostics
+
+These are request/activation diagnostics, not a new log stream. They are owned
+by `sessions/managed-subagents.ts`; catalog and package reads bound their text
+through their existing diagnostic envelopes.
+
+| Signal | Where to inspect | Meaning / action | Regression |
+| --- | --- | --- | --- |
+| `user-installed pi-subagents conflicts` / `The subagent tool is reserved` | extension-load conflict; `session.resources.subagentDiagnostics` or `packages.list.providesDiagnostic` | A user npm manifest or configured npm source claims the reserved provider. Remove that user declaration explicitly; Tron does not override or warn-and-run. | `managed-subagents.test.ts`: different user version is refused and manifest is unchanged; foreign late registration is refused |
+| `managed pi-subagents installed closure mismatch` / `install receipt mismatch` | activation command failure, extension-load conflict, or bounded catalog/provides diagnostic | Installed bytes or receipt differ from the selected pin. Do not load or repair in place; inspect the activation selection. | `managed-subagents.test.ts`: tampered byte and forged receipt are refused |
+| `managed pi-subagents unavailable` / `managed pi-subagents is not installed` | activation verification or bounded catalog/provides diagnostic | No selected managed build has been installed. Explicit payload activation must install the pinned offline closure before delegated work is available; startup never fetches it. | `managed-subagents.test.ts`: verification fails before installation |
+
 ## Getting a diagnostic bundle
 
 Run `scripts/tron diagnose` (default window 2h) and read

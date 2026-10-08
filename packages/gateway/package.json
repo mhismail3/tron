@@ -13,6 +13,7 @@
     "postinstall": "node scripts/ensure-node-pty-helper.mjs",
     "check:pi-sdk": "node scripts/check-pi-sdk.mjs",
     "check:pi-subagents": "node scripts/check-pi-subagents.mjs",
+    "install:pi-subagents": "node scripts/install-pi-subagents.mjs",
     "build:pi-subagents-closure": "python3 scripts/build-pi-subagents-closure.py",
     "test:pi-subagents-scripts": "node --test scripts/check-pi-subagents.test.mjs scripts/build-pi-subagents-closure.test.mjs",
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
