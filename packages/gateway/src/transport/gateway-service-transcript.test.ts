@@ -86,7 +86,7 @@ describe("session transcript paging", () => {
       const store = new KnowledgeStore(workspace);
       const source = await store.captureSource({ commandId: "service-erasure-source", record: { kind: "source", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Evidence", text: "private fixture", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
       const request = { commandId: "service-erasure-note", record: { kind: "note" as const, scope: "personal" as const, provenance: { actor: "agent" as const, evidence: [{ recordId: source.record.id, revisionId: source.record.revisionId }] }, relations: [], content: { title: "Derived", body: "private fixture", role: "fact" as const, confirmed: false } } };
-      const service = new GatewayService({ config: { tronHome: root }, sessions: {}, receipts: new CommandReceiptStore(root), knowledge: new KnowledgeService(store, { admit() {}, dispose() {} }), updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
+      const service = new GatewayService({ config: { tronHome: root }, sessions: { isAdministrativeDrainStarted: false }, receipts: new CommandReceiptStore(root), knowledge: new KnowledgeService(store, { admit() {}, dispose() {} }), updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
       const first = await service.invoke(client, "knowledge.note.create", request);
       expect(JSON.stringify(first)).toContain("private fixture");
       await service.invoke(client, "knowledge.forget", { commandId: "service-erasure-forget", recordId: source.record.id, reason: "fixture erasure", expectedRevision: source.record.revisionId });
@@ -103,7 +103,7 @@ describe("session transcript paging", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-service-knowledge-receipts-"));
     try {
       const invoke = vi.fn(async (action: { operation: string }) => ({ operation: action.operation }));
-      const service = new GatewayService({ config: { tronHome: root }, sessions: {}, receipts: new CommandReceiptStore(root), knowledge: { invoke }, updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
+      const service = new GatewayService({ config: { tronHome: root }, sessions: { isAdministrativeDrainStarted: false }, receipts: new CommandReceiptStore(root), knowledge: { invoke }, updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
       const edits = ["knowledge.config", "knowledge.source.take", "knowledge.source.curate", "knowledge.source.admission", "knowledge.source.assess", "knowledge.note.create", "knowledge.correction", "knowledge.forget", "knowledge.exclusion", "knowledge.source.ingest", "knowledge.connector.ack"];
       for (const method of edits) {
         const params = { commandId: `receipt-${method}` };
@@ -128,7 +128,7 @@ describe("session transcript paging", () => {
       const service = new GatewayService({
         config: { tronHome: root },
         devices,
-        sessions: {},
+        sessions: { isAdministrativeDrainStarted: false },
         receipts: new CommandReceiptStore(root),
         iosDeviceInstallService: { removeDevice, isUsable: false } as never,
       } as unknown as GatewayServiceDependencies);
@@ -209,7 +209,7 @@ describe("session transcript paging", () => {
         machineName: "Mac",
         tronHome: "/tmp/tron-process-capabilities",
       },
-      sessions: {},
+      sessions: { isAdministrativeDrainStarted: false },
     } as unknown as GatewayServiceDependencies);
 
     const capabilities = (service.info() as { capabilities: string[] }).capabilities;
@@ -508,6 +508,7 @@ describe("session transcript paging", () => {
       operation: () => Promise<unknown>,
     ) => operation());
     const service = new GatewayService({
+      sessions: { isAdministrativeDrainStarted: false },
       terminals: { write, resize, terminate },
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);

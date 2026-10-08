@@ -34,6 +34,7 @@ export interface TronModuleHost {
   compactionPolicy: () => CompactionOperationPolicy | undefined;
   compactionStopped: (event: SessionBeforeCompactEvent) => boolean;
   compactionChanged: () => void;
+  joinTerminalReceiptWrites: () => Promise<void>;
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
@@ -73,6 +74,22 @@ export interface TronModuleRegistration {
  * exactly this list for each session and `modules.list` reports it, so Settings
  * and sessions cannot drift. */
 export const TRON_MODULES: readonly TronModule[] = [
+  {
+    name: "tron-invocation-settlement",
+    purpose: "Keeps each chat's completion receipts in order before the next message",
+    tools: [],
+    commands: [],
+    factory: (host) => (pi) => {
+      // Pi awaits these public hooks before the next run/input can append.
+      // Join receipt I/O only: attention must not hold up accepted continuations.
+      pi.on("turn_start", async () => {
+        await host.joinTerminalReceiptWrites();
+      });
+      pi.on("message_end", async (event) => {
+        if (event.message.role === "user") await host.joinTerminalReceiptWrites();
+      });
+    },
+  },
   {
     name: "tron-context-window",
     purpose: "Keeps the session's model context window applied as the model changes.",

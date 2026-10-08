@@ -281,6 +281,11 @@ tasks, claims, progress, decisions and evidence. There are no plan documents.
 Every agent assumes many other agents are working in this repository at the
 same time. The commands are owned by [tools/work/README.md](tools/work/README.md),
 and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
+Agents make GitHub work writes only through `scripts/tron work`; do not invoke
+`gh` mutation commands directly. The typed commands privacy-check public text
+and record every GitHub mutation in the private, bounded local audit described
+in the work-tooling guide. `gh` reads remain read-only and credentials stay in
+gh's credential store.
 
 - **See the state:** `scripts/tron work dashboard`. The tron-work skill renders it
   for the user.
@@ -330,18 +335,30 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
     inferred claims. A delegating agent passes this rule to each child; the
     [tron-work skill](.agents/skills/tron-work/SKILL.md) owns the procedure.
 - **Discovered work:** file it, then stay in scope.
-  - File a new task issue (Task form). If it belongs to the current epic, make
-    it a sub-issue there; otherwise label it `needs-triage`.
-  - Give every issue except an epic exactly one `kind:*` and one `visibility:*`
-    label and its `area:*` label. `.github/work.json` declares what each means;
+  - Use `scripts/tron work issue create --title <title> --body-file <md>
+    --kind kind:* --visibility visibility:* --area area:* [--area area:* ...]`
+    to file a task; use
+    `--type epic` for an epic. New work starts with `needs-triage`. Never invoke
+    GitHub mutations through `gh` directly.
+  - Add the issue with `scripts/tron work project add <issue>`, then use
+    `scripts/tron work project set <issue> --status Proposed --priority P2`
+    until its approved scope authorizes Ready.
+  - Use `scripts/tron work issue labels` for declared classification and
+    triage-label changes, `issue parent <task> --epic <epic>` for sub-issues,
+    and `issue block <issue> --blocked-by <issue>` for native blockers.
+    Public issue text must pass the configured privacy guard.
+  - Give every issue except an epic exactly one declared `kind:*` and one
+    `visibility:*` label, plus one or more declared `area:*` labels.
+    `.github/work.json` declares what each means;
     the dashboard reports any issue that breaks this.
   - Add it to the Project. Use Status Ready only when it is inside an approved
     epic's scope, and Proposed otherwise.
   - Link it from your pull request. Do not do it in your pull request unless
     it blocks your task.
 - **Decisions and maintainer-only actions:**
-  - A question for the maintainer gets the `needs-decision` label and Status
-    Needs you, and is asked in the session.
+  - A question for the maintainer gets the `needs-decision` label using
+    `scripts/tron work issue labels`, Status Needs you using `work project set`,
+    and is asked in the session with `work comment`.
   - The answer is recorded on the issue.
   - A step only the maintainer can perform is handed off with
     `land --needs-user-validation`.

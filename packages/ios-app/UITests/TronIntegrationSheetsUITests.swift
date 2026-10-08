@@ -6,6 +6,19 @@ import XCTest
 /// - a failed X credit read leaves an error line in the list;
 /// - a setup-required instance is incorrectly repeated under Available.
 final class TronIntegrationSheetsUITests: XCTestCase {
+    @MainActor
+    func testOllamaUnlimitedAccessibilityAndTypeSizes() {
+        for (size, largeType) in [("default", false), ("large", true)] {
+            let app = launch(scenario: "ollama-detail", largeType: largeType)
+            defer { app.terminate() }
+            app.buttons["Details for Ollama"].tap()
+            let cardLabel = "Unlimited. Local models run on this Mac with no account usage limits."
+            let card = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", cardLabel)).firstMatch
+            XCTAssertTrue(card.waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(app, name: "583-ollama-\(size)")
+        }
+    }
+
     /// Replacing the foreground transport must not destroy an unsubmitted form.
     @MainActor
     func testXSetupDraftSurvivesBackgroundReconnect() {
@@ -626,11 +639,14 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
-    private func launch(scenario: String = "default", dark: Bool = false) -> XCUIApplication {
+    private func launch(scenario: String = "default", dark: Bool = false, largeType: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-integrations-fixture", "-integrations-scenario", scenario,
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if dark { app.launchArguments += ["-ui-dark-mode"] }
+        if largeType {
+            app.launchArguments += ["-fixture-large-type", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         app.launch()
         return app
     }

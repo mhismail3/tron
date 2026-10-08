@@ -141,12 +141,12 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
 const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });
 
-async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string) => string, compactionDiagnostics: Array<Record<string, unknown>> = []) {
+async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string) => string, compactionDiagnostics: Array<Record<string, unknown>> = [], initialCompaction?: Record<string, unknown>) {
   const root = await mkdtemp(join(tmpdir(), "tron-compaction-boundary-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ compaction: {
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ compaction: initialCompaction ?? {
     enabled: false, reserveTokens: 120_000, keepRecentTokens: 13_000, thinkingLevel: "low", instructions: "Retain the API contract",
   } }));
   if (extension) {
@@ -618,6 +618,221 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     } finally {
       release();
       await compacting.catch(() => {});
+    }
+  });
+
+  it.each(["success", "failure"] as const)("adopts a threshold compaction for a queued manual request and settles it on %s", async outcome => {
+    const root = await mkdtemp(join(tmpdir(), "tron-compaction-queued-adoption-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    await writeFile(join(cwd, "large.txt"), "context ".repeat(6_000));
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ compaction: {
+      enabled: true, reserveTokens: 120_000, keepRecentTokens: 13_000,
+      thinkingLevel: "low", instructions: "retain API decisions",
+    } }));
+    const faux = fauxProvider({ provider: "tron-queued-compaction", models: [{ id: "fixture", reasoning: true }], tokensPerSecond: 1_000_000, tokenSize: { min: 100_000, max: 100_000 } });
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const snapshots: SessionSnapshot[] = [];
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const adopted: Array<Record<string, unknown>> = [];
+    const events: string[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: (_id, topic, value) => {
+        events.push(topic);
+        if (topic === "session.snapshot") snapshots.push(value as unknown as SessionSnapshot);
+      }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      compactionDiagnostic: diagnostic => diagnostics.push(diagnostic),
+      manualCompactionAdopted: diagnostic => adopted.push(diagnostic),
+    });
+    let slot: Awaited<ReturnType<RuntimeRegistry["create"]>> | undefined;
+    let releaseRun!: () => void;
+    let enteredRun!: () => void;
+    const runEntered = new Promise<void>(resolve => { enteredRun = resolve; });
+    const runBarrier = new Promise<void>(resolve => { releaseRun = resolve; });
+    let promptRun: Promise<unknown> | undefined;
+    let manualCompaction: Promise<unknown> | undefined;
+    const reasons: string[] = [];
+    try {
+      await registry.initialize();
+      slot = await registry.create(cwd);
+      registry.subscribe("test-audience", slot.id);
+      const session = (slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
+      session.subscribe(event => { if (event.type === "compaction_start") reasons.push(event.reason); });
+      await slot.setModel(faux.getModel().provider, faux.getModel().id);
+      faux.setResponses([
+        fauxAssistantMessage("Earlier ".repeat(1_000)),
+        async () => {
+          enteredRun();
+          await runBarrier;
+          return fauxAssistantMessage(fauxToolCall("read", { path: "large.txt" }));
+        },
+        ...Array.from({ length: 8 }, () => async context => {
+          if (getCurrentSystemPrompt(context.messages).includes("retain API decisions")) {
+            return outcome === "failure"
+              ? fauxAssistantMessage("", { stopReason: "error", errorMessage: "summary failed" })
+              : fauxAssistantMessage("Summary of earlier work.");
+          }
+          return fauxAssistantMessage("The file was read and summarized.");
+        }),
+      ]);
+      await slot.prompt("An earlier request.");
+      await waitFor(() => !slot!.isBusy, "the slot to go idle");
+      promptRun = slot.prompt("Read large.txt, then explain it.");
+      await runEntered;
+      manualCompaction = slot.compact();
+      await waitFor(() => slot!.snapshot().compactionQueued, "the manual compaction to queue");
+      releaseRun();
+      await promptRun.catch(() => {});
+      const manualResult = await manualCompaction.then(() => "resolved", () => "rejected");
+      expect(manualResult).toBe(outcome === "success" ? "resolved" : "rejected");
+      await waitFor(() => !slot!.isBusy, "the slot to go idle");
+      expect(reasons.length).toBeGreaterThanOrEqual(1);
+      expect(reasons.every(reason => reason === "threshold")).toBe(true);
+      expect((await readFile(slot.sessionFile!, "utf8")).trim().split("\n").map(line => JSON.parse(line)).filter((entry: { type?: string }) => entry.type === "compaction")).toHaveLength(outcome === "success" ? 1 : 0);
+      expect(diagnostics).toContainEqual(expect.objectContaining({ reason: "threshold", outcome }));
+      expect(snapshots.every(snapshot => !(snapshot.phase === "compacting" && snapshot.compactionQueued))).toBe(true);
+      const compactionStartedAt = snapshots.findIndex(snapshot => snapshot.phase === "compacting");
+      expect(compactionStartedAt).toBeGreaterThanOrEqual(0);
+      expect(snapshots.slice(compactionStartedAt).every(snapshot => !snapshot.compactionQueued)).toBe(true);
+      expect(adopted).toEqual([expect.objectContaining({ operationId: expect.any(String), reason: "threshold" })]);
+      expect(events.includes("session.operationFailed")).toBe(outcome === "failure");
+      expect(registry.administrativeWorkRegistry.size).toBe(0);
+    } finally {
+      releaseRun();
+      await promptRun?.catch(() => {});
+      await manualCompaction?.catch(() => {});
+      await registry.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("settles the prompt independently when adopted compaction marker cleanup outlasts agent_settled", async () => {
+    const item = await boundaryFixture();
+    let enteredRun!: () => void;
+    let releaseRun!: () => void;
+    let releaseAdoptedClear!: () => void;
+    const runEntered = new Promise<void>(resolve => { enteredRun = resolve; });
+    const runBarrier = new Promise<void>(resolve => { releaseRun = resolve; });
+    const adoptedClearBarrier = new Promise<void>(resolve => { releaseAdoptedClear = resolve; });
+    let adoptedClearEntered!: () => void;
+    const clearEntered = new Promise<void>(resolve => { adoptedClearEntered = resolve; });
+    const marked: string[] = [];
+    let promptOperationId: string | undefined;
+    let precedingOperationId: string | undefined;
+    let settledCount = 0;
+    const itemSession = item.session;
+    itemSession.subscribe(event => { if (event.type === "agent_settled") settledCount += 1; });
+    const internal = item.slot as unknown as { dependencies: { markers: RunMarkerStore } };
+    const originalMark = internal.dependencies.markers.mark.bind(internal.dependencies.markers);
+    const originalClear = internal.dependencies.markers.clear.bind(internal.dependencies.markers);
+    const mark = vi.spyOn(internal.dependencies.markers, "mark").mockImplementation(async (sessionId, operationId) => {
+      marked.push(operationId);
+      await originalMark(sessionId, operationId);
+    });
+    let adoptedOperationId: string | undefined;
+    const clear = vi.spyOn(internal.dependencies.markers, "clear").mockImplementation(async (sessionId, operationId) => {
+      if (operationId === adoptedOperationId) {
+        adoptedClearEntered();
+        await adoptedClearBarrier;
+      }
+      await originalClear(sessionId, operationId);
+    });
+    let promptRun: Promise<unknown> | undefined;
+    let queuedCompaction: Promise<unknown> | undefined;
+    try {
+      const preceding = await item.slot.prompt("Establish the API contract");
+      precedingOperationId = preceding.operationId;
+      await waitFor(() => !item.slot.isBusy, "the slot to go idle");
+      const reasons: string[] = [];
+      itemSession.subscribe(event => { if (event.type === "compaction_start") reasons.push(event.reason); });
+      item.faux.setResponses([
+        async () => {
+          enteredRun();
+          await runBarrier;
+          return fauxAssistantMessage("", { stopReason: "error", errorMessage: "context_length_exceeded" });
+        },
+        ...Array.from({ length: 8 }, () => async context => getCurrentSystemPrompt(context.messages).includes("Retain the API contract")
+          ? fauxAssistantMessage("Summary of earlier work.")
+          : fauxAssistantMessage("The file was read and summarized.")),
+      ]);
+      const settlesBeforePrompt = settledCount;
+      promptRun = item.slot.prompt("Read large.txt, then explain it.");
+      await runEntered;
+      promptOperationId = item.slot.snapshot().operation?.id;
+      expect(promptOperationId).toBeDefined();
+      queuedCompaction = item.slot.compact();
+      await waitFor(() => item.slot.snapshot().compactionQueued, "the manual compaction to queue");
+      adoptedOperationId = marked.findLast(id => id !== precedingOperationId && id !== promptOperationId);
+      expect(adoptedOperationId).toBeDefined();
+      releaseRun();
+      await clearEntered;
+      await waitFor(() => settledCount > settlesBeforePrompt, "the enclosing agent to settle");
+      const terminal = (await item.entries()).find(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+        && entry.data.operationId === promptOperationId && entry.data.receiptKind === "terminal");
+      expect(reasons).toEqual(["manual"]);
+      expect(terminal?.data.lifecycle).toBe("failed");
+      releaseAdoptedClear();
+      await queuedCompaction;
+      await promptRun;
+      await expectSettled(item);
+      expect(clear).toHaveBeenCalledWith(item.slot.id, adoptedOperationId);
+      expect(marked).toContain(promptOperationId);
+    } finally {
+      releaseRun();
+      releaseAdoptedClear();
+      await promptRun?.catch(() => {});
+      await queuedCompaction?.catch(() => {});
+      mark.mockRestore();
+      clear.mockRestore();
+    }
+  });
+
+  it("retires adopted SDK manual compaction before allowing a later prompt", async () => {
+    const item = await boundaryFixture(8_000);
+    let enteredRun!: () => void;
+    let releaseRun!: () => void;
+    const runEntered = new Promise<void>(resolve => { enteredRun = resolve; });
+    const runBarrier = new Promise<void>(resolve => { releaseRun = resolve; });
+    let queuedCompaction: Promise<unknown> | undefined;
+    let prompting: Promise<unknown> | undefined;
+    try {
+      item.faux.setResponses([
+        async () => {
+          enteredRun();
+          await runBarrier;
+          return fauxAssistantMessage("The active request was interrupted for compaction.");
+        },
+        () => fauxAssistantMessage("Preserved the API contract."),
+        () => fauxAssistantMessage("The next explicit request succeeded."),
+      ]);
+      prompting = item.slot.prompt("A request during which the SDK will compact.");
+      await runEntered;
+      queuedCompaction = item.slot.compact();
+      await waitFor(() => item.slot.snapshot().compactionQueued, "the manual compaction to queue");
+      const sdkCompaction = item.session.compact("Preserve the API contract.");
+      releaseRun();
+      await sdkCompaction;
+      await queuedCompaction;
+      await prompting;
+      await expectSettled(item);
+      expect(item.slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
+      expect(item.slot.snapshot().operation).toBeUndefined();
+      expect((await item.entries()).filter(entry => entry.type === "compaction")).toHaveLength(1);
+      await item.slot.prompt("A later explicit request.");
+      await expectSettled(item);
+      expect(userTexts(await item.entries()).at(-1)).toContain("A later explicit request");
+    } finally {
+      releaseRun();
+      await prompting?.catch(() => {});
+      await queuedCompaction?.catch(() => {});
     }
   });
 

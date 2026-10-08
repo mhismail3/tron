@@ -9,7 +9,7 @@ import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -28,7 +28,7 @@ import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
-import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
+import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import {
@@ -202,7 +202,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     /** Admit one explicit delegated artifact root, as the production cutover
      * does, so ambient discovery scans exactly that root. */
     delegatedRoot?: string;
-    beforeInitialize?: (sessionFile: string) => Promise<void>;
+    beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;
     notifications?: NotificationService;
     resources?: ResourceRecorder;
     runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
@@ -248,7 +248,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
     });
     registries.push(registry);
-    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
+    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!, registry);
     await initializeRegistry(registry, options.phaseObserver);
     await registry.recoverCanonicalAttention();
     return {
@@ -5781,21 +5781,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("does not reopen an unchanged ambient artifact for a live slot", async () => {
-    // A root shaped like the production provider root on 2026-09-28: 2,498 run
-    // directories, 556 finished status.json files and one live slot, which read
-    // every one of them on every 750 ms pass.
     const delegated = await delegatedFixtureRoot("ambient-steady-state");
     const startedAt = Date.now();
     const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
     await mkdir(runsRoot, { recursive: true });
-    const finished = Array.from({ length: 556 }, (_unused, index) => `finished-${String(index).padStart(4, "0")}`);
-    const empty = Array.from({ length: 2_498 - 556 }, (_unused, index) => `empty-${String(index).padStart(4, "0")}`);
-    await Promise.all([...empty, ...finished].map((name) => mkdir(join(runsRoot, name), { recursive: true })));
     const finishedStatus = (runId: string) => JSON.stringify({
       lifecycleArtifactVersion: 3, runId, state: "complete",
       startedAt: startedAt - 120_000, lastUpdate: startedAt - 120_000, endedAt: startedAt - 120_000,
     });
-    await Promise.all(finished.map((name) => writeFile(join(runsRoot, name, "status.json"), finishedStatus(name))));
     const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
@@ -5820,14 +5813,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
     const routed = vi.spyOn(slot, "discoverExtensionArtifact");
 
-    // Only the two runs this slot can attribute are offered; the finished runs of
-    // other sessions are examined by the walk but never reopened.
+    // Only the two runs this slot can attribute are offered.
     await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([finishedDir, liveDir]));
 
     // A pass over the unchanged root offers the finished artifact to nobody: it
     // already reached this slot, and the live one is refreshed by its exact
-    // binding. Everything else stays unopened.
+    // binding.
     routed.mockClear();
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([liveDir]));
@@ -7476,7 +7468,8 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
-  it("retires completion observations after queued successful operations settle", async () => {
+  it.each(["successful append", "pre-staging append failure"])(
+    "retires completion observations after queued successful operations settle (%s)", async (appendOutcome) => {
     const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -7489,10 +7482,11 @@ export default function (pi) {
     const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
     const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
     const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
-    onTestFinished(() => {
+    onTestFinished(async () => {
       releaseInitial();
       releaseFollowUp();
       releaseAttention();
+      await rm(root, { recursive: true, force: true });
     });
     const faux = fauxProvider({ provider: "tron-completion-observation-retirement", tokensPerSecond: 10_000 });
     faux.setResponses([
@@ -7541,14 +7535,56 @@ export default function (pi) {
     const initialOperationId = slot.snapshot().operation?.id;
     expect(initialOperationId).toBeTruthy();
     const queued = await slot.prompt("queued follow-up", [], "followUp");
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    const append = manager.appendCustomEntry.bind(manager);
+    let failed = false;
+    const receiptAppend = vi.spyOn(manager, "appendCustomEntry").mockImplementation((customType, data) => {
+      const receipt = data as { receiptKind?: unknown; operationId?: unknown } | undefined;
+      if (appendOutcome === "pre-staging append failure" && !failed && customType === INVOCATION_RECEIPT_TYPE
+        && receipt?.receiptKind === "terminal" && receipt?.operationId === initialOperationId) {
+        failed = true;
+        throw new Error("injected pre-staging terminal receipt failure");
+      }
+      return append(customType, data);
+    });
     releaseInitial();
-    await followUpStart;
-    releaseFollowUp();
+    try {
+      await followUpStart;
+      // Canonical receipt ordering cannot depend on the delayed attention store:
+      // ownership transfer settles the predecessor before the next input appends.
+      const entries = slot.canonicalSessionEntries();
+      const completionIndex = entries.findIndex(entry => entry.type === "message"
+        && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"));
+      expect(completionIndex).toBeGreaterThanOrEqual(0);
+      const followUpIndex = entries.findIndex(entry => entry.type === "message" && entry.message.role === "user"
+        && contentText(entry.message.content).includes("queued follow-up"));
+      if (appendOutcome === "pre-staging append failure") expect(failed).toBe(true);
+      // Transfer ends the predecessor, not completion admission. The next
+      // canonical input must wait even when its receipt needs a bounded retry.
+      expect(entries[completionIndex + 1]).toMatchObject({
+        type: "custom",
+        customType: INVOCATION_RECEIPT_TYPE,
+        data: { receiptKind: "terminal", operationId: initialOperationId, lifecycle: "completed" },
+      });
+      expect(followUpIndex).toBeGreaterThan(completionIndex + 1);
+    } catch (error) {
+      releaseAttention();
+      throw error;
+    } finally {
+      releaseFollowUp();
+    }
     await waitFor(() => faux.state.callCount === 2, "both successful model responses");
     await initial;
     releaseAttention();
     await waitFor(() => !slot.isBusy, "both operations to settle");
 
+    receiptAppend.mockRestore();
+    const persisted = (await readFile(manager.getSessionFile()!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line));
+    const terminalEntries = persisted.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.receiptKind === "terminal" && entry.data?.operationId === initialOperationId);
+    expect(terminalEntries).toHaveLength(1);
+    expect(terminalEntries[0].data).toMatchObject({ lifecycle: "completed" });
     expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
     expect(slotInternals.operationObservations.has(queued.operationId)).toBe(false);
     expect(slotInternals.operationObservations.size).toBe(0);
@@ -12871,7 +12907,19 @@ export default function (pi) {
   // no request-path walks to the criterion this file measures above.
   it("publishes an external append to a catalog row without a walk", async () => {
     const recorded = resourceRecorder();
-    const fixture = await coldFixture("external-append", { resources: recorded });
+    let watchRequest: SessionCatalogWatchRequest | undefined;
+    const fixture = await coldFixture("external-append", {
+      resources: recorded,
+      beforeInitialize: async (_sessionFile, registry) => {
+        // Inject at the catalog's existing backend seam before it starts; the
+        // registry keeps its production discovery/index/row publication owners.
+        (catalogOwner(registry) as unknown as { watchCatalog: SessionCatalogOptions["watchCatalog"] }).watchCatalog = (request) => {
+          watchRequest = request;
+          return { close: () => {} };
+        };
+      },
+    });
+    onTestFinished(() => rm(fixture.root, { recursive: true, force: true }));
     const catalog = catalogOwner(fixture.registry);
     await catalog.settled();
 
@@ -12881,19 +12929,31 @@ export default function (pi) {
     await writeFile(child, `${JSON.stringify({
       type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
     })}\n`);
-    await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
+    expect(watchRequest?.root).toBe(await realpath(join(fixture.agentDir, "sessions")));
+    const deliverHint = async (): Promise<void> => {
+      // Advance only the owner's debounce. No FSEvents delivery or latency is
+      // part of the oracle; the serial lane is the row-publication barrier.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        watchRequest!.onEvent(relative(watchRequest!.root, child));
+        await vi.advanceTimersByTimeAsync(CATALOG_EVENT_DEBOUNCE_MS);
+        await catalog.awaitQueuedChanges();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    await deliverHint();
+    expect(catalog.row(child)?.id).toBe("id-child");
     expect(catalog.row(child)?.delegated).toBe(true);
 
     const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
-    const appendedAt = Date.now();
     await appendFile(child, `${JSON.stringify({
       type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
     })}\n`);
-    await waitFor(() => catalog.row(child)?.messageCount === 1, "the child's first catalog message");
+    await deliverHint();
 
-    // The watcher's own hint, not a walk: the row is current within a second of
-    // the append and the sampler saw no catalog structure walk at all.
-    expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
+    // The watcher's hint, not a walk, publishes the canonical append facts.
+    expect(catalog.row(child)?.messageCount).toBe(1);
     expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
     expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
   });

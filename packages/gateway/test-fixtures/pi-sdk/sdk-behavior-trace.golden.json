@@ -1794,6 +1794,30 @@
       "type": "message"
     },
     {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "completed",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
       "id": "<id>",
       "message": {
         "content": [
@@ -1863,30 +1887,6 @@
       "parentId": "<id>",
       "timestamp": "<timestamp>",
       "type": "message"
-    },
-    {
-      "customType": "tron.chat-invocation.v1",
-      "data": {
-        "createdAt": "<timestamp>",
-        "invocationId": "<id>",
-        "lifecycle": "completed",
-        "operationId": "<id>",
-        "origin": {
-          "confidence": "boundary",
-          "kind": "user"
-        },
-        "receiptId": "<id>",
-        "receiptKind": "terminal",
-        "sequence": "<n>",
-        "sessionId": "<id>",
-        "source": "plain",
-        "version": 1,
-        "writer": "gateway"
-      },
-      "id": "<id>",
-      "parentId": "<id>",
-      "timestamp": "<timestamp>",
-      "type": "custom"
     },
     {
       "customType": "tron.chat-invocation.v1",

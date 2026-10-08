@@ -84,19 +84,29 @@ assert_owned_ancestors() {
     done
 }
 safe_remove_tree() {
-    local path="$1" entry
-    [[ -e "$path" || -L "$path" ]] || return 0
-    if [[ -L "$path" ]]; then
-        unlink "$path"
-        return 0
-    fi
-    if [[ -d "$path" ]]; then
-        chmod u+w "$path"
-        while IFS= read -r -d '' entry; do safe_remove_tree "$entry"; done < <(find "$path" -mindepth 1 -maxdepth 1 -print0)
-        rmdir "$path"
-    else
-        unlink "$path"
-    fi
+    # Finish and close each directory enumeration before descending. Recursive
+    # shell process substitutions retain ancestor pipes and hide producer
+    # failures; cleanup must not depend on those stream lifetimes.
+    python3 - "$1" <<'PY'
+import os, stat, sys
+
+def remove(path):
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(mode):
+        os.chmod(path, mode | stat.S_IWUSR)
+        with os.scandir(path) as entries:
+            children = [entry.path for entry in entries]
+        for child in children:
+            remove(child)
+        os.rmdir(path)
+    else:
+        os.unlink(path)
+
+remove(sys.argv[1])
+PY
 }
 assert_owned_ancestors "$RESOURCES_DIR"
 assert_owned_ancestors "$PAYLOAD_DIR"
@@ -122,6 +132,7 @@ required=(
     "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py"
     "$REPO_ROOT/scripts/gateway_protocol_contract.py"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
+    "$REPO_ROOT/scripts/gateway-install-inputs.mjs"
     "$GATEWAY_DIR/scripts/check-pi-sdk.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$SCRIPT_DIR/verify-gateway-payload.sh"
@@ -143,8 +154,14 @@ fi
 python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" >/dev/null
 
 if ((verify_only)); then
+    # Validate the immutable artifact before using its Node runtime. Verification
+    # is read-only and must not depend on an unrelated source Node/npm install.
     "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
     python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-payload "$PAYLOAD_DIR" >/dev/null
+    cmp -s "$GATEWAY_DIR/package.json" "$APP_DIR/package.json" && cmp -s "$GATEWAY_DIR/package-lock.json" "$APP_DIR/package-lock.json" || {
+        echo "staged Gateway package manifest/lockfile do not match source; rebuild the Gateway payload" >&2
+        exit 78
+    }
     cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig" || {
         echo "staged Gateway PushService.xcconfig does not match canonical product configuration" >&2
         exit 3
@@ -153,6 +170,14 @@ if ((verify_only)); then
         echo "staged Gateway deployment helper does not match canonical source" >&2
         exit 3
     }
+    case "$(uname -m)" in
+        arm64|aarch64) verify_runtime_arch=arm64 ;;
+        x86_64) verify_runtime_arch=x64 ;;
+        *) echo "unsupported host architecture for Gateway payload verification: $(uname -m)" >&2; exit 2 ;;
+    esac
+    verify_node="$PAYLOAD_DIR/runtime/bin-$verify_runtime_arch/node"
+    source_revision="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+    "$verify_node" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" verify-receipt "$REPO_ROOT" "$APP_DIR" "$source_revision"
     exit 0
 fi
 
@@ -186,8 +211,8 @@ acquire_bundle_lock() {
         safe_remove_tree "$BUNDLE_LOCK"
         mkdir "$BUNDLE_LOCK" || { echo "cannot acquire Gateway bundle build lock" >&2; exit 75; }
     fi
-    printf '%s\n' "$$" > "$BUNDLE_LOCK/pid"
     BUNDLE_LOCK_OWNED=1
+    printf '%s\n' "$$" > "$BUNDLE_LOCK/pid"
 }
 release_bundle_lock() {
     if ((BUNDLE_LOCK_OWNED)); then
@@ -201,9 +226,9 @@ cleanup_bundle_lock() {
     release_bundle_lock
     exit "$status"
 }
-acquire_bundle_lock
 trap cleanup_bundle_lock EXIT
 trap 'exit 130' INT TERM HUP
+acquire_bundle_lock
 
 # Xcode and LaunchAgents may provide a sanitized PATH. Resolve the exact
 # canonical Node once, before any install/build work, and derive npm from that
@@ -259,13 +284,21 @@ export PYTHONDONTWRITEBYTECODE=1
 
 if ((!skip_install)); then
     echo "==> installing locked gateway dependencies"
-    (cd "$GATEWAY_DIR" && "$NPM_BIN" ci --ignore-scripts=false && "$NPM_BIN" run build)
+    (cd "$GATEWAY_DIR" && "$NPM_BIN" ci --ignore-scripts=false)
 else
-    [[ -d "$GATEWAY_DIR/node_modules" && -f "$GATEWAY_DIR/dist/index.js" ]] || {
-        echo "--skip-install requires packages/gateway/node_modules and dist/index.js" >&2
+    [[ -d "$GATEWAY_DIR/node_modules" ]] || {
+        echo "--skip-install requires packages/gateway/node_modules" >&2
         exit 2
     }
 fi
+"$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" check "$GATEWAY_DIR" full
+CURRENT_INPUT_FINGERPRINT="$("$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" fingerprint "$REPO_ROOT")"
+INPUT_FINGERPRINT="${TRON_GATEWAY_INPUT_FINGERPRINT:-$CURRENT_INPUT_FINGERPRINT}"
+[[ "$INPUT_FINGERPRINT" =~ ^[a-f0-9]{64}$ && "$INPUT_FINGERPRINT" == "$CURRENT_INPUT_FINGERPRINT" ]] || {
+    echo "Gateway source inputs changed before compilation; retry from the current checkout" >&2
+    exit 78
+}
+(cd "$GATEWAY_DIR" && "$NPM_BIN" run build)
 
 # This is a deterministic, offline check of the already-installed source tree;
 # it intentionally does not perform another install or registry lookup.
@@ -463,7 +496,7 @@ stage_node() {
     fi
     local archive="node-v${NODE_VERSION}-darwin-${arch}.tar.gz"
     local temp source_root
-    temp="$(mktemp -d)"
+    temp="$(mktemp -d "$STAGING_ROOT/node-download.XXXXXX")"
     curl -fsSL --retry 3 "https://nodejs.org/dist/v${NODE_VERSION}/${archive}" -o "$temp/$archive"
     tar -xzf "$temp/$archive" -C "$temp"
     source_root="$temp/node-v${NODE_VERSION}-darwin-${arch}"
@@ -483,14 +516,11 @@ stage_node() {
 
 # The staging root is fresh, so nothing here replaces earlier output.
 mkdir -p "$APP_DIR/scripts" "$RUNTIME_DIR" "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
-cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
-cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
-cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
-cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
-cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
+bash "$SCRIPT_DIR/stage-gateway-app.sh" "$GATEWAY_DIR" "$APP_DIR"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
+"$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" check "$APP_DIR" production
 # node-pty loads only prebuilds/${process.platform}-${process.arch}, so the
 # Windows prebuilds npm ci installs can never load from this signed payload.
 for windows_prebuild in win32-arm64 win32-x64; do
@@ -518,7 +548,7 @@ for arch in arm64 x64; do
     ln -s "../../app/node_modules/.bin/pi" "$alias_dir/pi"
 done
 
-launcher_temp="$(mktemp -d)/tron"
+launcher_temp="$(mktemp -d "$STAGING_ROOT/launcher.XXXXXX")/tron"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
     -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
     "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$launcher_temp"
@@ -574,6 +604,7 @@ SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
     exit 3
 }
 RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+"$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" write-receipt "$REPO_ROOT" "$APP_DIR" "$SOURCE_REVISION" "$INPUT_FINGERPRINT"
 # Hash the complete staged dependency tree, not merely the compiled entrypoint.
 # The helper is standalone so release validation can exercise the same coverage.
 # The signed launcher hashes the complete tree in-process; the shell helper
