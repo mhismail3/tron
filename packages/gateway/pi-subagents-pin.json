@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "pi-subagents",
+  "version": "0.76.1-tron.3",
+  "forkCommit": "bc56dd08de1f7e3d6d6da7f076fef6d38133d764",
+  "nodeVersion": "22.22.0",
+  "npmVersion": "10.9.4",
+  "sourceArchive": {
+    "path": "artifacts/pi-subagents-0.76.1-tron.3.tgz",
+    "sha256": "c77930d7a47525025e99e302bd21a66eb11516559d347039d1dcc35d48bc86f9"
+  },
+  "lockfile": {
+    "path": "artifacts/pi-subagents-0.76.1-tron.3-package-lock.json",
+    "sha256": "25676f003153a1a5d4bd4f150ea53fd37f5233a6397c0820f11c32add4940454"
+  },
+  "closure": {
+    "path": "artifacts/pi-subagents-0.76.1-tron.3-closure.tgz",
+    "sha512": "0d67d180f9b1cd4accf54156926181ee495225e7b232e8933b2ec9bee83d20dcbdb51437187b3d0efc8df3c445ff01a7b531ecc47a3ae95b38734d1deae9ff24"
+  },
+  "previous": null
+}

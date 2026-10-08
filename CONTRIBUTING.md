@@ -58,7 +58,8 @@ agent execution, session state, inbox, badge, or reminder policy.
    restores only its owned manifests plus
    the disposable installed tree with `npm ci` if anything fails. No deployment or
    Gateway lifecycle command is part of dependency maintenance.
-9. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
+9. `pi-subagents` is a separate Tron-owned provider build, not a user-managed npm dependency. Its exact fork commit, source archive, lockfile, and deterministic bundled closure are bound by `packages/gateway/pi-subagents-pin.json`; run `npm run check:pi-subagents` before changing the pin. Do not install it through the general user package updater or modify a user's package manifest. Preserve prior provider pins and install roots for rollback; conflicting user-installed providers are refused rather than replaced or run alongside Tron.
+10. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
    compaction/retries, extension UI, projections, settings/auth/models,
    packaging, or user-visible UI/UX changes must be compared with the approved
    baseline and explicitly decided; never accept a changed behavior merely

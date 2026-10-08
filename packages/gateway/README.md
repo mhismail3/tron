@@ -274,6 +274,23 @@ delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 
+### Tron-owned `pi-subagents` build
+
+The delegated provider is distributed separately from the Gateway's Pi SDK. Its
+single source of version authority is `pi-subagents-pin.json`: the fork commit,
+source archive SHA-256, fork lockfile SHA-256, Node/npm build versions, and
+SHA-512 of the self-contained closure are bound together. `npm run
+check:pi-subagents` validates both immutable inputs, their package identity, and
+every bundled runtime dependency without registry access. The source tarball and
+fork lockfile are retained under `artifacts/`; build the deterministic closure
+with `npm run build:pi-subagents-closure` using the pinned Node 22/npm toolchain.
+The closure excludes Pi SDK peer dependencies so those resolve from the selected
+Gateway SDK, not from a user npm tree. Gateway payloads carry the pin, input
+archives, and closure as fingerprinted app inputs; bundling refuses an invalid
+pin. This does not install the package into Stable or mutate a user's package
+manifest. The provider install/activation lifecycle is managed by Tron and is
+not an ordinary user package update.
+
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
 layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote
 through the real Gateway, plus the Tron-level observation of that corpus reopened
