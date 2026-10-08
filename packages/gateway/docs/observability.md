@@ -73,6 +73,19 @@ Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-
 reproduce the verification signal with `TRON_HOME_NAME=.tron-dev scripts/tron work verify`.
 The selector is resolved relative to the user's home, as in `resolveTronHome()`.
 
+The connector credential adapter also fails closed at construction in Vitest or
+`NODE_ENV=test` without an injected private keychain path. Its focused regression
+is `src/knowledge/connector-credentials.test.ts`; run it with
+`npx vitest run src/knowledge/connector-credentials.test.ts`. These are thrown
+admission errors, not persisted Gateway events; no secret or keychain path is
+included in the error.
+
+| Signal | Owner / destination | Meaning |
+| --- | --- | --- |
+| `Connector credential tests require an explicit keychain path` | `MacKeychainConnectorCredentialStore` constructor / test-runner failure | A test attempted to use the default keychain; no `security` process starts. This diagnoses unsafe fixture ownership before a Keychain prompt or timeout. |
+| `Connector credential is invalid: expected printable ASCII` (`TypeError`) | Adapter write admission / caller error | A secret contains Unicode or control characters that cannot be read back unambiguously with `security -w`; no child starts. |
+| `Mac Keychain credential command is too long` | Adapter write admission / caller error | The escaped UTF-8 stdin command would reach the CLI's 4096-byte input-buffer limit; rejection prevents truncation or loss of an explicit keychain target. |
+
 ## External provider diagnostics
 
 Installed provider extensions retain their own diagnostic owners; these are not
