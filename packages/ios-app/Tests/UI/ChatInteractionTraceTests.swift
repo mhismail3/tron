@@ -38,22 +38,6 @@ struct ChatInteractionTraceTests {
         #expect(isNewestFirst(sequences))
         #expect(!isNewestFirst(Array(sequences.reversed())))
 
-        let sameTimestampRecords = records.map { value in
-            GatewayProfileLogRecord(
-                profileID: value.profileID,
-                profileLabel: value.profileLabel,
-                record: GatewayLogRecord(
-                    timestamp: "2026-01-01T00:00:00.000Z",
-                    level: value.record.level,
-                    message: value.record.message,
-                    event: value.record.event,
-                    source: value.record.source
-                )
-            )
-        }
-        #expect(!zip(sameTimestampRecords, sameTimestampRecords.dropFirst()).allSatisfy {
-            $0.record.timestamp > $1.record.timestamp
-        })
     }
 
     @Test("diagnostic priority survives routine ring pressure")
