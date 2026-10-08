@@ -75,9 +75,29 @@ materializing a chapter, or dispatching the input again. Pending or uncertain
 receipts remain outcome-unknown fences; a reconnect never resends accepted input.
 The receipt owner emits `home.route-bound` with `category=fresh|replay` at its
 durable-target/replay decision. `home.open` emits `category=open` and is not an
-activation or receipt. Terminal chat uses these
-logical RPCs when Home is enabled and subscribes to the physical runtime only
-after a chapter is active. Ordinary session routes are unchanged.
+activation or receipt. Registry shares only reserved-chapter construction, never
+command input or receipts. Every distinct joined command has its own durable
+target and slot admission: accepted input is submitted once; a busy contender is
+explicitly refused before SDK submission. A duplicate command joins/replays its
+receipt lane, not another input. The joined user/terminal cases in
+`home-activation.e2e.test.ts` hold claim, scan, recorded-path and first-flush
+boundaries and retain their outcomes in `test-results/home-activation/report.json`.
+Their soft-rollover setup injects metrics; these cases prove submission/receipt
+ownership, not chapter-size thresholds.
+
+`home-receipt-crash.e2e.test.ts` retains
+`test-results/home-receipt-crash/report.json`. Its child fixture,
+`test-support/home-receipt-crash-child.ts`, uses the real receipt atomic writer and
+pinned SDK canonical flush, reusing `home-ledger-crash-preload.mjs` and the ledger
+harness's parent-owned pipe lifetime. SIGKILL cuts after durable binding, during
+SDK effects before completion, and after durable completion before response
+prove pending fences and exact completed replay without rerouting or effects.
+These are receipt/SDK persistence-boundary tests, not a live-provider Gateway
+process or power-loss test. Regenerate with the named Vitest file.
+
+Terminal chat uses these logical RPCs when Home is enabled and subscribes to the
+physical runtime only after a chapter is active. Ordinary session routes are
+unchanged.
 
 Home transition signals are typed in `home/home-diagnostic.ts` and go through
 one privacy-preserving logger boundary. Recovery uses `absent|adopt` (not

@@ -12,17 +12,32 @@
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
+import { dirname, join } from "node:path";
+import { ModelRuntime, AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { waitFor } from "../../test-support/wait-for.js";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+
+const materializationScan = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
+vi.mock("../home/home-session-recovery.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../home/home-session-recovery.js")>();
+  return {
+    ...actual,
+    scanReservedHomeSession: async (...args: Parameters<typeof actual.scanReservedHomeSession>) => {
+      const result = await actual.scanReservedHomeSession(...args);
+      const hold = materializationScan.hold;
+      materializationScan.hold = undefined;
+      await hold?.();
+      return result;
+    },
+  };
+});
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
@@ -36,6 +51,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeSlot } from "../sessions/runtime-slot.js";
 import { invocationReceipts } from "../sessions/invocation-receipts.js";
 import { logHomeDiagnostic } from "../home/home-diagnostic.js";
 import { GatewayLogger } from "../transport/logger.js";
@@ -152,6 +168,8 @@ const registries: RuntimeRegistry[] = [];
 const disposals: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  materializationScan.hold = undefined;
+  vi.restoreAllMocks();
   for (const dispose of disposals.splice(0).reverse()) await dispose();
 });
 
@@ -334,6 +352,151 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
 }
 
 describe("Tron Home activations end to end", () => {
+  it.each(["claim", "scan", "path", "pre-flush"] as const)(
+    "keeps distinct joined Home commands and duplicate receipts exact at %s",
+    async cut => {
+      const f = await fixture(`joined-${cut}`);
+      disposals.push(async () => {
+        f.service.dispose();
+        await f.receipts.dispose();
+        await f.registry.dispose();
+        await rm(f.root, { recursive: true, force: true });
+      });
+      const oldSlot = await designateHome(f, `joined-${cut}-designate`);
+      f.faux.setResponses([fauxAssistantMessage("initial chapter reply")]);
+      await oldSlot.prompt("canonical initial chapter input");
+      await waitUntil(() => !oldSlot.isBusy);
+      const initialProviderCalls = f.faux.state.callCount;
+      expect(initialProviderCalls).toBe(1);
+      const owner = f.registry.homeOwner();
+      const port = (owner as unknown as {
+        options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      }).options.sessions;
+      const measurement = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      await owner.chapterQuiescent(oldSlot.id);
+      measurement.mockRestore();
+      const binding = owner.routeBinding();
+      expect(owner.reservedChapter(binding.physicalSessionId)?.state).toBe("reserved");
+      let reached!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>(resolve => { reached = resolve; });
+      const held = new Promise<void>(resolve => { release = resolve; });
+      const hold = async () => { reached(); await held; };
+      const claimReservedChapter = owner.claimReservedChapter.bind(owner);
+      const claims = vi.spyOn(owner, "claimReservedChapter");
+      if (cut === "scan") materializationScan.hold = hold;
+      else if (cut === "claim") {
+        const original = claimReservedChapter;
+        vi.spyOn(owner, "claimReservedChapter").mockImplementationOnce(async (...args) => {
+          const result = await original(...args); await hold(); return result;
+        });
+      } else if (cut === "path") {
+        const original = owner.recordReservedChapterPath.bind(owner);
+        vi.spyOn(owner, "recordReservedChapterPath").mockImplementationOnce(async (...args) => {
+          await original(...args); await hold();
+        });
+      } else {
+        const prototype = RuntimeSlot.prototype as unknown as {
+          persistInvocationReceipt: (...args: unknown[]) => Promise<void>;
+        };
+        const original = prototype.persistInvocationReceipt;
+        vi.spyOn(prototype, "persistInvocationReceipt").mockImplementationOnce(async function (this: RuntimeSlot, ...args) {
+          await hold(); await original.apply(this, args);
+        });
+      }
+      const constructions = vi.spyOn(RuntimeSlot, "create");
+      let releaseTerminal!: () => void;
+      const terminalGate = new Promise<void>(resolve => { releaseTerminal = resolve; });
+      const originalMaterialize = f.registry.materializeReservedHome.bind(f.registry);
+      let contenders = 0;
+      const materializations = vi.spyOn(f.registry, "materializeReservedHome").mockImplementation(async id => {
+        const joinedTerminal = ++contenders === 2;
+        const slot = await originalMaterialize(id);
+        // One ordering lets both joined inputs be admitted: construction is still
+        // shared, while terminal input waits for the first operation to settle.
+        if (cut === "path" && joinedTerminal) await terminalGate;
+        return slot;
+      });
+      const submissions = vi.spyOn(AgentSession.prototype, "prompt");
+      let releaseProvider!: () => void;
+      const providerGate = new Promise<void>(resolve => { releaseProvider = resolve; });
+      f.faux.setResponses([async () => { await providerGate; return fauxAssistantMessage("joined reply"); }]);
+      const commands = [
+        { commandId: `joined-${cut}-user-command`, text: `distinct user input ${cut}` },
+        { commandId: `joined-${cut}-terminal-command`, text: `distinct terminal input ${cut}` },
+      ];
+      const terminal = { ...client, id: "second-terminal", identity: "device:joined-terminal" } as ClientContext;
+      const invoke = (index: number) => f.service.invoke(index ? terminal : client, "home.prompt", commands[index]!);
+      const first = invoke(0);
+      void first.catch(() => {});
+      let second: ReturnType<typeof invoke> | undefined;
+      let duplicate: ReturnType<typeof invoke> | undefined;
+      try {
+        await waitUntil(() => materializations.mock.calls.length === 1);
+        await awaitsWithin(started, `${cut} construction barrier`);
+        second = invoke(1);
+        duplicate = invoke(0);
+        void second.catch(() => {}); void duplicate.catch(() => {});
+        await waitUntil(() => materializations.mock.calls.length === 2);
+        release();
+        if (cut === "path") {
+          await first;
+          releaseProvider();
+          const sharedSlot = await f.registry.acquire(binding.physicalSessionId);
+          await waitUntil(() => !sharedSlot.isBusy);
+          releaseTerminal();
+        }
+        const outcomes = await Promise.allSettled([first, second]);
+        const accepted = outcomes.flatMap((outcome, index) => outcome.status === "fulfilled" ? [index] : []);
+        expect(claims).toHaveBeenCalledTimes(1);
+        expect(constructions).toHaveBeenCalledTimes(1);
+        expect(accepted).toEqual(cut === "path" ? [0, 1] : [0]);
+        const slot = await f.registry.acquire(binding.physicalSessionId);
+        expect(slot.id).toBe(binding.physicalSessionId);
+        for (const [index, outcome] of outcomes.entries()) {
+          const sdkInputs = submissions.mock.calls.filter(([text]) => text === commands[index]!.text);
+          expect(sdkInputs).toHaveLength(outcome.status === "fulfilled" ? 1 : 0);
+          if (outcome.status === "fulfilled") expect(outcome.value).toMatchObject({ sessionId: binding.physicalSessionId });
+          else expect(outcome.reason).toMatchObject({ code: "busy" });
+        }
+        await expect(duplicate).resolves.toEqual((outcomes[0] as PromiseFulfilledResult<unknown>).value);
+        releaseProvider();
+        await waitUntil(() => !slot.isBusy);
+        const bytes = await sessionJsonl(slot);
+        for (const [index, outcome] of outcomes.entries()) {
+          const messages = (await canonicalMessages(slot)).filter(message => message.role === "user" && JSON.stringify(message.content).includes(commands[index]!.text));
+          expect(messages).toHaveLength(outcome.status === "fulfilled" ? 1 : 0);
+        }
+        const files = (await readdir(dirname(slot.sessionFile!))).filter(name => name.endsWith(".jsonl"));
+        const matching = await Promise.all(files.map(async name => {
+          const header = JSON.parse((await readFile(join(dirname(slot.sessionFile!), name), "utf8")).split("\n")[0]!);
+          return header.id === slot.id;
+        }));
+        expect(matching.filter(Boolean)).toHaveLength(1);
+        for (const index of accepted) {
+          await expect(invoke(index)).resolves.toEqual((outcomes[index] as PromiseFulfilledResult<unknown>).value);
+          await expect(f.receipts.status(index ? terminal.identity : client.identity, "home.prompt", commands[index]!.commandId))
+            .resolves.toMatchObject({ status: "completed", result: (outcomes[index] as PromiseFulfilledResult<unknown>).value });
+        }
+        const receiptDirectory = join(f.tronHome, "receipts", "gateway", "command-receipts");
+        const receipts = await Promise.all((await readdir(receiptDirectory)).filter(name => name.endsWith(".json"))
+          .map(async name => JSON.parse(await readFile(join(receiptDirectory, name), "utf8"))));
+        for (const [index, command] of commands.entries()) {
+          const exact = receipts.filter(receipt => receipt.method === "home.prompt" && receipt.commandId === command.commandId);
+          expect(exact).toHaveLength(accepted.includes(index) ? 1 : 0);
+          if (exact[0]) expect(exact[0].binding).toEqual(binding);
+        }
+        expect(await sessionJsonl(slot)).toBe(bytes);
+        expect(f.faux.state.callCount - initialProviderCalls).toBe(accepted.length);
+        report.cases.push({ case: "joined-home-submission", barrier: cut, accepted: accepted.length,
+          refused: outcomes.length - accepted.length, materializers: constructions.mock.calls.length,
+          canonicalFiles: 1, replayed: false, thresholdSetup: "injected soft rollover only" });
+      } finally {
+        release(); releaseProvider(); releaseTerminal();
+        await Promise.allSettled([first, ...(second ? [second] : []), ...(duplicate ? [duplicate] : [])]);
+      }
+    },
+  );
   it("replays the exact completed Home target after rollover and disable without resolving or dispatching again", async () => {
     const f = await fixture("receipt-exact-replay");
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
