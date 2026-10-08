@@ -90,7 +90,7 @@ describe("extension owner attribution", () => {
     expect(seen.every((owner) => owner?.source === "npm:pi-subagents")).toBe(true);
     expect(attributedToolOwner(tool)).toEqual(seen[0]);
     expect(attributedCommandOwner(command)).toEqual(seen[0]);
-    expect(trustedExtensionOriginKind(seen[0]!)).toBe("subagent");
+    expect(trustedExtensionOriginKind(seen[0]!)).toBe("extension");
     expect(currentExtensionOwner()).toBeUndefined();
   });
 

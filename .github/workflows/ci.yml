@@ -210,6 +210,10 @@ jobs:
         working-directory: packages/gateway
       - run: npm run check:pi-sdk
         working-directory: packages/gateway
+      - run: npm run check:pi-subagents
+        working-directory: packages/gateway
+      - run: npm run test:pi-subagents-scripts
+        working-directory: packages/gateway
       - run: npm run build
         working-directory: packages/gateway
       - name: Test macOS development lifecycle state tooling

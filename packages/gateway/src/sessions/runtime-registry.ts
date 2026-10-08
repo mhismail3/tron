@@ -1,3 +1,4 @@
+import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -14,6 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
+import { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
@@ -529,6 +531,7 @@ class RequestSpanLane extends AsyncMutex {
 
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
+  private readonly openAIModelEligibility: OpenAIModelEligibility;
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first user or assistant message. Weak ownership cannot outlive
    * the RuntimeSlot and is never a second session catalog. */
@@ -673,10 +676,12 @@ export class RuntimeRegistry {
       tronHome: string;
       /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
+      managedSubagents?: ManagedSubagents;
       mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
+      openAIModelEligibility?: OpenAIModelEligibility;
       trust: TrustService;
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -702,6 +707,7 @@ export class RuntimeRegistry {
        * reserved or already-running automation target. */
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
+      manualCompactionAdopted?: RuntimeSlotDependencies["manualCompactionAdopted"];
       codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       /** Handled catalog-index write failures. The index write is fire-and-forget
@@ -737,6 +743,7 @@ export class RuntimeRegistry {
       connections?: ConnectionOwner;
     },
   ) {
+    this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.workspace = new TronWorkspace(options.tronHome);
@@ -795,6 +802,9 @@ export class RuntimeRegistry {
   }
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
+
+  /** Drain admission is owned here; readers derive it from the canonical phase rather than mirroring a stop flag. */
+  get isAdministrativeDrainStarted(): boolean { return this.drainPhase !== "idle"; }
 
   /** Shared model recency for the model picker; newest first and bounded. */
   recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }
@@ -1559,15 +1569,20 @@ export class RuntimeRegistry {
   private dependencies() {
     return {
       agentDir: this.options.agentDir,
+      ...(this.options.managedSubagents ? { managedSubagents: this.options.managedSubagents } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
-        authPath: join(this.options.agentDir, "auth.json"),
-        modelsPath: join(this.options.agentDir, "models.json"),
-        modelsStorePath: join(this.options.agentDir, "models-store.json"),
-        refreshOnCreate: true,
-        allowModelNetwork: false,
-      })))())),
+      openAIModelEligibility: this.openAIModelEligibility,
+      createModelRuntime: async () => {
+        const runtime = applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
+          authPath: join(this.options.agentDir, "auth.json"),
+          modelsPath: join(this.options.agentDir, "models.json"),
+          modelsStorePath: join(this.options.agentDir, "models-store.json"),
+          refreshOnCreate: true,
+          allowModelNetwork: false,
+        })))()));
+        return runtime;
+      },
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,
@@ -1581,6 +1596,7 @@ export class RuntimeRegistry {
       noteModelUsed: (sessionId: string, model: { provider: string; id: string }) => { void this.noteModelUsed(sessionId, model); },
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
+      ...(this.options.manualCompactionAdopted ? { manualCompactionAdopted: this.options.manualCompactionAdopted } : {}),
       ...(this.options.codemodeDiagnostic ? { codemodeDiagnostic: this.options.codemodeDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       sessionAudience: (sessionId: string) => this.subscribers.get(sessionId)?.size ?? 0,
@@ -4313,13 +4329,16 @@ export class RuntimeRegistry {
 
   drainBusySessionCount(): number { return this.administrativeDrainSnapshot().blockerCount; }
 
-  async waitUntilIdle(): Promise<void> {
+  async waitUntilIdle(continueDrain?: (snapshot: AdministrativeDrainSnapshot) => boolean): Promise<boolean> {
     // Freeze slot/admin admissions synchronously, then wait for every operation
     // admitted before the cutoff. Graceful restart never cancels accepted work.
     this.beginAdministrativeDrain();
     try {
       while (this.slotAdmissionsInFlight > 0) {
-        this.administrativeDrainSnapshot();
+        if (continueDrain && !continueDrain(this.administrativeDrainSnapshot())) {
+          this.failAdministrativeDrain();
+          return false;
+        }
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       const slots = await this.mutex.run(() => [...this.slots.values()]);
@@ -4343,7 +4362,11 @@ export class RuntimeRegistry {
       let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
       this.setDrainPhase("waiting");
       while (!preparationSettled || this.workRegistry.size > 0 || slots.some((slot) => slot.isDrainBusy)) {
-        this.administrativeDrainSnapshot();
+        const snapshot = this.administrativeDrainSnapshot();
+        if (continueDrain && !continueDrain(snapshot)) {
+          this.failAdministrativeDrain();
+          return false;
+        }
         assertForegroundOwnersHaveSlots();
         const monotonic = performance.now();
         if (preparationSettled && preparationError === undefined
@@ -4358,6 +4381,10 @@ export class RuntimeRegistry {
       }
       if (preparationError !== undefined) throw preparationError;
       const finalWaiting = this.administrativeDrainSnapshot();
+      if (continueDrain && !continueDrain(finalWaiting)) {
+        this.failAdministrativeDrain();
+        return false;
+      }
       if (finalWaiting.blockerCount !== 0) {
         throw new Error("Administrative drain cannot complete while blockers remain");
       }
@@ -4367,11 +4394,18 @@ export class RuntimeRegistry {
       if (completed.blockerCount !== 0) {
         throw new Error("Administrative drain completion invariant was violated");
       }
+      return true;
     } catch (error) {
-      this.setDrainPhase("failed");
-      this.administrativeDrainSnapshot();
+      this.failAdministrativeDrain();
       throw error;
     }
+  }
+
+  /** Records an unproved process-retirement stage without reopening admission. */
+  failAdministrativeDrain(): void {
+    if (this.drainPhase === "idle") this.beginAdministrativeDrain();
+    this.setDrainPhase("failed");
+    this.administrativeDrainSnapshot();
   }
 
   async dispose(): Promise<void> {

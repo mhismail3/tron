@@ -71,6 +71,7 @@ enum MacAppStartupMaintenance {
         controller: MenuBarController?,
         context: MacAppStartupContext
     ) async -> MacAppStartupMaintenanceResult {
+        await setup.restoreApprovedNativeHost()
         truncateGatewayStderr(at: setup.tronHome)
         let currentVersion = setup.currentAppVersion()
         let startupMode = setup.resolvedStartupMode(
@@ -133,11 +134,24 @@ enum MacAppStartupMaintenance {
             ))
         }
 
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
+        let outcome: LaunchAgentOutcome
+        switch setup.launchAgentServiceStatus() {
+        case .enabled:
+            outcome = await LaunchAgentLoader.ensureLoaded(
+                manager: setup.launchAgentManager,
+                plistPath: setup.launchAgentPlistPath,
+                label: setup.launchAgentLabel
+            )
+        case .requiresApproval:
+            setup.openLoginItemsSettings()
+            outcome = .requiresApproval(message: "Approve Tron Agent in System Settings → General → Login Items.")
+        case .notRegistered:
+            outcome = .launchdRefused(message: "Tron Agent is not registered. Use the explicit install flow to approve it.")
+        case .notFound:
+            outcome = .binaryMissing(path: setup.launchAgentPlistPath.path)
+        case .unknown(let message):
+            outcome = .unknown(message: message)
+        }
         let health: ServerPingResult?
         switch outcome {
         case .ok, .alreadyLoaded:

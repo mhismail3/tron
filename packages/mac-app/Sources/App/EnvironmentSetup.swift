@@ -21,6 +21,10 @@ struct EnvironmentSetup: Sendable {
 
     var launchAgentLabel: String
     var serverPort: Int
+    var launchAgentServiceStatus: @Sendable () -> ExistingInstallDetector.ServiceRegistrationStatus = {
+        .unknown("Tron Agent approval could not be inspected")
+    }
+    var openLoginItemsSettings: @Sendable () -> Void = {}
     var canManageLaunchAgent: Bool
     var wrapperLockPath: URL
 
@@ -114,6 +118,16 @@ struct EnvironmentSetup: Sendable {
     var gatewayUpdateCommandStatus: @Sendable (String) async throws -> GatewayRestartClient.CommandStatusResponse = { _ in
         throw GatewayRestartClient.Failure.transport
     }
+    var stopGateway: @Sendable (String) async throws -> GatewayStopClient.Response = { _ in
+        throw GatewayRestartClient.Failure.transport
+    }
+    var readRuntimeForQuit: @Sendable () async throws -> LaunchAgentRuntimeInfo? = {
+        throw LaunchAgentRuntimeReader.ObservationFailure.unavailable
+    }
+    var retireNativeHostForQuit: @Sendable () async throws -> Void = {
+        throw NativeHostError.serviceUnavailable
+    }
+    var restoreApprovedNativeHost: @Sendable () async -> Void = {}
 
     /// Health wait policy after menu-bar start/restart/resume actions.
     /// Tests can lower these to keep stale-helper paths deterministic.
@@ -211,6 +225,8 @@ struct EnvironmentSetup: Sendable {
             serverHelperBinaryPath: TronPaths.serverHelperBinary(profile: profile),
             launchAgentLabel: profile.launchAgentLabel,
             serverPort: profile.port,
+            launchAgentServiceStatus: { ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) },
+            openLoginItemsSettings: { LoginItemsSettingsOpener.open() },
             canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile),
             wrapperLockPath: TronPaths.macWrapperLockPath(profile: profile),
             onboardedSentinelExists: { FileManager.default.fileExists(atPath: marker.path) },
@@ -309,6 +325,22 @@ struct EnvironmentSetup: Sendable {
                     host: host, port: profile.port, token: BearerTokenReader.read(at: bearer), commandID: commandID
                 )
             },
+            stopGateway: { commandID in
+                guard let host = await resolveHost() else { throw GatewayRestartClient.Failure.transport }
+                return try await GatewayStopClient.stop(
+                    host: host, port: profile.port, token: BearerTokenReader.read(at: bearer), commandID: commandID
+                )
+            },
+            readRuntimeForQuit: { try await LaunchAgentRuntimeReader.read(label: profile.launchAgentLabel) },
+            retireNativeHostForQuit: {
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.serviceUnavailable }
+                try await NativeHostCoordinator.shared.retireForQuit()
+            },
+            restoreApprovedNativeHost: {
+                guard TronPaths.canManageLaunchAgent(profile: profile),
+                      NativeHostStartupPolicy.shouldRestore(state: await NativeHostCoordinator.shared.serviceState()) else { return }
+                _ = await NativeHostCoordinator.shared.probe()
+            },
             launchAgentManager: LiveLaunchAgentManager(profile: profile),
             touchOnboardedSentinel: { try OnboardedSentinelWriter.touch(at: marker) },
             currentAppVersion: { MacAppVersionIdentity.current() },
@@ -361,6 +393,7 @@ struct EnvironmentSetup: Sendable {
             serverHelperBinaryPath: TronPaths.serverHelperBinary(profile: .stable),
             launchAgentLabel: profile.launchAgentLabel,
             serverPort: profile.port,
+            launchAgentServiceStatus: { .notRegistered },
             canManageLaunchAgent: false,
             wrapperLockPath: TronPaths.macWrapperLockPath(profile: profile),
             onboardedSentinelExists: { FileManager.default.fileExists(atPath: marker.path) },

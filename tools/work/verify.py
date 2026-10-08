@@ -318,7 +318,19 @@ def branch_base(root: Path, config: dict) -> str:
         raise VerifyError(str(error)) from None
 
 
+def _preflight_tron_home_environment() -> None:
+    policy = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
+    try:
+        result = subprocess.run(["node", str(policy)], capture_output=True, text=True)
+    except OSError as error:
+        raise VerifyError(f"cannot run Tron-home environment preflight: {error}") from error
+    if result.returncode != 0:
+        message = result.stderr.strip() or "inherited environment resolves into a live Tron home"
+        raise VerifyError(message)
+
+
 def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None) -> dict:
+    _preflight_tron_home_environment()
     settings, claim = config["verify"], config["claim"]
     remote = claim["remote"]
     checks = load_checks(settings)
