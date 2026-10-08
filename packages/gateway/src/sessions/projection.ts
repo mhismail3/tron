@@ -2193,7 +2193,7 @@ function withInvocationSemantics(
       origin: boundInvocation.origin,
       invocationId: boundInvocation.invocationId,
       operationId: boundInvocation.operationId,
-      kind: "resourcePrompt",
+      kind: boundInvocation.source === "subagentWake" ? "subagentWake" : "resourcePrompt",
       ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
       ...(boundInvocation.submittedText === undefined ? {} : { submittedText: boundInvocation.submittedText }),
       lifecycle: boundInvocation.lifecycle,

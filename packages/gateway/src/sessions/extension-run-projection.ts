@@ -207,7 +207,7 @@ function validLifecycleProjection(value: unknown): value is ExtensionLifecyclePr
   if (!source || [...Object.keys(source)].some((key) => !["version", "runId", "toolCallId", "sessionId", "generatedAt", "caps", "omitted", "root"].includes(key))) return false;
   if (source.version !== 1 || !boundedProjectionString(source.runId, 256, true, 256)
     || (source.toolCallId !== undefined && !boundedProjectionString(source.toolCallId, 256, true, 256))
-    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 256, true, 256))
+    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 4_096, true, 4_096))
     || !Number.isSafeInteger(source.generatedAt) || (source.generatedAt as number) < 0 || !caps || !omitted || !root
     || !validProjectionNode(root, 0, source.runId as string, true)) return false;
   const capValues = [caps.maxRuns, caps.maxChildrenPerNode, caps.maxDepth, caps.maxStringLength, caps.maxSerializedBytes];

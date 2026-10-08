@@ -17,7 +17,10 @@ export function capturedMessageProducer(content: unknown): ExtensionToolOrigin |
 
 /** Bind the complete managed API, including actions retained by factory-time
  * timers/watchers/ports. Async call-site context is never producer authority. */
-export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner): ExtensionAPI {
+export type ManagedInternalWake = (content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
+  options: Parameters<ExtensionAPI["sendUserMessage"]>[1], owner: ExtensionOwner) => Promise<void> | void;
+
+export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner, internalWake?: ManagedInternalWake): ExtensionAPI {
   return new Proxy(pi, {
     get(target, key, receiver) {
       const value = Reflect.get(target, key, receiver);
@@ -36,7 +39,16 @@ export function managedProducerAPI(pi: ExtensionAPI, owner: ExtensionOwner): Ext
         // to another producer's ambient loop context. It is never serialized.
         Object.defineProperty(content, managedContent, { value: true });
         messageProducers.set(content, { source: owner.source, owner });
-        return withExtensionOwner(owner, () => target.sendMessage({ ...message, content }, options));
+        // Per-child notes are context only. Completion, control and decision
+        // sources own parent action; the provider also suppresses idle wakes
+        // before its ParentWake wrapper reaches this boundary.
+        const delivery = message.customType === "subagent-incremental-child-notify"
+          ? { ...options, triggerTurn: false } : options;
+        return withExtensionOwner(owner, () => target.sendMessage({ ...message, content }, delivery));
+      };
+      if (key === "sendUserMessage") return (content: Parameters<ExtensionAPI["sendUserMessage"]>[0], options: Parameters<ExtensionAPI["sendUserMessage"]>[1]) => {
+        if (!internalWake) throw new Error("Managed internal wake has no RuntimeSlot admission owner");
+        return internalWake(content, options, owner);
       };
       return (...args: unknown[]) => withExtensionOwner(owner, () => Reflect.apply(value, target, args));
     },

@@ -58,6 +58,14 @@ function nonnegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
+/** Canonical captured owners are classified here once for every receipt reader.
+ * Historic package/build provenance is not a UI capability discriminator. */
+export function classifyCapturedExtensionOwner(owner: ExtensionOwner): ExtensionOwner & { kind: "subagent" | "extension" } {
+  const subagent = /^npm:pi-subagents(?:@[^\s/]+)?$/u.test(owner.source)
+    || /^tron:pi-subagents@[^\s/#]+#[a-f0-9]{128}$/u.test(owner.source);
+  return { ...owner, kind: owner.kind ?? (subagent ? "subagent" : "extension") };
+}
+
 function ownerValue(value: unknown): ExtensionOwner | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -67,9 +75,9 @@ function ownerValue(value: unknown): ExtensionOwner | undefined {
   // Extension source is an opaque package identity, never a filesystem path.
   if (!id || !title || !source || /(?:[\\/]|^[A-Za-z]:|^file:)/u.test(source)) return undefined;
   if (candidate.kind !== undefined && candidate.kind !== "subagent" && candidate.kind !== "extension") return undefined;
-  return { id, title, source,
+  return classifyCapturedExtensionOwner({ id, title, source,
     ...(candidate.kind === "subagent" || candidate.kind === "extension" ? { kind: candidate.kind } : {}),
-  };
+  });
 }
 
 function terminalState(value: unknown): ExtensionActivityReceipt["state"] | undefined {

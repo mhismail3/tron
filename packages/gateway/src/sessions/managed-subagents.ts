@@ -8,7 +8,7 @@ import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionF
 import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
-import { managedProducerAPI } from "../extensions/managed-producer.js";
+import { managedProducerAPI, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { loadSubagentCatalog } from "./subagent-catalog.js";
 import { producerIdentity, withExtensionOwner } from "../extensions/owner-attribution.js";
 
@@ -289,7 +289,7 @@ export class ManagedSubagents {
     return { extensions: admitted("extensions"), skills: admitted("skills"), prompts: admitted("prompts"), themes: [] };
   }
 
-  async loaderOptions(settings: SettingsManager): Promise<ManagedLoaderOptions> {
+  async loaderOptions(settings: SettingsManager, internalWake?: ManagedInternalWake): Promise<ManagedLoaderOptions> {
     // Check before executing extension code; admission repeats it for reloads
     // and to refuse a process binding changed while the loader was awaiting I/O.
     this.requireBoundArtifactRoot(this.tronHome);
@@ -314,7 +314,7 @@ export class ManagedSubagents {
           const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents");
           await withExtensionOwner(owner, async () => {
             const factory = await this.loadFactory(path);
-            await factory(managedProducerAPI(pi, owner));
+            await factory(managedProducerAPI(pi, owner, internalWake));
           });
         },
       })),

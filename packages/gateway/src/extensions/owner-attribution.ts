@@ -135,9 +135,9 @@ export function producerIdentity(source: string, path: string, title: string): E
 }
 
 export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | "extension" {
-  // Canonical receipts carry the build identity captured at managed admission,
-  // rather than retaining a global registry of disposed extension owners.
-  return owner.kind ?? (owner.source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension");
+  // Live admission and canonical receipt decoding supply the classification.
+  // Build provenance is not a second consumer-side capability discriminator.
+  return owner.kind ?? "extension";
 }
 
 /**

@@ -1,6 +1,8 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../protocol/types.js";
 
+import { classifyCapturedExtensionOwner } from "./extension-activity-history.js";
+
 export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 const HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.session-input.v1";
 
@@ -33,9 +35,9 @@ function parseOrigin(value: unknown): ExtensionToolOrigin | undefined {
       || (owner.kind !== undefined && owner.kind !== "subagent" && owner.kind !== "extension")) return undefined;
   return {
     source: record.source,
-    owner: { id: owner.id, title: owner.title, source: owner.source,
+    owner: classifyCapturedExtensionOwner({ id: owner.id, title: owner.title, source: owner.source,
       ...(owner.kind === "subagent" || owner.kind === "extension" ? { kind: owner.kind } : {}),
-    },
+    }),
   };
 }
 

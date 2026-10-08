@@ -260,7 +260,7 @@ export type ChatDirection = "inboundContext" | "agentOutput" | "agentInvocation"
 export type ChatContextEffect = "none" | "modelInput" | "hiddenModelInput" | "toolResult";
 export type ChatDelivery = "stored" | "nextTurn" | "steer" | "followUp" | "triggeredTurn" | "continuedTurn" | "beforeAgentStart" | "toolResult" | "unknown";
 export type ChatOriginKind = "user" | "subagent" | "extension" | "process" | "gateway" | "assistant" | "unknown";
-export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "unknown";
+export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "subagentWake" | "unknown";
 
 export interface ChatOrigin {
   kind: ChatOriginKind;
@@ -836,6 +836,8 @@ export interface ResourceInvocation {
 }
 
 export interface QueuedMessageState {
+  /** Internal producer inputs retain their invocation semantics before binding. */
+  semantic?: ChatSemanticMetadata;
   id: string;
   behavior: "steer" | "followUp";
   text: string;
@@ -851,6 +853,8 @@ export interface QueuedMessageState {
 /** A prompt admitted before its canonical user entry exists, usually while
  * Pi performs automatic compaction during prompt preflight. */
 export interface PendingPromptState {
+  /** Internal producer inputs retain their invocation semantics before binding. */
+  semantic?: ChatSemanticMetadata;
   id: string;
   createdAt?: string;
   behavior?: "steer" | "followUp";

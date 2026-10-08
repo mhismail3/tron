@@ -45,6 +45,7 @@ import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
   ChatOrigin,
+  ChatSemanticMetadata,
   CommandDetail,
   CommandInfo,
   ExtensionRunActivity,
@@ -111,7 +112,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { capturedMessageProducer, isManagedProducerContent } from "../extensions/managed-producer.js";
+import { capturedMessageProducer, isManagedProducerContent, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
@@ -401,7 +402,8 @@ interface RuntimeSlotHooks {
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
-interface PromptOwnership {
+interface AutomationPromptOwnership {
+  kind?: never;
   operationId: string;
   /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
   signal?: AbortSignal;
@@ -409,6 +411,16 @@ interface PromptOwnership {
   onAdmitted?: (invocationId: string) => void;
   onTerminal: (terminal: AutomationOperationTerminal) => Promise<void> | void;
 }
+
+type PromptOwnership = AutomationPromptOwnership | {
+  kind: "subagentWake";
+  expandPromptTemplates: boolean;
+  operationId: string;
+  origin: ChatOrigin;
+  signal?: never;
+  onAdmitted?: never;
+  onTerminal?: never;
+};
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
@@ -1569,7 +1581,8 @@ export class RuntimeSlot {
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
-      const managedLoaderOptions = await this.dependencies.managedSubagents?.loaderOptions(settingsManager);
+      const managedLoaderOptions = await this.dependencies.managedSubagents?.loaderOptions(settingsManager,
+        (content, options, owner) => this.admitSubagentWake(content, options, owner));
       const services = await createAgentSessionServices({
         settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
@@ -4597,9 +4610,9 @@ export class RuntimeSlot {
     const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
     if (!opened) return undefined;
     try {
-      // Modern status files are admitted from a small first-property read. The
-      // larger legacy read below occurs only after the first key is proven not
-      // to be lifecycleProjection, preserving the old header-less fallback.
+      // The compact header admits parent/run ownership. Native children and
+      // details come from the full bounded status, not the widget's eight-row
+      // summary. Keep the header as bounded lifecycle evidence on overflow.
       const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
       const { bytesRead: headerBytesRead } = await opened.handle.read(headerBuffer, 0, headerBuffer.length, 0);
       const headerBytes = headerBuffer.subarray(0, headerBytesRead);
@@ -4609,10 +4622,19 @@ export class RuntimeSlot {
         if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
         // The producer retains the original parent session identity across resumes.
         // Exact run/tool/path ownership does not authorize a header copied from another session.
-        if (projection.sessionId !== undefined && projection.sessionId !== this.id) {
+        const parentIdentity = this.sessionFile ? resolve(this.sessionFile) : this.id;
+        if (projection.sessionId !== undefined && projection.sessionId !== parentIdentity) {
           throw new ForeignExtensionArtifactSessionError();
         }
-        const projected = lifecycleProjectionArtifact(projection);
+        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+        const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+        const full: unknown = bytesRead <= MAX_EXTENSION_ARTIFACT_BYTES ? JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")) : undefined;
+        if (full !== undefined && (!full || typeof full !== "object" || Array.isArray(full))) throw new SyntaxError("Invalid full extension status");
+        const status = full as Record<string, unknown> | undefined;
+        if (status && (status.runId !== projection.runId
+          || (projection.toolCallId !== undefined && status.toolCallId !== projection.toolCallId))) throw new ForeignExtensionArtifactSessionError();
+        const projected = status ? { ...status, lifecycleArtifactVersion: EXTENSION_LIFECYCLE_ARTIFACT_VERSION }
+          : lifecycleProjectionArtifact({ ...projection, omitted: { ...projection.omitted, byteLimitExceeded: true } });
         const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
         return markEmbeddedLifecycleArtifact(withProof);
@@ -5020,6 +5042,10 @@ export class RuntimeSlot {
         return "transient";
       }
       const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
+      if (isEmbeddedLifecycleArtifact(rawValue) && raw.toolCallId !== undefined && raw.toolCallId !== boundToolCallId) {
+        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+        return "rejected";
+      }
       let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
         ? ([boundToolCallId, this.extensionActivities.get(boundToolCallId)] as const)
         : matchingEntries[0];
@@ -6309,6 +6335,15 @@ export class RuntimeSlot {
     if (changed) this.queueRevision += 1;
   }
 
+  private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
+    const invocation = this.invocationForOperation(operationId);
+    return invocation?.source === "subagentWake" ? {
+      version: 1, kind: "subagentWake", direction: "inboundContext", contextEffect: "modelInput",
+      delivery: "stored", visibility: "visible", origin: invocation.origin,
+      invocationId: invocation.invocationId, operationId, sequence: invocation.sequence,
+    } : undefined;
+  }
+
   private projectedQueue(): QueuedMessageState[] {
     this.reconcileQueuedMessages();
     // Held prompts follow Pi's queue: they are delivered after it. An entry
@@ -6319,16 +6354,20 @@ export class RuntimeSlot {
       ...this.heldPrompts.filter((item) => !piQueued.has(item.id)),
     ].map(({
       id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocation,
-    }) => ({
-      id,
-      behavior,
-      text,
-      attachmentCount,
-      ...(photoCount === undefined ? {} : { photoCount }),
-      ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
-      ...(attachments === undefined ? {} : { attachments }),
-      ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
-    }));
+    }) => {
+      const semantic = this.internalWakeSemantic(id);
+      return {
+        id,
+        ...(semantic ? { semantic } : {}),
+        behavior,
+        text,
+        attachmentCount,
+        ...(photoCount === undefined ? {} : { photoCount }),
+        ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
+        ...(attachments === undefined ? {} : { attachments }),
+        ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
+      };
+    });
   }
 
   private static queueText(text: string, attachmentEnvelope: string): string {
@@ -6604,8 +6643,7 @@ export class RuntimeSlot {
       throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
     }
     try {
-      return {
-        ...projectTranscriptPage(
+      const page = projectTranscriptPage(
           this.runtime.session.sessionManager,
           this.dependencies.blobs,
           before,
@@ -6617,7 +6655,16 @@ export class RuntimeSlot {
           this.bashMetadata,
           this.forkBoundary,
           branchCut,
-        ),
+        );
+      return {
+        ...page,
+        // Exact presentation binding precedes receipt I/O. Retain the owning
+        // invocation's semantics in that interval without a second binding map.
+        items: page.items.map(item => {
+          const semantic = item.kind === "message" && item.role === "user" && !item.semantic?.invocationId
+            ? this.internalWakeSemantic(this.presentationIDs.get(item.id) ?? item.id) : undefined;
+          return semantic ? { ...item, semantic } : item;
+        }),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),
       };
@@ -6841,6 +6888,23 @@ export class RuntimeSlot {
     }
   }
 
+  /** The managed provider uses user input to run Pi's normal before-agent-start
+   * lifecycle. Admit it through the prompt owner, never the SDK's unowned wake
+   * path: queued consumption and canonical binding retain this exact invocation. */
+  readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner) => {
+    try {
+      const text = typeof content === "string" ? content : content.filter(part => part.type === "text").map(part => part.text).join("\n");
+      const images = typeof content === "string" ? [] : content.filter((part): part is ImageContent => part.type === "image");
+      await this.prompt(text, images, options?.deliverAs, undefined, undefined, {
+        kind: "subagentWake", operationId: randomUUID(), expandPromptTemplates: options?.expandPromptTemplates ?? false,
+        origin: { kind: "subagent", ownerId: owner.id, title: owner.title, confidence: "boundary" },
+      });
+    } catch (error) {
+      this.emit("session.extensionError", safeJson({ code: "subagent-wake-admission-failed",
+        message: error instanceof Error ? error.message : String(error), owner }));
+    }
+  };
+
   async prompt(
     text: string,
     images: ImageContent[] = [],
@@ -7062,7 +7126,7 @@ export class RuntimeSlot {
       // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const parsedCommand = parsePiLiteralCommand(text);
+      const parsedCommand = ownership?.kind === "subagentWake" ? undefined : parsePiLiteralCommand(text);
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -7082,7 +7146,7 @@ export class RuntimeSlot {
         throw new GatewayError("conflict", "Automation operation is already registered", true);
       }
       const invocationId = randomUUID();
-      const invocationSource: InvocationProjection["source"] = isExactExtensionCommand
+      const invocationSource: InvocationProjection["source"] = ownership?.kind === "subagentWake" ? "subagentWake" : isExactExtensionCommand
         ? "extension"
         : queueDisplay?.resourceInvocation?.source ?? "plain";
       const invocationName = isExactExtensionCommand
@@ -7133,7 +7197,7 @@ export class RuntimeSlot {
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
 
-      if (ownership) this.automationTerminalObservers.set(operationId, ownership.onTerminal);
+      if (ownership && ownership.kind !== "subagentWake") this.automationTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -7256,7 +7320,8 @@ export class RuntimeSlot {
         sdkRun = withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
-          source: "rpc",
+          source: ownership?.kind === "subagentWake" ? "extension" : "rpc",
+          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates } : {}),
           preflightResult: (disposition) => {
             // Pi calls back only after it has handled, queued, or started the
             // prompt. Rejections do not call this hook; the SDK promise's
@@ -7639,8 +7704,10 @@ export class RuntimeSlot {
     images: ImageContent[],
     queueDisplay: PromptQueueDisplay | undefined,
   ): PendingPromptState {
+    const semantic = this.internalWakeSemantic(operationId);
     return {
       id: operationId,
+      ...(semantic ? { semantic } : {}),
       createdAt: new Date().toISOString(),
       // Requested queue behavior is advisory until Pi actually enqueues.
       // A prompt admitted after the run settles remains ordinary.
