@@ -971,8 +971,13 @@ worktrees, or branches.
 Every run durably snapshots its target and concrete execution-session ID before
 dispatch. Existing targets reuse their session ID; workspace runs receive a new
 predetermined UUID and create that exact identity through
-`RuntimeRegistry`/`RuntimeSlot`. A live-only generated slot carries an exact
-operation-owned lease until Pi persists its first user or assistant message.
+`RuntimeRegistry`/`RuntimeSlot`. `OwnedSessionDispatch` is the neutral boundary
+for shared session leases, exact recovery evidence, and terminal acknowledgement;
+Automation retains its own operation identity and result interpretation above
+that seam. The seam also owns the fixed 24-hour deadline primitive for callers
+that explicitly opt in; it does not impose a deadline on ordinary sessions or
+Automation. A live-only generated slot carries an exact operation-owned lease
+until Pi persists its first user or assistant message.
 Restart recovery always consults the run snapshot and concrete session identity.
 A new session with no user or assistant message remains memory-only; after the
 first user message, Pi persists the transcript and any earlier canonical
@@ -1048,7 +1053,7 @@ future managed-state contract are owned by
 Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns one bounded projection
-`{ phase, activation, readiness, recovery, available, reason?, enabled, homeId?,
+`{ phase, activation, readiness, recovery, taskRecovery?, available, reason?, enabled, homeId?,
   sessionId?, generation?, model?, live, sessionPresent, memory }`. Phase,
 readiness and recovery are derived from the existing designation, memory and
 activation owners rather than stored as separate lifecycle state. `memory` is
@@ -1069,7 +1074,7 @@ model; there is no budget to manage (memory spend is bounded by construction and
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
-`ask_user`/`display`/`notify` executable allowlist, per-session compaction
+`ask_user`/`display`/`notify`/memory-tools/`delegate`/`task` executable allowlist, per-session compaction
 disabled, a fixed physical model, and zero cache-warming requests), and its
 designation is keyed by session id, so a fork is ordinary. A profile change
 replaces the live runtime in place inside the session's own lane, and a record
@@ -1080,6 +1085,37 @@ re-sent, the view is never persisted, and a request waits for the lines it will
 send (abortably) before it is made. Ordinary sessions are byte-for-byte
 unaffected. The record, the profile, the RPCs, fork and loadout semantics and
 what is not built yet are owned by [`docs/home.md`](docs/home.md).
+
+Home is delegate-only for project work: `delegate` admits finite work once in a
+trusted project through the neutral owned-session boundary. Workers retain normal
+project capabilities plus the explicit `report` tool; v1 refuses subagent
+execution/revival, scheduled work and durable `bg_wait` wake subscriptions because
+these can outlive the operation.
+Reports seal exact canonical evidence, never the latest assistant reply; absent
+report is limited/unknown. A fixed internal 24-hour deadline cancels and joins
+operation-owned work, and terminal usage remains explicitly unpriced. Unknown
+tracked detached work yields unknown, not a clean stop claim. Separate strict
+Home task state is initialized on first dispatch. Startup retires abandoned tasks
+from exact canonical reports or terminal unknown, never replaying a prompt, and
+co-commits the same result outbox. A recovery refusal fences task surfaces until
+the next start, exposed by `home.status.taskRecovery`; ordinary Gateway sessions
+still work. Recreated task directory
+identity requires explicit `home.reconfirmPermissions` (terminal
+`/home reconfirm-permissions`); this renews active standing scopes only, never
+revoked scopes or one-use grants. Maintainer-only `home.taskPermissions`,
+`home.revokeTaskScope`, `home.revokeTaskGrant` and `home.decideTaskGrant` list
+and revoke authority or approve/deny an exact durable request with one-use
+expiry-bound permission. Terminal `/home permissions`, `/home revoke-scope`,
+`/home revoke-grant`, `/home approve-grant` and `/home deny-grant` route through
+command receipts; Home cannot approve its own requests. `home.taskStatus`, `home.steerTask` and
+`home.stopTask` expose durable spend and shared control; terminal `/home task`,
+`/home steer` and `/home stop` target one task. Steering shares the session lane;
+Stop persists exact intent and cancels outside blocked admission. Canonical usage
+identities dedupe tokens before display; money is explicitly unpriced without
+authoritative billing provenance. Wake delivery waits for the next user Home activation; terminal tasks co-commit
+a durable inbox event and make one advisory push decision at most. Active-task
+restart reconciliation is required before release; iOS controls are subsequent
+slices, not automatically triggered Home calls.
 
 ## Runtime and state
 
@@ -1227,6 +1263,15 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 - Push grants and short-lived intents: `gateway/notifications.json`, an exact 1 MiB owner-only document. It stores endpoint-scoped grants, at most 64 active devices, 256 pending intents, 512 bounded receipts, and 192 revocation tombstones (128 rotation slots plus a 64-device revocation reserve). It never stores raw APNs tokens. Secrets and message content are excluded from RPC projections, logs, and Pi session JSONL.
 
 ## Push notifications
+
+Home task operations have one separate terminal owner: their immutable task
+record co-commits the wake inbox and durably decides one advisory push before
+enqueue. The hint uses a stable task-result event identity and logical `home`
+route; a crash after decision may omit it, never replay it. Ordinary terminal
+alerts remain unchanged. The wake inbox (not APNs or the notification bell)
+delivers the attributed result on the next Home message. See
+[Task wake inbox and terminal push](docs/home.md#task-wake-inbox-and-terminal-push).
+
 
 The first-party inline Pi extension reserves `notify({message})`; RuntimeSlot owns automatic terminal alerts. Pi 0.87 defines `agent_before_settle` as the final actionable boundary (entries plus one `continue: true` request) and `agent_settled` as notification-only after automatic work is finished. `pi.sendMessage(..., { triggerTurn: true })` from an `agent_settled` handler remains available but starts a distinct SDK run/operation with different receipt and notification semantics; it is not equivalent to an in-run `agent_before_settle` continuation. Candidate fixtures exercise `agent_before_settle`. A bounded installed-extension review found no equivalent old-style continuation consumer: `pi-subagents@0.59` uses `agent_settled` to resume widgets (its `triggerTurn` use belongs to `session_compact`), `pi-web-access@0.22` triggers turns from async fetch/command paths, and no `agent_settled` consumer was found in pi-goal, browser, or pi-sub-anthropic. Arbitrary project extensions were not exhaustively inspected, so review them before adoption if present; no compatibility shim is provided. Only Pi's final `agent_settled` at idle is terminal, so automatic retries, compaction retries, queued follow-ups, recoverable tool errors, and extension continuations do not announce an intermediate response. RuntimeSlot matches the exact final run's canonical assistant object and queues fixed, outcome-specific copy for normal completion, output limits, terminal errors (including retry exhaustion), aborts, or a tool/agent stop without a final response. Exact Gateway abort ownership overrides the last assistant reason, including cancellation during retry backoff. It never searches backward for an earlier successful answer or infers an outcome from error prose. The assistant entry ID remains the durable deduplication source and also keys one bounded RuntimeSlot observation disposition shared with successful-response attention state. Without a canonical assistant, the existing invocation terminal receipt ID is the source; a Gateway-derived run without an invocation uses its exact operation identity. An exact mobile subscription may publish `session.presentation.set` only after synchronization; monotonically revisioned visible/hidden updates are token-bound, one per connection, removed on close/replacement/disconnect/rekey/delete, and visible leases expire after 45 seconds unless iOS renews them. If that disposition observes an active chat, RuntimeSlot does not invoke notification enqueue: NotificationService writes only a durable `suppressed` receipt for the completion, creates no relay intent or inbox row, and excludes it from delivery quota. Terminal alerts otherwise carry the bounded session title plus the exact Gateway machine/session route; tapping is therefore profile-qualified rather than inferred from whichever server is selected on iOS. The extension receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, payload dictionary, or presentation policy. Admission is persisted before dispatch, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. Durable abuse ceilings admit up to 240 intents per session per hour and 480 intents per day globally or per target. Rate-limited attempts are returned synchronously but are not persisted, consume no quota, and cannot extend their own lockout. Preview-disabled grants still replace model-authored `notify` text with fixed generic copy; automatic terminal body copy is fixed by Tron rather than the model. The session title is the product-required terminal-alert title and is therefore shown independently of that model-text preview flag.
 

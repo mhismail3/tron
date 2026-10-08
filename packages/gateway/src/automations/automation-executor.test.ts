@@ -38,8 +38,8 @@ describe("GatewayAutomationExecutor", () => {
       abort: vi.fn(async () => {}),
     };
     const sessions = {
-      acquireAutomationLease: vi.fn(async () => ({ slot, release })),
-      clearAutomationMarker: vi.fn(async () => {}),
+      acquireOwnedSessionLease: vi.fn(async () => ({ slot, release })),
+      clearOwnedOperationMarker: vi.fn(async () => {}),
     };
     const work = new GatewayWorkRegistry("epoch-one", 16);
     const executor = new GatewayAutomationExecutor(sessions as any, work, undefined, "machine-one");
@@ -57,7 +57,7 @@ describe("GatewayAutomationExecutor", () => {
     await expect(handle.completion).resolves.toMatchObject({ state: "succeeded", assistantCompletionId: "completion-one" });
     expect(work.size).toBe(1);
     await handle.acknowledgeTerminal?.();
-    expect(sessions.clearAutomationMarker).toHaveBeenCalledWith(run.executionSessionId, run.operationId);
+    expect(sessions.clearOwnedOperationMarker).toHaveBeenCalledWith(run.executionSessionId, run.operationId);
     expect(release).toHaveBeenCalledOnce();
     expect(work.size).toBe(0);
   });
@@ -70,7 +70,7 @@ describe("GatewayAutomationExecutor", () => {
     let acquired!: () => void;
     const lease = new Promise<void>(resolve => { acquired = resolve; });
     const sessions = {
-      acquireAutomationLease: async () => { await lease; return { slot: { prompt }, release }; },
+      acquireOwnedSessionLease: async () => { await lease; return { slot: { prompt }, release }; },
     };
     const work = new GatewayWorkRegistry();
     const executor = new GatewayAutomationExecutor(sessions as unknown as RuntimeRegistry, work, undefined, undefined);
@@ -89,9 +89,9 @@ describe("GatewayAutomationExecutor", () => {
     const { record, run } = fixture();
     const release = vi.fn();
     const sessions = {
-      acquireAutomationLease: async () => ({
+      acquireOwnedSessionLease: async () => ({
         slot: { commands: () => [], prompt: async () => { throw uncertainOutcome("staged receipt append failed"); } }, release,
-      }),
+      })
     };
     const work = new GatewayWorkRegistry();
     const executor = new GatewayAutomationExecutor(sessions as unknown as RuntimeRegistry, work, undefined, undefined);
@@ -118,7 +118,7 @@ describe("GatewayAutomationExecutor", () => {
     };
     const sessions = {
       createAutomationSession: vi.fn(async () => ({ slot, release })),
-      clearAutomationMarker: vi.fn(async () => {}),
+      clearOwnedOperationMarker: vi.fn(async () => {}),
     };
     const executor = new GatewayAutomationExecutor(
       sessions as any,
@@ -156,7 +156,7 @@ describe("GatewayAutomationExecutor", () => {
     record.target = { kind: "workspace", cwd: "/workspace", sessionPolicy: "newPerRun" };
     run.targetSnapshot = record.target;
     run.executionSessionId = "20000000-0000-4000-8000-000000000002";
-    const sessions = { automationRecoveryEvidence: vi.fn(async () => ({})) };
+    const sessions = { ownedOperationRecoveryEvidence: vi.fn(async () => ({})) };
     const executor = new GatewayAutomationExecutor(
       sessions as any,
       new GatewayWorkRegistry(),
@@ -172,7 +172,7 @@ describe("GatewayAutomationExecutor", () => {
   it("recovers a canonical completion marker even before its terminal receipt", async () => {
     const { record, run } = fixture();
     const sessions = {
-      automationRecoveryEvidence: vi.fn(async () => ({
+      ownedOperationRecoveryEvidence: vi.fn(async () => ({
         marker: { operationId: run.operationId, acceptedAt: "2026-01-01T01:00:00.000Z", assistantCompletionId: "completion-one", assistantCompletedAt: "2026-01-01T01:01:00.000Z" },
         invocation: { invocationId: "invocation-one", lifecycle: "accepted" },
       })),
@@ -186,7 +186,7 @@ describe("GatewayAutomationExecutor", () => {
   it("preserves a durable cancellation intent when no admission evidence exists", async () => {
     const { record, run } = fixture();
     run.state = "cancelling";
-    const sessions = { automationRecoveryEvidence: vi.fn(async () => ({})) };
+    const sessions = { ownedOperationRecoveryEvidence: vi.fn(async () => ({})) };
     const executor = new GatewayAutomationExecutor(sessions as any, new GatewayWorkRegistry(), undefined, undefined);
     await expect(executor.recover(record, run)).resolves.toEqual({
       state: "cancelled", reason: "cancelled-before-admission",
@@ -196,7 +196,7 @@ describe("GatewayAutomationExecutor", () => {
   it("classifies accepted recovery without terminal evidence as unknown", async () => {
     const { record, run } = fixture();
     const sessions = {
-      automationRecoveryEvidence: vi.fn(async () => ({
+      ownedOperationRecoveryEvidence: vi.fn(async () => ({
         marker: { operationId: run.operationId, acceptedAt: "2026-01-01T01:00:00.000Z" },
         invocation: { invocationId: "invocation-one", lifecycle: "accepted" },
       })),

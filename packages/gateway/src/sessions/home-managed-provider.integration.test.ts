@@ -59,7 +59,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
       const resources = await slot.resources() as unknown as { subagents: Array<{ name: string }>; subagentDiagnostics?: string };
       const names = context.availableTools.map(tool => tool.name);
       if (profile === "home") {
-        expect(names.sort()).toEqual(["ask_user", "date", "display", "memory_search", "zoom"]);
+        expect(names.sort()).toEqual(["ask_user", "date", "delegate", "display", "memory_search", "task", "zoom"]);
         // The executable allowlist alone can hide tools from a loaded provider;
         // Home must exclude the extension itself, not merely hide its tools.
         expect(context.extensions.map(extension => extension.name.replace(/^<inline:/, "").replace(/>$/, "")).sort())
@@ -84,7 +84,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     await first.homeOwner().configureMemory({ model });
     faux.setResponses([fauxAssistantMessage("persisted Home reply")]);
     await home.prompt("Persist this Home chapter for cold acquisition");
-    await waitFor(() => !home.isBusy, "Home persisted turn");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home persisted turn");
     expect(await readFile(home.sessionFile!, "utf8")).toContain("persisted Home reply");
     await first.homeOwner().disable();
     expect(await first.acquire(designation.sessionId)).toBe(home);

@@ -77,7 +77,8 @@ import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
-import { readCanonicalSession } from "../episodic/episodic-source.js";
+import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
+import { syncDurably } from "../util/durable-json.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
@@ -784,6 +785,7 @@ export class RuntimeRegistry {
       gatewayModelRuntime?: ModelRuntime;
       /** Where Home's memory reports its bounded records. */
       homeMemoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
+      homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
       /** Where Home's request seam reports one record per activation and per
        * refusal. */
       homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
@@ -871,6 +873,10 @@ export class RuntimeRegistry {
       memorySummarizer: options.homeMemorySummarizer ?? (() => ({ refusal: "unavailable" })),
       ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
       ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
+      taskSessions: this,
+      ...(options.notifications ? { notifications: options.notifications } : {}),
+      ...(options.machineId ? { machineId: options.machineId } : {}),
+      ...(options.homeTaskDiagnostic ? { taskDiagnostic: options.homeTaskDiagnostic } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
@@ -971,8 +977,9 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
     }
     this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
-    // Pi's public newSession API selects a timestamped path and writes its
-    // header immediately. Once a previous attempt durably named a different
+    // Pi's public newSession API selects a timestamped path but stages setup
+    // entries: no file is persisted until the first user or assistant entry.
+    // Once a previous attempt durably named a different
     // path, absence is not permission to silently replace that binding: no
     // verified exact-path adapter exists in the pinned SDK, so preserve and
     // block rather than create evidence outside the recorded attempt.
@@ -1112,6 +1119,9 @@ export class RuntimeRegistry {
     // any event the watcher could not see (G-9 moves both into the scheduler).
     // A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
+    // Retire abandoned task identities before any runtime/admission is exposed.
+    // This uses canonical files only; accepted prompts are never recreated.
+    await this.home.recoverTasks();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -1922,10 +1932,16 @@ export class RuntimeRegistry {
       homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
+      homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, append, envelope),
+      homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
+      homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => this.home.taskTool(sessionId, request),
+      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.home.dispatchTask(sessionId, request),
+      validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
+      ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
         this.options.persistenceDiagnostic?.(sessionId, "home-model-record-failed");
       }),
@@ -2154,7 +2170,7 @@ export class RuntimeRegistry {
     }
   }
 
-  async acquireAutomationLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+  async acquireOwnedSessionLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
     const slot = await this.acquire(sessionId);
     return this.mutex.run(() => {
       if (this.deletingSessionIds.has(sessionId) || this.slots.get(sessionId) !== slot
@@ -2165,7 +2181,7 @@ export class RuntimeRegistry {
     });
   }
 
-  async automationRecoveryEvidence(sessionId: string, operationId: string): Promise<{
+  async ownedOperationRecoveryEvidence(sessionId: string, operationId: string): Promise<{
     marker?: RunMarkerEvidence;
     invocation?: InvocationProjection;
   }> {
@@ -2190,8 +2206,7 @@ export class RuntimeRegistry {
     };
   }
 
-  async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
-    if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
+  async clearOwnedOperationMarker(sessionId: string, operationId: string): Promise<void> {
     await this.markers.clear(sessionId, operationId);
     if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
   }
@@ -2951,7 +2966,13 @@ export class RuntimeRegistry {
     }
   }
 
-  async create(cwdInput: string, profile: RuntimeProfile = "ordinary"): Promise<RuntimeSlot> {
+  async canonicalTaskTarget(target: string): Promise<string> {
+    const inspection = await this.options.trust.inspect(target);
+    if (inspection.effectiveDecision !== true) throw new GatewayError("trust_required", "Home tasks require a trusted project");
+    return inspection.cwd;
+  }
+
+  async create(cwdInput: string, profile: RuntimeProfile = "ordinary", taskWorker?: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -2976,7 +2997,7 @@ export class RuntimeRegistry {
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
       slot = await stage(
         "session.create.runtime",
-        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, profile),
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false, profile, undefined, taskWorker),
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {
@@ -4642,6 +4663,67 @@ export class RuntimeRegistry {
     } catch {
       return undefined;
     }
+  }
+
+  /** Shared live/cold task evidence boundary: never constructs executable
+   * resources or repairs the canonical file. Sync and identity checks precede
+   * immutable terminal/outbox publication and operation acknowledgement. */
+  async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
+    const entries = await this.taskEvidenceFileCut(sessionId);
+    if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
+    return entries;
+  }
+
+  /** Registry ordering precedes the slot lane. The live caller is the dispatch
+   * closure, never in-lane receipt persistence. Cold inspection stays read-only. */
+  async readLiveTaskEvidence(sessionId: string, operationId: string): Promise<
+    | { state: "present"; entries: FileEntry[]; branch: FileEntry[] }
+    | { state: "absent"; operationSettled: boolean }
+  > {
+    return this.serializeSessionMutation(sessionId, async () => {
+      const slot = this.slots.get(sessionId);
+      if (!slot) throw new GatewayError("conflict", "Task runtime is missing");
+      return slot.inspectTaskSettlement(operationId, async operationSettled => {
+        const entries = await this.taskEvidenceFileCut(sessionId);
+        return entries ? { state: "present" as const, entries, branch: slot.canonicalSessionEntries() }
+          : { state: "absent" as const, operationSettled };
+      });
+    });
+  }
+
+  private async taskEvidenceFileCut(sessionId: string): Promise<FileEntry[] | null> {
+    // Recovery publishes a permanent result. A loaded previous catalog cut or
+    // a not-yet-ready projection cannot decide whether its report exists.
+    await this.sessionCatalog.whenReconciled();
+    const path = await this.homeSessionFile(sessionId);
+    if (!path) throw new GatewayError("conflict", "Task canonical session is missing");
+    const before = await lstat(path).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!before) {
+      // Pi can settle Stop before appending a conversation. Absence becomes
+      // evidence only after the parent is durable and the exact path is still
+      // absent; the live caller additionally proves settled operation + Stop.
+      const directory = await open(dirname(path), "r");
+      try { await syncDurably(directory); } finally { await directory.close(); }
+      const after = await lstat(path).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (after) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+      return null;
+    }
+    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Task canonical session is unsafe");
+    for (const durablePath of [path, dirname(path)]) {
+      const handle = await open(durablePath, "r");
+      try { await syncDurably(handle); } finally { await handle.close(); }
+    }
+    const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes });
+    const after = await lstat(path);
+    if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+    return entries.map(entry => entry.raw as unknown as FileEntry);
   }
 
   /** Whether Home's recorded session still exists: a live runtime, or a

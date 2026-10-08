@@ -14,7 +14,7 @@ export interface TronWorkspaceDescriptor {
 /** The capabilities that record their namespace's initialization beside the
  * workspace root. Adding one here is what lets a missing namespace be reported
  * as lost state instead of a fresh installation. */
-export type TronWorkspaceFeature = "knowledge" | "episodic";
+export type TronWorkspaceFeature = "knowledge" | "episodic" | "home-tasks";
 
 export type TronWorkspaceUnavailableCause =
   | "invalid-record" | "unsafe-directory" | "missing-root"

@@ -347,6 +347,10 @@ const sessions = new RuntimeRegistry({
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
+  homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
+    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused"
+    || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
+    "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
   notifications,
   browserLiveViews,

@@ -101,7 +101,7 @@ async function homeTurn(f: Awaited<ReturnType<typeof fixture>>, text: string): P
   const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
   const home = await f.registry.acquire(status.sessionId!);
   await home.prompt(text);
-  await waitFor(() => !home.isBusy, `the Home turn "${text}"`);
+  await waitFor(() => home.snapshot().configurationBlocker === null, `the Home turn "${text}"`);
   return lastAssistant(sessionOf(home));
 }
 

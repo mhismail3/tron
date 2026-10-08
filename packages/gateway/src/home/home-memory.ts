@@ -290,7 +290,26 @@ export class HomeMemory {
    * request's signal, so the user's Stop cancels it and their message stays in
    * the log, unanswered.
    */
-  async activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
+  /** HomeOwner qualifies a not-started chapter with no prior history. The
+   * memory must still be configured; no store/source is manufactured. */
+  emptyChapterView(signal?: AbortSignal): HomeActivationView {
+    if (!this.config || !this.summarizer) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
+    if (signal?.aborted) throw new HomeMemoryRefusal("memory-wait-cancelled", "Chapter activation was cancelled");
+    const { pieces } = viewPieces("", undefined);
+    return { text: pieces.join(""), pieces, waitedMs: 0, commit: () => {} };
+  }
+
+  activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
+    return this.viewAtBoundary(activation, signal);
+  }
+
+  /** A not-started chapter has no current messages; its entire validated source
+   * is the preceding sealed history. Reuse ingestion, bounds and readiness. */
+  precedingChapterView(signal: AbortSignal | undefined): Promise<HomeActivationView> {
+    return this.viewAtBoundary(undefined, signal);
+  }
+
+  private async viewAtBoundary(activation: HomeActivationIdentity | undefined, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     const binding = await this.mutex.run(() => this.bindingForViewLocked());
     try {
       // Ingest only: the wait below is for the lines this activation will send,
@@ -314,7 +333,7 @@ export class HomeMemory {
       blocked = binding.memory.status().blocked;
     }
     if (blocked) throw this.blockedRefusal(blocked);
-    const cut = await binding.memory.cutAtEntry(activation.boundaryEntryId);
+    const cut = activation ? await binding.memory.cutAtEntry(activation.boundaryEntryId) : binding.memory.status().messages;
     if (cut === undefined) {
       throw new HomeMemoryRefusal(
         "memory-boundary-missing",

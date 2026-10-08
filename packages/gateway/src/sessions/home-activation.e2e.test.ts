@@ -154,6 +154,34 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   };
 }
 
+// Threshold fixtures must not alter chapter limits while the previous turn's
+// quiescence callback still owns sealing. Hold that callback to prove the cut.
+async function prepareThresholdFixture(f: Awaited<ReturnType<typeof fixture>>, slot: RuntimeSlot, text: string): Promise<void> {
+  const owner = f.registry.homeOwner();
+  const quiescent = owner.chapterQuiescent.bind(owner);
+  let release!: () => void;
+  let held = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const hook = vi.spyOn(owner, "chapterQuiescent").mockImplementationOnce(async id => {
+    held = true;
+    await gate;
+    await quiescent(id);
+  });
+  let ready = false;
+  let readiness: Promise<unknown> | undefined;
+  try {
+    await slot.prompt(text);
+    await waitFor(() => held && !slot.isBusy, "threshold fixture quiescence");
+    readiness = waitFor(() => slot.snapshot().configurationBlocker === null, "threshold fixture configuration readiness").then(() => { ready = true; });
+    await awaitsWithin(new Promise<void>(resolve => setImmediate(resolve)), "threshold readiness observation turn");
+    expect(ready, "threshold mutation must wait for chapter quiescence").toBe(false);
+  } finally {
+    release();
+    hook.mockRestore();
+    await readiness;
+  }
+}
+
 async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 12_000): Promise<void> {
   await waitFor(async () => (await predicate()) || undefined, "Home activation condition", { boundMs: timeoutMs });
 }
@@ -385,7 +413,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "aliased-home");
     f.faux.setResponses([fauxAssistantMessage("the violet lighthouse")]);
     await slot.prompt("remember the violet lighthouse");
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const path = await realpath(slot.sessionFile!);
     const bytes = await readFile(path, "utf8");
     await restart(f);
@@ -411,7 +439,7 @@ describe("Tron Home activations end to end", () => {
       const oldSlot = await designateHome(f, `joined-${cut}-designate`);
       f.faux.setResponses([fauxAssistantMessage("initial chapter reply")]);
       await oldSlot.prompt("canonical initial chapter input");
-      await waitUntil(() => !oldSlot.isBusy);
+      await waitUntil(() => oldSlot.snapshot().configurationBlocker === null);
       const initialProviderCalls = f.faux.state.callCount;
       expect(initialProviderCalls).toBe(1);
       const owner = f.registry.homeOwner();
@@ -486,10 +514,11 @@ describe("Tron Home activations end to end", () => {
         await waitUntil(() => materializations.mock.calls.length === 2);
         release();
         if (cut === "path") {
-          await first;
+          const accepted = await first as { operationId: string };
           releaseProvider();
           const sharedSlot = await f.registry.acquire(binding.physicalSessionId);
-          await waitUntil(() => !sharedSlot.isBusy);
+          await waitUntil(() => invocationReceipts(sharedSlot.sessionManager.getBranch(), sharedSlot.id).some(receipt =>
+            receipt.receiptKind === "terminal" && receipt.operationId === accepted.operationId));
           releaseTerminal();
         }
         const outcomes = await Promise.allSettled([first, second]);
@@ -507,7 +536,7 @@ describe("Tron Home activations end to end", () => {
         }
         await expect(duplicate).resolves.toEqual((outcomes[0] as PromiseFulfilledResult<unknown>).value);
         releaseProvider();
-        await waitUntil(() => !slot.isBusy);
+        await waitUntil(() => slot.snapshot().configurationBlocker === null);
         const bytes = await sessionJsonl(slot);
         for (const [index, outcome] of outcomes.entries()) {
           const messages = (await canonicalMessages(slot)).filter(message => message.role === "user" && JSON.stringify(message.content).includes(commands[index]!.text));
@@ -550,7 +579,7 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([fauxAssistantMessage("original receipt reply")]);
     const params = { commandId: "home-receipt-exact-command", text: "receipt-only-secret-marker" };
     const accepted = await f.service.invoke(client, "home.prompt", params);
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     // Drain the early-response completion write before reconstructing the receipt owner.
     await f.receipts.dispose();
     const before = await sessionJsonl(slot);
@@ -590,7 +619,7 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([fauxAssistantMessage(secret)]);
     const params = { commandId: "privacy-original-command", text: secret };
     await f.service.invoke(client, "home.prompt", params);
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await f.service.invoke(client, "home.prompt", params);
     const owner = f.registry.homeOwner() as unknown as {
       unavailable?: string;
@@ -600,7 +629,7 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([fauxAssistantMessage("privacy successor reply")]);
     const successor = await f.service.invoke(client, "home.prompt", { commandId: "privacy-successor-command", text: secret }) as unknown as { sessionId: string };
     const next = await f.registry.acquire(successor.sessionId);
-    await waitUntil(() => !next.isBusy);
+    await waitUntil(() => next.snapshot().configurationBlocker === null);
     // Simulate the owner-facing explanation from a failed storage/reload seam;
     // it is useful to clients, but never safe as a diagnostic reason enum.
     owner.unavailable = `${secret} ${f.root} ${slot.id}`;
@@ -628,7 +657,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-home-export-destination");
     f.faux.setResponses([fauxAssistantMessage("Home export source")]);
     await slot.prompt("create a canonical Home chapter entry");
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const chapterPath = slot.sessionFile!;
     const before = await readFile(chapterPath);
     await f.registry.initializeBlobStorage();
@@ -718,8 +747,7 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, `cold-hard-${boundary}`);
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize cold threshold evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize cold threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
     admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
     for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
@@ -743,8 +771,7 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, `physical-hard-${boundary}`);
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize physical threshold evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize physical threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
     admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
     for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
@@ -767,8 +794,7 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, `admission-await-${boundary}`);
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize await threshold evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize await threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -802,8 +828,7 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, `successful-crossing-${ordering}`);
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize successful threshold evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize successful threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
     // Canonical custom entries bring the chapter near the byte boundary without
     // crossing it; only the provider's finalized successful message crosses.
@@ -838,7 +863,7 @@ describe("Tron Home activations end to end", () => {
         .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
     } finally { release(); held.mockRestore(); }
     await running;
-    await waitUntil(() => !slot.isBusy && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    await waitUntil(() => slot.snapshot().configurationBlocker === null && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
     const lastTerminal = invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)!;
     expect(lastTerminal).toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
     expect(slot.sessionManager.getBranch().some(entry => entry.type === "message" && entry.message.role === "assistant"
@@ -853,13 +878,12 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, "real-input-crossing");
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize input crossing evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize input crossing evidence");
     admissionLimits.bytes = 64 * 1_024;
     const before = statSync(slot.sessionFile!).size;
     f.faux.setResponses([fauxAssistantMessage("must not reach provider")]);
     await slot.prompt("input crossing ".repeat(5_000));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     expect(f.faux.state.callCount).toBe(1);
     await waitUntil(() => f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
     expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
@@ -873,8 +897,7 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, "real-byte-stop-home");
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize canonical evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize canonical evidence");
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let entered = false;
@@ -891,7 +914,7 @@ describe("Tron Home activations end to end", () => {
       }
     } finally { release(); }
     await running;
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const before = statSync(slot.sessionFile!).size;
     expect(before).toBeGreaterThan(200 * 1_024 * 1_024);
     await expect(scanReservedHomeSession({ directory: dirname(slot.sessionFile!), expectedPath: slot.sessionFile!, sessionId: slot.id }))
@@ -909,7 +932,7 @@ describe("Tron Home activations end to end", () => {
     const ledger = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(ledger.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: before });
     const successor = await f.registry.acquire(accepted.sessionId);
-    await waitUntil(() => !successor.isBusy && successor.sessionManager.getBranch().some(entry => entry.type === "message"
+    await waitUntil(() => successor.snapshot().configurationBlocker === null && successor.sessionManager.getBranch().some(entry => entry.type === "message"
       && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("successor continues")));
     expect(successor.sessionManager.getBranch().some(entry => entry.type === "message"
       && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("continue after the stopped chapter"))).toBe(true);
@@ -946,8 +969,7 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const slot = await designateHome(f, "e2e-hard-running-crossing");
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
-    await slot.prompt("initialize entry crossing evidence");
-    await waitUntil(() => !slot.isBusy);
+    await prepareThresholdFixture(f, slot, "initialize entry crossing evidence");
     admissionLimits.entries = 100;
     for (let index = 0; index < 100 && slot.canonicalEntryCount < 90; index += 1) {
       slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
@@ -965,7 +987,7 @@ describe("Tron Home activations end to end", () => {
       }
     } finally { release(); }
     await running;
-    await waitUntil(() => !slot.isBusy && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    await waitUntil(() => slot.snapshot().configurationBlocker === null && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
     const stopped = f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop");
     const branch = slot.sessionManager.getBranch();
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
@@ -997,7 +1019,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, `${kind}-${order}-home`);
     f.faux.setResponses([fauxAssistantMessage("canonical race evidence")]);
     await slot.prompt("initialize race evidence");
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const path = slot.sessionFile!;
     const bytes = await readFile(path, "utf8");
     const registry = f.registry as unknown as {
@@ -1096,7 +1118,7 @@ describe("Tron Home activations end to end", () => {
     const oldSlot = await designateHome(f, "e2e-reservation-crash-designate");
     f.faux.setResponses([fauxAssistantMessage("recovered successor reply")]);
     await oldSlot.prompt("BEFORE-ROLLOVER-FACT: the lighthouse is blue");
-    await waitUntil(() => !oldSlot.isBusy);
+    await waitUntil(() => oldSlot.snapshot().configurationBlocker === null);
     const owner = f.registry.homeOwner() as unknown as {
       options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
       chapterQuiescent(sessionId: string): Promise<void>;
@@ -1154,7 +1176,7 @@ describe("Tron Home activations end to end", () => {
       ...current,
       chapters: [
         { ...active, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "materializing", createdAt: new Date().toISOString(), attemptId: "old-attempt", expectedPath },
+        { sessionId: reservedId, ordinal: 2, state: "materializing", activationStarted: false, createdAt: new Date().toISOString(), attemptId: "old-attempt", expectedPath },
       ],
     });
 
@@ -1172,7 +1194,7 @@ describe("Tron Home activations end to end", () => {
     const active = await designateHome(f, `profile-flight-${construction}-${enabled}`);
     f.faux.setResponses([fauxAssistantMessage("profile construction baseline")]);
     await active.prompt("profile construction baseline input");
-    await waitUntil(() => !active.isBusy);
+    await waitUntil(() => active.snapshot().configurationBlocker === null);
     let sessionId = active.id;
     if (construction === "reserved") {
       const owner = f.registry.homeOwner();
@@ -1278,7 +1300,7 @@ describe("Tron Home activations end to end", () => {
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
         {
-          sessionId: pending.id, ordinal: 2, state, createdAt: new Date().toISOString(),
+          sessionId: pending.id, ordinal: 2, state, activationStarted: false, createdAt: new Date().toISOString(),
           ...(state === "materializing" ? { attemptId, expectedPath } : {}),
         },
       ],
@@ -1307,7 +1329,7 @@ describe("Tron Home activations end to end", () => {
     const beforeRequests: CapturedRequest[] = [];
     f.faux.setResponses([responsesOf(f, beforeRequests)("before chapter response")]);
     await oldSlot.prompt("CONTINUITY-FACT: the brass key is under the red bowl");
-    await waitUntil(() => !oldSlot.isBusy);
+    await waitUntil(() => oldSlot.snapshot().configurationBlocker === null);
     const owner = f.registry.homeOwner() as unknown as {
       options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
       chapterQuiescent(sessionId: string): Promise<void>;
@@ -1352,7 +1374,7 @@ describe("Tron Home activations end to end", () => {
       const requests: CapturedRequest[] = [];
       f.faux.setResponses([responsesOf(f, requests)(reply(turn))]);
       await slot.prompt(`INPUT-${turn}-MARK please continue`);
-      await waitUntil(() => !slot.isBusy, 60_000);
+      await waitUntil(() => slot.snapshot().configurationBlocker === null, 60_000);
       expect(requests).toHaveLength(1);
       const view = viewOf(requests[0]!);
       // Short inputs are verbatim view lines (gist §3); only text outside the
@@ -1391,7 +1413,7 @@ describe("Tron Home activations end to end", () => {
     // summarized message proves the native body is gone.
     f.faux.setResponses([responsesOf(f, requests)(longInput("activation one response"))]);
     await slot.prompt(longInput("activation one input"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     // Activation one's leaves are built before activation two starts.
     await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.coverage.summarized ?? 0) >= 2);
     f.faux.setResponses([
@@ -1399,7 +1421,7 @@ describe("Tron Home activations end to end", () => {
       async (context) => { requests.push(record(context)); return fauxAssistantMessage("after the tool"); },
     ]);
     await slot.prompt(longInput("activation two input"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const second = requests[1]!;
     const third = requests[2]!;
     const jsonl = await sessionJsonl(slot);
@@ -1458,7 +1480,7 @@ describe("Tron Home activations end to end", () => {
     f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
     f.faux.setResponses([responsesOf(f, requests)(longInput("wait activation one reply"))]);
     await slot.prompt(longInput("wait activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(() => f.compactor.entered > 0);
     expect(requests.length).toBe(1);
     f.faux.setResponses([responsesOf(f, requests)("wait activation two reply")]);
@@ -1472,7 +1494,7 @@ describe("Tron Home activations end to end", () => {
     const unbuiltWhileWaiting = (await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt ?? 0;
     f.compactor.release?.();
     await second;
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const activations = f.requestRecords.filter((record) => record.event === "activation");
     const row = {
       requestsWhileWaiting: waiting,
@@ -1503,7 +1525,7 @@ describe("Tron Home activations end to end", () => {
     f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
     f.faux.setResponses([responsesOf(f, requests)("stop activation one reply")]);
     await slot.prompt(longInput("stop activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(() => f.compactor.entered > 0);
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
@@ -1511,7 +1533,7 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
     await slot.abort("agent");
     const outcome = await second.then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const messages = await canonicalMessages(slot);
     const row = {
       outcome,
@@ -1549,7 +1571,7 @@ describe("Tron Home activations end to end", () => {
     });
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("unconfigured activation input"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const refused = await canonicalMessages(slot);
     const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
     const context = await f.service.invoke(client, "home.context", {}) as unknown as HomeContextProjection;
@@ -1560,7 +1582,7 @@ describe("Tron Home activations end to end", () => {
     });
     f.faux.setResponses([responsesOf(f, requests)("configured activation response")]);
     await slot.prompt(longInput("configured activation input"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     expect(status).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" }, activation: { available: true, activationOpen: false } });
     const row = {
@@ -1608,7 +1630,7 @@ describe("Tron Home activations end to end", () => {
       ? await f.registry.create(cwd) : await designateHome(f, `terminal-attachments-${mode}`);
     f.faux.setResponses([fauxAssistantMessage("attachment fixture initialized")]);
     await initial.prompt("initialize attachment evidence");
-    await waitUntil(() => !initial.isBusy);
+    await waitUntil(() => initial.snapshot().configurationBlocker === null);
     const devices = new DeviceStore(f.tronHome, "fixture-terminal-attachments");
     await devices.initialize();
     const opened: Array<{ sessionId: string; subscriptionToken: string; phase: string }> = [];
@@ -1675,7 +1697,7 @@ describe("Tron Home activations end to end", () => {
         settleDuringSync.release();
         await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
           receipt.operationId === operation.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed")
-          && slot.snapshot().phase === "idle");
+          && slot.snapshot().configurationBlocker === null);
       }
       const result = await invoke(context, method, params);
       if (method === "command.status") {
@@ -1705,8 +1727,7 @@ describe("Tron Home activations end to end", () => {
         }
         if (["running-operation", "rollover-0", "rollover-1"].includes((params as { text: string }).text)) return result;
         // The accepted command's response arrives after its actual settlement.
-        // This exercises both event-before-response and idle-baseline transfer.
-        await waitUntil(() => !slot.isBusy);
+        // This exercises both event-before-response and terminal-baseline transfer.
         const connection = (server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.get(context.id);
         if (!connection) throw new Error("terminal connection missing at accepted-response cut");
         await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
@@ -1927,7 +1948,8 @@ describe("Tron Home activations end to end", () => {
       if (second) holdSecondSnapshots = true;
       const result = await invoke(context, method, params);
       if (second) {
-        await waitUntil(() => !slot.isBusy);
+        await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
+          receipt.receiptKind === "terminal" && receipt.operationId === (result as { operationId: string }).operationId));
         // Suppress presentation events and force authoritative resync while
         // the accepted response is still pending. That snapshot owns refusal 2.
         broadcast(slot.id, "transport.resyncRequired", {});
@@ -2069,7 +2091,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-transient");
     f.faux.setResponses([responsesOf(f, requests)(longInput("transient response one"))]);
     await slot.prompt(longInput("transient activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
 
     // The Gateway that a transient outage blocked: the memory's own durable state
     // is exactly what a restart hands over.
@@ -2082,7 +2104,7 @@ describe("Tron Home activations end to end", () => {
     const reopened = await f.registry.acquire(slot.id);
     f.faux.setResponses([responsesOf(f, requests)(longInput("transient response two"))]);
     await reopened.prompt(longInput("transient activation two"));
-    await waitUntil(() => !reopened.isBusy);
+    await waitUntil(() => reopened.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
     const row = {
@@ -2109,7 +2131,7 @@ describe("Tron Home activations end to end", () => {
     f.compactor.failing = true;
     f.faux.setResponses([responsesOf(f, requests)(longInput("resume response one"))]);
     await slot.prompt(longInput("resume activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure");
     const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
     expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
@@ -2119,7 +2141,7 @@ describe("Tron Home activations end to end", () => {
 
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("resume activation two"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
 
     // The cause is gone; the operator says so.
@@ -2131,7 +2153,7 @@ describe("Tron Home activations end to end", () => {
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)(longInput("resume response three"))]);
     await slot.prompt(longInput("resume activation three"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const row = {
       blockedBefore: blocked,
       refusedWithBlock: refusals.includes("memory-blocked"),
@@ -2157,7 +2179,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-lifecycle");
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply one"))]);
     await slot.prompt(longInput("lifecycle activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0) > 0);
     const spentOnFirstSession = (await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0;
 
@@ -2168,7 +2190,7 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply two"))]);
     const sameSession = await f.registry.acquire((reEnabled as unknown as { sessionId: string }).sessionId);
     await sameSession.prompt(longInput("lifecycle activation two"));
-    await waitUntil(() => !sameSession.isBusy);
+    await waitUntil(() => sameSession.snapshot().configurationBlocker === null);
     const afterEnable = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     expect(afterEnable).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
 
@@ -2209,7 +2231,7 @@ describe("Tron Home activations end to end", () => {
     const freshSlot = await f.registry.acquire(reDesignated.sessionId);
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply three"))]);
     await freshSlot.prompt(longInput("lifecycle activation three"));
-    await waitUntil(() => !freshSlot.isBusy);
+    await waitUntil(() => freshSlot.snapshot().configurationBlocker === null);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as { lastRefusalReason?: string; lastRefusalDetail?: string };
     expect(context.lastRefusalReason, context.lastRefusalDetail).toBe("memory-blocked");
     expect(context.lastRefusalDetail).toContain("Sealed Home chapter");
@@ -2230,10 +2252,10 @@ describe("Tron Home activations end to end", () => {
     // Activation one's summaries report a cost far beyond any former budget.
     f.compactor.runawayUsage = 1_000_000_000;
     await slot.prompt(longInput("costly activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0) >= 1_000_000_000);
     await slot.prompt(longInput("costly activation two"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt === 0);
     const after = await f.registry.homeOwner().memoryStatus();
     const row = {
@@ -2259,7 +2281,7 @@ describe("Tron Home activations end to end", () => {
     f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
     f.faux.setResponses([responsesOf(f, requests)(longInput("disable wait reply one"))]);
     await slot.prompt(longInput("disable wait activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(() => f.compactor.entered > 0);
     f.faux.setResponses([responsesOf(f, requests)("disable wait reply two")]);
     const second = slot.prompt(longInput("disable wait activation two"));
@@ -2268,7 +2290,7 @@ describe("Tron Home activations end to end", () => {
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     f.compactor.release?.();
     await second;
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const row = {
       disableOutcome: disabled,
@@ -2294,7 +2316,7 @@ describe("Tron Home activations end to end", () => {
     f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
     f.faux.setResponses([responsesOf(f, requests)(longInput("race reply one"))]);
     await slot.prompt(longInput("race activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(() => f.compactor.entered > 0);
     f.faux.setResponses([responsesOf(f, requests)("race reply two")]);
     const second = slot.prompt(longInput("race activation two"));
@@ -2305,12 +2327,12 @@ describe("Tron Home activations end to end", () => {
     }).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
     f.compactor.release?.();
     await second.catch(() => undefined);
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     // Whatever that race did to the waiting activation, the memory is usable and
     // open exactly once: the next activation is served with the new model.
     f.faux.setResponses([responsesOf(f, requests)(longInput("race reply three"))]);
     await slot.prompt(longInput("race activation three"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog() ?? [];
     const row = {
@@ -2337,7 +2359,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-context", { configure: false });
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("context refusal input"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as HomeContextProjection;
     const row = { context };
     report.cases.push({ case: "context-refusal", ...row });
@@ -2362,7 +2384,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-status");
     f.faux.setResponses([responsesOf(f, requests)(longInput("status reply"))]);
     await slot.prompt(longInput("status activation"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.tokens.used ?? 0) > 0);
 
     await restart(f);
@@ -2429,12 +2451,12 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-blocked");
     f.faux.setResponses([responsesOf(f, requests)("first activation response")]);
     await slot.prompt(longInput("blocked activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked !== undefined);
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("blocked activation two"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
     const row = {
@@ -2456,7 +2478,7 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-restart");
     f.faux.setResponses([responsesOf(f, requests)("first activation response")]);
     await slot.prompt(longInput("restart activation one"));
-    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.tokens.used ?? 0) > 0);
     const before = await f.registry.homeOwner().memoryStatus();
     const beforeUsed = before.episodic?.tokens.used ?? 0;
@@ -2468,7 +2490,7 @@ describe("Tron Home activations end to end", () => {
     const reopened = await f.registry.acquire(slot.id);
     f.faux.setResponses([responsesOf(f, requests)("after restart response")]);
     await reopened.prompt(longInput("restart activation two"));
-    await waitUntil(() => !reopened.isBusy);
+    await waitUntil(() => reopened.snapshot().configurationBlocker === null);
     const after = await f.registry.homeOwner().memoryStatus();
     const persisted = await readMemoryState(f, await homeMemoryStateId(f));
     const row = {

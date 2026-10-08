@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { GatewayConfig } from "../config.js";
@@ -16,7 +16,7 @@ import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-
 import type { HomeStatus } from "../protocol/types.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 // Recipe §8 caching, proved on the wire (progress.md C1-C11; #491 R1-R8): Home
@@ -245,7 +245,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     for (let turn = 0; turn < 3; turn += 1) {
       if (turn === 2) f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
       await home.prompt(`responses input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => !home.isBusy, `Responses turn ${turn}`);
+      await waitFor(() => home.snapshot().configurationBlocker === null, `Responses turn ${turn}`);
     }
     const requests = f.requests.filter((request) => request.kind === "home");
     expect(requests).toHaveLength(4);
@@ -294,12 +294,12 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     const TURNS = 62;
     for (let turn = 0; turn < TURNS; turn += 1) {
       await home.prompt(`input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => !home.isBusy, `Home turn ${turn}`);
+      await waitFor(() => home.snapshot().configurationBlocker === null, `Home turn ${turn}`);
     }
     // A last turn with a tool step: the step must reuse the frozen view and keep the end mark.
     f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
     await home.prompt(`input ${TURNS} ${"i".repeat(900)}`);
-    await waitFor(() => !home.isBusy, "the tool turn");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "the tool turn");
 
     const homeRequests = f.requests.filter((request) => request.kind === "home");
     const summarizer = f.requests.filter((request) => request.kind === "summarizer");
@@ -373,7 +373,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     const ordinary = await f.registry.create(f.root);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     await ordinary.prompt("an ordinary message");
-    await waitFor(() => !ordinary.isBusy, "the ordinary turn");
+    await waitFor(() => ordinary.snapshot().configurationBlocker === null, "the ordinary turn");
     const plain = f.requests.filter((request) => request.kind === "ordinary").at(-1)!;
     const plainMarks = cacheMarks(plain);
     expect(plainMarks.every((path) => path.startsWith(".system") || path.startsWith(".tools")
@@ -402,7 +402,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     const TURNS = 210;
     for (let turn = 0; turn < TURNS; turn += 1) {
       await home.prompt(`input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => !home.isBusy, `Home turn ${turn}`);
+      await waitFor(() => home.snapshot().configurationBlocker === null, `Home turn ${turn}`);
     }
     const turns = f.requests.filter((request) => request.kind === "home");
     expect(turns.length).toBe(TURNS);
@@ -443,21 +443,49 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
     await f.service.invoke(client, "home.configureMemory", { commandId: "refused-memory", model: MODEL });
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
-    for (let turn = 0; turn < 3; turn += 1) {
+    const owner = f.registry.homeOwner();
+    const quiescent = owner.chapterQuiescent.bind(owner);
+    let release!: () => void;
+    let held = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const hook = vi.spyOn(owner, "chapterQuiescent").mockImplementation(async id => {
+      held = true;
+      await gate;
+      await quiescent(id);
+    });
+    let ready = false;
+    let readiness: Promise<unknown> | undefined;
+    try {
+      await home.prompt(`input 0 ${"i".repeat(900)}`);
+      await waitFor(() => held && !home.isBusy, "post-terminal Home quiescence");
+      expect(home.snapshot().configurationBlocker).toBe("running");
+      // Terminal receipt and actionable-work retirement precede configuration
+      // readiness while Home's chapter owner is still unwinding.
+      readiness = waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration readiness").then(() => { ready = true; });
+      await awaitsWithin(new Promise<void>(resolve => setImmediate(resolve)), "readiness observation turn");
+      expect(ready, "actionable work retirement is not configuration readiness").toBe(false);
+    } finally {
+      release();
+      hook.mockRestore();
+      await readiness;
+    }
+    for (let turn = 1; turn < 3; turn += 1) {
       await home.prompt(`input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => !home.isBusy, `Home turn ${turn}`);
+      await waitFor(() => home.snapshot().configurationBlocker === null, `Home configuration after turn ${turn}`);
     }
     const sent = f.requests.filter((request) => request.kind === "home").at(-1)!;
     await home.setModel(PROVIDER, SMALL_MODEL_ID);
     await home.prompt(`refused input ${"i".repeat(900)}`);
-    await waitFor(() => !home.isBusy, "the refused turn");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration after the refused turn");
     expect(f.records.filter((record) => record.event === "refused").map((record) => record.reason)).toContain("context-overflow");
     expect(f.requests.filter((request) => request.kind === "home").at(-1)).toBe(sent);
     await home.setModel(PROVIDER, MODEL_ID);
     await home.prompt(`input after ${"i".repeat(900)}`);
-    await waitFor(() => !home.isBusy, "the turn after the refusal");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration after the refusal");
     const next = f.requests.filter((request) => request.kind === "home").at(-1)!;
     expect(next).not.toBe(sent);
     expect(transition(sent, next)).toBe("extend");
+    report.cases.push({ case: "refused-activation-configuration-cut", heldQuiescence: held, refusedReason: "context-overflow",
+      sentHomeRequests: f.requests.filter(request => request.kind === "home").length, transition: transition(sent, next) });
   }, 300_000);
 });

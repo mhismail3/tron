@@ -245,7 +245,7 @@ const HOME_EXTENSIONS = [
 ];
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
-const HOME_TOOLS = ["ask_user", "date", "display", "memory_search", "notify", "zoom"];
+const HOME_TOOLS = ["ask_user", "date", "delegate", "display", "memory_search", "notify", "task", "zoom"];
 
 describe("Tron Home designation", () => {
   homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {
@@ -289,7 +289,7 @@ describe("Tron Home designation", () => {
     f.faux.setResponses([fauxAssistantMessage("before corruption")]);
     await home.prompt("establish the session transcript");
     await waitUntil(() => f.faux.state.callCount === 1);
-    await waitUntil(() => !home.isBusy);
+    await waitUntil(() => home.snapshot().configurationBlocker === null);
     const requestsBeforeCorruption = f.faux.state.callCount;
     expect(requestsBeforeCorruption).toBe(1);
 
@@ -304,7 +304,7 @@ describe("Tron Home designation", () => {
       f.faux.setResponses([fauxAssistantMessage("unprotected Home request")]);
       await admitted.prompt("must not reach provider after corruption");
       await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
-      await waitUntil(() => !admitted.isBusy);
+      await waitUntil(() => admitted.snapshot().configurationBlocker === null);
     } catch (error) {
       admissionError = error;
     }
@@ -317,7 +317,7 @@ describe("Tron Home designation", () => {
     f.faux.setResponses([fauxAssistantMessage("ordinary remains available")]);
     await ordinary.prompt("ordinary control");
     await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
-    await waitUntil(() => !ordinary.isBusy);
+    await waitUntil(() => ordinary.snapshot().configurationBlocker === null);
     expect(f.faux.state.callCount).toBe(requestsBeforeCorruption + 1);
   });
 
@@ -341,7 +341,7 @@ describe("Tron Home designation", () => {
     expect(registeredTools(ordinaryContext)).toEqual(registeredTools(controlContext));
 
     expect(await homeStatus(f)).toEqual({
-      available: true, enabled: false, live: false, sessionPresent: false,
+      available: true, enabled: false, live: false, sessionPresent: false, taskRecovery: { available: true },
       memory: { configured: false, open: false },
       // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
       phase: "undesignated", activation: { available: false },
@@ -411,7 +411,7 @@ describe("Tron Home designation", () => {
     await configureHomeMemory(f);
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
     await home.prompt("hello home");
-    await waitUntil(() => !home.isBusy);
+    await waitUntil(() => home.snapshot().configurationBlocker === null);
     const leaf = (home as unknown as { sessionManager: { getLeafId(): string | null } }).sessionManager.getLeafId();
     expect(leaf).toBeTypeOf("string");
     await expect(home.fork(leaf!)).rejects.toMatchObject({
@@ -464,7 +464,7 @@ describe("Tron Home designation", () => {
     expect(await homeStatus(f)).toMatchObject({ enabled: true, generation: 1, sessionId: designation.sessionId });
 
     release();
-    await waitUntil(() => !home.isBusy, 20_000);
+    await waitUntil(() => home.snapshot().configurationBlocker === null, 20_000);
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "home-disable-after-busy" }) as unknown as HomeDesignation;
     expect(disabled).toEqual({ ...designation, generation: 2 });
     expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "refused", "disabled"]);
@@ -527,7 +527,7 @@ describe("Tron Home designation", () => {
     const designation = await designate(f, "home-designate-loadout");
     const home = await f.registry.acquire(designation.sessionId);
     await home.prompt("record the loadout");
-    await waitUntil(() => !home.isBusy);
+    await waitUntil(() => home.snapshot().configurationBlocker === null);
 
     const ordinary = await f.registry.create(f.cwd);
     await ordinary.setModel(PROVIDER, MODEL_ID);
@@ -578,7 +578,7 @@ describe("Tron Home designation", () => {
     await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
     f.faux.setResponses([fauxAssistantMessage("persist virtual transcript")]);
     await home.prompt("persist disabled transcript");
-    await waitUntil(() => !home.isBusy);
+    await waitUntil(() => home.snapshot().configurationBlocker === null);
 
     const recordPath = join(f.tronHome, "gateway", "home", "home.json");
     const record = JSON.parse(await readFile(recordPath, "utf8")) as { model: { provider: string; id: string } };
@@ -606,7 +606,7 @@ describe("Tron Home designation", () => {
     expect((await homeStatus(f)).model).toEqual(MODEL);
     f.faux.setResponses([fauxAssistantMessage("persist disabled transcript")]);
     await home.prompt("persist the disabled session");
-    await waitUntil(() => !home.isBusy);
+    await waitUntil(() => home.snapshot().configurationBlocker === null);
 
     await reopen(f);
     await waitForCatalog(f);
@@ -671,13 +671,13 @@ describe("Tron Home designation", () => {
     // still streaming when its warm timer fires.
     f.faux.setResponses([response("home reply")]);
     await home.prompt(LARGE_PROMPT);
-    await waitUntil(() => !home.isBusy, 20_000);
+    await waitUntil(() => home.snapshot().configurationBlocker === null, 20_000);
     f.faux.setResponses(Array.from({ length: 6 }, () => response(SLOW_RESPONSE)));
     await home.prompt("warm this request");
     await waitUntil(() => homeSession.cacheWarmingStatus?.reason === "stopped by extension", 10_000);
     expect(homeSession.cacheWarmingStatus).toMatchObject({ state: "inactive", extensionOverride: true });
     expect(warmCalls).toEqual([]);
-    await waitUntil(() => !home.isBusy, 30_000);
+    await waitUntil(() => home.snapshot().configurationBlocker === null, 30_000);
 
     // Control: an ordinary session in the same registry and on the same model
     // does warm, so Home's zero is the profile and not a disabled warmer.
@@ -685,13 +685,13 @@ describe("Tron Home designation", () => {
     await ordinary.setModel(PROVIDER, MODEL_ID);
     f.faux.setResponses([response("ordinary reply")]);
     await ordinary.prompt(LARGE_PROMPT);
-    await waitUntil(() => !ordinary.isBusy, 20_000);
+    await waitUntil(() => ordinary.snapshot().configurationBlocker === null, 20_000);
     f.faux.appendResponses(Array.from({ length: 6 }, () => response(SLOW_RESPONSE)));
     await ordinary.prompt("warm this request");
     await waitUntil(() => warmCalls.length > 0, 10_000);
     expect(warmCalls.length).toBeGreaterThan(0);
     // Home still never warmed.
     expect(homeSession.cacheWarmingStatus).toMatchObject({ reason: "stopped by extension" });
-    await waitUntil(() => !ordinary.isBusy, 30_000);
+    await waitUntil(() => ordinary.snapshot().configurationBlocker === null, 30_000);
   });
 });

@@ -659,7 +659,7 @@ describe("session archive over the real Gateway", () => {
     // changes phase, which only a token covering the whole row overlay can
     // carry, so an owner naming the old token must be answered with rows.
     const listChangesBefore = f.listChanged.mock.calls.length;
-    await restarted.registry.clearAutomationMarker(session.id, operationId);
+    await restarted.registry.clearOwnedOperationMarker(session.id, operationId);
     expect(f.listChanged.mock.calls.length).toBeGreaterThan(listChangesBefore);
     const after = await list(client, "exclude", { projectionToken: token });
     expect(after.notModified).toBeUndefined();
@@ -911,7 +911,7 @@ describe("session archive over the real Gateway", () => {
     const client = await f.connect();
     const session = await f.coldSession("automation-lease");
     await openSession(client, session.id);
-    const lease = await f.current().registry.acquireAutomationLease(session.id);
+    const lease = await f.current().registry.acquireOwnedSessionLease(session.id);
     try {
       const archive = await client.request("automation-lease-archive", "session.archive.set", {
         commandId: "automation-lease-archive-command", sessionId: session.id, archived: true,
@@ -1407,9 +1407,9 @@ describe("session archive over the real Gateway", () => {
     await archiveSession(client, session.id, "automation-archive-command");
     f.faux.setResponses([fauxAssistantMessage("scheduled response")]);
 
-    // Mirrors AutomationExecutor: take the automation lease for a persisted
-    // session, then admit the prompt with its exact operation ownership.
-    const lease = await f.current().registry.acquireAutomationLease(session.id);
+    // Mirrors AutomationExecutor: take the shared owned-session lease for a
+    // persisted session, then admit the prompt with exact operation ownership.
+    const lease = await f.current().registry.acquireOwnedSessionLease(session.id);
     const admission = await lease.slot.prompt(
       "scheduled run",
       [],
