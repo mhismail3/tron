@@ -307,7 +307,7 @@ describe("Home materialization crash recovery", () => {
       await registry.homeOwner().configureMemory({ model });
       const live = await registry.acquire(designation.sessionId);
       await live.prompt("persist one canonical Home response");
-      await waitFor(() => !live.isBusy, "canonical prompt settled", { boundMs: 5_000, intervalMs: 25 });
+      await waitFor(() => live.snapshot().configurationBlocker === null, "canonical prompt settled", { boundMs: 5_000, intervalMs: 25 });
       expect(liveRegistry.dispatches).toBe(1);
       const retire = live.retireAfterSettled.bind(live);
       vi.spyOn(live, "retireAfterSettled").mockImplementation(async () => { await held; await retire(); });

@@ -636,6 +636,10 @@ faux-provider `home-task-dispatch.e2e.test.ts` artifact (`HOME_TASK_REPORT`) cov
 input → task → immutable report → one push + pending wake → next Home input →
 canonical attributed consumption/ack, repeated disable/re-enable, receipted
 replacement redelivery, rollover, failed fsync and ordinary-chat isolation.
+The route E2Es hold the real `terminal → acknowledged` publication and await the
+durable wake state before asserting consumption. An exact invocation receipt
+proves the operation settled; neither it nor `!isBusy` proves that the inbox's
+separate acknowledgement write has finished.
 
 ## Shared task control and spend status
 
@@ -1080,6 +1084,19 @@ invalidation or a restart, and any request after the provider's cache expired:
 
 Ordinary sessions are not affected: the handler, the layout and the retention
 belong to the Home profile.
+
+`home-cache-layout.e2e.test.ts` also holds post-terminal chapter quiescence to
+prove that actionable work may have retired while model configuration is still
+blocked. Its refused-activation case awaits `configurationBlocker: null` before
+changing the model, then verifies that the next actual provider request extends
+the previous cached view. Terminal-client receipt settlement, inbox
+acknowledgement and configuration readiness are distinct owner cuts, not a
+single idle predicate. Home runtime fixtures likewise await configuration
+readiness before changing chapter thresholds, profile/lifecycle, or reading
+post-settlement canonical state. The hard-threshold cases hold the preceding
+chapter-quiescence callback explicitly; terminal response-ordering cuts use the
+accepted operation's exact canonical receipt instead of a configuration wait
+that could depend on releasing the response under test.
 
 ## Memory and readiness
 

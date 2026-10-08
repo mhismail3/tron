@@ -17,7 +17,7 @@ import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/o
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { runHomeInput } from "../client/terminal-chat.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
 
 const evidence: Array<Record<string, unknown>> = [];
@@ -107,6 +107,45 @@ async function fixture(providerVersion?: string, codemode = false, contextWindow
       return owned.registry;
     } };
 }
+async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
+  await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
+}
+
+// Hold the real terminal → acknowledged publication so presentation retirement
+// cannot accidentally satisfy either route test's consumption cut.
+async function observeTaskAcknowledgement<T>(f: Awaited<ReturnType<typeof fixture>>, taskId: string, start: () => Promise<T>): Promise<T> {
+  const owner = f.registry.homeOwner();
+  const store: HomeTaskStore = (owner as any).tasks.store;
+  const update = store.updateWake.bind(store);
+  let release!: () => void;
+  let held = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const hook = vi.spyOn(store, "updateWake").mockImplementation(async (id, change) => {
+    const current = await store.read(id);
+    if (id === taskId && current?.wake && change(structuredClone(current.wake)).state === "acknowledged") {
+      held = true;
+      await gate;
+    }
+    return update(id, change);
+  });
+  let ready = false;
+  let acknowledgement: Promise<unknown> | undefined;
+  let accepted!: T;
+  try {
+    accepted = await start();
+    await waitFor(() => held, "task acknowledgement publication gate");
+    expect((await owner.taskResult(taskId)).wake?.state).toBe("terminal");
+    acknowledgement = waitForTaskAcknowledgement(f, taskId).then(() => { ready = true; });
+    await awaitsWithin(new Promise<void>(resolve => setImmediate(resolve)), "acknowledgement observation turn");
+    expect(ready, "actionable work retirement is not task acknowledgement").toBe(false);
+  } finally {
+    release();
+    hook.mockRestore();
+    await acknowledgement;
+  }
+  return accepted;
+}
+
 const reportCall = (id = "report-one", text = "Verified result") => fauxToolCall("report", { resultId: id, outcome: "final", text, evidence: ["focused check passed"] }, { id: `call-${id}` });
 async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-one") {
   return f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
@@ -166,7 +205,7 @@ describe("Home task authorization RPC", () => {
       return fauxAssistantMessage("Maintainer approval required");
     }]);
     await home.prompt("Try the finite work");
-    await waitFor(() => !home.isBusy, "Home authorization refusal terminal");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home authorization refusal terminal");
     expect(modelRefusal).toMatchObject({ isError: true });
     expect(JSON.stringify(modelRefusal)).toContain(requestId);
     expect(JSON.stringify(modelRefusal)).toContain("grant-required");
@@ -290,7 +329,7 @@ describe("Home task bounded backlogs", () => {
       expect(JSON.stringify(context)).not.toContain("Home task backlog-");
       return fauxAssistantMessage("Results wait for a shorter activation");
     }]);
-    await home.prompt("u".repeat(60000)); await waitFor(() => !home.isBusy, "temporarily starved inbox");
+    await home.prompt("u".repeat(60000)); await waitFor(() => home.snapshot().configurationBlocker === null, "temporarily starved inbox");
     expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
     for (const task of tasks) expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
     for (let i = 0; i < 6; i++) {
@@ -299,14 +338,17 @@ describe("Home task bounded backlogs", () => {
         expect(JSON.stringify(context)).toMatch(/more task results pending/);
         return fauxAssistantMessage("Reviewed results");
       }]);
-      await home.prompt("Review pending results"); await waitFor(() => !home.isBusy, "bounded inbox activation");
+      await home.prompt("Review pending results"); await waitFor(() => home.snapshot().configurationBlocker === null, "bounded inbox activation");
       if (batches.flat().length === tasks.length) break;
     }
     expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
     expect(batches.length).toBeGreaterThan(1);
     expect(batches.flat()).toEqual(tasks.map(t => t.taskId));
     expect(f.signals).not.toContainEqual(expect.objectContaining({ reason: "context-overflow" }));
-    for (const task of tasks) expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    for (const task of tasks) {
+      await waitForTaskAcknowledgement(f, task.taskId);
+      expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
+    }
     evidence.push({ case: "bounded-backlog", batches });
   }, 30_000);
 
@@ -320,7 +362,7 @@ describe("Home task bounded backlogs", () => {
     const small = await (await dispatch(f, "small")).completion;
     const home = await f.registry.acquire(f.home.sessionId); let request = "";
     f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Read references"); }]);
-    await home.prompt("Review"); await waitFor(() => !home.isBusy, "reference inbox");
+    await home.prompt("Review"); await waitFor(() => home.snapshot().configurationBlocker === null, "reference inbox");
     const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
     expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
     expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
@@ -337,6 +379,8 @@ describe("Home task bounded backlogs", () => {
     expect(report.text).toBe("🦊".repeat(16384));
     await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: -1, limit: 1024 } as any)).rejects.toThrow(/page/);
     await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: 0, limit: 1_000_000 } as any)).rejects.toThrow(/page/);
+    await waitForTaskAcknowledgement(f, large.taskId);
+    await waitForTaskAcknowledgement(f, small.taskId);
     expect(await owner.taskResult(large.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     expect(await owner.taskResult(small.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     evidence.push({ case: "never-fit-reference-and-pages", messages, pages: pages.length, bytes: pages.reduce((n, p) => n + Buffer.byteLength(p.text), 0) });
@@ -349,7 +393,7 @@ describe("Home task bounded backlogs", () => {
     if (kind !== "initial") {
       const first = await f.registry.acquire(sessionId);
       f.faux.setResponses([fauxAssistantMessage("Initial conversation")]);
-      await first.prompt("First"); await waitFor(() => !first.isBusy, "first chapter activation");
+      await first.prompt("First"); await waitFor(() => first.snapshot().configurationBlocker === null, "first chapter activation");
       const port = (owner as any).options.sessions;
       if (kind === "replacement") {
         const present = port.sessionPresent.bind(port);
@@ -372,15 +416,16 @@ describe("Home task bounded backlogs", () => {
     const task = await (await owner.dispatchTask(sessionId, { taskId: `task-${kind}`, intent: "Finite work", target: f.cwd })).completion;
     let request = "";
     f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Reviewed first backlog"); }]);
-    await home.prompt("Review pending"); await waitFor(() => !home.isBusy, "first backlog activation");
+    await home.prompt("Review pending"); await waitFor(() => home.snapshot().configurationBlocker === null, "first backlog activation");
     expect(request).toContain("Verified result");
     if (kind !== "initial") expect(request).toContain("Initial conversation");
+    await waitForTaskAcknowledgement(f, task.taskId);
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     await rm(path);
     await expect((owner as any).memoryView({ operationId: "lost", nonce: "lost", boundaryEntryId: null }, undefined)).rejects.toThrow();
     let providers = 0;
     f.faux.setResponses([() => { providers++; return fauxAssistantMessage("Must not see provider"); }]);
-    await home.prompt("After data loss"); await waitFor(() => !home.isBusy, "canonical loss refuses before provider");
+    await home.prompt("After data loss"); await waitFor(() => home.snapshot().configurationBlocker === null, "canonical loss refuses before provider");
     expect(providers).toBe(0);
     expect(f.signals.filter(record => record.event === "refused")).toContainEqual(expect.objectContaining({ reason: expect.stringMatching(/memory-blocked|memory-unavailable/) }));
     evidence.push({ case: `chapter-${kind}-first-backlog-and-loss`, consumed: task.taskId });
@@ -593,7 +638,7 @@ describe("Home task cold reconciliation", () => {
     expect(f.signals.filter(signal => signal.event === "home.task.store-refused" && signal.reason === "unsafe-state")).toHaveLength(1);
     const ordinary = await cold.create(f.cwd);
     f.faux.setResponses([fauxAssistantMessage("Ordinary sessions still work")]);
-    await ordinary.prompt("ordinary input"); await waitFor(() => !ordinary.isBusy, "ordinary fenced-owner prompt");
+    await ordinary.prompt("ordinary input"); await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary fenced-owner prompt");
     expect(ordinary.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "message", message: expect.objectContaining({ role: "assistant", content: expect.arrayContaining([expect.objectContaining({ text: "Ordinary sessions still work" })]) }) }));
     expect(await readFile(taskPath, "utf8")).toBe(taskBytes); expect(await readFile(authPath, "utf8")).toBe(authBytes);
     const again = await f.restart();
@@ -750,7 +795,8 @@ describe("Home task production dispatch", () => {
     let instructions = "";
     f.faux.setResponses([(context) => { request = JSON.stringify(context); instructions = JSON.stringify(context.messages.filter(message => message.role === "system")); return fauxAssistantMessage("Result consumed"); }]);
     await home.prompt("What happened?");
-    await waitFor(() => !home.isBusy, "Home inbox terminal");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home inbox terminal");
+    await waitForTaskAcknowledgement(f, run.taskId);
     const consumed = await f.registry.homeOwner().taskResult(run.taskId);
     expect(consumed).toMatchObject({ wake: { state: "acknowledged" } });
     expect(request).toContain("Verified result");
@@ -768,7 +814,7 @@ describe("Home task production dispatch", () => {
       expect.objectContaining({ state: "admitted", reason: "canonical-admission" }), expect.objectContaining({ state: "acknowledged", reason: "canonical-consumed" })]));
     expect(JSON.stringify(f.signals.filter(record => record.event === "home.task.inbox"))).not.toMatch(/Verified result|task-one|Finite work/);
     f.faux.setResponses([fauxAssistantMessage("No duplicate")]);
-    await home.prompt("Again"); await waitFor(() => !home.isBusy, "second Home terminal");
+    await home.prompt("Again"); await waitFor(() => home.snapshot().configurationBlocker === null, "second Home terminal");
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
     expect(f.notifications.filter(input => input.sourceId === (task as any).wake.eventId)).toHaveLength(1);
     evidence.push({ case: "input-task-report-push-pending-consumption", task, consumed, attributed, request });
@@ -794,12 +840,13 @@ describe("Home task production dispatch", () => {
     });
     f.faux.setResponses([fauxAssistantMessage("result received")]);
     await home.prompt("Read the result").catch(() => {});
-    await waitFor(() => !home.isBusy, "failed sync Home terminal");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "failed sync Home terminal");
     expect((await owner.taskResult(task.taskId)).wake?.state).not.toBe("acknowledged");
     expect(failedSync).toBe(true);
     vi.restoreAllMocks();
     f.faux.setResponses([fauxAssistantMessage("reconciled")]);
-    await home.prompt("Continue"); await waitFor(() => !home.isBusy, "reconciled sync terminal");
+    await home.prompt("Continue"); await waitFor(() => home.snapshot().configurationBlocker === null, "reconciled sync terminal");
+    await waitForTaskAcknowledgement(f, task.taskId);
     expect((await owner.taskResult(task.taskId)).wake?.state).toBe("acknowledged");
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
     evidence.push({ case: "canonical-fsync-before-ack", failedSync, recovered: await owner.taskResult(task.taskId) });
@@ -821,7 +868,7 @@ describe("Home task production dispatch", () => {
     await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: task.taskId })], { stopReason: "toolUse" }), fauxAssistantMessage("consumed once")]);
     const home = await f.registry.acquire(f.home.sessionId);
-    await home.prompt("Continue"); await waitFor(() => !home.isBusy, "reenabled inbox terminal");
+    await observeTaskAcknowledgement(f, task.taskId, () => home.prompt("Continue"));
     expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "task")).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ isError: false }) }));
     evidence.push({ case: "inbox-disable-reenable", before, after });
@@ -832,7 +879,7 @@ describe("Home task production dispatch", () => {
     await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
     let home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
-    await home.prompt("Start Home"); await waitFor(() => !home.isBusy, "initial Home terminal");
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
     const port = (owner as any).options.sessions;
@@ -843,7 +890,7 @@ describe("Home task production dispatch", () => {
     expect((await owner.status() as any).routeGeneration).toBe(task.routeGeneration + 1);
     home = await f.registry.acquire(replacement.sessionId);
     f.faux.setResponses([fauxAssistantMessage("replacement sees no old result")]);
-    await home.prompt("Continue after replacement"); await waitFor(() => !home.isBusy, "replacement terminal");
+    await home.prompt("Continue after replacement"); await waitFor(() => home.snapshot().configurationBlocker === null, "replacement terminal");
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
     expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
     const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
@@ -862,10 +909,9 @@ describe("Home task production dispatch", () => {
     await owner.chapterQuiescent(replacement.sessionId); metrics.mockRestore();
     const sealed = await readFile(oldPath);
     f.faux.setResponses([fauxAssistantMessage("current chapter receives result")]);
-    const accepted = await service.invoke(client, "home.prompt", { commandId: "next-chapter-message", text: "Review the task" }) as any;
+    const accepted = await observeTaskAcknowledgement(f, task.taskId, () => service.invoke(client, "home.prompt", { commandId: "next-chapter-message", text: "Review the task" })) as any;
     expect(accepted.sessionId).not.toBe(replacement.sessionId);
     const current = await f.registry.acquire(accepted.sessionId);
-    await waitFor(() => !current.isBusy, "rollover result terminal");
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "acknowledged" } });
     // Once consumed, redelivery is ineligible. Only the original command's
     // receipt may still return its accepted result without invoking the owner.
@@ -892,7 +938,7 @@ describe("Home task production dispatch", () => {
       await waitFor(() => entered, "worker provider barrier");
       f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "steer", taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1, text: "Home tool instruction" })], { stopReason: "toolUse" }), fauxAssistantMessage("shared steering accepted")]);
       await home.prompt("Steer the active task");
-      await waitFor(() => !home.isBusy, "Home task tool terminal");
+      await waitFor(() => home.snapshot().configurationBlocker === null, "Home task tool terminal");
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home tool instruction"]);
       release(); await run.completion;
       evidence.push({ case: "home-task-tool", steering: "accepted" });
@@ -1229,7 +1275,7 @@ describe("Home task production dispatch", () => {
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", { agent: "worker", task: "work", async: true })], { stopReason: "toolUse" }), fauxAssistantMessage("ordinary completion")]);
     const slot = await f.registry.create(f.cwd); await slot.prompt("ordinary delegation");
     await waitFor(() => existsSync(join(f.cwd, "subagent-effect.json")), "ordinary async producer invocation");
-    await waitFor(() => !slot.isBusy, "ordinary producer terminal");
+    await waitFor(() => slot.snapshot().configurationBlocker === null, "ordinary producer terminal");
     evidence.push({ case: "ordinary-async-negative-control", admitted: true, injectedProducer: true });
   }, 20_000);
 
@@ -1268,7 +1314,7 @@ describe("Home task production dispatch", () => {
       catch { return false; }
     }, "delegate task terminal");
     expect((await f.registry.homeOwner().taskResult("task-via-tool")).terminalEvidence?.outcome).toBe("final");
-    await waitFor(() => !home.isBusy, "Home tool activation terminal");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home tool activation terminal");
     evidence.push({ case: "production-delegate", taskOutcome: "final", noAutomaticWake: homeCalls === 2 });
   }, 20_000);
   it("admits once, seals exact canonical report evidence and refuses replay or conflicting reports", async () => {
@@ -1355,7 +1401,7 @@ describe("Home task production dispatch", () => {
     const requests: unknown[] = [];
     f.faux.setResponses([(context) => { requests.push(context); return fauxAssistantMessage("Ordinary reply"); }]);
     await ordinary.prompt("hello");
-    await waitFor(() => !ordinary.isBusy, "ordinary terminal");
+    await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
     const tools = JSON.stringify((await ordinary.context() as any).availableTools);
     expect(requests).toHaveLength(1);
     expect(tools).not.toMatch(/"name":"(?:report|delegate)"/);

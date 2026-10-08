@@ -84,7 +84,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     await first.homeOwner().configureMemory({ model });
     faux.setResponses([fauxAssistantMessage("persisted Home reply")]);
     await home.prompt("Persist this Home chapter for cold acquisition");
-    await waitFor(() => !home.isBusy, "Home persisted turn");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home persisted turn");
     expect(await readFile(home.sessionFile!, "utf8")).toContain("persisted Home reply");
     await first.homeOwner().disable();
     expect(await first.acquire(designation.sessionId)).toBe(home);

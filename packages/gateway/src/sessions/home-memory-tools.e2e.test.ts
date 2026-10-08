@@ -305,7 +305,7 @@ async function runActivation(f: Fixture, input: string, steps: Step[]): Promise<
   const before = f.requests.length;
   await f.slot.prompt(input);
   await waitUntil(() => f.requests.length >= before + steps.length + 1);
-  await waitUntil(() => !f.slot.isBusy);
+  await waitUntil(() => f.slot.snapshot().configurationBlocker === null);
   const activation = f.requests.slice(before);
   expect(activation.length, "one request per step, plus the closing reply").toBe(steps.length + 1);
   return activation.at(-1)!;
@@ -323,7 +323,7 @@ async function toolAnswers(f: Fixture, input: string, steps: Step[]): Promise<To
 async function prompt(f: Fixture, input: string, reply: string): Promise<void> {
   f.faux.setResponses([async (context: { messages: Array<{ role: string }> }) => { f.requests.push(record(context)); return fauxAssistantMessage(reply); }]);
   await f.slot.prompt(input);
-  await waitUntil(() => !f.slot.isBusy);
+  await waitUntil(() => f.slot.snapshot().configurationBlocker === null);
 }
 
 const ok = (answer: ToolObservation): string => {
@@ -846,7 +846,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
       async (context: { messages: Array<{ role: string }> }) => { f.requests.push(record(context)); return fauxAssistantMessage("done"); },
     ]);
     await f.slot.prompt("tools");
-    await waitUntil(() => !f.slot.isBusy);
+    await waitUntil(() => f.slot.snapshot().configurationBlocker === null);
     const answers = toolResultsOf(f.requests.at(-1)!);
     const row = {
       blocked: (await memoryStatus(f)).blocked ?? null,
