@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class TronReadonlyAttachmentUITests: XCTestCase {
     @MainActor func testDownloadedImageSelectionAndZoomSurviveBackgroundReconnect() {
@@ -50,6 +51,81 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(image.waitForExistence(timeout: 10), "Static display selection is not a live/browser lease")
         XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: "label == %@", value: before))
         keepEvidence(app, name: "348-readonly-display-image-after")
+    }
+
+    @MainActor func testVideoDisplaySheetOpensAtMediumPlaysAndExpandsToLarge() {
+        continueAfterFailure = false
+        for scenario in ["display-video", "display-video-light", "display-video-accessibility", "display-video-light-accessibility"] {
+            let app = launch(scenario); defer { app.terminate() }
+            let transcriptPlayer = app.otherElements["display.video.player"]
+            XCTAssertTrue(transcriptPlayer.waitForExistence(timeout: 15), "\(scenario): transcript video is mounted")
+            let expand = app.buttons["Open Inline video fixture in sheet"]
+            XCTAssertTrue(expand.waitForExistence(timeout: 10)); expand.tap()
+            let done = app.buttons["Done"]
+            XCTAssertTrue(done.waitForExistence(timeout: 10), "\(scenario): shared document sheet chrome is installed")
+            let sheetPlayer = app.otherElements["display.video.sheet.player"]
+            XCTAssertTrue(sheetPlayer.waitForExistence(timeout: 10), "\(scenario): video player is visible in the sheet")
+            let mediumTop = done.frame.minY
+            XCTAssertGreaterThan(mediumTop, app.windows.firstMatch.frame.height * 0.40, "\(scenario): sheet begins at medium")
+            let mediumPlayerFrame = sheetPlayer.frame
+            XCTAssertGreaterThanOrEqual(mediumPlayerFrame.height, 220, "\(scenario): the player has its bounded viewport at medium")
+            XCTAssertGreaterThanOrEqual(mediumPlayerFrame.minY, done.frame.maxY, "\(scenario): player begins below the shared title and top blur")
+            XCTAssertLessThanOrEqual(mediumPlayerFrame.maxY, app.windows.firstMatch.frame.maxY, "\(scenario): player remains inside the medium sheet")
+            XCTAssertTrue(sheetPlayer.isHittable, "\(scenario): player controls can receive interaction at medium")
+
+            let clocks = app.staticTexts.matching(identifier: "display.video.sheet.playback-time")
+            XCTAssertTrue(clocks.firstMatch.waitForExistence(timeout: 10))
+            let clock = clocks.element(boundBy: clocks.count - 1)
+            let initialTime = Double(clock.label) ?? 0
+            sheetPlayer.tap()
+            var advanced = false
+            for _ in 0..<30 {
+                if (Double(clock.label) ?? initialTime) > initialTime + 0.2 { advanced = true; break }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            XCTAssertTrue(advanced, "\(scenario): playback advances without enlarging the sheet")
+            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.40, "\(scenario): playback leaves the sheet at medium")
+            RunLoop.current.run(until: Date().addingTimeInterval(5.5))
+            keepScreenshot(app, "520-video-medium-playing-\(scenario)")
+            assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
+
+            sheetPlayer.tap()
+            let playPause = app.buttons["Play/Pause"]
+            XCTAssertTrue(playPause.waitForExistence(timeout: 3), "\(scenario): visible native playback controls are reachable")
+            XCTAssertTrue(playPause.isHittable, "\(scenario): native play/pause control is reachable at medium")
+            if playPause.label == "Pause" { playPause.tap() }
+            XCTAssertEqual(playPause.label, "Play", "\(scenario): native control reports the paused state")
+            let pausedTime = Double(clock.label) ?? 0
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+            XCTAssertEqual(Double(clock.label) ?? pausedTime, pausedTime, accuracy: 0.05, "\(scenario): playback can be paused at medium")
+            keepScreenshot(app, "520-video-medium-paused-controls-\(scenario)")
+
+            app.swipeUp()
+            let expanded = NSPredicate { element, _ in
+                guard let button = element as? XCUIElement else { return false }
+                return button.frame.minY < mediumTop - 100
+            }
+            expectation(for: expanded, evaluatedWith: done)
+            waitForExpectations(timeout: 8)
+            XCTAssertTrue(sheetPlayer.exists && sheetPlayer.isHittable, "\(scenario): player survives the large detent")
+            XCTAssertGreaterThan(sheetPlayer.frame.height, mediumPlayerFrame.height + 100, "\(scenario): the player re-lays out with the expanded detent")
+            let largePlayPause = app.buttons["Play/Pause"]
+            if largePlayPause.label == "Play" { largePlayPause.tap() }
+            RunLoop.current.run(until: Date().addingTimeInterval(5.5))
+            keepScreenshot(app, "520-video-large-\(scenario)")
+            assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
+        }
+    }
+
+    @MainActor func testDocumentDisplaySheetKeepsExistingLargeDetent() {
+        continueAfterFailure = false
+        let app = launch("display-file"); defer { app.terminate() }
+        let display = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Readonly display file'" )).firstMatch
+        XCTAssertTrue(display.waitForExistence(timeout: 15)); display.tap()
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        keepScreenshot(app, "520-document-sheet-large-negative-control")
+        XCTAssertLessThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35, "Document display retains its existing large-only detent")
     }
 
     @MainActor func testDownloadedDisplayFileRouteAndReaderSurviveReconnect() {
@@ -141,6 +217,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if scenario.contains("accessibility") {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         app.launch(); return app
     }
     @MainActor private func openImage(_ app: XCUIApplication) -> XCUIElement {
@@ -158,6 +237,53 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let condition = value.map { NSPredicate(format: predicate, $0) } ?? NSPredicate(format: predicate)
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: condition, object: element)], timeout: 10) == .completed
     }
+    @MainActor private func assertGeneratedVideoEdge(
+        in app: XCUIApplication,
+        player: XCUIElement,
+        scenario: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else {
+            XCTFail("\(scenario): screenshot has no image", file: file, line: line)
+            return
+        }
+        let viewport = player.frame
+        let fittedSide = min(viewport.width, viewport.height)
+        let fittedOrigin = CGPoint(
+            x: viewport.minX + (viewport.width - fittedSide) / 2,
+            y: viewport.minY + (viewport.height - fittedSide) / 2
+        )
+        let screenFrame = app.frame
+        let yPoint = fittedOrigin.y + fittedSide * 0.05
+        let sample = { (xPoint: CGFloat) -> (Int, Int, Int)? in
+            let x = Int((xPoint - screenFrame.minX) * CGFloat(image.width) / screenFrame.width)
+            let y = Int((yPoint - screenFrame.minY) * CGFloat(image.height) / screenFrame.height)
+            guard x >= 0, x < image.width, y >= 0, y < image.height,
+                  let pixel = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else { return nil }
+            var rgba = [UInt8](repeating: 0, count: 4)
+            let color = rgba.withUnsafeMutableBytes { buffer -> (Int, Int, Int)? in
+                guard let context = CGContext(
+                    data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+                ) else { return nil }
+                context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                return (Int(buffer[0]), Int(buffer[1]), Int(buffer[2]))
+            }
+            return color
+        }
+        // The generated clip is cyan on the left and magenta on the right. The
+        // matched pair sits in the top band, where title-blur underlap occurred.
+        let delta = max(fittedSide * 0.01, 1)
+        guard let left = sample(viewport.midX - delta), let right = sample(viewport.midX + delta) else {
+            XCTFail("\(scenario): video edge samples are outside the captured viewport", file: file, line: line)
+            return
+        }
+        let contrast = abs(left.0 - right.0) + abs(left.1 - right.1) + abs(left.2 - right.2)
+        XCTAssertGreaterThan(contrast, 180, "\(scenario): the distinct video edge must remain visible; RGB samples \(left) and \(right) differ by only \(contrast)", file: file, line: line)
+    }
+
     @MainActor private func keepEvidence(_ app: XCUIApplication, name: String) {
         let attachment = XCTAttachment(string: "before=\(app.staticTexts["fixture.preview-before"].label)\nafter=\(app.staticTexts["fixture.preview-native"].label)\n\(app.staticTexts["fixture.preview-counts"].label)")
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)

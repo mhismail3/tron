@@ -490,6 +490,9 @@ final class AppModel {
     private var recoveryDisplayProfileID: String?
     private var recoveryDisplayTask: Task<Void, Never>?
     private var recoveryDisplayNoticeEpisode: Int?
+#if HOSTED_TEST
+    var hostedDisplayArtifactFile: (@Sendable (String, String, String, Int, Int64) async throws -> URL)?
+#endif
     private var optionalReconnectRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshLifecycleGeneration: Int?
@@ -836,7 +839,12 @@ final class AppModel {
         maximumBytes: Int,
         expectedBytes: Int64
     ) async throws -> URL {
-        try await client.displayArtifactFile(
+#if HOSTED_TEST
+        if let hostedDisplayArtifactFile {
+            return try await hostedDisplayArtifactFile(id, sessionID, profileID, maximumBytes, expectedBytes)
+        }
+#endif
+        return try await client.displayArtifactFile(
             id: id,
             sessionID: sessionID,
             profileID: profileID,

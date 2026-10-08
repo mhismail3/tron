@@ -180,7 +180,7 @@ function restoreOwnedState(root, original, npmBin, spawn) {
     manifestError = error instanceof Error ? error.message : String(error);
   }
   const recovery = spawn(npmBin, ["ci", "--engine-strict", ...REGISTRY_ARGS], {
-    cwd: root, stdio: "inherit", env: { ...process.env, npm_config_offline: "false", npm_config_engine_strict: "true" },
+    cwd: root, stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" }
   });
   const recoveryError = recovery.status === 0 ? undefined : commandFailure("npm ci recovery", recovery);
   if (manifestError || recoveryError) {
@@ -213,7 +213,7 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
     const command = updateCommand(version);
     installStarted = true;
-    const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, npm_config_offline: "false", npm_config_engine_strict: "true" } });
+    const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" } });
     if (install.status !== 0) throw new Error(commandFailure("npm install", install));
     const report = validatePiSdk({ gatewayDir: root });
     if (!report.ok) throw new Error(formatPiSdkReport(report));

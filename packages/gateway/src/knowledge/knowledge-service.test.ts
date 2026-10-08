@@ -80,6 +80,26 @@ describe("KnowledgeService integration", () => {
     expect((await store.config()).knowledgeModel).toBeUndefined();
   });
 
+  it("admits changed Knowledge and observation models before durable configuration and exempts receipt replay", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-model-admission-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const admit = vi.fn(async (modelRef: string) => {
+      if (modelRef === "openai/gpt-4") throw new Error("ineligible model");
+    });
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, undefined, undefined, undefined, undefined, undefined, admit);
+    const set = { action: "setKnowledgeModel", commandId: "agent-knowledge-admission", expectedConfigRevision: 0, knowledgeModel: "openai/gpt-5.5" } as const;
+    const accepted = await service.tool(set);
+    await expect(service.tool(set)).resolves.toEqual(accepted);
+    expect(admit).toHaveBeenCalledTimes(1);
+    expect(admit).toHaveBeenCalledWith("openai/gpt-5.5");
+
+    const before = await store.config();
+    const blocked = { ...before, observation: { ...before.observation, model: "openai/gpt-4" } };
+    await expect(service.invoke({ operation: "knowledge.config", request: { commandId: "knowledge-observation-hidden-model", config: blocked } } as never)).rejects.toThrow("ineligible model");
+    await expect(service.tool({ action: "setKnowledgeModel", commandId: "agent-hidden-knowledge-model", expectedConfigRevision: before.revision, knowledgeModel: "openai/gpt-4" })).rejects.toThrow("ineligible model");
+    expect(await store.config()).toEqual(before);
+  });
+
   it("refuses summary generation without knowledgeModel.model even when observation.model exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-source-summary-no-knowledge-model-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

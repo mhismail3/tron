@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -41,7 +41,7 @@ function homeCase(name: string, body: () => Promise<void>): void {
       report.cases.push({ name, outcome: "failed", detail: error instanceof Error ? error.message : String(error) });
       throw error;
     }
-  });
+  }, 30_000);
 }
 
 const roots: string[] = [];
@@ -131,13 +131,18 @@ function openRegistry(f: {
   return { registry, service };
 }
 
-async function fixture(label: string, options: { cacheWarming?: boolean; virtualModel?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { cacheWarming?: boolean; virtualModel?: boolean; symlinkHome?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
-  const tronHome = join(root, "tron");
+  const tronHome = join(root, options.symlinkHome ? "tron-link" : "tron");
   await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+  if (options.symlinkHome) {
+    const actualTronHome = join(root, "tron-real");
+    await mkdir(actualTronHome);
+    await symlink(actualTronHome, tronHome);
+  }
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({
     defaultProvider: PROVIDER,
     defaultModel: MODEL_ID,
@@ -242,7 +247,80 @@ const HOME_EXTENSIONS = [
  * the assertions read it. */
 const HOME_TOOLS = ["ask_user", "date", "display", "memory_search", "notify", "zoom"];
 
-describe.sequential("Tron Home designation", () => {
+describe("Tron Home designation", () => {
+  homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {
+    const f = await fixture("enabled-model-designate");
+    const original = await designate(f, "home-designate-enabled-model");
+    const home = await f.registry.acquire(original.sessionId);
+    const before = await homeStatus(f);
+    const runtimeModel = home.snapshot().model;
+
+    await expect(f.service.invoke(client, "home.designate", {
+      commandId: "home-designate-enabled-different-model",
+      model: { provider: PROVIDER, id: OTHER_MODEL_ID },
+    })).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("session.setModel"),
+    });
+    expect(await homeStatus(f)).toEqual(before);
+    expect(home.snapshot().model).toEqual(runtimeModel);
+    expect(f.diagnostics).toEqual([
+      { outcome: "designated" },
+      { outcome: "refused", reason: "model-change-requires-session-set-model" },
+    ]);
+
+    const sameModel = await designate(f, "home-designate-enabled-same-model", MODEL);
+    expect(sameModel).toEqual(original);
+    expect(await designate(f, "home-designate-enabled-same-model", MODEL)).toEqual(original);
+
+    const noModel = await designate(f, "home-designate-enabled-no-model", null);
+    expect(noModel).toEqual(original);
+    expect(await designate(f, "home-designate-enabled-no-model", null)).toEqual(original);
+    expect(await homeStatus(f)).toEqual(before);
+    expect(home.snapshot().model).toEqual(runtimeModel);
+  });
+
+  homeCase("refuses a former Home after record corruption without blocking ordinary provider requests", async () => {
+    const f = await fixture("corrupt-record", { symlinkHome: true });
+    const designation = await designate(f, "home-designate-corrupt-record");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-before-corruption" });
+    await home.setModel(PROVIDER, MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("before corruption")]);
+    await home.prompt("establish the session transcript");
+    await waitUntil(() => f.faux.state.callCount === 1);
+    await waitUntil(() => !home.isBusy);
+    const requestsBeforeCorruption = f.faux.state.callCount;
+    expect(requestsBeforeCorruption).toBe(1);
+
+    await writeFile(join(f.tronHome, "gateway", "home", "home.json"), "{broken", { mode: 0o600 });
+    await reopen(f);
+    await waitForCatalog(f);
+    let admissionError: unknown;
+    try {
+      const admitted = await f.registry.acquire(designation.sessionId);
+      // Negative-control path: without the guard the former Home is an ordinary
+      // runtime and sends its canonical transcript to the provider.
+      f.faux.setResponses([fauxAssistantMessage("unprotected Home request")]);
+      await admitted.prompt("must not reach provider after corruption");
+      await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
+      await waitUntil(() => !admitted.isBusy);
+    } catch (error) {
+      admissionError = error;
+    }
+    if (!admissionError) expect(f.faux.state.callCount).toBe(requestsBeforeCorruption + 1);
+    expect(admissionError).toMatchObject({ code: "conflict" });
+    expect(f.faux.state.callCount).toBe(requestsBeforeCorruption);
+
+    const ordinary = await f.registry.create(f.cwd);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("ordinary remains available")]);
+    await ordinary.prompt("ordinary control");
+    await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
+    await waitUntil(() => !ordinary.isBusy);
+    expect(f.faux.state.callCount).toBe(requestsBeforeCorruption + 1);
+  });
+
   homeCase("gives a new Home the curated first runtime and leaves ordinary sessions unchanged", async () => {
     // Failure modes 12-17, 19, 21, 22.
     const f = await fixture("profile", { virtualModel: true });
@@ -294,9 +372,9 @@ describe.sequential("Tron Home designation", () => {
     expect(activeTools(await contextOf(ordinary))).toEqual(activeTools(ordinaryContext));
     expect(extensionNames(await contextOf(ordinary))).toEqual(extensionNames(ordinaryContext));
 
-    expect(await homeStatus(f)).toEqual({
+    expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
-      sessionId: designation.sessionId, generation: 1, model: MODEL, live: true, sessionPresent: true,
+      sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
       // Home has no memory defaults: until `home.configureMemory`, the
       // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false },
@@ -328,33 +406,19 @@ describe.sequential("Tron Home designation", () => {
     await expect(home.setModel(PROVIDER, VIRTUAL_MODEL_ID)).rejects.toMatchObject({ code: "invalid_request" });
     expect(await homeStatus(f)).toMatchObject({ model: MODEL });
 
-    // Forking the Home session yields an ordinary session. Home's memory is
-    // configured first, so the prompt below is a real Home turn rather than a
-    // fail-closed refusal.
+    // An active Home slot cannot be rekeyed by a fork. Configure memory so
+    // the source has a real canonical turn rather than an admission refusal.
     await configureHomeMemory(f);
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
     await home.prompt("hello home");
     await waitUntil(() => !home.isBusy);
     const leaf = (home as unknown as { sessionManager: { getLeafId(): string | null } }).sessionManager.getLeafId();
     expect(leaf).toBeTypeOf("string");
-    const forked = await home.fork(leaf!);
-    expect(f.registry.homeOwner().profileFor(forked.sessionId)).not.toBe("home");
-    const forkedSlot = await f.registry.acquire(forked.sessionId);
-    const forkedContext = await contextOf(forkedSlot);
-    // The curated profile is keyed by session id, so the fork registers exactly
-    // what the control registry's ordinary session registers, and compaction is
-    // back to the canonical budget. Its *active* set is the Home loadout the
-    // canonical transcript declares, which Pi replays for every chat (documented
-    // in docs/home.md), minus the tools this profile cannot register: the memory
-    // tools come from the Home-only module, so a fork can never read Home's
-    // memory. `session.setTools` is how a user changes the loadout.
-    expect(registeredTools(forkedContext)).toEqual(registeredTools(controlContext));
-    expect(extensionNames(forkedContext)).toEqual(extensionNames(controlContext));
-    expect(activeTools(forkedContext)).toEqual(HOME_TOOLS.filter((name) => registeredTools(forkedContext).includes(name)));
-    expect(activeTools(forkedContext)).not.toContain("zoom");
-    expect(forkedSlot.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
-    await forkedSlot.setTools(activeTools(controlContext));
-    expect(activeTools(await contextOf(forkedSlot))).toEqual(activeTools(controlContext));
+    await expect(home.fork(leaf!)).rejects.toMatchObject({
+      code: "conflict", details: { reason: "home-identity-replacement", sessionId: home.id },
+    });
+    expect(await f.registry.acquire(designation.sessionId)).toBe(home);
+    expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: false });
   });
 
   homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from Home", async () => {
@@ -504,6 +568,53 @@ describe.sequential("Tron Home designation", () => {
     const home = await f.registry.acquire(fresh.sessionId);
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
     expect(await homeStatus(f)).toMatchObject({ enabled: true, sessionId: fresh.sessionId, live: true, sessionPresent: true });
+  });
+
+  homeCase("refuses a virtual model in the Home record on cold acquisition", async () => {
+    const f = await fixture("model-virtual-record", { virtualModel: true });
+    const designation = await designate(f, "home-designate-virtual-record");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-virtual-record" });
+    await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("persist virtual transcript")]);
+    await home.prompt("persist disabled transcript");
+    await waitUntil(() => !home.isBusy);
+
+    const recordPath = join(f.tronHome, "gateway", "home", "home.json");
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as { model: { provider: string; id: string } };
+    record.model = { provider: PROVIDER, id: VIRTUAL_MODEL_ID };
+    await writeFile(recordPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    expect(JSON.parse(await readFile(recordPath, "utf8")).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    await reopen(f);
+    await waitForCatalog(f);
+    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+    await designate(f, "home-reenable-virtual-record", null);
+    expect((await homeStatus(f)).model).toEqual({ provider: PROVIDER, id: VIRTUAL_MODEL_ID });
+
+    const requestsBeforeAcquire = f.faux.state.callCount;
+    await expect(f.registry.acquire(designation.sessionId)).rejects.toMatchObject({ code: "conflict" });
+    expect(f.faux.state.callCount).toBe(requestsBeforeAcquire);
+  });
+
+  homeCase("restores the recorded model when re-enabling an unloaded Home", async () => {
+    const f = await fixture("model-unloaded", { virtualModel: true });
+    const designation = await designate(f, "home-designate-model-unloaded");
+    const home = await f.registry.acquire(designation.sessionId);
+    await f.service.invoke(client, "home.disable", { commandId: "home-disable-model-unloaded" });
+    await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
+    expect(home.snapshot().model).toMatchObject({ id: VIRTUAL_MODEL_ID });
+    expect((await homeStatus(f)).model).toEqual(MODEL);
+    f.faux.setResponses([fauxAssistantMessage("persist disabled transcript")]);
+    await home.prompt("persist the disabled session");
+    await waitUntil(() => !home.isBusy);
+
+    await reopen(f);
+    await waitForCatalog(f);
+    expect((await homeStatus(f)).live).toBe(false);
+    await designate(f, "home-reenable-model-unloaded");
+    const restored = await f.registry.acquire(designation.sessionId);
+    expect(restored.snapshot().model).toMatchObject({ provider: PROVIDER, id: MODEL_ID });
+    expect((await homeStatus(f)).model).toEqual(MODEL);
   });
 
   homeCase("applies the recorded physical model when re-enabling a Home whose session moved on", async () => {

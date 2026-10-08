@@ -12,20 +12,60 @@
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
+import { dirname, join } from "node:path";
+import { ModelRuntime, AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+
+const admissionLimits = vi.hoisted(() => ({ bytes: 200 * 1_024 * 1_024, entries: 100_000 }));
+vi.mock("../home/home-chapter-state.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../home/home-chapter-state.js")>(),
+  get HOME_HARD_BYTES() { return admissionLimits.bytes; },
+  get HOME_HARD_ENTRIES() { return admissionLimits.entries; },
+}));
+
+const runtimeServices = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
+vi.mock("@earendil-works/pi-coding-agent", async importOriginal => {
+  const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+  return {
+    ...actual,
+    createAgentSessionServices: async (...args: Parameters<typeof actual.createAgentSessionServices>) => {
+      const hold = runtimeServices.hold;
+      runtimeServices.hold = undefined;
+      await hold?.();
+      return actual.createAgentSessionServices(...args);
+    },
+  };
+});
+
+const materializationScan = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
+vi.mock("../home/home-session-recovery.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../home/home-session-recovery.js")>();
+  return {
+    ...actual,
+    scanReservedHomeSession: async (...args: Parameters<typeof actual.scanReservedHomeSession>) => {
+      const result = await actual.scanReservedHomeSession(...args);
+      const hold = materializationScan.hold;
+      materializationScan.hold = undefined;
+      await hold?.();
+      return result;
+    },
+  };
+});
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
+import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
@@ -34,9 +74,14 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { RuntimeSlot } from "../sessions/runtime-slot.js";
+import { invocationReceipts } from "../sessions/invocation-receipts.js";
+import { logHomeDiagnostic } from "../home/home-diagnostic.js";
+import { GatewayLogger } from "../transport/logger.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
+const OTHER_MODEL_ID = "chat-2";
 const MEMORY_PROVIDER = "tron-home-e2e-memory";
 const MEMORY_MODEL_ID = "compactor";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
@@ -44,6 +89,7 @@ const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
 const OTHER_MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor-2" };
 const VIRTUAL_MODEL_ID = "router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
+const OTHER_MODEL = { provider: PROVIDER, id: OTHER_MODEL_ID };
 const SUMMARY_MARKER = "HOME-SUMMARY";
 const FILLER = "these are earlier home words ".repeat(40);
 const REPORT_PATH = "test-results/home-activation/report.json";
@@ -108,12 +154,8 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   };
 }
 
-async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 15_000): Promise<void> {
-  const deadline = performance.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (performance.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 12_000): Promise<void> {
+  await waitFor(async () => (await predicate()) || undefined, "Home activation condition", { boundMs: timeoutMs });
 }
 
 interface CapturedRequest {
@@ -149,6 +191,11 @@ const registries: RuntimeRegistry[] = [];
 const disposals: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  runtimeServices.hold = undefined;
+  materializationScan.hold = undefined;
+  admissionLimits.bytes = 200 * 1_024 * 1_024;
+  admissionLimits.entries = 100_000;
+  vi.restoreAllMocks();
   for (const dispose of disposals.splice(0).reverse()) await dispose();
 });
 
@@ -166,6 +213,7 @@ interface Fixture {
   runtime: ModelRuntime;
   registry: RuntimeRegistry;
   service: GatewayService;
+  receipts: CommandReceiptStore;
   server?: GatewayServer;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
@@ -173,6 +221,8 @@ interface Fixture {
   requestRecords: HomeRequestRecord[];
   /** Every record Home's memory reported. */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
+  homeDiagnostics: Array<Record<string, unknown>>;
+  homeLogger: GatewayLogger;
   openChatProvider: () => FauxProviderHandle;
 }
 
@@ -189,14 +239,16 @@ function openRegistry(f: Fixture): void {
     homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
+    homeDiagnostic: (record) => { f.homeDiagnostics.push(record); logHomeDiagnostic(f.homeLogger, record); },
   });
   registries.push(registry);
+  const receipts = new CommandReceiptStore(join(f.tronHome, "receipts"));
   const service = new GatewayService({
     config: { tronHome: f.tronHome } as unknown as GatewayConfig,
     modelRuntime: f.runtime,
     sessions: registry,
     home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
+    receipts,
     settings: new SettingsService(f.agentDir, f.runtime),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
@@ -208,18 +260,23 @@ function openRegistry(f: Fixture): void {
   } as unknown as GatewayServiceDependencies);
   f.registry = registry;
   f.service = service;
+  f.receipts = receipts;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
-  const tronHome = join(root, "tron");
+  if (options.aliasedRoot) await symlink(await realpath(root), join(root, "alias"), "dir");
+  const tronHome = join(root, ...(options.aliasedRoot ? ["alias", "tron"] : ["tron"]));
   await mkdir(agentDir, { recursive: true });
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
   const faux = fauxProvider({
     provider: PROVIDER,
-    models: [{ id: MODEL_ID, reasoning: true, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) }],
+    models: [
+      { id: MODEL_ID, reasoning: true, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) },
+      { id: OTHER_MODEL_ID, reasoning: true },
+    ],
     tokensPerSecond: 1_000_000,
     tokenSize: { min: 10, max: 10 },
   });
@@ -241,7 +298,9 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     summarizer: options.summarizer ?? deterministicSummarizer(compactor),
     requestRecords: [],
     memoryDiagnostics: [],
-    registry: undefined!, service: undefined!,
+    homeDiagnostics: [],
+    homeLogger: new GatewayLogger(join(root, "home-signals.jsonl")),
+    registry: undefined!, service: undefined!, receipts: undefined!,
     openChatProvider: () => faux,
   };
   openRegistry(f);
@@ -253,7 +312,8 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
  * thing a Gateway restart does. */
 async function restart(f: Fixture): Promise<void> {
   await f.registry.dispose();
-  registries.splice(registries.indexOf(f.registry), 1);
+  const registeredIndex = registries.indexOf(f.registry);
+  if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
   openRegistry(f);
   await f.registry.initialize();
   // A restarted Gateway has to read its catalog before it can resolve a session
@@ -290,10 +350,13 @@ async function sessionJsonl(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>
   return slot.sessionFile ? await readFile(slot.sessionFile, "utf8").catch(() => "") : "";
 }
 
-/** The memory store's state document for one session, as the memory persists it
- * (and as a restart restores it). */
-function memoryStatePath(f: Fixture, sessionId: string): string {
-  return join(f.tronHome, "workspace", "state", "episodic", sessionId, "state.json");
+/** The memory store's state document keyed by Home's stable logical identity. */
+function memoryStatePath(f: Fixture, homeId: string): string {
+  return join(f.tronHome, "workspace", "state", "episodic", homeId, "state.json");
+}
+
+async function homeMemoryStateId(f: Fixture): Promise<string> {
+  return (JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord).homeId;
 }
 
 async function readMemoryState(f: Fixture, sessionId: string): Promise<Record<string, unknown> | undefined> {
@@ -315,7 +378,964 @@ async function canonicalMessages(slot: Awaited<ReturnType<RuntimeRegistry["acqui
     .map((entry) => (entry as { message?: Record<string, unknown> }).message!);
 }
 
-describe.sequential("Tron Home activations end to end", () => {
+describe("Tron Home activations end to end", () => {
+  it("reopens and searches the exact Home file when its cwd came through a symlink alias", async () => {
+    const f = await fixture("aliased-cwd", { aliasedRoot: true });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "aliased-home");
+    f.faux.setResponses([fauxAssistantMessage("the violet lighthouse")]);
+    await slot.prompt("remember the violet lighthouse");
+    await waitUntil(() => !slot.isBusy);
+    const path = await realpath(slot.sessionFile!);
+    const bytes = await readFile(path, "utf8");
+    await restart(f);
+    const cut = await f.registry.readSearchCut(slot.id);
+    expect(JSON.stringify(cut.entries)).toContain("the violet lighthouse");
+    const reopened = await f.registry.acquire(slot.id);
+    expect(await realpath(reopened.sessionFile!)).toBe(path);
+    expect(await readFile(path, "utf8")).toBe(bytes);
+    expect(f.faux.state.callCount).toBe(1);
+    report.cases.push({ case: "aliased-cwd-cold-open-search", exactPathRetained: true,
+      bytesUnchanged: true, providerReplay: false });
+  });
+  it.each(["claim", "scan", "path", "pre-flush"] as const)(
+    "keeps distinct joined Home commands and duplicate receipts exact at %s",
+    async cut => {
+      const f = await fixture(`joined-${cut}`);
+      disposals.push(async () => {
+        f.service.dispose();
+        await f.receipts.dispose();
+        await f.registry.dispose();
+        await rm(f.root, { recursive: true, force: true });
+      });
+      const oldSlot = await designateHome(f, `joined-${cut}-designate`);
+      f.faux.setResponses([fauxAssistantMessage("initial chapter reply")]);
+      await oldSlot.prompt("canonical initial chapter input");
+      await waitUntil(() => !oldSlot.isBusy);
+      const initialProviderCalls = f.faux.state.callCount;
+      expect(initialProviderCalls).toBe(1);
+      const owner = f.registry.homeOwner();
+      const port = (owner as unknown as {
+        options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      }).options.sessions;
+      const measurement = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      await owner.chapterQuiescent(oldSlot.id);
+      measurement.mockRestore();
+      const binding = owner.routeBinding();
+      expect(owner.reservedChapter(binding.physicalSessionId)?.state).toBe("reserved");
+      let reached!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>(resolve => { reached = resolve; });
+      const held = new Promise<void>(resolve => { release = resolve; });
+      const hold = async () => { reached(); await held; };
+      const claimReservedChapter = owner.claimReservedChapter.bind(owner);
+      const claims = vi.spyOn(owner, "claimReservedChapter");
+      if (cut === "scan") materializationScan.hold = hold;
+      else if (cut === "claim") {
+        const original = claimReservedChapter;
+        vi.spyOn(owner, "claimReservedChapter").mockImplementationOnce(async (...args) => {
+          const result = await original(...args); await hold(); return result;
+        });
+      } else if (cut === "path") {
+        const original = owner.recordReservedChapterPath.bind(owner);
+        vi.spyOn(owner, "recordReservedChapterPath").mockImplementationOnce(async (...args) => {
+          await original(...args); await hold();
+        });
+      } else {
+        const prototype = RuntimeSlot.prototype as unknown as {
+          persistInvocationReceipt: (...args: unknown[]) => Promise<void>;
+        };
+        const original = prototype.persistInvocationReceipt;
+        vi.spyOn(prototype, "persistInvocationReceipt").mockImplementationOnce(async function (this: RuntimeSlot, ...args) {
+          await hold(); await original.apply(this, args);
+        });
+      }
+      const constructions = vi.spyOn(RuntimeSlot, "create");
+      let releaseTerminal!: () => void;
+      const terminalGate = new Promise<void>(resolve => { releaseTerminal = resolve; });
+      const originalMaterialize = f.registry.materializeReservedHome.bind(f.registry);
+      let contenders = 0;
+      const materializations = vi.spyOn(f.registry, "materializeReservedHome").mockImplementation(async id => {
+        const joinedTerminal = ++contenders === 2;
+        const slot = await originalMaterialize(id);
+        // One ordering lets both joined inputs be admitted: construction is still
+        // shared, while terminal input waits for the first operation to settle.
+        if (cut === "path" && joinedTerminal) await terminalGate;
+        return slot;
+      });
+      const submissions = vi.spyOn(AgentSession.prototype, "prompt");
+      let releaseProvider!: () => void;
+      const providerGate = new Promise<void>(resolve => { releaseProvider = resolve; });
+      f.faux.setResponses([async () => { await providerGate; return fauxAssistantMessage("joined reply"); }]);
+      const commands = [
+        { commandId: `joined-${cut}-user-command`, text: `distinct user input ${cut}` },
+        { commandId: `joined-${cut}-terminal-command`, text: `distinct terminal input ${cut}` },
+      ];
+      const terminal = { ...client, id: "second-terminal", identity: "device:joined-terminal" } as ClientContext;
+      const invoke = (index: number) => f.service.invoke(index ? terminal : client, "home.prompt", commands[index]!);
+      const first = invoke(0);
+      void first.catch(() => {});
+      let second: ReturnType<typeof invoke> | undefined;
+      let duplicate: ReturnType<typeof invoke> | undefined;
+      try {
+        await waitUntil(() => materializations.mock.calls.length === 1);
+        await awaitsWithin(started, `${cut} construction barrier`);
+        second = invoke(1);
+        duplicate = invoke(0);
+        void second.catch(() => {}); void duplicate.catch(() => {});
+        await waitUntil(() => materializations.mock.calls.length === 2);
+        release();
+        if (cut === "path") {
+          await first;
+          releaseProvider();
+          const sharedSlot = await f.registry.acquire(binding.physicalSessionId);
+          await waitUntil(() => !sharedSlot.isBusy);
+          releaseTerminal();
+        }
+        const outcomes = await Promise.allSettled([first, second]);
+        const accepted = outcomes.flatMap((outcome, index) => outcome.status === "fulfilled" ? [index] : []);
+        expect(claims).toHaveBeenCalledTimes(1);
+        expect(constructions).toHaveBeenCalledTimes(1);
+        expect(accepted).toEqual(cut === "path" ? [0, 1] : [0]);
+        const slot = await f.registry.acquire(binding.physicalSessionId);
+        expect(slot.id).toBe(binding.physicalSessionId);
+        for (const [index, outcome] of outcomes.entries()) {
+          const sdkInputs = submissions.mock.calls.filter(([text]) => text === commands[index]!.text);
+          expect(sdkInputs).toHaveLength(outcome.status === "fulfilled" ? 1 : 0);
+          if (outcome.status === "fulfilled") expect(outcome.value).toMatchObject({ sessionId: binding.physicalSessionId });
+          else expect(outcome.reason).toMatchObject({ code: "busy" });
+        }
+        await expect(duplicate).resolves.toEqual((outcomes[0] as PromiseFulfilledResult<unknown>).value);
+        releaseProvider();
+        await waitUntil(() => !slot.isBusy);
+        const bytes = await sessionJsonl(slot);
+        for (const [index, outcome] of outcomes.entries()) {
+          const messages = (await canonicalMessages(slot)).filter(message => message.role === "user" && JSON.stringify(message.content).includes(commands[index]!.text));
+          expect(messages).toHaveLength(outcome.status === "fulfilled" ? 1 : 0);
+        }
+        const files = (await readdir(dirname(slot.sessionFile!))).filter(name => name.endsWith(".jsonl"));
+        const matching = await Promise.all(files.map(async name => {
+          const header = JSON.parse((await readFile(join(dirname(slot.sessionFile!), name), "utf8")).split("\n")[0]!);
+          return header.id === slot.id;
+        }));
+        expect(matching.filter(Boolean)).toHaveLength(1);
+        for (const index of accepted) {
+          await expect(invoke(index)).resolves.toEqual((outcomes[index] as PromiseFulfilledResult<unknown>).value);
+          await expect(f.receipts.status(index ? terminal.identity : client.identity, "home.prompt", commands[index]!.commandId))
+            .resolves.toMatchObject({ status: "completed", result: (outcomes[index] as PromiseFulfilledResult<unknown>).value });
+        }
+        const receiptDirectory = join(f.tronHome, "receipts", "gateway", "command-receipts");
+        const receipts = await Promise.all((await readdir(receiptDirectory)).filter(name => name.endsWith(".json"))
+          .map(async name => JSON.parse(await readFile(join(receiptDirectory, name), "utf8"))));
+        for (const [index, command] of commands.entries()) {
+          const exact = receipts.filter(receipt => receipt.method === "home.prompt" && receipt.commandId === command.commandId);
+          expect(exact).toHaveLength(accepted.includes(index) ? 1 : 0);
+          if (exact[0]) expect(exact[0].binding).toEqual(binding);
+        }
+        expect(await sessionJsonl(slot)).toBe(bytes);
+        expect(f.faux.state.callCount - initialProviderCalls).toBe(accepted.length);
+        report.cases.push({ case: "joined-home-submission", barrier: cut, accepted: accepted.length,
+          refused: outcomes.length - accepted.length, materializers: constructions.mock.calls.length,
+          canonicalFiles: 1, replayed: false, thresholdSetup: "injected soft rollover only" });
+      } finally {
+        release(); releaseProvider(); releaseTerminal();
+        await Promise.allSettled([first, ...(second ? [second] : []), ...(duplicate ? [duplicate] : [])]);
+      }
+    },
+  );
+  it("replays the exact completed Home target after rollover and disable without resolving or dispatching again", async () => {
+    const f = await fixture("receipt-exact-replay");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-home-receipt-designate");
+    f.faux.setResponses([fauxAssistantMessage("original receipt reply")]);
+    const params = { commandId: "home-receipt-exact-command", text: "receipt-only-secret-marker" };
+    const accepted = await f.service.invoke(client, "home.prompt", params);
+    await waitUntil(() => !slot.isBusy);
+    // Drain the early-response completion write before reconstructing the receipt owner.
+    await f.receipts.dispose();
+    const before = await sessionJsonl(slot);
+    const calls = f.faux.state.callCount;
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 0, entries: 50_001, quiescent: true });
+    await f.registry.homeOwner().chapterQuiescent(slot.id);
+    await f.registry.homeOwner().disable();
+    // A new durable receipt owner is enough to prove replay does not depend on volatile lanes.
+    const receipts = new CommandReceiptStore(join(f.tronHome, "receipts"));
+    const replayCategories: string[] = [];
+    try {
+      const replay = await receipts.execute(client.identity, "home.prompt", params.commandId,
+        async () => { throw new Error("completed receipt dispatched again"); }, {
+          resolveBinding: () => { throw new Error("completed receipt resolved the disabled successor"); },
+          onRouteBound: category => replayCategories.push(category),
+        });
+      expect(replay).toEqual(accepted);
+      expect(replayCategories).toEqual(["replay"]);
+      expect(f.homeDiagnostics.filter(record => record.outcome === "route-bound")).toEqual([
+        { outcome: "route-bound", category: "fresh" },
+      ]);
+      expect(await sessionJsonl(slot)).toBe(before);
+      expect(f.faux.state.callCount).toBe(calls);
+      report.cases.push({ case: "exact-home-receipt-replay", originalTargetRetained: true,
+        replayProviderCalls: f.faux.state.callCount - calls, categories: ["fresh", ...replayCategories] });
+    } finally { await receipts.dispose(); }
+  });
+
+  it("keeps Home signals private through recovery, refusal, replay and an owner fence", async () => {
+    const f = await fixture("diagnostic-privacy");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-privacy-designate-command");
+    const secret = "HOME-PRIVATE-TRANSCRIPT-MARKER";
+    f.faux.setResponses([fauxAssistantMessage(secret)]);
+    const params = { commandId: "privacy-original-command", text: secret };
+    await f.service.invoke(client, "home.prompt", params);
+    await waitUntil(() => !slot.isBusy);
+    await f.service.invoke(client, "home.prompt", params);
+    const owner = f.registry.homeOwner() as unknown as {
+      unavailable?: string;
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+    };
+    owner.options.sessions.chapterMetrics = async id => ({ bytes: 0, entries: id === slot.id ? 100_000 : 3, quiescent: true });
+    f.faux.setResponses([fauxAssistantMessage("privacy successor reply")]);
+    const successor = await f.service.invoke(client, "home.prompt", { commandId: "privacy-successor-command", text: secret }) as unknown as { sessionId: string };
+    const next = await f.registry.acquire(successor.sessionId);
+    await waitUntil(() => !next.isBusy);
+    // Simulate the owner-facing explanation from a failed storage/reload seam;
+    // it is useful to clients, but never safe as a diagnostic reason enum.
+    owner.unavailable = `${secret} ${f.root} ${slot.id}`;
+    try { await expect(f.service.invoke(client, "home.open", {})).rejects.toMatchObject({ code: "conflict" }); }
+    finally { owner.unavailable = undefined; }
+    const signals = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100);
+    expect(signals.some(record => record.event === "home.route-bound" && record.category === "replay")).toBe(true);
+    expect(signals.some(record => record.event === "home.chapter-recovery" && record.reason === "absent")).toBe(true);
+    expect(signals.some(record => record.event === "home.chapter-refused" && record.reason === "hard-entries")).toBe(true);
+    const approved = new Set(["timestamp", "level", "message", "process", "event", "source", "reason", "category", "chapterOrdinal",
+      "boundary", "crossingBytes", "crossingEntries", "settledBytes", "settledEntries"]);
+    for (const signal of signals) expect(Object.keys(signal).every(key => approved.has(key))).toBe(true);
+    const encoded = JSON.stringify(signals);
+    for (const privateValue of [secret, f.root, slot.id, successor.sessionId, params.commandId, client.identity]) {
+      expect(encoded).not.toContain(privateValue);
+    }
+    expect(signals.some(record => record.event === "home.unavailable" && record.reason === "owner-fenced")).toBe(true);
+    report.cases.push({ case: "home-diagnostic-privacy", events: [...new Set(signals.map(record => record.event))],
+      privateValuesAbsent: true, recovery: "absent", routeCategories: ["fresh", "replay"] });
+  });
+
+  it("exports Home through a temporary artifact without targeting its chapter file", async () => {
+    const f = await fixture("export-destination");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-home-export-destination");
+    f.faux.setResponses([fauxAssistantMessage("Home export source")]);
+    await slot.prompt("create a canonical Home chapter entry");
+    await waitUntil(() => !slot.isBusy);
+    const chapterPath = slot.sessionFile!;
+    const before = await readFile(chapterPath);
+    await f.registry.initializeBlobStorage();
+
+    const artifact = await slot.export("jsonl");
+    const lease = await f.registry.acquireBlob(artifact.blobId);
+    let exported = Buffer.alloc(0);
+    try {
+      for await (const chunk of lease.stream) exported = Buffer.concat([exported, Buffer.from(chunk)]);
+    } finally {
+      await lease.release();
+    }
+
+    expect(artifact.name).toMatch(/\.jsonl$/);
+    expect(exported).toEqual(before);
+    expect(await readFile(chapterPath)).toEqual(before);
+    report.cases.push({ case: "home-export-destination", sourceUnchanged: true, destinationIsChapter: false });
+  });
+
+  it.each([
+    ["canonical bytes", 24 * 1_024 * 1_024 + 1, 3],
+    ["canonical entries", 0, 50_001],
+  ])("seals lazily after the soft %s threshold at a quiescent boundary", async (_label, bytes, entries) => {
+    const f = await fixture(`soft-threshold-${_label.replaceAll(" ", "-")}`);
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `e2e-soft-threshold-${bytes}-${entries}`);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      chapterQuiescent(sessionId: string): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes, entries, quiescent: true });
+    f.faux.setResponses([fauxAssistantMessage("soft threshold crossed")]);
+    await slot.prompt("cross the soft Home threshold");
+    await waitUntil(async () => {
+      const record = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+      return record.chapters.length === 2;
+    });
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters).toHaveLength(2);
+    expect(stored.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: bytes, entriesAtSeal: entries });
+    expect(stored.chapters[1]).toMatchObject({ state: "reserved", ordinal: 2 });
+    expect(stored.bindingRevision).toBe(1);
+    // Lazy rollover: threshold crossing seals and reserves metadata only.
+    expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(stored.chapters[1]!.sessionId);
+    report.cases.push({ case: "soft-rollover", trigger: _label, oldState: stored.chapters[0]!.state, successorState: stored.chapters[1]!.state, successorMaterialized: false });
+  });
+
+  it.each(["hard bytes", "hard entries"] as const)("rolls Home admission over before effects at the %s threshold", async boundary => {
+    const f = await fixture(`hard-boundary-${boundary.replaceAll(" ", "-")}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `e2e-hard-boundary-${boundary.replaceAll(" ", "-")}`);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+    };
+    const hardBytes = 200 * 1_024 * 1_024;
+    const hardEntries = 100_000;
+    owner.options.sessions.chapterMetrics = async () => ({
+      bytes: boundary === "hard bytes" ? hardBytes : 3,
+      entries: boundary === "hard entries" ? hardEntries : 3,
+      quiescent: true,
+    });
+    let providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; return fauxAssistantMessage("successor chapter response"); }]);
+    const accepted = await f.service.invoke(client, "home.prompt", {
+      commandId: `hard-admission-${boundary.replaceAll(" ", "-")}`,
+      text: "must dispatch only after the hard-limit rollover",
+    }) as unknown as { sessionId: string; operationId: string };
+    expect(accepted.sessionId).not.toBe(slot.id);
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.chapters).toHaveLength(2);
+    expect(stored.chapters[0]).toMatchObject({
+      state: "sealed",
+      ...(boundary === "hard bytes" ? { sizeAtSeal: hardBytes } : { entriesAtSeal: hardEntries }),
+    });
+    expect(stored.chapters[1]).toMatchObject({ sessionId: accepted.sessionId, ordinal: 2 });
+    expect(providerCalls).toBe(0);
+    expect(f.homeDiagnostics.filter(record => record.outcome === "chapter-refused")).toEqual([
+      { outcome: "chapter-refused", chapterOrdinal: 1, reason: boundary === "hard bytes" ? "hard-bytes" : "hard-entries" },
+    ]);
+    expect(f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop")).toBe(false);
+    report.cases.push({ case: "hard-admission-signal", boundary: boundary === "hard bytes" ? "hard-bytes" : "hard-entries",
+      metricsInjected: true, refusalBeforeEffects: true, successorTarget: true });
+  });
+
+  it.each(["bytes", "entries"] as const)("measures cold canonical %s before logical hard admission", async boundary => {
+    const f = await fixture(`cold-hard-${boundary}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `cold-hard-${boundary}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize cold threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
+    for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
+      slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
+    }
+    const path = slot.sessionFile!;
+    const bytes = await readFile(path);
+    const entries = slot.canonicalEntryCount;
+    await restart(f);
+    f.faux.setResponses([fauxAssistantMessage("cold successor")]);
+    const accepted = await f.service.invoke(client, "home.prompt", { commandId: `cold-hard-next-${boundary}`, text: "continue cold Home" }) as unknown as { sessionId: string };
+    expect(accepted.sessionId === slot.id).toBe(false);
+    expect(await readFile(path)).toEqual(bytes);
+    expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === `hard-${boundary}`)).toBe(true);
+    report.cases.push({ case: "cold-canonical-hard-admission", boundary, bytes: bytes.length, entries,
+      hardBytes: admissionLimits.bytes, hardEntries: admissionLimits.entries, metricsInjected: false, successorTarget: true, predecessorUnchanged: true });
+  });
+
+  it.each(["bytes", "entries"] as const)("refuses physical prompt effects at real canonical hard %s", async boundary => {
+    const f = await fixture(`physical-hard-${boundary}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `physical-hard-${boundary}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize physical threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
+    for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
+      slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
+    }
+    const bytes = await readFile(slot.sessionFile!);
+    const calls = f.faux.state.callCount;
+    f.faux.setResponses([fauxAssistantMessage("must not run")]);
+    const physicalClient = { ...client, isSubscribed: (id: string) => id === slot.id } as ClientContext;
+    await expect(f.service.invoke(physicalClient, "session.prompt", { sessionId: slot.id, commandId: `physical-hard-next-${boundary}`, text: "must refuse without redirect" }))
+      .rejects.toMatchObject({ code: "conflict", details: { reason: `hard-${boundary}` } });
+    expect(await readFile(slot.sessionFile!)).toEqual(bytes);
+    expect(f.faux.state.callCount).toBe(calls);
+    report.cases.push({ case: "physical-canonical-hard-admission", boundary, bytes: bytes.length, entries: slot.canonicalEntryCount,
+      metricsInjected: false, providerCallsAdded: 0, canonicalEffectsAdded: 0, redirected: false });
+  });
+
+  it.each(["settings", "archive"] as const)("revalidates physical Home admission after the %s await before canonical effects", async boundary => {
+    const f = await fixture(`admission-await-${boundary}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `admission-await-${boundary}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize await threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered = false;
+    const hold = async () => { entered = true; await gate; };
+    const dependencies = slot as unknown as { dependencies: { beforeRunAdmission(): Promise<void> } };
+    const held = boundary === "settings"
+      ? vi.spyOn(sessionOf(slot).settingsManager, "flush").mockImplementation(hold)
+      : vi.spyOn(dependencies.dependencies, "beforeRunAdmission").mockImplementation(hold);
+    f.faux.setResponses([fauxAssistantMessage("must not run")]);
+    const running = slot.prompt("wait and then refuse before effects");
+    void running.catch(() => {});
+    let bytes!: Buffer;
+    try {
+      await waitUntil(() => entered);
+      for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < admissionLimits.bytes; index += 1) {
+        slot.sessionManager.appendCustomEntry("await-fixture", { padding: "x".repeat(4_096) });
+      }
+      bytes = await readFile(slot.sessionFile!);
+    } finally { release(); }
+    await expect(running).rejects.toMatchObject({ code: "conflict", details: { reason: "hard-bytes" } });
+    held.mockRestore();
+    expect(await readFile(slot.sessionFile!)).toEqual(bytes);
+    expect(f.faux.state.callCount).toBe(1);
+    report.cases.push({ case: "physical-admission-await", boundary, metricsInjected: false,
+      canonicalEffectsAdded: 0, providerCallsAdded: 0 });
+  });
+
+  it.each(["completion-first", "abort-first"] as const)("records successful assistant crossings as chapter-limit with %s settlement", async ordering => {
+    const f = await fixture(`successful-crossing-${ordering}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `successful-crossing-${ordering}`);
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize successful threshold evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    // Canonical custom entries bring the chapter near the byte boundary without
+    // crossing it; only the provider's finalized successful message crosses.
+    for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 40 * 1_024; index += 1) {
+      slot.sessionManager.appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
+    }
+    const before = statSync(slot.sessionFile!).size;
+    expect(before).toBeLessThan(admissionLimits.bytes);
+    const internal = slot as unknown as { terminalizeInvocation(...args: unknown[]): Promise<void> };
+    const terminalize = internal.terminalizeInvocation.bind(slot);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let losingObserverEntered = false;
+    const held = vi.spyOn(internal, "terminalizeInvocation").mockImplementation(async (...args) => {
+      const abortObserver = args[2] === "chapter-limit";
+      if (abortObserver === (ordering === "completion-first")) {
+        losingObserverEntered = true;
+        await gate;
+      }
+      return terminalize(...args);
+    });
+    f.faux.setResponses([fauxAssistantMessage("successful response ".repeat(2_048))]);
+    const running = slot.prompt("cross only on the successful response");
+    void running.catch(() => {});
+    try {
+      await waitUntil(() => losingObserverEntered);
+      await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id)
+        .filter(receipt => receipt.receiptKind === "terminal").length === 2);
+      expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
+        .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
+    } finally { release(); held.mockRestore(); }
+    await running;
+    await waitUntil(() => !slot.isBusy && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    const lastTerminal = invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)!;
+    expect(lastTerminal).toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
+    expect(slot.sessionManager.getBranch().some(entry => entry.type === "message" && entry.message.role === "assistant"
+      && entry.message.stopReason === "stop" && JSON.stringify(entry.message.content).includes("successful response"))).toBe(true);
+    expect(f.faux.state.callCount).toBe(2);
+    report.cases.push({ case: "successful-response-hard-crossing", ordering, beforeBytes: before, settledBytes: statSync(slot.sessionFile!).size,
+      hardBytes: admissionLimits.bytes, metricsInjected: false, providerCallsAdded: 1, lifecycle: lastTerminal.lifecycle, reason: lastTerminal.errorCode });
+  });
+
+  it("stops a real canonical input crossing before provider dispatch", async () => {
+    const f = await fixture("real-input-crossing");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "real-input-crossing");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize input crossing evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.bytes = 64 * 1_024;
+    const before = statSync(slot.sessionFile!).size;
+    f.faux.setResponses([fauxAssistantMessage("must not reach provider")]);
+    await slot.prompt("input crossing ".repeat(5_000));
+    await waitUntil(() => !slot.isBusy);
+    expect(f.faux.state.callCount).toBe(1);
+    await waitUntil(() => f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
+      .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
+    report.cases.push({ case: "real-input-hard-crossing", beforeBytes: before, settledBytes: statSync(slot.sessionFile!).size,
+      hardBytes: admissionLimits.bytes, metricsInjected: false, providerCallsAdded: 0, reason: "chapter-limit" });
+  });
+
+  it("continues in a successor after a real hard-byte stop retains an oversized chapter", async () => {
+    const f = await fixture("real-byte-stop-successor");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "real-byte-stop-home");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize canonical evidence");
+    await waitUntil(() => !slot.isBusy);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered = false;
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage("abort settlement"); }]);
+    const running = slot.prompt("stop this operation at the byte limit");
+    void running.catch(() => {});
+    try {
+      await waitUntil(() => entered);
+      const padding = "x".repeat(1_024 * 1_024);
+      // Real canonical SDK appends cross the byte boundary while the provider is
+      // running; no metric getter is substituted and no append is suppressed.
+      for (let index = 0; index < 201 && statSync(slot.sessionFile!).size < 200 * 1_024 * 1_024; index += 1) {
+        slot.sessionManager.appendCustomEntry("byte-stop-fixture", { padding: index === 190 ? padding.repeat(11) : padding });
+      }
+    } finally { release(); }
+    await running;
+    await waitUntil(() => !slot.isBusy);
+    const before = statSync(slot.sessionFile!).size;
+    expect(before).toBeGreaterThan(200 * 1_024 * 1_024);
+    await expect(scanReservedHomeSession({ directory: dirname(slot.sessionFile!), expectedPath: slot.sessionFile!, sessionId: slot.id }))
+      .resolves.toEqual({ action: "blocked" });
+    expect(f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop"))
+      .toMatchObject([{ boundary: "hard-bytes" }]);
+    expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id)
+      .find(receipt => receipt.receiptKind === "terminal" && receipt.errorCode === "chapter-limit")).toBeDefined();
+    f.faux.setResponses([async context => {
+      expect(JSON.stringify(context.messages)).toContain("initialize canonical evidence");
+      return fauxAssistantMessage("successor continues");
+    }]);
+    const accepted = await f.service.invoke(client, "home.prompt", { commandId: "real-byte-stop-next", text: "continue after the stopped chapter" }) as unknown as { sessionId: string; operationId: string };
+    expect(accepted.sessionId).not.toBe(slot.id);
+    const ledger = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(ledger.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: before });
+    const successor = await f.registry.acquire(accepted.sessionId);
+    await waitUntil(() => !successor.isBusy && successor.sessionManager.getBranch().some(entry => entry.type === "message"
+      && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("successor continues")));
+    expect(successor.sessionManager.getBranch().some(entry => entry.type === "message"
+      && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("continue after the stopped chapter"))).toBe(true);
+    expect(f.faux.state.callCount).toBe(3);
+    expect(statSync(slot.sessionFile!).size).toBe(before);
+    const stop = f.homeDiagnostics.find(record => record.outcome === "chapter-limit-stop")!;
+    report.cases.push({ case: "real-byte-stop-successor", metricsInjected: false, retainedBytes: before,
+      crossingBytes: stop.crossingBytes, settledBytes: stop.settledBytes, boundary: stop.boundary,
+      predecessorSealed: true, predecessorUnchanged: true, crossingEntryOver8MiB: true, successorPrompted: true, priorMemoryPresent: true });
+  }, 30_000);
+
+  it("refuses a cyclic cold Home file before SDK construction", async () => {
+    const f = await fixture("cyclic-cold-home");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "cyclic-cold-home");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize canonical evidence");
+    const path = slot.sessionFile!;
+    await restart(f);
+    const original = await readFile(path, "utf8");
+    const malformed = original + JSON.stringify({ type: "thinking_level_change", id: "cycle", parentId: "cycle",
+      timestamp: "2026-10-07T00:00:00.000Z", thinkingLevel: "off" }) + "\n";
+    await writeFile(path, malformed);
+    // Do not let the negative control enter Pi's unbounded parent traversal.
+    const open = vi.spyOn(SessionManager, "open").mockImplementation(() => { throw new Error("unsafe SDK construction reached"); });
+    await expect(f.registry.acquire(slot.id)).rejects.toThrow(/uncertain canonical evidence/);
+    expect(open).not.toHaveBeenCalled();
+    expect(await readFile(path, "utf8")).toBe(malformed);
+    report.cases.push({ case: "cyclic-cold-home", sdkConstructions: 0, canonicalPreserved: true });
+  });
+
+  it("stops one running Home operation on its first canonical hard-entry crossing and retains its writes", async () => {
+    const f = await fixture("hard-running-crossing");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "e2e-hard-running-crossing");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize entry crossing evidence");
+    await waitUntil(() => !slot.isBusy);
+    admissionLimits.entries = 100;
+    for (let index = 0; index < 100 && slot.canonicalEntryCount < 90; index += 1) {
+      slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
+    }
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let providerCalls = 0;
+    f.faux.setResponses([async () => { providerCalls += 1; await gate; return fauxAssistantMessage("settlement response retained"); }]);
+    const running = slot.prompt("cross while running");
+    void running.catch(() => {});
+    try {
+      await waitUntil(() => providerCalls === 1);
+      for (let index = 0; index < 100 && slot.canonicalEntryCount < admissionLimits.entries; index += 1) {
+        slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
+      }
+    } finally { release(); }
+    await running;
+    await waitUntil(() => !slot.isBusy && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
+    const stopped = f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop");
+    const branch = slot.sessionManager.getBranch();
+    const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0]).toMatchObject({ boundary: "hard-entries", crossingEntries: 100 });
+    expect(stopped[0]!.settledEntries).toBeGreaterThanOrEqual(100);
+    expect(branch).toEqual(canonical.slice(1));
+    expect(invocationReceipts(branch, slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)?.errorCode).toBe("chapter-limit");
+    expect(providerCalls).toBe(1);
+    expect(f.homeDiagnostics.some(record => record.outcome === "chapter-refused" && record.reason === "hard-entries")).toBe(false);
+    const persisted = new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100)
+      .filter(record => record.event === "home.chapter-limit-stop");
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ level: "warning", chapterOrdinal: 1, boundary: "hard-entries",
+      crossingBytes: stopped[0]!.crossingBytes, crossingEntries: 100,
+      settledBytes: stopped[0]!.settledBytes, settledEntries: stopped[0]!.settledEntries });
+    report.cases.push({ case: "persisted-home-running-stop", canonicalMatchesSdk: true, metricsInjected: false,
+      hardEntries: admissionLimits.entries, crossingEntries: 100, settledEntries: stopped[0]!.settledEntries,
+      providerCallsAdded: providerCalls, signalRetainedOnReload: true });
+  });
+
+  it.each([
+    ["attention", "mutation-first"], ["attention", "seal-first"],
+    ["archive", "mutation-first"], ["archive", "seal-first"],
+    ["delete", "mutation-first"], ["delete", "seal-first"],
+  ] as const)("serializes Registry %s and Home seal in %s order", async (kind, order) => {
+    const f = await fixture(`${kind}-${order}`);
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, `${kind}-${order}-home`);
+    f.faux.setResponses([fauxAssistantMessage("canonical race evidence")]);
+    await slot.prompt("initialize race evidence");
+    await waitUntil(() => !slot.isBusy);
+    const path = slot.sessionFile!;
+    const bytes = await readFile(path, "utf8");
+    const registry = f.registry as unknown as {
+      resolveAttentionAdmission(sessionId: string): Promise<unknown>;
+      catalogMembership(sessionId: string): Promise<unknown>;
+      sessionMutations: Map<string, Promise<void>>;
+    };
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      writeLocked(record: HomeRecord): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const events: string[] = [];
+    const write = owner.writeLocked.bind(owner);
+    vi.spyOn(owner, "writeLocked").mockImplementation(async record => {
+      if (record.chapters[0]!.state === "sealed") {
+        events.push("seal-commit");
+        if (order === "seal-first") { entered(); await gate; }
+      }
+      await write(record);
+    });
+    if (order === "mutation-first") {
+      const seam = kind === "attention" ? "resolveAttentionAdmission" : "catalogMembership";
+      const resolve = registry[seam].bind(registry);
+      vi.spyOn(registry, seam).mockImplementation(async id => {
+        entered();
+        await gate;
+        return resolve(id);
+      });
+    }
+    const mutate = () => (kind === "attention" ? f.registry.setAttention(slot.id, true)
+      : kind === "archive" ? f.registry.setArchived(slot.id, true) : f.registry.delete(slot.id))
+      .then(() => { events.push("mutation-settled"); return "accepted"; }, error => {
+        events.push("mutation-refused"); return (error as { code?: string }).code;
+      });
+    let mutation: ReturnType<typeof mutate> | undefined;
+    let seal: Promise<void> | undefined;
+    try {
+      if (order === "mutation-first") {
+        mutation = mutate();
+        await awaitsWithin(reached, "admitted mutation barrier");
+        seal = f.registry.homeOwner().chapterQuiescent(slot.id);
+        // The serializer must still be waiting behind admitted mutation work.
+        // This microtask cut joins enqueue, not a filesystem scheduling sleep.
+        await Promise.resolve();
+        expect(events).toEqual([]);
+        release();
+        expect(await awaitsWithin(mutation, "mutation settlement")).toBe("accepted");
+        await awaitsWithin(seal, "seal after mutation");
+        expect(events).toEqual(["mutation-settled", "seal-commit"]);
+      } else {
+        seal = f.registry.homeOwner().chapterQuiescent(slot.id);
+        await awaitsWithin(reached, "seal commit barrier");
+        mutation = mutate();
+        release();
+        await awaitsWithin(seal, "seal settlement");
+        expect(await awaitsWithin(mutation, "mutation after seal")).toBe("conflict");
+        expect(events).toEqual(["seal-commit", "mutation-refused"]);
+      }
+      expect(f.registry.homeOwner().chapterStateFor(slot.id).sealed).toBe(true);
+      if (kind !== "delete" || order === "seal-first") expect(await readFile(path, "utf8")).toBe(bytes);
+      else await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(registry.sessionMutations.has(slot.id)).toBe(false);
+      report.cases.push({ case: `registry-${kind}-${order}`, events, serializerRetired: true });
+    } finally {
+      release();
+      await Promise.allSettled([...(mutation ? [mutation] : []), ...(seal ? [seal] : [])]);
+    }
+  });
+
+  it("retires a failed Registry mutation and admits the next exact-session mutation", async () => {
+    const f = await fixture("mutation-failure");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "mutation-failure-home");
+    const registry = f.registry as unknown as {
+      resolveAttentionAdmission(id: string): Promise<unknown>;
+      sessionMutations: Map<string, Promise<void>>;
+    };
+    vi.spyOn(registry, "resolveAttentionAdmission").mockRejectedValueOnce(new Error("fixture admission failure"));
+    const failed = f.registry.setAttention(slot.id, true);
+    const next = f.registry.setAttention(slot.id, true);
+    await expect(failed).rejects.toThrow("fixture admission failure");
+    await next;
+    expect(f.registry.attentionProjection(slot.id).isUnread).toBe(true);
+    expect(registry.sessionMutations.has(slot.id)).toBe(false);
+    report.cases.push({ case: "registry-mutation-failure-recovery", unread: true, serializerRetired: true });
+  });
+
+  it("recovers a durable reservation after restart and routes the next activation to one successor", async () => {
+    const f = await fixture("reserved-crash-recovery");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const oldSlot = await designateHome(f, "e2e-reservation-crash-designate");
+    f.faux.setResponses([fauxAssistantMessage("recovered successor reply")]);
+    await oldSlot.prompt("BEFORE-ROLLOVER-FACT: the lighthouse is blue");
+    await waitUntil(() => !oldSlot.isBusy);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      chapterQuiescent(sessionId: string): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    await owner.chapterQuiescent(oldSlot.id);
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = current.chapters.at(-1)!.sessionId;
+    expect(current.chapters.at(-1)).toMatchObject({ state: "reserved", ordinal: 2 });
+    await f.registry.dispose();
+    const registeredIndex = registries.indexOf(f.registry);
+    if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
+    openRegistry(f);
+    await f.registry.initialize();
+    const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+    await waitUntil(() => catalogCut(), 20_000);
+    const recoveredCatalog = await f.registry.catalog("all");
+    expect(recoveredCatalog.sessions.map(session => session.id)).toContain(oldSlot.id);
+
+    const opened = await f.service.invoke(client, "home.open", {}) as unknown as {
+      homeId: string; bindingRevision: number; sessionId: string;
+    };
+    expect(opened).toMatchObject({ homeId: current.homeId, bindingRevision: current.bindingRevision + 1, sessionId: reservedId, chapterState: "reserved" });
+    expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(reservedId);
+    f.faux.setResponses([fauxAssistantMessage("after reservation recovery")]);
+    const accepted = await f.service.invoke(client, "home.prompt", {
+      commandId: "e2e-home-prompt-after-reservation", text: "AFTER-ROLLOVER-FACT: the bell rings twice",
+    }) as unknown as { sessionId: string; operationId: string };
+    await waitUntil(async () => {
+      const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+      return status.sessionId === reservedId && (status.phase === "active" || status.phase === "ready");
+    }, 30_000);
+    expect(accepted.sessionId).toBe(reservedId);
+    expect(accepted.operationId).toBeTypeOf("string");
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(status).toMatchObject({ sessionId: reservedId, bindingRevision: current.bindingRevision + 1 });
+  });
+
+  it("preserves and blocks a recorded materialization path that is absent after restart", async () => {
+    const f = await fixture("recorded-home-path-absent");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    await designateHome(f, "e2e-recorded-path-absent");
+    const registry = f.registry as unknown as {
+      homeOwner(): { writeLocked(record: HomeRecord): Promise<void> };
+      sessionDirectoryFor(cwd: string): string;
+      home: { homeWorkspacePath(): string };
+      materializeReservedHome(sessionId: string): Promise<unknown>;
+    };
+    const owner = f.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const active = current.chapters[0]!;
+    const reservedId = "recorded-path-absent-session";
+    const expectedPath = join(registry.sessionDirectoryFor(registry.home.homeWorkspacePath()), "missing-recorded-path.jsonl");
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...active, state: "sealed", sealedAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "materializing", createdAt: new Date().toISOString(), attemptId: "old-attempt", expectedPath },
+      ],
+    });
+
+    await expect(f.registry.materializeReservedHome(reservedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(readFile(expectedPath)).rejects.toMatchObject({ code: "ENOENT" });
+    const recovered = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(recovered.chapters.at(-1)).toMatchObject({ state: "materializing", expectedPath });
+  });
+
+  it.each([
+    ["reserved", false], ["reserved", true], ["cold", false], ["cold", true],
+  ] as const)("owns in-flight %s construction while transitioning enabled to %s", async (construction, enabled) => {
+    const f = await fixture(`profile-construction-${construction}-${enabled}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const active = await designateHome(f, `profile-flight-${construction}-${enabled}`);
+    f.faux.setResponses([fauxAssistantMessage("profile construction baseline")]);
+    await active.prompt("profile construction baseline input");
+    await waitUntil(() => !active.isBusy);
+    let sessionId = active.id;
+    if (construction === "reserved") {
+      const owner = f.registry.homeOwner();
+      const port = (owner as unknown as { options: { sessions: { chapterMetrics: (id: string) => Promise<unknown> } } }).options.sessions;
+      const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      await owner.chapterQuiescent(active.id);
+      metrics.mockRestore();
+      sessionId = owner.routeBinding().physicalSessionId;
+    }
+    if (enabled) await f.registry.homeOwner().disable();
+    if (construction === "cold") await restart(f);
+    let reached!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { reached = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    runtimeServices.hold = async () => { reached(); await held; };
+    const flight = construction === "reserved" ? f.registry.materializeReservedHome(sessionId) : f.registry.acquire(sessionId);
+    void flight.catch(() => {});
+    let transition: Promise<unknown> | undefined;
+    try {
+      await awaitsWithin(entered, "latched runtime profile before services");
+      const owner = f.registry.homeOwner() as unknown as {
+        writeLocked: (record: HomeRecord) => Promise<void>;
+        options: { sessions: { replaceRuntimeForProfile: (id: string, commit: () => Promise<void>) => Promise<void> } };
+      };
+      let transitionReached!: () => void;
+      const changing = new Promise<void>(resolve => { transitionReached = resolve; });
+      const originalPort = owner.options.sessions.replaceRuntimeForProfile;
+      vi.spyOn(owner.options.sessions, "replaceRuntimeForProfile").mockImplementation((...args) => {
+        const result = originalPort(...args); transitionReached(); return result;
+      });
+      // The unfixed disable bypasses Registry entirely for an unpublished
+      // reservation. Observe that old commit cut too, without rescuing it.
+      const originalWrite = owner.writeLocked.bind(owner);
+      vi.spyOn(owner, "writeLocked").mockImplementation(record => {
+        const result = originalWrite(record); transitionReached(); return result;
+      });
+      transition = enabled
+        ? f.registry.homeOwner().designate({ model: OTHER_MODEL }, () => MODEL)
+        : f.registry.homeOwner().disable();
+      void transition.catch(() => {});
+      await awaitsWithin(changing, "profile transition owner entered");
+      release();
+      const slot = await awaitsWithin(flight, "profile construction completion");
+      await awaitsWithin(transition, "profile transition completion");
+      const profile = (slot as unknown as { liveProfile: () => string }).liveProfile();
+      expect(profile).toBe(enabled ? "home" : "ordinary");
+      expect(f.registry.homeOwner().profileFor(slot.id)).toBe(profile);
+      expect(await f.registry.acquire(sessionId)).toBe(slot);
+      if (enabled) expect(slot.snapshot().model).toMatchObject(OTHER_MODEL);
+      report.cases.push({ case: "in-flight-profile-transition", construction, enabled, publishedProfile: profile, exactIdentity: slot.id === sessionId });
+    } finally {
+      release();
+      await Promise.allSettled([flight, ...(transition ? [transition] : [])]);
+    }
+  }, 30_000);
+
+  it("settles a failed Home construction before committing disable", async () => {
+    const f = await fixture("failed-profile-construction");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const active = await designateHome(f, "failed-profile-flight");
+    const owner = f.registry.homeOwner();
+    const port = (owner as unknown as { options: { sessions: { chapterMetrics: (id: string) => Promise<unknown> } } }).options.sessions;
+    const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    await owner.chapterQuiescent(active.id);
+    metrics.mockRestore();
+    const sessionId = owner.routeBinding().physicalSessionId;
+    let reached!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { reached = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    runtimeServices.hold = async () => { reached(); await held; throw new Error("fixture service construction failed"); };
+    const flight = f.registry.materializeReservedHome(sessionId);
+    void flight.catch(() => {});
+    let transition: Promise<unknown> | undefined;
+    try {
+      await awaitsWithin(entered, "failed construction barrier");
+      transition = owner.disable();
+      void transition.catch(() => {});
+      release();
+      await expect(flight).rejects.toThrow("fixture service construction failed");
+      await awaitsWithin(transition, "disable after failed construction");
+      expect((await owner.status()).enabled).toBe(false);
+      expect((f.registry as unknown as { slots: Map<string, RuntimeSlot> }).slots.has(sessionId)).toBe(false);
+      report.cases.push({ case: "failed-profile-construction", enabled: false, staleRuntimePublished: false });
+    } finally {
+      release();
+      await Promise.allSettled([flight, ...(transition ? [transition] : [])]);
+    }
+  }, 30_000);
+
+  it.each(["reserved", "materializing"] as const)("rebuilds a live runtime when re-enabling a pending %s chapter", async state => {
+    const f = await fixture(`reenable-pending-${state}`);
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const active = await designateHome(f, `e2e-reenable-${state}`);
+    const pending = await f.registry.create(f.agentDir);
+    const owner = f.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const attemptId = "attempt-reenable";
+    const expectedPath = pending.sessionFile!;
+    await owner.writeLocked({
+      ...current,
+      chapters: [
+        { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
+        {
+          sessionId: pending.id, ordinal: 2, state, createdAt: new Date().toISOString(),
+          ...(state === "materializing" ? { attemptId, expectedPath } : {}),
+        },
+      ],
+    });
+    await f.registry.homeOwner().disable();
+    const afterDisable = pending.snapshot().revision;
+    const designation = await f.registry.homeOwner().designate({ model: OTHER_MODEL }, () => ({ provider: "faux", id: "test" }));
+    expect(designation).toMatchObject({ sessionId: pending.id });
+    expect(pending.snapshot().revision).toBeGreaterThan(afterDisable);
+    expect(pending.snapshot().model).toMatchObject(OTHER_MODEL);
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(stored.model).toEqual(OTHER_MODEL);
+    expect(stored.chapters.map(chapter => [chapter.sessionId, chapter.state])).toEqual([
+      [active.id, "sealed"], [pending.id, state],
+    ]);
+    if (state === "materializing") {
+      expect(stored.chapters.at(-1)).toMatchObject({ attemptId, expectedPath });
+    }
+    report.cases.push({ case: "re-enable-pending-reservation", state, preservedSessionId: pending.id, runtimeRevisionAdvanced: pending.snapshot().revision > afterDisable });
+  });
+
+  it("keeps one homeId memory stream continuous across a crash and physical chapter boundary", async () => {
+    const f = await fixture("chapter-memory-continuity");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const oldSlot = await designateHome(f, "e2e-memory-chapter-designate");
+    const beforeRequests: CapturedRequest[] = [];
+    f.faux.setResponses([responsesOf(f, beforeRequests)("before chapter response")]);
+    await oldSlot.prompt("CONTINUITY-FACT: the brass key is under the red bowl");
+    await waitUntil(() => !oldSlot.isBusy);
+    const owner = f.registry.homeOwner() as unknown as {
+      options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      chapterQuiescent(sessionId: string): Promise<void>;
+    };
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    await owner.chapterQuiescent(oldSlot.id);
+    const current = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const reservedId = current.chapters.at(-1)!.sessionId;
+    expect(current.chapters.at(-1)).toMatchObject({ state: "reserved", ordinal: 2 });
+    await f.registry.dispose();
+    const registeredIndex = registries.indexOf(f.registry);
+    if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
+    openRegistry(f);
+    await f.registry.initialize();
+    const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+    await waitUntil(() => catalogCut(), 20_000);
+    const recoveredCatalog = await f.registry.catalog("all");
+    expect(recoveredCatalog.sessions.map(session => session.id)).toContain(oldSlot.id);
+    const afterRequests: CapturedRequest[] = [];
+    f.faux.setResponses([responsesOf(f, afterRequests)("after chapter response")]);
+    await f.service.invoke(client, "home.prompt", {
+      commandId: "e2e-home-prompt-after-rollover", text: "Where is the brass key?",
+    });
+    await waitUntil(() => afterRequests.length === 1, 30_000);
+    expect(viewOf(afterRequests[0]!)).toContain("CONTINUITY-FACT");
+    const after = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    expect(after).toMatchObject({ homeId: current.homeId, sessionId: reservedId });
+    expect(beforeRequests).toHaveLength(1);
+  });
+
   // progress.md C12 (#466), the property Home exists for: the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.
@@ -563,6 +1583,204 @@ describe.sequential("Tron Home activations end to end", () => {
     expect(row.configured.open).toBe(true);
   }, 60_000);
 
+  it.each(["rollover", "failed-sync"] as const)("owns exact Home attachments in a real terminal child: %s", async mode => {
+    const f = await fixture(`terminal-attachments-${mode}`);
+    disposals.push(async () => {
+      await f.server?.close();
+      f.server = undefined;
+      f.service.dispose();
+      await f.receipts.dispose();
+      await f.registry.dispose();
+      await rm(f.root, { recursive: true, force: true });
+    });
+    const initial = await designateHome(f, `terminal-attachments-${mode}`);
+    f.faux.setResponses([fauxAssistantMessage("attachment fixture initialized")]);
+    await initial.prompt("initialize attachment evidence");
+    await waitUntil(() => !initial.isBusy);
+    const devices = new DeviceStore(f.tronHome, "fixture-terminal-attachments");
+    await devices.initialize();
+    const opened: Array<{ sessionId: string; subscriptionToken: string; phase: string }> = [];
+    const closed: Array<{ sessionId: string; subscriptionToken: string; closed: boolean }> = [];
+    const accepted: Array<{ sessionId: string; operationId: string }> = [];
+    const prompts: string[] = [];
+    const invoke = f.service.invoke.bind(f.service);
+    let disconnectOnce = mode === "rollover";
+    let failSync = false;
+    let settledSession: string | undefined;
+    let retainIdleBaseline = false;
+    f.service.invoke = async (context, method, params) => {
+      if (method === "home.prompt") {
+        settledSession = undefined;
+        retainIdleBaseline = (params as { text: string }).text === "running-operation";
+      }
+      if (method === "session.sync" && failSync) throw new Error("fixture candidate synchronization failed");
+      const result = await invoke(context, method, params);
+      if (method === "session.open") {
+        const envelope = result as unknown as { session: { sessionId: string; phase: string }; subscriptionToken: string };
+        opened.push({ sessionId: envelope.session.sessionId, subscriptionToken: envelope.subscriptionToken, phase: envelope.session.phase });
+      }
+      if (method === "session.close") closed.push({ ...(params as { sessionId: string; subscriptionToken: string }), ...(result as { closed: boolean }) });
+      if (method === "home.prompt") {
+        prompts.push((params as { text: string }).text);
+        const operation = result as unknown as { sessionId: string; operationId: string };
+        accepted.push(operation);
+        const slot = await f.registry.acquire(operation.sessionId);
+        if ((params as { text: string }).text === "running-operation") return result;
+        // The accepted command's response arrives after its actual settlement.
+        // This exercises both event-before-response and idle-baseline transfer.
+        await waitUntil(() => !slot.isBusy);
+        const connection = (server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.get(context.id);
+        if (!connection) throw new Error("terminal connection missing at accepted-response cut");
+        expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+        server.broadcastSession(slot.id, "session.snapshot", slot.snapshot() as never);
+        // A ping/pong cut proves the terminal has consumed preceding snapshot
+        // frames before this response, without a scheduling sleep.
+        const consumed = once(connection.socket, "pong");
+        connection.socket.ping();
+        await awaitsWithin(consumed, "terminal consumed the settled snapshot");
+        settledSession = slot.id;
+        if (disconnectOnce) {
+          disconnectOnce = false;
+          connection.socket.terminate();
+        }
+      }
+      return result;
+    };
+    const server = new GatewayServer({
+      host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
+      devices, sessions: f.registry, service: f.service,
+      uploads: { removeSession: async () => {} } as never,
+      auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
+      logger: { log: () => {} } as never,
+    });
+    f.server = server;
+    const broadcast = server.broadcastSession.bind(server);
+    server.broadcastSession = (id, topic, payload) => {
+      // No duplicate late idle snapshot may accidentally rescue a waiter that
+      // ignored the authoritative settled cut consumed before its response.
+      if (id !== settledSession && !retainIdleBaseline) broadcast(id, topic, payload);
+    };
+    await server.listen();
+    const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+    const preload = pathToFileURL(join(process.cwd(), "test-support/home-ledger-crash-preload.mjs")).href;
+    const terminal = spawn(process.execPath, ["--experimental-transform-types", "--import", preload,
+      join(process.cwd(), "src/client/terminal-chat.ts")], {
+      cwd: process.cwd(), env: { ...process.env, TRON_DATA_DIR: f.tronHome,
+        TRON_GATEWAY_HOST: "127.0.0.1", TRON_GATEWAY_PORT: String(port) }, stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    terminal.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    terminal.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    const exit = once(terminal, "close");
+    const promptCount = () => stdout.match(/you>/gu)?.length ?? 0;
+    const scrub = (value: string) => value.replaceAll(`/private${f.root}`, "<fixture>").replaceAll(f.root, "<fixture>");
+    const awaitPrompt = async (count: number) => {
+      await waitUntil(() => promptCount() >= count, 8_000).catch(() => {
+        throw new Error(`terminal settlement did not return prompt ${count}; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`);
+      });
+    };
+    const roll = async (id: string) => {
+      const port = (f.registry.homeOwner() as unknown as {
+        options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+      }).options.sessions;
+      const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      try { await f.registry.homeOwner().chapterQuiescent(id); } finally { metrics.mockRestore(); }
+    };
+    const send = (input: string) => {
+      f.faux.setResponses([fauxAssistantMessage(`REPLY-${input}`)]);
+      terminal.stdin.write(`${input}\n`);
+    };
+    try {
+      await awaitPrompt(1);
+      if (mode === "failed-sync") {
+        await roll(initial.id);
+        failSync = true;
+        send("failed-transfer");
+        await awaitsWithin(exit, "failed terminal transfer exit", 10_000);
+        expect(terminal.exitCode).toBe(1);
+        expect(opened).toHaveLength(2);
+        expect(closed.map(({ sessionId, subscriptionToken }) => ({ sessionId, subscriptionToken }))).toEqual([
+          { sessionId: opened[1]!.sessionId, subscriptionToken: opened[1]!.subscriptionToken },
+          { sessionId: opened[0]!.sessionId, subscriptionToken: opened[0]!.subscriptionToken },
+        ]);
+        expect(closed.every(item => item.closed)).toBe(true);
+      } else {
+        send("reconnect-settled");
+        await awaitPrompt(2);
+        expect(stderr).toContain("[Tron synchronized]");
+        send("same-chapter-settled");
+        await awaitPrompt(3);
+        let releaseProvider!: () => void;
+        let providerEntered = false;
+        const providerGate = new Promise<void>(resolve => { releaseProvider = resolve; });
+        f.faux.setResponses([async () => {
+          providerEntered = true;
+          await providerGate;
+          return fauxAssistantMessage("REPLY-running-operation");
+        }]);
+        try {
+          terminal.stdin.write("running-operation\n");
+          await waitUntil(() => providerEntered);
+          const connection = [...(server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.values()][0]!;
+          const consumed = once(connection.socket, "pong");
+          connection.socket.ping();
+          await awaitsWithin(consumed, "terminal consumed the running admission");
+          expect(initial.snapshot().phase).not.toBe("idle");
+          expect(promptCount()).toBe(3);
+        } finally { retainIdleBaseline = false; releaseProvider(); }
+        await awaitPrompt(4);
+        let current = initial.id;
+        for (let rollover = 0; rollover < 2; rollover += 1) {
+          await roll(current);
+          send(`rollover-${rollover}`);
+          await awaitPrompt(5 + rollover);
+          const next = accepted.at(-1)!.sessionId;
+          expect(next).not.toBe(current);
+          const previous = opened.findLast(item => item.sessionId === current)!;
+          expect(closed.at(-1)).toEqual({ sessionId: current, subscriptionToken: previous.subscriptionToken, closed: true });
+          // Real idle eviction after outgoing attachment retirement. The current
+          // subscribed chapter stays live; no production protection is bypassed.
+          (f.registry as unknown as { options: { idleRuntimeMs: number } }).options.idleRuntimeMs = 0;
+          const liveSlots = (f.registry as unknown as { slots: Map<string, RuntimeSlot> }).slots;
+          await waitUntil(async () => {
+            await (f.registry as unknown as { evictIdle(): Promise<void> }).evictIdle();
+            return !liveSlots.has(current);
+          }).catch(() => {
+            const old = liveSlots.get(current);
+            const subscribers = (f.registry as unknown as { subscribers: Map<string, Set<string>> }).subscribers;
+            throw new Error(`outgoing eviction stalled: busy=${old?.isBusy} protected=${old?.isEvictionProtected} subscribers=${JSON.stringify([...(subscribers.get(current) ?? [])])} touched=${old?.touchedAt} now=${Date.now()} stderr=${scrub(stderr)}`);
+          });
+          expect(liveSlots.has(current)).toBe(false);
+          expect(liveSlots.has(next)).toBe(true);
+          current = next;
+        }
+        terminal.stdin.write("/quit\n");
+        await awaitsWithin(exit, "terminal attachment exit", 10_000);
+        expect(terminal.exitCode).toBe(0);
+        expect(closed.at(-1)).toEqual({ sessionId: current, subscriptionToken: opened.at(-1)!.subscriptionToken, closed: true });
+        expect(prompts).toEqual(["reconnect-settled", "same-chapter-settled", "running-operation", "rollover-0", "rollover-1"]);
+        expect(f.faux.state.callCount).toBe(6);
+        for (const input of prompts) expect(stdout.match(new RegExp(`REPLY-${input}`, "gu"))).toHaveLength(1);
+        expect(opened.slice(-2).every(item => item.phase === "idle")).toBe(true);
+      }
+      const artifact = { mode, exitCode: terminal.exitCode, opened, closed, accepted,
+        submittedInputs: prompts, stdout: scrub(stdout), stderr: scrub(stderr), injectedSoftMetrics: true,
+        responseBeforeRunningEvents: mode === "rollover" };
+      const directory = join(process.cwd(), "test-results", "terminal-chat-home");
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, `attachments-${mode}.json`), `${JSON.stringify(artifact, null, 2)}\n`);
+      report.cases.push({ case: `terminal-attachments-${mode}`, exitCode: terminal.exitCode,
+        attachments: opened.length, retiredTokens: closed.length, submittedInputs: prompts, injectedSoftMetrics: true });
+    } finally {
+      if (terminal.exitCode === null && terminal.signalCode === null) terminal.kill("SIGKILL");
+      await awaitsWithin(exit, "owned terminal cleanup");
+      terminal.stdin.destroy();
+      await server.close();
+      f.server = undefined;
+    }
+  }, 45_000);
+
   it("shows Gateway refusals in the terminal and keeps its prompt after invalid input", async () => {
     const f = await fixture("terminal-subprocess");
     const slot = await designateHome(f, "e2e-terminal-subprocess", { configure: false });
@@ -574,10 +1792,23 @@ describe.sequential("Tron Home activations end to end", () => {
       removeSession: async () => {},
     };
     const methods: string[] = [];
+    let holdSecondSnapshots = false;
+    let releaseSecondResponse!: () => void;
+    const secondResponseGate = new Promise<void>(resolve => { releaseSecondResponse = resolve; });
     const invoke = f.service.invoke.bind(f.service);
     (f.service as unknown as { invoke: typeof f.service.invoke }).invoke = async (context, method, params) => {
       methods.push(method);
+      const second = method === "session.prompt" && (params as { text?: string }).text === "refusal two";
+      if (second) holdSecondSnapshots = true;
       const result = await invoke(context, method, params);
+      if (second) {
+        await waitUntil(() => !slot.isBusy);
+        // Suppress presentation events and force authoritative resync while
+        // the accepted response is still pending. That snapshot owns refusal 2.
+        broadcast(slot.id, "transport.resyncRequired", {});
+        await secondResponseGate;
+        holdSecondSnapshots = false;
+      }
       if (method === "session.close") methods.push("session.close:completed");
       return result;
     };
@@ -588,6 +1819,10 @@ describe.sequential("Tron Home activations end to end", () => {
       logger: { log: () => {} } as never,
     });
     f.server = server;
+    const broadcast = server.broadcastSession.bind(server);
+    server.broadcastSession = (id, topic, payload) => {
+      if (!holdSecondSnapshots) broadcast(id, topic, payload);
+    };
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
     const testRoot = join(f.root, "terminal-client");
@@ -612,6 +1847,7 @@ describe.sequential("Tron Home activations end to end", () => {
     let stdout = "";
     let stderr = "";
     const scrub = (value: string) => value.replaceAll(`/private${f.root}`, "<fixture>").replaceAll(f.root, "<fixture>");
+    const terminalExit = once(terminal, "close") as Promise<[number | null, NodeJS.Signals | null]>;
     let exitTimer: NodeJS.Timeout | undefined;
     let serverClosed = false;
     terminal.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
@@ -620,8 +1856,12 @@ describe.sequential("Tron Home activations end to end", () => {
       await waitUntil(() => stdout.includes(`Attached to Tron session ${slot.id}`), 20_000);
       terminal.stdin.write("refusal one\n");
       await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 1, 10_000).catch(() => { throw new Error(`missing first refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 2, 10_000);
+      const syncsBefore = stderr.match(/Tron synchronized/gu)?.length ?? 0;
       terminal.stdin.write("refusal two\n");
-      await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 2, 10_000).catch(() => { throw new Error(`missing second refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      await waitUntil(() => (stderr.match(/Tron synchronized/gu)?.length ?? 0) > syncsBefore, 10_000);
+      await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 2, 2_000).catch(() => { throw new Error(`missing second refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
+      releaseSecondResponse();
       const repeatedRefusalCount = stdout.match(/Home memory is not configured/gu)?.length ?? 0;
       await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 3, 10_000);
       terminal.stdin.write("/home memory anthropic\n");
@@ -649,9 +1889,8 @@ describe.sequential("Tron Home activations end to end", () => {
       serverClosed = true;
       f.server = undefined;
       terminal.stdin.destroy();
-      const closed = once(terminal, "close") as Promise<[number | null, NodeJS.Signals | null]>;
       const [code, signal] = await Promise.race([
-        closed,
+        terminalExit,
         new Promise<never>((_, reject) => { exitTimer = setTimeout(() => reject(new Error(`terminal client did not exit; methods=${methods.join(",")} stdout=${scrub(stdout)} stderr=${scrub(stderr)}`)), 10_000); }),
       ]);
       if (exitTimer) clearTimeout(exitTimer);
@@ -684,12 +1923,10 @@ describe.sequential("Tron Home activations end to end", () => {
       expect(artifact.assertions.configuredMemoryDetail).toBe(true);
       report.cases.push({ case: "terminal-subprocess", exitCode: code, repeatedRefusalCount: artifact.assertions.repeatedRefusalCount, malformedUsage: artifact.assertions.malformedUsage, statusReturned: artifact.assertions.statusReturned, streamedReplyOnce: artifact.assertions.streamedReplyOnce, configuredMemoryDetail: artifact.assertions.configuredMemoryDetail });
     } finally {
+      releaseSecondResponse();
       if (exitTimer) clearTimeout(exitTimer);
-      if (terminal.exitCode === null && terminal.signalCode === null) {
-        const stopped = once(terminal, "close");
-        terminal.kill("SIGTERM");
-        await stopped;
-      }
+      if (terminal.exitCode === null && terminal.signalCode === null) terminal.kill("SIGKILL");
+      await awaitsWithin(terminalExit, "owned terminal cleanup");
       if (!serverClosed) await server.close();
       f.server = undefined;
       await f.registry.dispose();
@@ -712,9 +1949,10 @@ describe.sequential("Tron Home activations end to end", () => {
     // The Gateway that a transient outage blocked: the memory's own durable state
     // is exactly what a restart hands over.
     await restart(f);
-    const state = await readMemoryState(f, slot.id);
+    const memoryId = await homeMemoryStateId(f);
+    const state = await readMemoryState(f, memoryId);
     expect(state).toBeDefined();
-    await writeMemoryState(f, slot.id, { ...state!, blocked: { reason: "retries-exhausted" } });
+    await writeMemoryState(f, memoryId, { ...state!, blocked: { reason: "retries-exhausted" } });
 
     const reopened = await f.registry.acquire(slot.id);
     f.faux.setResponses([responsesOf(f, requests)(longInput("transient response two"))]);
@@ -838,19 +2076,22 @@ describe.sequential("Tron Home activations end to end", () => {
     expect(row.newSessionDiffers).toBe(true);
     expect(row.configuredOnNewSession).toBe(true);
     expect(row.modelOnNewSession).toEqual(MEMORY_MODEL);
-    expect(row.spendOnNewSession).toBe(0);
+    expect(row.spendOnNewSession).toBeGreaterThanOrEqual(row.spentOnFirstSession);
     expect(row.spentOnFirstSession).toBeGreaterThan(0);
 
-    // The new session's memory opens and builds (#483). Its namespace was never
-    // created, which is not lost state, even though the first session's store
-    // set the workspace's episodic marker.
+    // The new physical chapter opens the same Home memory namespace (#483), so
+    // the stable Home identity retains configuration and spend across recovery.
     const freshSlot = await f.registry.acquire(reDesignated.sessionId);
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply three"))]);
     await freshSlot.prompt(longInput("lifecycle activation three"));
     await waitUntil(() => !freshSlot.isBusy);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as { lastRefusalReason?: string; lastRefusalDetail?: string };
-    expect(context.lastRefusalReason, context.lastRefusalDetail).toBeUndefined();
-    await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).spentTokens ?? 0) > 0);
+    expect(context.lastRefusalReason, context.lastRefusalDetail).toBe("memory-blocked");
+    expect(context.lastRefusalDetail).toContain("Sealed Home chapter");
+    const blockedMemory = await f.registry.homeOwner().memoryStatus();
+    expect(blockedMemory.blocked).toBe("source-unavailable");
+    expect(blockedMemory.spentTokens).toBeGreaterThanOrEqual(row.spentOnFirstSession);
+    report.cases.push({ case: "missing-sealed-source-blocked", priorProjectionRetained: true, blocked: blockedMemory.blocked });
   }, 120_000);
 
   // #493: there is no budget to manage, and the memory is never stopped by what
@@ -1002,10 +2243,11 @@ describe.sequential("Tron Home activations end to end", () => {
     await restart(f);
     // The store the restart closed: its own document is what the status must
     // report, because the reopened memory has not opened it yet.
-    const persisted = await readMemoryState(f, slot.id);
+    const memoryId = await homeMemoryStateId(f);
+    const persisted = await readMemoryState(f, memoryId);
     expect(persisted).toBeDefined();
     const closed = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    await writeMemoryState(f, slot.id, { ...persisted!, blocked: { reason: "source-unavailable", detail: "canonical session is unreadable" } });
+    await writeMemoryState(f, memoryId, { ...persisted!, blocked: { reason: "source-unavailable", detail: "canonical session is unreadable" } });
     const blocked = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const row = {
       openWhenClosed: closed.memory.open,
@@ -1103,7 +2345,7 @@ describe.sequential("Tron Home activations end to end", () => {
     await reopened.prompt(longInput("restart activation two"));
     await waitUntil(() => !reopened.isBusy);
     const after = await f.registry.homeOwner().memoryStatus();
-    const persisted = await readMemoryState(f, slot.id);
+    const persisted = await readMemoryState(f, await homeMemoryStateId(f));
     const row = {
       usedBeforeRestart: beforeUsed,
       usedAfterRestart: after.episodic?.tokens.used ?? 0,

@@ -26,6 +26,20 @@ const SUPPORTED_SESSION_VERSION = 3;
 /** How many bytes before the cursor the incremental reader re-reads to prove the
  * prefix is the one it read last time. */
 const PREFIX_WINDOW_BYTES = 8 * 1_024;
+export const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
+
+/** A failed parse of a source whose snapshot could not be proven stable. */
+export class EpisodicSourceChangedError extends Error {
+  constructor() {
+    super("Canonical session changed while it was being read");
+    this.name = "EpisodicSourceChangedError";
+  }
+}
+
+function sameSnapshot(start: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>, end: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>): boolean {
+  return start.dev === end.dev && start.ino === end.ino && start.size === end.size
+    && start.mtimeMs === end.mtimeMs && start.ctimeMs === end.ctimeMs;
+}
 
 export interface EpisodicCanonicalEntry {
   id: string;
@@ -33,6 +47,8 @@ export interface EpisodicCanonicalEntry {
   timestamp: string;
   type: string;
   raw: Record<string, unknown>;
+  /** Physical provenance when a stable Home source spans chapters. */
+  sourceSessionId?: string;
   /** The exact JSON text of the entry's line, without its newline. */
   line: string;
 }
@@ -49,6 +65,10 @@ export interface EpisodicCanonicalCut {
   cursor: EpisodicSourceCursor;
   /** True when this read continued from the previous cursor. */
   incremental: boolean;
+  /** Home sources project while streaming, retaining no raw transcript arrays. */
+  projected?: EpisodicProjectedMessage[];
+  /** A full branch refresh invalidates only this physical chapter. */
+  scopeSessionId?: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -59,24 +79,30 @@ interface LineBatch {
   lines: string[];
   completeBytes: number;
   tornBytes: number;
+  completePrefixDigest: string;
 }
 
 /** Read complete lines from `start` to the end of the file, bounded per line. */
-async function readLines(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, start: number, maxLineBytes: number): Promise<LineBatch> {
+async function readLines(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, start: number, maxLineBytes: number, endExclusive?: number, previousPrefixDigest?: string | null): Promise<LineBatch> {
   const lines: string[] = [];
   const buffer = Buffer.alloc(1_024 * 1_024);
   let pending = Buffer.alloc(0);
   let offset = start;
   let completeBytes = start;
+  let completePrefixDigest = previousPrefixDigest ?? COMPLETE_PREFIX_SEED;
   for (;;) {
-    const read = await handle.read(buffer, 0, buffer.length, offset);
+    if (endExclusive !== undefined && offset >= endExclusive) break;
+    const length = endExclusive === undefined ? buffer.length : Math.min(buffer.length, endExclusive - offset);
+    const read = await handle.read(buffer, 0, length, offset);
     if (read.bytesRead === 0) break;
     offset += read.bytesRead;
     let chunk = Buffer.concat([pending, buffer.subarray(0, read.bytesRead)]);
     let newline = chunk.indexOf(0x0a);
     while (newline >= 0) {
       if (newline > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
-      lines.push(chunk.subarray(0, newline).toString("utf8"));
+      const lineBytes = chunk.subarray(0, newline);
+      lines.push(lineBytes.toString("utf8"));
+      completePrefixDigest = extendPrefixDigest(completePrefixDigest, lineBytes);
       completeBytes += newline + 1;
       chunk = chunk.subarray(newline + 1);
       newline = chunk.indexOf(0x0a);
@@ -84,10 +110,14 @@ async function readLines(handle: { read(buffer: Buffer, offset: number, length: 
     if (chunk.length > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
     pending = chunk;
   }
-  return { lines, completeBytes, tornBytes: pending.length };
+  return { lines, completeBytes, tornBytes: pending.length, completePrefixDigest };
 }
 
-function parseEntry(line: string): EpisodicCanonicalEntry {
+export function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
+  return createHash("sha256").update(prefix).update("\\0").update(lineBytes).update("\\n").digest("hex");
+}
+
+export function parseEntry(line: string): EpisodicCanonicalEntry {
   let raw: Record<string, unknown>;
   try {
     raw = asRecord(JSON.parse(line)) ?? {};
@@ -101,16 +131,6 @@ function parseEntry(line: string): EpisodicCanonicalEntry {
     throw new EpisodicMemoryError("source", "Canonical session holds a line that is not a session entry");
   }
   return { id, parentId, timestamp, type: raw.type, raw, line };
-}
-
-/** The last complete line that is not blank, as read from the file. */
-function lastLine(lines: readonly string[]): { line: string; entry: EpisodicCanonicalEntry } | undefined {
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]!;
-    if (line.trim() === "") continue;
-    return { line, entry: parseEntry(line) };
-  }
-  return undefined;
 }
 
 /** Extend the remembered branch with entries read after the cursor. `undefined`
@@ -137,7 +157,7 @@ function extendBranch(branch: readonly EpisodicCanonicalEntry[], entries: readon
 
 /** The digest of the last complete non-blank line before `offset`, read from a
  * small window. `undefined` when the window cannot prove it. */
-async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
+export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
   if (offset <= 1) return undefined;
   const start = Math.max(0, offset - PREFIX_WINDOW_BYTES);
   const buffer = Buffer.alloc(offset - start);
@@ -173,16 +193,17 @@ export async function readCanonicalSession(options: {
   const handle = await open(options.path, constants.O_RDONLY).catch((error: NodeJS.ErrnoException) => {
     throw new EpisodicMemoryError("source", `Canonical session ${options.path} cannot be read: ${error.code ?? error.message}`);
   });
+  let start: Awaited<ReturnType<typeof handle.stat>> | undefined;
   try {
-    const info = await handle.stat();
+    const info = start = await handle.stat();
     if (!info.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
 
     const previous = options.previous;
-    if (previous && previous.cursor.dev === info.dev && previous.cursor.ino === info.ino
+    if (previous && previous.cursor.completePrefixDigest && previous.cursor.dev === info.dev && previous.cursor.ino === info.ino
       && info.size >= previous.cursor.size && info.size >= previous.cursor.completeBytes) {
       const digest = await prefixLineDigest(handle, previous.cursor.completeBytes);
       if (digest !== undefined && digest === previous.cursor.leafLineDigest) {
-        const batch = await readLines(handle, previous.cursor.completeBytes, options.maxLineBytes);
+        const batch = await readLines(handle, previous.cursor.completeBytes, options.maxLineBytes, undefined, previous.cursor.completePrefixDigest);
         const entries: EpisodicCanonicalEntry[] = [];
         for (const line of batch.lines) {
           if (line.trim() === "") continue;
@@ -191,7 +212,7 @@ export async function readCanonicalSession(options: {
         const extended = extendBranch(previous.branch, entries);
         if (extended) {
           const end = await handle.stat();
-          const tail = lastLine(batch.lines);
+          const tail = entries.at(-1);
           const branchLeaf = extended.at(-1) ?? null;
           return {
             sessionId: options.sessionId,
@@ -203,7 +224,8 @@ export async function readCanonicalSession(options: {
             cursor: {
               dev: end.dev, ino: end.ino, size: end.size,
               completeBytes: batch.completeBytes,
-              leafEntryId: tail?.entry.id ?? previous.cursor.leafEntryId,
+              leafEntryId: tail?.id ?? previous.cursor.leafEntryId,
+              completePrefixDigest: batch.completePrefixDigest,
               leafLineDigest: tail ? digestOf(tail.line) : previous.cursor.leafLineDigest,
             },
           };
@@ -222,7 +244,7 @@ export async function readCanonicalSession(options: {
     }
     branch.reverse();
     const end = await handle.stat();
-    const tail = lastLine(batch.lines);
+    const tail = entries.at(-1);
     return {
       sessionId: options.sessionId,
       branch,
@@ -233,13 +255,139 @@ export async function readCanonicalSession(options: {
       cursor: {
         dev: end.dev, ino: end.ino, size: end.size,
         completeBytes: batch.completeBytes,
-        leafEntryId: tail?.entry.id ?? null,
+        leafEntryId: tail?.id ?? null,
+        completePrefixDigest: batch.completePrefixDigest,
         leafLineDigest: tail ? digestOf(tail.line) : null,
       },
     };
+  } catch (error) {
+    if (start && error instanceof EpisodicMemoryError && error.kind === "source") {
+      const end = await handle.stat().catch(() => undefined);
+      if (!end || !sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
+    }
+    throw error;
   } finally {
     await handle.close();
   }
+}
+
+/** Hash every complete line through a cursor without retaining the source text. */
+async function digestCompletePrefix(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, endBytes: number, maxLineBytes: number): Promise<string | undefined> {
+  const buffer = Buffer.alloc(1_024 * 1_024);
+  let pending = Buffer.alloc(0);
+  let offset = 0;
+  let digestValue = COMPLETE_PREFIX_SEED;
+  while (offset < endBytes) {
+    const read = await handle.read(buffer, 0, Math.min(buffer.length, endBytes - offset), offset);
+    if (read.bytesRead === 0) return undefined;
+    offset += read.bytesRead;
+    let chunk = Buffer.concat([pending, buffer.subarray(0, read.bytesRead)]);
+    let newline = chunk.indexOf(0x0a);
+    while (newline >= 0) {
+      if (newline > maxLineBytes) return undefined;
+      digestValue = extendPrefixDigest(digestValue, chunk.subarray(0, newline));
+      chunk = chunk.subarray(newline + 1);
+      newline = chunk.indexOf(0x0a);
+    }
+    if (chunk.length > maxLineBytes) return undefined;
+    pending = chunk;
+  }
+  return pending.length === 0 ? digestValue : undefined;
+}
+
+/** Reconstruct the current branch only through the exact cursor already ingested.
+ * A full streaming prefix hash must match before and after reconstruction; the
+ * last-line window alone cannot detect a same-size rewrite earlier in history. */
+export async function readCanonicalBranchAtCursor(options: {
+  path: string;
+  sessionId: string;
+  maxLineBytes: number;
+  cursor: EpisodicSourceCursor;
+}): Promise<EpisodicCanonicalEntry[] | undefined> {
+  const handle = await open(options.path, constants.O_RDONLY).catch(() => undefined);
+  if (!handle) return undefined;
+  try {
+    const start = await handle.stat();
+    if (!start.isFile() || start.dev !== options.cursor.dev || start.ino !== options.cursor.ino
+      || start.size < options.cursor.completeBytes || options.cursor.completeBytes <= 0 || !options.cursor.completePrefixDigest) return undefined;
+    if (await digestCompletePrefix(handle, options.cursor.completeBytes, options.maxLineBytes) !== options.cursor.completePrefixDigest) return undefined;
+    const { batch, byId } = await readWholeFile(handle, {
+      path: options.path, sessionId: options.sessionId, maxLineBytes: options.maxLineBytes,
+      endBytes: options.cursor.completeBytes,
+    });
+    if (batch.completeBytes !== options.cursor.completeBytes || batch.tornBytes !== 0
+      || batch.completePrefixDigest !== options.cursor.completePrefixDigest) return undefined;
+    if (await digestCompletePrefix(handle, options.cursor.completeBytes, options.maxLineBytes) !== options.cursor.completePrefixDigest) return undefined;
+    const end = await handle.stat();
+    if (end.dev !== start.dev || end.ino !== start.ino || end.size < options.cursor.completeBytes) return undefined;
+    const leafId = options.cursor.leafEntryId;
+    if (!leafId) return undefined;
+    const leaf = byId.get(leafId);
+    if (!leaf) return undefined;
+    const branch: EpisodicCanonicalEntry[] = [];
+    const seen = new Set<string>();
+    for (let entry: EpisodicCanonicalEntry | undefined = leaf; entry; entry = entry.parentId === null ? undefined : byId.get(entry.parentId)) {
+      if (seen.has(entry.id)) throw new EpisodicMemoryError("source", "Canonical session parent chain is cyclic");
+      seen.add(entry.id);
+      branch.push(entry);
+    }
+    return branch.reverse();
+  } finally { await handle.close(); }
+}
+
+export async function readCanonicalSimpleAppend(options: {
+  path: string;
+  sessionId: string;
+  maxLineBytes: number;
+  cursor: EpisodicSourceCursor;
+}): Promise<EpisodicCanonicalCut | undefined> {
+  const handle = await open(options.path, constants.O_RDONLY).catch(() => undefined);
+  if (!handle) return undefined;
+  let start: Awaited<ReturnType<typeof handle.stat>> | undefined;
+  try {
+    start = await handle.stat();
+    const cursor = options.cursor;
+    if (!start.isFile() || start.dev !== cursor.dev || start.ino !== cursor.ino || start.size < cursor.completeBytes
+      || !cursor.completePrefixDigest || await prefixLineDigest(handle, cursor.completeBytes) !== cursor.leafLineDigest) return undefined;
+    const batch = await readLines(handle, cursor.completeBytes, options.maxLineBytes, undefined, cursor.completePrefixDigest);
+    const branch: EpisodicCanonicalEntry[] = [];
+    let parentId = cursor.leafEntryId;
+    const ids = new Set<string>();
+    for (const line of batch.lines) {
+      if (line.trim() === "") continue;
+      const entry = parseEntry(line);
+      if (entry.type !== "message" || entry.parentId !== parentId || ids.has(entry.id)) return undefined;
+      ids.add(entry.id);
+      branch.push(entry);
+      parentId = entry.id;
+    }
+    const end = await handle.stat();
+    if (end.dev !== start.dev || end.ino !== start.ino) return undefined;
+    if (branch.length === 0 && batch.completeBytes !== cursor.completeBytes) return undefined;
+    const last = branch.at(-1);
+    const nextCursor: EpisodicSourceCursor = {
+      dev: end.dev, ino: end.ino, size: end.size,
+      completeBytes: batch.completeBytes,
+      leafEntryId: last?.id ?? cursor.leafEntryId,
+      completePrefixDigest: batch.completePrefixDigest,
+      leafLineDigest: last ? digestOf(last.line) : cursor.leafLineDigest,
+    };
+    return {
+      sessionId: options.sessionId,
+      branch,
+      completeBytes: batch.completeBytes,
+      tornBytes: batch.tornBytes,
+      leafEntryId: last?.id ?? cursor.leafEntryId,
+      incremental: true,
+      cursor: nextCursor,
+    };
+  } catch (error) {
+    if (start && error instanceof EpisodicMemoryError && error.kind === "source") {
+      const end = await handle.stat().catch(() => undefined);
+      if (!end || !sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
+    }
+    throw error;
+  } finally { await handle.close(); }
 }
 
 interface WholeFile {
@@ -256,9 +404,9 @@ interface WholeFile {
  */
 async function readWholeFile(
   handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> },
-  options: { path: string; sessionId: string; maxLineBytes: number },
+  options: { path: string; sessionId: string; maxLineBytes: number; endBytes?: number },
 ): Promise<WholeFile> {
-  const batch = await readLines(handle, 0, options.maxLineBytes);
+  const batch = await readLines(handle, 0, options.maxLineBytes, options.endBytes);
   if (batch.lines.length === 0) throw new EpisodicMemoryError("source", "Canonical session file is empty");
   let header: Record<string, unknown>;
   try {
@@ -310,6 +458,7 @@ export async function readCanonicalEntryInstants(options: {
 
 export interface EpisodicProjectedMessage {
   entryId: string;
+  sourceSessionId?: string;
   kind: EpisodicMessageKind;
   text: string;
   /** The canonical entry's instant, carried so the catalog can answer a
@@ -466,6 +615,7 @@ export function projectBranch(cut: EpisodicCanonicalCut, limits: EpisodicLimits)
     if (credentials !== text) omissions.push("credentials");
     projected.push({
       entryId: entry.id,
+      ...(entry.sourceSessionId === undefined ? {} : { sourceSessionId: entry.sourceSessionId }),
       kind,
       text: credentials,
       timestamp: entry.timestamp,

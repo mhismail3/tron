@@ -23,6 +23,7 @@ import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/resta
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
+import { logHomeDiagnostic } from "./home/home-diagnostic.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -30,6 +31,7 @@ import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-di
 import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { assertNewModelChoice, OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
@@ -150,6 +152,7 @@ const notifications = new NotificationService(
 await notifications.initialize();
 startupCheckpoint("notifications");
 
+const openAIModelEligibility = new OpenAIModelEligibility();
 const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
@@ -157,6 +160,7 @@ const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime
   refreshOnCreate: true,
   allowModelNetwork: false,
 })));
+openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
 const trust = new TrustService(config.agentDir);
@@ -219,6 +223,7 @@ const sessions = new RuntimeRegistry({
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
+  openAIModelEligibility,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
@@ -331,14 +336,7 @@ const sessions = new RuntimeRegistry({
     `Codemode execution ${diagnostic.outcome}`,
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
-  // Home's designation is a rare explicit user action. `unavailable` and
-  // `refused` are the two outcomes that need attention: the preserved record
-  // could not be used, or a running session blocked the profile change.
-  homeDiagnostic: (diagnostic) => logger.log(
-    diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused" ? "warning" : "info",
-    `Tron Home designation ${diagnostic.outcome}`,
-    { event: `home.${diagnostic.outcome}`, source: "home", ...(diagnostic.reason ? { reason: diagnostic.reason } : {}) },
-  ),
+  homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -468,6 +466,14 @@ const knowledge = new KnowledgeService(
     );
   }),
   knowledgeTagging,
+  async modelReference => {
+    const separator = modelReference.indexOf("/");
+    if (separator <= 0 || separator === modelReference.length - 1) throw new GatewayError("invalid_request", "Knowledge model must identify a registered provider/model");
+    const provider = modelReference.slice(0, separator);
+    const id = modelReference.slice(separator + 1);
+    if (!modelRuntime.getModel(provider, id)) throw new GatewayError("invalid_request", "Knowledge model is not registered");
+    await assertNewModelChoice(modelRuntime, provider, id);
+  },
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
 sessions.setKnowledgeService(knowledge);

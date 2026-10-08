@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,21 +23,30 @@ interface Harness {
   replaced: string[];
   present: Set<string>;
   live: Set<string>;
+  holdProfileCommit(): { entered: Promise<void>; release(): void };
 }
 
 /** A port that records the calls the owner makes, so the assertions stay about
  * the owner's own decisions (record bytes, generations, session identity) and
  * never about a mocked mechanism. */
-async function harness(): Promise<Harness> {
+async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "tron-home-owner-"));
   roots.push(root);
   const agentDir = join(root, "agent");
+  const tronHome = join(root, options.symlinkHome ? "tron-link" : "tron");
+  const actualTronHome = options.symlinkHome ? join(root, "tron-real") : tronHome;
   await mkdir(agentDir);
+  if (options.symlinkHome) {
+    await mkdir(actualTronHome);
+    await symlink(actualTronHome, tronHome);
+  }
   const created: string[] = [];
   const replaced: string[] = [];
   const present = new Set<string>();
   const live = new Set<string>();
   let sequence = 0;
+  let replaceGate: Promise<void> | undefined;
+  let replaceEntered!: () => void;
   const sessions: HomeSessionPort = {
     createHomeSession: async () => {
       const sessionId = `session-${++sequence}`;
@@ -50,49 +59,169 @@ async function harness(): Promise<Harness> {
     sessionFile: async (sessionId) => (present.has(sessionId) ? join(root, "sessions", `${sessionId}.jsonl`) : undefined),
     sessionPresent: async (sessionId) => present.has(sessionId),
     hasLiveRuntime: (sessionId) => live.has(sessionId),
+    serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (sessionId, commit) => {
       replaced.push(sessionId);
+      if (replaceGate) {
+        replaceEntered();
+        await replaceGate;
+      }
       await commit();
     },
   };
-  const workspace = new TronWorkspace(join(root, "tron"), );
+  const workspace = new TronWorkspace(join(root, "tron-workspace"));
   workspaces.push(workspace);
   const owner = new HomeOwner({
-    tronHome: join(root, "tron"),
+    tronHome,
     trust: new TrustService(agentDir),
     sessions,
     workspace,
-    // Home's memory compactor is resolved from the Gateway's ModelRuntime; this
-    // harness never configures a memory that could use one.
-    memorySummarizer: () => ({ refusal: "unavailable" }),
+    // This deterministic summarizer lets record tests configure memory without
+    // reaching an external provider.
+    memorySummarizer: () => ({ summarizer: async () => "summary" }),
   });
   await owner.initialize();
   return {
     root,
     owner,
-    recordPath: join(root, "tron", "gateway", "home", "home.json"),
-    directory: join(root, "tron", "gateway", "home"),
-    workspacePath: join(root, "tron", "gateway", "home", "workspace"),
+    recordPath: join(tronHome, "gateway", "home", "home.json"),
+    directory: join(tronHome, "gateway", "home"),
+    workspacePath: join(actualTronHome, "gateway", "home", "workspace"),
     created,
     replaced,
     present,
     live,
+    holdProfileCommit: () => {
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      let enteredResolve!: () => void;
+      const entered = new Promise<void>(resolve => { enteredResolve = resolve; });
+      replaceEntered = enteredResolve;
+      replaceGate = gate;
+      return { entered, release: () => { replaceGate = undefined; release(); } };
+    },
   };
 }
 
 const MODEL = { provider: "anthropic", id: "claude-sonnet-4-5" };
 const defaultModel = () => MODEL;
 
-function recordBytes(overrides: Partial<HomeRecord> = {}): string {
+function chapterRecordBytes(overrides: Record<string, unknown> = {}): string {
   return `${JSON.stringify({
-    version: 1, homeId: "home-1", sessionId: "session-1", generation: 2,
-    policyRevision: 1, enabled: true, model: MODEL,
+    version: 2, homeId: "home-1", generation: 2, policyRevision: 1, bindingRevision: 1,
+    enabled: true, model: MODEL,
+    chapters: [{ sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     ...overrides,
   })}\n`;
 }
 
+function recordBytes(overrides: Record<string, unknown> = {}): string {
+  const { sessionId = "session-1", ...fields } = overrides;
+  return `${JSON.stringify({
+    version: 2, homeId: "home-1", chapters: [{ sessionId, ordinal: 1, state: "active", createdAt: new Date().toISOString() }],
+    bindingRevision: 1, generation: 2, policyRevision: 1, enabled: true, model: MODEL,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    ...fields,
+  })}\n`;
+}
+
+function legacyRecordBytes(): string {
+  return `${JSON.stringify({
+    version: 1, homeId: "home-1", sessionId: "session-1", generation: 2,
+    policyRevision: 1, enabled: true, model: MODEL,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  })}\n`;
+}
+
 describe("Tron Home record", () => {
+  it("admits a strict one-active-chapter record and resolves the physical session", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes(), { mode: 0o600 });
+    f.present.add("session-1");
+    await f.owner.initialize();
+
+    expect(await f.owner.status()).toMatchObject({
+      available: true, enabled: true, homeId: "home-1", sessionId: "session-1", generation: 2,
+    });
+    expect(f.owner.chapterStateFor("session-1")).toMatchObject({ sessionId: "session-1", sealed: false, ordinal: 1 });
+  });
+
+  it("preserves and refuses the pre-chapter v1 record without rewriting it", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const previous = legacyRecordBytes();
+    await writeFile(f.recordPath, previous, { mode: 0o600 });
+    await f.owner.initialize();
+
+    expect(await f.owner.status()).toMatchObject({ available: false, phase: "unavailable" });
+    await expect(f.owner.designate({}, defaultModel)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(previous);
+    expect(f.created).toEqual([]);
+  });
+
+  it("preserves unknown chapter-record fields instead of partially admitting them", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const persisted = chapterRecordBytes({ futureBinding: { attempt: "unknown" } });
+    await writeFile(f.recordPath, persisted, { mode: 0o600 });
+    await f.owner.initialize();
+    expect(await f.owner.status()).toMatchObject({ available: false, enabled: false });
+    await expect(readFile(f.recordPath, "utf8")).resolves.toBe(persisted);
+  });
+
+  it.each(["reserved", "materializing"] as const)("does not replace an unresolved %s reservation during designation", async (state) => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const persisted = chapterRecordBytes({ chapters: [
+      { sessionId: "session-old", ordinal: 1, state: "sealed", createdAt: new Date().toISOString(), sealedAt: new Date().toISOString() },
+      { sessionId: "session-reserved", ordinal: 2, state, createdAt: new Date().toISOString(),
+        ...(state === "materializing" ? { attemptId: "attempt-1", expectedPath: "/sessions/reserved.jsonl" } : {}) },
+    ] });
+    await writeFile(f.recordPath, persisted, { mode: 0o600 });
+    await f.owner.initialize();
+    await expect(f.owner.designate({ model: MODEL }, defaultModel)).rejects.toMatchObject({ code: "conflict" });
+    expect(f.created).toEqual([]);
+    expect(await readFile(f.recordPath, "utf8")).toBe(persisted);
+    await f.owner.dispose();
+  });
+
+  it("durably claims a reserved successor and fences path writes by attempt id", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes({ chapters: [
+      { sessionId: "session-reserved", ordinal: 1, state: "reserved", createdAt: new Date().toISOString() },
+    ] }), { mode: 0o600 });
+    await f.owner.initialize();
+
+    const claim = await f.owner.claimReservedChapter("session-reserved", "attempt-1");
+    expect(claim).toMatchObject({ state: "materializing", attemptId: "attempt-1" });
+    await f.owner.recordReservedChapterPath("session-reserved", "attempt-1", "/sessions/exact.jsonl");
+    const recorded = await readFile(f.recordPath, "utf8");
+    expect(JSON.parse(recorded).chapters[0]).toMatchObject({
+      state: "materializing", attemptId: "attempt-1", expectedPath: "/sessions/exact.jsonl",
+    });
+    await expect(f.owner.recordReservedChapterPath("session-reserved", "stale-attempt", "/sessions/other.jsonl"))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(recorded);
+  });
+
+  it("preserves malformed chapter topology rather than choosing an active target", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    const malformed = chapterRecordBytes({ chapters: [
+      { sessionId: "session-1", ordinal: 1, state: "active", createdAt: new Date().toISOString() },
+      { sessionId: "session-1", ordinal: 2, state: "active", createdAt: new Date().toISOString() },
+    ] });
+    await writeFile(f.recordPath, malformed, { mode: 0o600 });
+    await f.owner.initialize();
+
+    expect(await f.owner.status()).toMatchObject({ available: false, phase: "unavailable" });
+    await expect(f.owner.disable()).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(malformed);
+  });
+
   it("preserves a corrupt record and refuses to designate over it", async () => {
     // Failure modes 1 and 3: a corrupt record must not be silently replaced,
     // and a refused designate must not touch the file.
@@ -127,11 +256,35 @@ describe("Tron Home record", () => {
     expect(control.owner.profileFor("session-2")).toBe("unnamed");
   });
 
+  it("refuses runtime admission from Home's workspace when the record is unavailable", async () => {
+    const f = await harness();
+    await mkdir(f.workspacePath, { recursive: true });
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, "{broken", { mode: 0o600 });
+    await f.owner.initialize();
+    await f.owner.initialize();
+    const canonicalWorkspace = await realpath(f.workspacePath);
+    expect(() => f.owner.profileFor("session-1", canonicalWorkspace)).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(f.owner.profileFor("ordinary-session", f.root)).toBe("unnamed");
+  });
+
+  it("matches unavailable Home workspace identity through a symlinked installation path", async () => {
+    const f = await harness({ symlinkHome: true });
+    await mkdir(f.workspacePath, { recursive: true });
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, "{broken", { mode: 0o600 });
+    await f.owner.initialize();
+    await f.owner.initialize();
+    const canonicalWorkspace = await realpath(f.workspacePath);
+    expect(() => f.owner.profileFor("former-home", canonicalWorkspace)).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(f.owner.profileFor("ordinary-session", f.root)).toBe("unnamed");
+  });
+
   it("preserves an unknown-version record instead of migrating it", async () => {
     // Failure mode 2: a future record shape is not this build's to rewrite.
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
-    const future = recordBytes({ version: 2 as unknown as 1 });
+    const future = recordBytes({ version: 3 });
     await writeFile(f.recordPath, future, { mode: 0o600 });
     await f.owner.initialize();
 
@@ -186,6 +339,27 @@ describe("Tron Home record", () => {
     expect(await symlinked.owner.status()).toMatchObject({ available: false, enabled: false });
   });
 
+  it("refuses an oversized outgoing ledger before replacing the readable record", async () => {
+    const f = await harness();
+    await f.owner.designate({ model: MODEL }, defaultModel);
+    const previous = await readFile(f.recordPath, "utf8");
+    const now = new Date().toISOString();
+    const chapters = Array.from({ length: 100_000 }, (_, index) => ({
+      sessionId: `chapter-${index}-${"x".repeat(140)}`,
+      ordinal: index + 1,
+      state: index === 99_999 ? "active" as const : "sealed" as const,
+      createdAt: now,
+      ...(index === 99_999 ? {} : { sealedAt: now }),
+    }));
+    const oversized: HomeRecord = {
+      version: 2, homeId: "home-large", chapters, bindingRevision: 1, generation: 1,
+      policyRevision: 1, enabled: true, model: MODEL, createdAt: now, updatedAt: now,
+    };
+    const writer = f.owner as unknown as { writeLocked(record: HomeRecord): Promise<void> };
+    await expect(writer.writeLocked(oversized)).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(previous);
+  }, 30_000);
+
   it("writes the record owner-only with no temporary file left, and an owner-only workspace", async () => {
     // Failure modes 4, 5 and 10: one durable replacement, owner-only bytes, and
     // an owner-only neutral working directory.
@@ -197,8 +371,8 @@ describe("Tron Home record", () => {
     expect((await stat(f.workspacePath)).mode & 0o777).toBe(0o700);
     const stored = JSON.parse(await readFile(f.recordPath, "utf8")) as HomeRecord;
     expect(stored).toMatchObject({
-      version: 1, policyRevision: 1, enabled: true, generation: 1, model: MODEL,
-      sessionId: designation.sessionId,
+      version: 2, bindingRevision: 1, policyRevision: 1, enabled: true, generation: 1, model: MODEL,
+      chapters: [{ sessionId: designation.sessionId, ordinal: 1, state: "active" }],
     });
     expect(stored.createdAt).toBe(stored.updatedAt);
     expect(stored.homeId).toBe(designation.homeId);
@@ -277,7 +451,6 @@ describe("Tron Home record", () => {
 
     const disabled = await f.owner.disable();
     expect(disabled).toEqual({ ...first, generation: 2 });
-    expect(f.replaced).toEqual([]);
     expect(await f.owner.status()).toMatchObject({
       enabled: false, sessionPresent: false, phase: "disabled",
       readiness: { ready: false, gaps: ["disabled", "session-missing", "memory-not-configured"] },
@@ -300,6 +473,32 @@ describe("Tron Home record", () => {
     f.live.delete(first.sessionId);
     await f.owner.designate({}, () => other);
     expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ model: other });
+  });
+
+  it("merges a model update completed while disable waits for the slot lane", async () => {
+    const f = await harness();
+    const designated = await f.owner.designate({ model: MODEL }, defaultModel);
+    const chatModel = { provider: "openai", id: "chat-model-during-disable" };
+    const gate = f.holdProfileCommit();
+    const disabling = f.owner.disable();
+    await gate.entered;
+    await f.owner.noteModelApplied(designated.sessionId, chatModel);
+    gate.release();
+    await disabling;
+    expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ enabled: false, model: chatModel });
+  });
+
+  it("preserves concurrent memory and chat-model updates", async () => {
+    const f = await harness();
+    const designated = await f.owner.designate({ model: MODEL }, defaultModel);
+    const memoryModel = { provider: "openai", id: "memory-model" };
+    const chatModel = { provider: "openai", id: "chat-model" };
+    await Promise.all([
+      f.owner.configureMemory({ model: memoryModel }),
+      f.owner.noteModelApplied(designated.sessionId, chatModel),
+    ]);
+    expect(JSON.parse(await readFile(f.recordPath, "utf8"))).toMatchObject({ model: chatModel, memory: { model: memoryModel } });
+    await f.owner.dispose();
   });
 
   it("tracks a model applied to the enabled Home session, and ignores other sessions", async () => {
@@ -354,6 +553,7 @@ describe("Tron Home record", () => {
         sessionFile: async () => undefined,
         sessionPresent: async () => true,
         hasLiveRuntime: () => false,
+        serializeSessionMutation: async (_id, commit) => commit(),
         replaceRuntimeForProfile: async (_sessionId, commit) => { await commit(); },
       },
       workspace: new TronWorkspace(join(h.root, "tron")),
