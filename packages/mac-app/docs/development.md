@@ -32,13 +32,14 @@ or a pinned-version payload alias without sibling npm is skipped before the
 exact `$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew
 candidates are considered. `TRON_NODE_BIN` may explicitly name an absolute
 executable, but it must provide both the pinned Node and sibling npm; there is
-no ambient npm override. Failure happens before build or payload mutation. These variables
-affect staging only. Focused shell and Node payload tests derive their fixture
-root from the active pinned Node executable, or from an explicit
-`TRON_NODE_ROOT`, and reject a version mismatch. Hosted Mac tests use the npm
-runtime embedded in their built test app. No test depends on a machine-specific
-temporary archive path. Release preparation also downloads and verifies the
-repository-pinned XcodeGen archive, executable, and preset tree, then
+no ambient npm override. Failure happens before build or payload mutation. These
+variables affect staging only. Node payload tests copy fixture npm from the checksum-verified
+`${TRON_CI_TOOLS_DIR:-.ci-tools}/node-v<version>-<architecture>` archive cache, or from an
+explicit `TRON_NODE_ROOT`; they require the repository-pinned Node version regardless of which
+Node executable launches the test. Hosted Mac tests use the npm runtime embedded in their built
+test app. No test depends on a machine-specific temporary archive path. Release
+preparation also downloads and verifies the repository-pinned XcodeGen archive,
+executable, and preset tree, then
 fingerprints them under `Gateway/runtime/xcodegen`. Bundle writers serialize
 before touching the shared dependency tree, assemble and verify generated
 resources under a private source-local staging root, and publish the payload,
@@ -201,7 +202,8 @@ packages/mac-app/scripts/test-update-payload-fingerprint.sh
 # Two real builds in this checkout, the second with --skip-download; Node/npm
 # pin violations and symlinks refused without changing published bytes or modes,
 # with no private staging/backup roots or build lock remaining after each refusal.
-# Downloads Node and rebuilds the payload; retains the log at
+# Builds matching and dirty-source payloads, proves reverted provider-helper
+# receipts are rejected, then exercises runtime tamper refusal. Retains the log at
 # packages/mac-app/test-results/bundle-gateway-rebuild.log.
 packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
 # Focused disposal regression: immutable nested tree, bounded descriptors,

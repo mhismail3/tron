@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import {
   gatewayBuildInputFingerprint,
   verifyGatewayBuildInputReceipt,
   verifyGatewayInstallInputs,
   writeGatewayBuildInputReceipt,
 } from "./gateway-install-inputs.mjs";
+
+const execFileAsync = promisify(execFile);
 
 const lock = {
   name: "@tron/gateway", version: "1.0.0", lockfileVersion: 3,
@@ -69,6 +74,9 @@ async function buildInputFixture(t) {
     "packages/gateway/tsconfig.json": "{}\n",
     "packages/gateway/scripts/check-pi-sdk.mjs": "// check\n",
     "packages/gateway/scripts/ensure-node-pty-helper.mjs": "// helper\n",
+    "packages/gateway/scripts/check-pi-subagents.mjs": "// provider pin validator\n",
+    "packages/gateway/scripts/install-pi-subagents.mjs": "// provider installer\n",
+    "packages/gateway/pi-subagents-pin.json": "{}\n",
     "packages/mac-app/scripts/bundle-gateway.sh": "#!/bin/sh\n",
     "scripts/gateway-payload-deploy.mjs": "// deploy\n",
     "scripts/gateway-install-inputs.mjs": "// checker\n",
@@ -105,6 +113,28 @@ test("input receipt binds dirty source bytes, accepts matching dirty builds, and
   assert.equal(await gatewayBuildInputFingerprint(root), cleanFingerprint);
 });
 
+test("input receipt binds copied provider installer, pin, and verifier bytes", async (t) => {
+  const { root, app } = await buildInputFixture(t);
+  const revision = "0123456789abcdef0123456789abcdef01234567";
+  for (const relative of [
+    "packages/gateway/scripts/install-pi-subagents.mjs",
+    "packages/gateway/scripts/check-pi-subagents.mjs",
+    "packages/gateway/pi-subagents-pin.json",
+  ]) {
+    const input = join(root, relative);
+    const baseline = await readFile(input, "utf8");
+    const sourceFingerprint = await gatewayBuildInputFingerprint(root);
+    const dirty = relative.endsWith(".json") ? '{"changed":true}\n' : `${baseline}// dirty build input\n`;
+    await writeFile(input, dirty);
+    const dirtyFingerprint = await gatewayBuildInputFingerprint(root);
+    assert.notEqual(dirtyFingerprint, sourceFingerprint, `${relative} must affect the build receipt`);
+    await writeGatewayBuildInputReceipt(root, app, revision, dirtyFingerprint);
+    await verifyGatewayBuildInputReceipt(root, app, revision, dirtyFingerprint);
+    await writeFile(input, baseline);
+    await assert.rejects(verifyGatewayBuildInputReceipt(root, app, revision), /does not match current build inputs/);
+  }
+});
+
 test("accepts canonical full and Mac production installs despite npm hidden-lock differences", async (t) => {
   const full = await fixture(t);
   const later = new Date(Date.now() + 10_000);
@@ -134,6 +164,17 @@ test("rejects stale locked versions before a source build can compile", async (t
     installed.packages["node_modules/required"].version = "0.9.0";
   });
   await assert.rejects(verifyGatewayInstallInputs(root), /node_modules\/required.*does not match package-lock/);
+});
+
+test("Debug build input check command refuses stale installs before staging", async (t) => {
+  const root = await fixture(t, async (installed) => {
+    installed.packages["node_modules/required"].version = "0.9.0";
+  });
+  const cli = new URL("./gateway-install-inputs.mjs", import.meta.url);
+  await assert.rejects(
+    execFileAsync(process.execPath, [fileURLToPath(cli), "check", root, "full"]),
+    (error) => error.code === 78 && /node_modules\/required.*does not match package-lock.*npm ci/.test(error.stderr),
+  );
 });
 
 test("rejects missing, substituted, or extra actual package directories", async (t) => {

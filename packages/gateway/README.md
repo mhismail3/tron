@@ -1507,12 +1507,14 @@ traversed, so a link cannot redirect the validator outside the install.
 The hidden lock is not compared byte-for-byte with the root lock: npm omits root metadata,
 platform-inapplicable optional packages, and—on production installs—development packages. This
 structural check does not cryptographically re-hash every installed package file. Source rebuild
-records a bounded `app/build-inputs.json` receipt for the explicit compiler, copied-helper,
-configuration, and toolchain inputs used to produce each payload. Dirty development builds are
-allowed, but the receipt must match those exact bytes; returning to a clean checkout at the same
-`sourceRevision` therefore cannot reuse output built from reverted edits. Unrelated untracked files
-are not build inputs. If installed inputs are stale or cannot be proved, source rebuild refuses
-before compilation and names `npm ci` as the remedy. Source-only updates require the package lock and dependency declarations
+records a bounded `app/build-inputs.json` receipt for the explicit compiler, copied deployment and
+provider helpers, provider pin metadata, configuration, and toolchain inputs used to produce each
+payload. The provider pin checker separately binds copied archive bytes to their hashes. Dirty
+development builds are allowed, but the receipt must match those exact bytes; returning to a clean
+checkout at the same `sourceRevision` therefore cannot reuse output built from reverted edits.
+Unrelated untracked files are not build inputs. If installed inputs are stale or cannot be proved,
+source rebuild refuses before compilation and names `npm ci` as the remedy. Source-only updates
+require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or

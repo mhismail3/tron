@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { watch } from "node:fs";
 import { chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
@@ -238,16 +238,20 @@ let pinnedNpmRootPromise;
 async function pinnedNpmRoot() {
   if (pinnedNpmRootPromise) return pinnedNpmRootPromise;
   pinnedNpmRootPromise = (async () => {
-    const nodeExecutable = await realpath(process.execPath);
-    const nodeRoot = process.env.TRON_NODE_ROOT ?? dirname(dirname(nodeExecutable));
+    const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+    const nodeVersion = (await readFile(join(repoRoot, ".node-version"), "utf8")).trim();
+    assert.equal(process.version, `v${nodeVersion}`, "payload tests require the repository-pinned Node version");
+    const cacheRoot = resolve(repoRoot, process.env.TRON_CI_TOOLS_DIR ?? ".ci-tools");
+    const nodeRoot = process.env.TRON_NODE_ROOT
+      ? resolve(process.env.TRON_NODE_ROOT)
+      : join(cacheRoot, `node-v${nodeVersion}-${process.arch}`);
     const archiveNpmRoot = join(nodeRoot, "lib", "node_modules", "npm");
     let npmRoot = archiveNpmRoot;
     try { await lstat(npmRoot); }
     catch (error) {
-      if (error?.code !== "ENOENT" || !nodeExecutable.includes("/Contents/Resources/Gateway/runtime/")) throw error;
-      // A signed Tron runtime deliberately stores npm beside its matching Node
-      // binary; the source archive/cache uses lib/node_modules/npm instead.
-      npmRoot = join(dirname(nodeExecutable), `npm-${process.arch}`);
+      if (error?.code !== "ENOENT" || !nodeRoot.includes("/Contents/Resources/Gateway/runtime")) throw error;
+      // The signed app runtime keeps the verified npm tree next to its Node binary.
+      npmRoot = join(nodeRoot, `npm-${process.arch}`);
       await lstat(npmRoot);
     }
     const toolchain = await readFile(fileURLToPath(new URL("../config/ci-toolchain.env", import.meta.url)), "utf8");
@@ -575,7 +579,10 @@ test("source build failure leaves active selection and deployment state unchange
     await writeFile(join(gatewayRoot, "tsconfig.json"), "{}\n");
     await writeFile(join(gatewayRoot, "src", "index.ts"), "export const source = true;\n");
     await writeFile(join(gatewayRoot, "scripts", "check-pi-sdk.mjs"), "// check\n");
+    await writeFile(join(gatewayRoot, "scripts", "check-pi-subagents.mjs"), "// provider pin check\n");
     await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
+    await writeFile(join(gatewayRoot, "scripts", "install-pi-subagents.mjs"), "// provider installer\n");
+    await writeFile(join(gatewayRoot, "pi-subagents-pin.json"), "{}\n");
     await copyFile(new URL("./gateway-install-inputs.mjs", import.meta.url), join(sourceScripts, "gateway-install-inputs.mjs"));
     await writeFile(join(sourceScripts, "gateway-payload-deploy.mjs"), "// updater\n");
     const fingerprintInputs = {
@@ -662,7 +669,7 @@ test("payload clone copy preserves fingerprints and relative symlinks and refuse
     assert.equal(await payloadFingerprint(destination), sourceFingerprint);
     await assert.rejects(copyValidatedPayloadBase({ root: payload, manifest }, destination), /destination already exists/);
     assert.equal(await payloadFingerprint(destination), sourceFingerprint);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
 test("validated runtime snapshot rejects source mutation after admission and removes its private copy", async () => {
@@ -682,7 +689,7 @@ test("validated runtime snapshot rejects source mutation after admission and rem
       /fingerprint does not match/,
     );
     await assert.rejects(lstat(destination), { code: "ENOENT" });
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
 const execFileAsync = promisify(execFile);
@@ -701,6 +708,9 @@ async function makeSourceBuildFixture(root) {
   await copyFile(new URL("./gateway-install-inputs.mjs", import.meta.url), join(sourceRoot, "scripts", "gateway-install-inputs.mjs"));
   await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// trusted helper\n");
   await writeFile(join(gatewayRoot, "scripts", "check-pi-sdk.mjs"), "// checked SDK owner\n");
+  await writeFile(join(gatewayRoot, "scripts", "check-pi-subagents.mjs"), "// provider pin check\n");
+  await writeFile(join(gatewayRoot, "scripts", "install-pi-subagents.mjs"), "// provider installer\n");
+  await writeFile(join(gatewayRoot, "pi-subagents-pin.json"), "{}\n");
   for (const [path, content] of Object.entries({
     ".node-version": "22.22.0\n",
     "config/ci-toolchain.env": "TRON_NODE_NPM_VERSION=10.9.4\n",
