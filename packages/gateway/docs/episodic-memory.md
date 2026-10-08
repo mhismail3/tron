@@ -1,13 +1,13 @@
 # Episodic memory owner
 
 `EpisodicMemory` (`packages/gateway/src/episodic/`) keeps a binary summary tree
-over ONE canonical session's history: a "memory" of that session that a request
+over one canonical source identity: a "memory" that a request
 layer can read at a constant size. The algorithms are the public OptChat
 recipe's (its sections are cited as `gist §N` in the code); Tron's departures
 are listed below with their reasons.
 
 This document owns the module's own contract. Home is its one live caller today:
-the Home owner holds one memory over the Home session's canonical entries, feeds
+the Home owner holds one memory keyed by stable `homeId` across physical chapters, feeds
 it the commits the runtime reports, and sends each activation the view it renders
 ([home.md](home.md)).
 
@@ -54,6 +54,22 @@ it the commits the runtime reports, and sends each activation the view it render
   file still blocks as `source-unavailable`. The session file remains append-only
   under its owner; the reader neither repairs nor migrates it, and whole-file
   reads are bounded per line.
+- Home supplies two distinct source contracts: an async chapter-delta stream
+  for ingestion, and a cursor-scoped compact ID/parent index for exact cuts.
+  Ingestion projects and caps one line at a time, commits one chapter cursor at
+  a time, and does not retain raw JSONL arrays. Unchanged sealed files are checked
+  by identity/size/mtime/ctime without reopening; first sealing acknowledges any
+  final active writes. Navigation/context edits refresh only their chapter.
+  Restart repeats an interrupted chapter idempotently using permanent catalog
+  indices and physical session provenance. Exact cuts separately verify each
+  ingested prefix digest and membership; later appends/navigation are excluded.
+  This lookup can read sealed bytes, but retains only compact topology, not raw
+  messages. The raw transient bound is per line; retained chapter work is capped
+  projection plus ID/parent topology, not aggregate transcript bytes.
+- The strict Home cursor is version 2. Every chapter requires file-change
+  metadata, sealed state and a complete-prefix digest; older Home formats are
+  preserved and refused before cleanup. No dual reader or migration is provided.
+  Ordinary single-session cursors and legacy timestamp lookup are unchanged.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
@@ -144,6 +160,20 @@ state/episodic/<sourceSessionId>/
 - The version is `EPISODIC_STORE_VERSION` (2). Markers and state documents use
   strict field sets; there is no migration path. A store this owner cannot read
   is refused rather than guessed at.
+
+Home state is rewritten whole and scales with the chapter count. Its shared
+read/write byte limit is `HOME_MAX_CHAPTERS * EPISODIC_HOME_CURSOR_MAX_BYTES +
+64 KiB`: 100,000 chapters × 640 bytes (nested JSON per strict chapter cursor),
+plus fixed-state overhead. Writers validate both the schema and exact encoded
+size **before** replacing either live state or checkpoint state. An oversized
+state preserves the last readable file and stops the memory owner with
+`permanent-failure`; it is never published and then rejected on restart. The
+per-cursor bound covers the pinned SDK identity fields, two hashes, numeric file
+metadata and JSON syntax; oversized identities refuse rather than producing an
+unreadable cursor. `home-state.e2e.test.ts` proves maximum-count round-trip,
+oversized-write refusal with prior bytes preserved, and ordinary small state.
+The whole-state rewrite/serialization cost is not claimed constant-time; the
+Home hardening audit (#555) owns its measurement.
 
 ## Projection (departure 1: source projection before compression)
 

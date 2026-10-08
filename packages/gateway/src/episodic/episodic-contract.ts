@@ -1,3 +1,4 @@
+import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 /*
@@ -71,6 +72,14 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   maxSourceLineBytes: 16 * 1_024 * 1_024,
   maxStoreLineBytes: 1_024 * 1_024,
 };
+
+/** Each strict Home cursor fits 640 bytes including its nested JSON indentation.
+ * This covers the pinned SDK UUID/entry IDs, two SHA-256 digests, file
+ * identity/offset/timestamps and field syntax; oversized identities refuse.
+ * State fits the ledger's maximum cursor count plus 64 KiB for fixed fields.
+ * Readers and every publication use this same bound, including checkpoints. */
+export const EPISODIC_HOME_CURSOR_MAX_BYTES = 640;
+export const EPISODIC_STATE_MAX_BYTES = HOME_MAX_CHAPTERS * EPISODIC_HOME_CURSOR_MAX_BYTES + 64 * 1_024;
 
 /** Version of every persisted episodic document. */
 export const EPISODIC_STORE_VERSION = 2 as const;
@@ -203,6 +212,9 @@ export function isInvalidationRecord(record: EpisodicNodeLogRecord): record is E
 /** Where the canonical reader stopped, and the identity of the file it read, so
  * the next read can continue at the offset when the file only grew. */
 export interface EpisodicChapterSourceCursor {
+  sealed: boolean;
+  mtimeMs: number;
+  ctimeMs: number;
   sessionId: string;
   dev: number;
   ino: number;
@@ -220,7 +232,7 @@ export interface EpisodicSourceCursor {
   completeBytes: number;
   leafEntryId: string | null;
   /** Ordered canonical chapter cursors for a stable Home namespace. */
-  home?: { ledgerRevision: number; chapters: EpisodicChapterSourceCursor[] };
+  home?: { version: 2; ledgerRevision: number; chapters: EpisodicChapterSourceCursor[] };
   /** sha256 chain over every complete source line through this cursor. */
   completePrefixDigest?: string | null;
   /** sha256 of the last complete line's JSON text, so an in-place rewrite of
@@ -311,6 +323,12 @@ export type EpisodicCompactorDependency =
   | { summarizer: EpisodicSummarizer; modelRuntime?: never; model?: never }
   | { summarizer?: undefined; modelRuntime: ModelRuntime; model: Model<Api> };
 
+/** Delta ingestion and frozen historical lookup are deliberately distinct. */
+export interface EpisodicSessionSource {
+  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicCanonicalCut>;
+  branchAtCursor(cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }>;
+}
+
 export type EpisodicMemoryDependencies = {
   workspace: import("../workspace/tron-workspace.js").TronWorkspace;
   /** The canonical session this memory is over; also its store namespace. */
@@ -318,7 +336,7 @@ export type EpisodicMemoryDependencies = {
   /** The canonical session JSONL path. Read only, never repaired. */
   sessionFile: string;
   /** Ordered canonical source for a multi-chapter Home namespace. */
-  sessionSource?: (cursor: EpisodicSourceCursor | null) => Promise<import("./episodic-source.js").EpisodicCanonicalCut>;
+  sessionSource?: EpisodicSessionSource;
   limits?: Partial<EpisodicLimits>;
   /** Where this module raises its bounded records; the caller (gateway-main)
    * decides whether to persist them. */

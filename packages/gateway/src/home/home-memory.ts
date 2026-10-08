@@ -2,9 +2,8 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import {
   EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS,
-  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSourceCursor, type EpisodicSummarizer,
+  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSessionSource, type EpisodicSummarizer,
 } from "../episodic/episodic-contract.js";
-import type { EpisodicCanonicalCut } from "../episodic/episodic-source.js";
 import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { localTimestampText } from "../util/timestamp.js";
@@ -13,8 +12,8 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView } from "./home-request-policy.js";
 
 /*
- * Tron Home's memory for one Home session: ONE `EpisodicMemory` over that
- * session's canonical entries, plus the frozen agent-facing view an activation
+ * Tron Home's memory for one stable Home identity: ONE `EpisodicMemory`
+ * over its ordered canonical chapter source, plus the frozen agent-facing view an activation
  * receives.
  *
  * The owner of the memory is Home, not the session's live runtime: a runtime is
@@ -114,15 +113,15 @@ export type HomeMemoryModelResolution =
   | { refusal: "virtual-model" | "unavailable" };
 
 export interface HomeMemoryOptions {
-  /** The canonical session this memory is over; also its store namespace. */
+  /** The canonical source identity this memory is over; also its store namespace. */
   sessionId: string;
   workspace: TronWorkspace;
   /** The canonical session JSONL this memory reads, resolved when it opens: the
    * session exists before it has a line, and a runtime may be evicted while the
    * memory stays open. */
   sessionFile: () => Promise<string | undefined>;
-  /** Reads the ordered physical chapter branches for this stable Home namespace. */
-  sessionSource?: (cursor: EpisodicSourceCursor | null) => Promise<EpisodicCanonicalCut>;
+  /** Separate chapter-delta ingestion and frozen cursor-scoped branch lookup. */
+  sessionSource?: EpisodicSessionSource;
   /** Resolves the compactor's model the way Knowledge resolves the model for its
    * own model calls: from the Gateway's ModelRuntime, never a session's. */
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;

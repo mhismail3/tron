@@ -4,9 +4,9 @@ import { join } from "node:path";
 import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
-import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
-import { EPISODIC_DEFAULTS, type EpisodicDiagnostic, type EpisodicSourceCursor } from "../episodic/episodic-contract.js";
-import { readCanonicalHomeSessions, type EpisodicCanonicalCut, type EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
+import { EpisodicMemoryError, type EpisodicDiagnostic } from "../episodic/episodic-contract.js";
+import type { EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
+import { readCanonicalHomeDeltas, readCanonicalHomeIndex, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durablePublishBoundedJson, isDurablePublicationUncertain } from "../util/durable-json.js";
@@ -17,12 +17,11 @@ import {
   type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
-import { unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
+import { HOME_MAX_CHAPTERS, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
 const MAXIMUM_RECORD_BYTES = 16 * 1_024 * 1_024;
-const MAXIMUM_CHAPTERS = 100_000;
 const MAXIMUM_PROVIDER_BYTES = 120;
 const MAXIMUM_MODEL_ID_BYTES = 300;
 /** The curated Home profile this build writes. A record written against a newer
@@ -703,10 +702,10 @@ export class HomeOwner {
   }
 
   /** One memory owner and persisted namespace for the stable installation Home. */
-  private async readHomeSource(_cursor: EpisodicSourceCursor | null): Promise<EpisodicCanonicalCut> {
+  private async readHomeSource(): Promise<HomeSourceSnapshot> {
     const record = this.record;
     if (!record) throw new GatewayError("conflict", "Tron Home is unavailable");
-    const chapters: Array<{ sessionId: string; path: string }> = [];
+    const chapters: HomeSourceChapter[] = [];
     for (const chapter of record.chapters) {
       if (chapter.state !== "sealed" && chapter.state !== "active" && chapter.state !== "materializing") continue;
       let path: string | undefined;
@@ -727,21 +726,21 @@ export class HomeOwner {
         if (chapter.state === "sealed") throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} is unavailable`);
         continue;
       }
-      chapters.push({ sessionId: chapter.sessionId, path });
+      chapters.push({ sessionId: chapter.sessionId, path, sealed: chapter.state === "sealed" });
     }
     if (chapters.length === 0) throw new GatewayError("conflict", "Home has no canonical chapter file to read");
-    return readCanonicalHomeSessions({
+    return {
       homeId: record.homeId,
       ledgerRevision: record.bindingRevision,
       chapters,
-      maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
-    });
+    };
   }
 
   private ownerFor(homeId: string): HomeMemory {
     const current = this.memory;
     if (current && current.sessionId === homeId) return current.owner;
     if (current) void current.owner.dispose();
+    const source = () => this.readHomeSource();
     const owner = new HomeMemory({
       workspace: this.options.workspace,
       sessionId: homeId,
@@ -749,7 +748,10 @@ export class HomeOwner {
         const record = this.record;
         return record ? this.options.sessions.sessionFile(homeSessionId(record)) : undefined;
       },
-      sessionSource: (cursor) => this.readHomeSource(cursor),
+      sessionSource: {
+        read: async function* (cursor, limits) { yield* readCanonicalHomeDeltas(await source(), cursor, limits); },
+        branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits); },
+      },
       modelSummarizer: this.options.memorySummarizer,
       ...(this.options.memoryDiagnostic ? { diagnostic: this.options.memoryDiagnostic } : {}),
     });
@@ -1046,7 +1048,7 @@ function admitRecord(value: unknown): HomeRecord | undefined {
     || typeof root.enabled !== "boolean"
     || !boundedTimestamp(root.createdAt)
     || !boundedTimestamp(root.updatedAt)
-    || !Array.isArray(root.chapters) || root.chapters.length === 0 || root.chapters.length > MAXIMUM_CHAPTERS
+    || !Array.isArray(root.chapters) || root.chapters.length === 0 || root.chapters.length > HOME_MAX_CHAPTERS
     || !model || typeof model !== "object" || Array.isArray(model)) return undefined;
   const modelRecord = model as Record<string, unknown>;
   if (!hasOnlyKeys(modelRecord, ["provider", "id"])

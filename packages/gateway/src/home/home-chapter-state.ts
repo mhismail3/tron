@@ -1,5 +1,8 @@
 import { GatewayError } from "../errors.js";
 
+/** Shared ledger/source bound; no second chapter-count authority. */
+export const HOME_MAX_CHAPTERS = 100_000;
+
 /** Physical chapter state consumed only by the runtime that owns that session. */
 export interface HomeChapterState {
   sessionId: string;

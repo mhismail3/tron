@@ -77,11 +77,33 @@ after a chapter is active. Ordinary session routes are unchanged.
 Home memory remains one bounded projection keyed by stable `homeId`, not by a
 physical chapter. Its canonical source reads active, sealed, and materializing
 chapters in ledger order and retains each physical session ID as provenance.
-Per-chapter cursors continue simple active appends and skip unchanged sealed
-files; an active-branch rewrite falls back to that chapter only, while immutable
-sealed entries remain outside the active chapter's navigation cut. Missing or
-changed sealed evidence blocks ingestion without rewriting the projection. A
-reserved chapter contributes nothing until canonical evidence exists. If an SDK
+Delta ingestion streams and caps each entry before retaining a chapter projection;
+it never concatenates raw chapter histories. Per-chapter cursors continue linear
+active appends (including non-message entries) and stat-check, rather than reopen,
+unchanged sealed files. A navigation or context edit rebuilds only the active
+chapter's capped branch; it cannot omit earlier chapters. The last writes before
+sealing are ingested before that chapter's cursor becomes immutable. Missing or
+changed sealed identity, size, modification time or change time blocks ingestion
+before updating the projection.
+
+Historical-cut lookup is a separate contract: it streams a compact ID/parent
+index only through each chapter's **ingested** byte offset and verifies the full
+prefix digest and physical provenance. It may read sealed bytes for this proof,
+never later active appends. Message and non-message boundaries resolve to the
+permanent logical indices at that exact cursor; off-branch entries have no cut.
+The Home source cursor format is version 2 and requires its sealed-file metadata.
+Older Home cursors are preserved and refused, with memory unavailable; there is
+no migration or automatic rebuild. Ordinary session formats are unchanged.
+
+`home-source.e2e.test.ts` retains `test-results/home-memory/continuity.json` for
+cross-chapter replay, restart, navigation and frozen-cut proof.
+`home-source.scale.test.ts` retains `test-results/home-memory/heap.json` for four
+chapters containing at least 64 MiB of canonical payload, with post-GC live heap
+samples at ingestion cuts and a retained heap sample. Regenerate with the named
+file and `vitest.scale.config.ts`; the heap report does not claim an allocation
+peak or power-loss proof.
+
+A reserved chapter contributes nothing until canonical evidence exists. If an SDK
 operation fails after staging canonical entries, RuntimeSlot retains the existing
 uncertain-outcome fence rather than treating the staged mutation as a clean
 refusal. A sealed check before a custom-entry append is a clean typed refusal: it

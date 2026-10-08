@@ -26,7 +26,7 @@ const SUPPORTED_SESSION_VERSION = 3;
 /** How many bytes before the cursor the incremental reader re-reads to prove the
  * prefix is the one it read last time. */
 const PREFIX_WINDOW_BYTES = 8 * 1_024;
-const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
+export const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
 
 /** A failed parse of a source whose snapshot could not be proven stable. */
 export class EpisodicSourceChangedError extends Error {
@@ -65,6 +65,10 @@ export interface EpisodicCanonicalCut {
   cursor: EpisodicSourceCursor;
   /** True when this read continued from the previous cursor. */
   incremental: boolean;
+  /** Home sources project while streaming, retaining no raw transcript arrays. */
+  projected?: EpisodicProjectedMessage[];
+  /** A full branch refresh invalidates only this physical chapter. */
+  scopeSessionId?: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -109,11 +113,11 @@ async function readLines(handle: { read(buffer: Buffer, offset: number, length: 
   return { lines, completeBytes, tornBytes: pending.length, completePrefixDigest };
 }
 
-function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
+export function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
   return createHash("sha256").update(prefix).update("\\0").update(lineBytes).update("\\n").digest("hex");
 }
 
-function parseEntry(line: string): EpisodicCanonicalEntry {
+export function parseEntry(line: string): EpisodicCanonicalEntry {
   let raw: Record<string, unknown>;
   try {
     raw = asRecord(JSON.parse(line)) ?? {};
@@ -153,7 +157,7 @@ function extendBranch(branch: readonly EpisodicCanonicalEntry[], entries: readon
 
 /** The digest of the last complete non-blank line before `offset`, read from a
  * small window. `undefined` when the window cannot prove it. */
-async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
+export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
   if (offset <= 1) return undefined;
   const start = Math.max(0, offset - PREFIX_WINDOW_BYTES);
   const buffer = Buffer.alloc(offset - start);
@@ -329,77 +333,6 @@ export async function readCanonicalBranchAtCursor(options: {
     }
     return branch.reverse();
   } finally { await handle.close(); }
-}
-
-/**
- * Read the ordered active branches of a Home chapter ledger into one logical
- * stream. Each entry keeps its physical source ID; the cursor retains per-file
- * identity/offset/leaf evidence plus the ledger revision. Chapter boundaries do
- * not reset the logical message index or introduce navigation.
- */
-export async function readCanonicalHomeSessions(options: {
-  homeId: string;
-  ledgerRevision: number;
-  chapters: readonly { sessionId: string; path: string }[];
-  maxLineBytes: number;
-}): Promise<EpisodicCanonicalCut> {
-  if (!Number.isSafeInteger(options.ledgerRevision) || options.ledgerRevision < 1 || options.chapters.length === 0) {
-    throw new EpisodicMemoryError("source", "Home chapter source has no admitted ledger");
-  }
-  const branch: EpisodicCanonicalEntry[] = [];
-  const chapterCursors: NonNullable<EpisodicSourceCursor["home"]>["chapters"] = [];
-  const sessionIds = new Set<string>();
-  const entryIds = new Set<string>();
-  let completeBytes = 0;
-  let tornBytes = 0;
-  let last: EpisodicCanonicalCut | undefined;
-  for (const chapter of options.chapters) {
-    if (sessionIds.has(chapter.sessionId)) throw new EpisodicMemoryError("source", "Home chapter source repeats a session ID");
-    sessionIds.add(chapter.sessionId);
-    const cut = await readCanonicalSession({ path: chapter.path, sessionId: chapter.sessionId, maxLineBytes: options.maxLineBytes });
-    last = cut;
-    completeBytes += cut.completeBytes;
-    tornBytes += cut.tornBytes;
-    chapterCursors.push({
-      sessionId: chapter.sessionId,
-      dev: cut.cursor.dev,
-      ino: cut.cursor.ino,
-      size: cut.cursor.size,
-      completeBytes: cut.cursor.completeBytes,
-      leafEntryId: cut.cursor.leafEntryId,
-      leafLineDigest: cut.cursor.leafLineDigest,
-      ...(cut.cursor.completePrefixDigest === undefined ? {} : { completePrefixDigest: cut.cursor.completePrefixDigest }),
-    });
-    for (const entry of cut.branch) {
-      if (entryIds.has(entry.id)) throw new EpisodicMemoryError("source", "Home chapter source repeats a canonical entry ID");
-      entryIds.add(entry.id);
-      branch.push({ ...entry, sourceSessionId: chapter.sessionId });
-    }
-  }
-  if (!last) throw new EpisodicMemoryError("source", "Home chapter source has no files");
-  const leaf = branch.at(-1);
-  const aggregateDigest = createHash("sha256").update("tron-home-source-v1\0")
-    .update(String(options.ledgerRevision)).update("\0")
-    .update(chapterCursors.map(cursor => `${cursor.sessionId}\0${cursor.dev}\0${cursor.ino}\0${cursor.completeBytes}\0${cursor.leafLineDigest ?? ""}`).join("\n"))
-    .digest("hex");
-  return {
-    sessionId: options.homeId,
-    branch,
-    completeBytes,
-    tornBytes,
-    leafEntryId: leaf?.id ?? null,
-    cursor: {
-      dev: last.cursor.dev,
-      ino: last.cursor.ino,
-      size: completeBytes,
-      completeBytes,
-      leafEntryId: leaf?.id ?? null,
-      leafLineDigest: leaf ? digest(leaf.line) : null,
-      completePrefixDigest: aggregateDigest,
-      home: { ledgerRevision: options.ledgerRevision, chapters: chapterCursors },
-    },
-    incremental: false,
-  };
 }
 
 export async function readCanonicalSimpleAppend(options: {
