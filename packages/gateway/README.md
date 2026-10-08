@@ -3682,9 +3682,39 @@ or the session UUID only when the slot has no file. File identities have a 4096-
 not a UUID-sized bound. The producer preserves this owner through legitimate resumes.
 Within the existing 256 KiB document bound, native presentation reads the full status
 steps in launch order, keeping agent-role titles, model/thinking, task, path/output,
-attention and counters with Gateway's 32-per-node and 64-total child caps. The header
-supplies ownership, not the compact widget's labels, ordering or eight-child limit.
+attention and counters with Gateway's 32-per-node and 64-total child caps. Released
+workflows keep detached execution details in child status files rather than copying
+them into root steps. The same read owner joins a bounded single-child execution
+through its reciprocal workflow run/key, run ID, parent session, session owner and
+validated session file. Only display facts cross that edge; identity and order remain
+root-owned. The root's existing watcher owns and retires its exact child-directory
+subscriptions, so child activity updates do not wait for a root status change.
+An explicitly empty recent-tools list with no total represents zero tools before the
+first tool event. The header supplies ownership, not the compact widget's labels,
+ordering or eight-child limit.
 Run/tool identity must agree between header, full status and canonical launch binding.
+
+`src/sessions/subagent-parity.integration.test.ts` compares the managed selection's
+real RuntimeRegistry projections to `test-support/subagent-parity-old.json`. The same
+faux-parent/loopback-child script runs an async single and a three-child failure,
+question/answer and success workflow with progress and idle completion wakes. Native
+row title/state/mode, displayed model/thinking, started presence and counters are
+compared without exemptions. Transcript/pill semantics, canonical context delivery,
+retained provider classification and package skills have finite approved delivery/
+identity allowances; other differences print their checkpoint and exact field.
+The fixture preserves raw statuses/entries in its private report. Pill labels describe
+the native consumer contract; native rendering is separately tested on iOS.
+
+To regenerate OLD, use the pinned Node with isolated HOME/TMPDIR and run
+`bash scripts/regenerate-subagent-parity.sh <read-only-0.59.0-package> <private-evidence-dir>`
+from this Gateway directory under the bounded command runner. It creates and removes
+its own detached `1dc07c210` pre-cutover worktree, installs that revision's SDK and the
+OLD package's exact dependencies, copies the shared driver unchanged, loads OLD as a
+user package (no managed admission), and writes the baseline plus `parity-old.json`.
+Then run `TRON_PARITY_REPORT=<private-evidence-dir>/parity-report.json npx vitest run
+src/sessions/subagent-parity.integration.test.ts --maxWorkers=2` under the same runner
+and isolated environment. A normal focused test run also compares NEW to the committed
+baseline without requiring the OLD installation or a second worktree.
 Oversized modern documents retain the existing compact lifecycle fallback; detailed
 native coverage therefore remains bounded and may be reduced on overflow, explicitly
 marked by `lifecycleOmissions.byteLimitExceeded=true`. Header-less

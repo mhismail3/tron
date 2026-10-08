@@ -1,0 +1,503 @@
+{
+  "schemaVersion": 1,
+  "checkpoints": {
+    "single-running": {
+      "processes": [
+        {
+          "title": "parity-worker",
+          "state": "running",
+          "visibility": "active",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": null,
+          "turnCount": null,
+          "childCount": null
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true
+        }
+      ],
+      "deliveries": {}
+    },
+    "single-completed": {
+      "processes": [
+        {
+          "title": "parity-worker",
+          "state": "completed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": null,
+          "turnCount": 1,
+          "childCount": null
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true
+        }
+      ],
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    },
+    "workflow-running": {
+      "processes": [
+        {
+          "title": "parity-worker",
+          "state": "completed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": null,
+          "turnCount": 1,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "running",
+          "visibility": "active",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": null,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "running",
+          "visibility": "active",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": null,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "running",
+          "visibility": "active",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": null,
+          "childCount": null
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          },
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true
+        }
+      ],
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    },
+    "workflow-question": {
+      "processes": [
+        {
+          "title": "parity-worker",
+          "state": "completed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": null,
+          "turnCount": 1,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "failed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": 1,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "running",
+          "visibility": "active",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": null,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "running",
+          "visibility": "active",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 2,
+          "turnCount": 1,
+          "childCount": null
+        }
+      ],
+      "transcript": {
+        "need_decision": [
+          {
+            "category": "need_decision",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "pill": "Needs Attention"
+          }
+        ],
+        "progress_update": [
+          {
+            "category": "progress_update",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "pill": "Progress Update"
+          }
+        ],
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          },
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true
+        }
+      ],
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "need_decision": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "progress_update": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    },
+    "workflow-completed": {
+      "processes": [
+        {
+          "title": "parity-worker",
+          "state": "completed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": 1,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "completed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 2,
+          "turnCount": 2,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "completed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": null,
+          "turnCount": 1,
+          "childCount": null
+        },
+        {
+          "title": "parity-worker",
+          "state": "failed",
+          "visibility": "recent",
+          "executionMode": "asynchronous",
+          "model": "child",
+          "thinking": null,
+          "started": true,
+          "toolCount": 0,
+          "turnCount": 1,
+          "childCount": null
+        }
+      ],
+      "transcript": {
+        "need_decision": [
+          {
+            "category": "need_decision",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "pill": "Needs Attention"
+          }
+        ],
+        "progress_update": [
+          {
+            "category": "progress_update",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "pill": "Progress Update"
+          }
+        ],
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          },
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "delivery": "stored",
+            "visibility": "visible",
+            "pill": null
+          }
+        ],
+        "subagent-notify": [
+          {
+            "category": "subagent-notify",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "pill": "Result Received"
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true
+        }
+      ],
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          },
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "need_decision": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "progress_update": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    }
+  },
+  "skills": [
+    {
+      "name": "council-mode",
+      "source": "npm:pi-subagents@0.59.0",
+      "distribution": "external"
+    },
+    {
+      "name": "pi-subagents",
+      "source": "npm:pi-subagents@0.59.0",
+      "distribution": "external"
+    }
+  ],
+  "packages": [
+    {
+      "source": "npm:pi-subagents@0.59.0",
+      "skills": [
+        "council-mode",
+        "pi-subagents"
+      ]
+    }
+  ]
+}

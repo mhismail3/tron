@@ -113,7 +113,7 @@ import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedMessageProducer, isManagedProducerContent, type ManagedInternalWake } from "../extensions/managed-producer.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -157,6 +157,9 @@ import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from 
 // attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
+// Disposable exact child subscriptions travel with the admitted read, never
+// with canonical activity data or a separate slot-wide child registry.
+const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
 
 function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
   Object.defineProperty(value, EMBEDDED_LIFECYCLE_ARTIFACT, { configurable: false, enumerable: false, value: true, writable: false });
@@ -678,6 +681,8 @@ export class RuntimeSlot {
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
+    children: Map<string, FSWatcher>;
+    onChange: (eventType: string, filename: string | Buffer | null) => void;
     timer: NodeJS.Timeout | undefined;
     asyncDir: string;
     readRetries: number;
@@ -4605,7 +4610,64 @@ export class RuntimeSlot {
     }
   }
 
-  private async readExtensionStatusArtifact(asyncDir: string): Promise<Record<string, unknown> | undefined> {
+  /** Released workflows keep execution details in their detached children's
+   * status, not the workflow edge. Join only exact reciprocal producer edges;
+   * root identity/order remains authoritative and every read is disposable. */
+  private async readWorkflowChildDetails(asyncDir: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (status.mode !== "workflow" || typeof status.runId !== "string" || !Array.isArray(status.steps)) return status;
+    const directories: string[] = [];
+    const steps: unknown[] = [];
+    for (const value of status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) { steps.push(value); continue; }
+      const edge = value as Record<string, unknown>;
+      steps.push(edge);
+      if (edge.async !== true || typeof edge.runId !== "string" || !edge.runId
+        || Buffer.byteLength(edge.runId) > 256 || /[\\/\0]/u.test(edge.runId)
+        || typeof edge.workflowKey !== "string" || typeof edge.sessionOwnerId !== "string"
+        || typeof edge.sessionFile !== "string") continue;
+      const directory = join(dirname(asyncDir), edge.runId);
+      const child = await this.readExtensionStatusArtifact(directory, false);
+      if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
+        || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
+        || child.mode !== "single" || !Array.isArray(child.steps) || child.steps.length !== 1) continue;
+      const detail = child.steps[0];
+      if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
+      const source = detail as Record<string, unknown>;
+      if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
+        || !this.validateChildSessionFile(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
+      directories.push(directory);
+      // Do not copy child identity, declarations or control authority. Only
+      // provider-authored display facts cross this already verified edge.
+      const projected = { ...edge };
+      for (const key of ["model", "thinking", "currentTool", "currentPath", "lastActivityAt", "currentToolStartedAt",
+        "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
+        if (source[key] !== undefined) projected[key] = source[key];
+      }
+      // The released single-child snapshot omits a zero total until its first
+      // tool event; an explicitly empty recent-tools list proves that zero.
+      if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
+      steps[steps.length - 1] = projected;
+    }
+    return Object.assign({ ...status, steps: [...steps, ...status.steps.slice(MAX_EXTENSION_RUN_CHILDREN)] }, { [WORKFLOW_CHILD_ARTIFACT_DIRECTORIES]: directories });
+  }
+
+  private syncWorkflowChildArtifactWatchers(toolCallId: string, value: Record<string, unknown>): void {
+    const tracked = this.extensionActivityWatchers.get(toolCallId);
+    if (!tracked) return;
+    const directories = (value as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_ARTIFACT_DIRECTORIES];
+    const next = new Set(Array.isArray(directories) ? directories as string[] : []);
+    for (const [directory, watcher] of tracked.children) if (!next.has(directory)) {
+      watcher.close();
+      tracked.children.delete(directory);
+    }
+    for (const directory of next) if (!tracked.children.has(directory)) {
+      const watcher = watch(directory, tracked.onChange);
+      watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
+      tracked.children.set(directory, watcher);
+    }
+  }
+
+  private async readExtensionStatusArtifact(asyncDir: string, includeWorkflowChildren = true): Promise<Record<string, unknown> | undefined> {
     if (!this.extensionArtifactPathAllowed(asyncDir)) return undefined;
     const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
     if (!opened) return undefined;
@@ -4635,7 +4697,8 @@ export class RuntimeSlot {
           || (projection.toolCallId !== undefined && status.toolCallId !== projection.toolCallId))) throw new ForeignExtensionArtifactSessionError();
         const projected = status ? { ...status, lifecycleArtifactVersion: EXTENSION_LIFECYCLE_ARTIFACT_VERSION }
           : lifecycleProjectionArtifact({ ...projection, omitted: { ...projection.omitted, byteLimitExceeded: true } });
-        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
+        const detailed = includeWorkflowChildren ? await this.readWorkflowChildDetails(asyncDir, projected) : projected;
+        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, detailed, opened.directory);
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
         return markEmbeddedLifecycleArtifact(withProof);
       }
@@ -5222,6 +5285,7 @@ export class RuntimeSlot {
     if (!tracked) return;
     if (tracked.timer) clearTimeout(tracked.timer);
     tracked.watcher.close();
+    for (const watcher of tracked.children.values()) watcher.close();
     this.extensionActivityWatchers.delete(toolCallId);
   }
 
@@ -5447,6 +5511,7 @@ export class RuntimeSlot {
           return;
         }
       }
+      this.syncWorkflowChildArtifactWatchers(toolCallId, raw);
       const normalized = normalizeExtensionArtifact(raw, {
         now: new Date().toISOString(),
         fallbackStartedAt: previous.startedAt,
@@ -5620,7 +5685,7 @@ export class RuntimeSlot {
     }
     this.stopExtensionActivityWatcher(toolCallId);
     try {
-      const watcher = watch(realAsyncDir, (_eventType, filename) => {
+      const onChange = (_eventType: string, filename: string | Buffer | null) => {
         if (filename !== null && filename.toString() !== "status.json") return;
         const tracked = this.extensionActivityWatchers.get(toolCallId);
         if (!tracked) return;
@@ -5632,10 +5697,13 @@ export class RuntimeSlot {
           void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
         }, 50);
         tracked.timer.unref();
-      });
+      };
+      const watcher = watch(realAsyncDir, onChange);
       watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
       this.extensionActivityWatchers.set(toolCallId, {
         watcher,
+        children: new Map(),
+        onChange,
         timer: undefined,
         asyncDir: realAsyncDir,
         readRetries: 0,
