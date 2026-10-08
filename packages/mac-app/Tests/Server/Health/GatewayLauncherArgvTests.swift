@@ -95,7 +95,8 @@ private struct LauncherFixture {
         let payload = contents.appendingPathComponent("Resources/Gateway", isDirectory: true)
         try makeGatewayPayload(
             root: payload, channel: "stable", version: "launcher-argv",
-            fingerprint: String(repeating: "a", count: 64), runtimeExecutable: Self.argvRecorder
+            fingerprint: String(repeating: "a", count: 64), runtimeExecutable: Self.argvRecorder,
+            additionalFiles: [("app/build-inputs.json", Data("{\"schema\":1,\"sourceRevision\":\"0123456789abcdef0123456789abcdef01234567\",\"sourceInputFingerprint\":\"\(String(repeating: "b", count: 64))\"}\n".utf8))]
         )
         home = root.appendingPathComponent("home", isDirectory: true)
         try fm.createDirectory(at: home, withIntermediateDirectories: true)

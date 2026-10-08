@@ -398,6 +398,18 @@ every installed closure file against the pinned archive; a receipt alone cannot
 bless changed bytes. SDK peer ranges are checked against the selected Gateway payload. Pi's extension
 loader aliases their imports to its own host SDK exports; no SDK peer copies or
 links are installed, so a new Gateway payload can reuse the same immutable root.
+Before any managed extension load (including reload and session-free loads),
+`ManagedSubagents` requires `PI_SUBAGENTS_TEMP_ROOT` to resolve exactly to
+`delegatedArtifactRoot(tronHome)` for its explicitly supplied home. The registry
+also passes its home to this owner before constructing runtime dependencies,
+refusing a selection belonging to another home. Admission
+rechecks the binding after loading; an absent, blank or foreign binding fails
+with `conflict` rather than allowing the provider's system-temp fallback.
+In-process hosts and test fixtures must bind through
+`delegatedProviderEnvironment` before loading, and fixtures restore the previous
+environment only after runtime disposal and remove their own temporary homes.
+The real execution integration test asserts that no default
+`<os.tmpdir()>/pi-subagents-uid-<uid>` root was created.
 Before provider initialization, the delegated-provider environment owner also
 sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the running payload's own
 resolved `@earendil-works/pi-coding-agent` package root, replacing any inherited
@@ -1499,7 +1511,22 @@ sealed in `versions/` before any candidate state names the version. The trusted
 source checkout must already have its lockfile-pinned Gateway development dependencies
 installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
-registry during an update. Source-only updates require the package lock and dependency declarations
+registry during an update. Before compiling, it compares applicable npm hidden-lock package
+records with the source lock, then walks the actual install to require every locked package for
+this platform/mode at its locked name and version, with no missing or extra package directories.
+Unsupported package-directory symlinks are rejected before their nested dependency trees are
+traversed, so a link cannot redirect the validator outside the install.
+The hidden lock is not compared byte-for-byte with the root lock: npm omits root metadata,
+platform-inapplicable optional packages, and—on production installs—development packages. This
+structural check does not cryptographically re-hash every installed package file. Source rebuild
+records a bounded `app/build-inputs.json` receipt for the explicit compiler, copied deployment and
+provider helpers, provider pin metadata, configuration, and toolchain inputs used to produce each
+payload. The provider pin checker separately binds copied archive bytes to their hashes. Dirty
+development builds are allowed, but the receipt must match those exact bytes; returning to a clean
+checkout at the same `sourceRevision` therefore cannot reuse output built from reverted edits.
+Unrelated untracked files are not build inputs. If installed inputs are stale or cannot be proved,
+source rebuild refuses before compilation and names `npm ci` as the remedy. Source-only updates
+require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
@@ -2421,6 +2448,16 @@ Before materialization, recursive discovery streams at most 50,001 directory ent
 retains at most 25,001 canonical directories/8 MiB of traversal paths, and admits at most 25,000 session
 records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. Cold scans, live summaries, and appended metadata cap session names and first-message previews at 1,024 UTF-8 bytes, including the truncation marker, without splitting code points or modifying canonical JSONL. Oversized cached preview/name rows are discarded and rebuilt from canonical metadata; they cannot bypass the bound after restart. The pinned
 Gateway performs its own bounded direct-directory JSONL metadata scan for catalog rows, so catalog discovery does not construct the SDK's unused transcript-wide picker search text. One owner, `session-catalog.ts`, holds the index of every canonical row and is every reader's membership source: `session.list`, a cold open, attention resolution, automation admission, workspace lookup and storage maintenance read its rows, so no request walks the session folder. The owner keeps the index current from the Gateway's own commit points, the recursive folder watcher, and a whole-folder reconcile every `CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) that is the backstop for a dropped event or a stopped watcher; its passes run in bounded batches that yield to the background-work scheduler between them. A user-scoped read filters those same rows by each row's own delegated flag, and duplicate identities are quarantined from the whole index, so a concurrent child write cannot make an unchanged dashboard fail `session.list` and an ambiguous user ID never resolves to one of its files. The durable `gateway/catalog-metadata-v2.json` document is the owner's acceleration only — bounded identity/classification metadata, file identity, size/mtime/EOF and a tail-boundary hash, never transcript text — and only the owner writes it, debounced. JSONL remains authoritative: a missing, corrupt or foreign-root document leaves the index to rebuild every row from canonical files, and a pass that cannot prove a file keeps the row it already had and refuses retryably (`catalog_not_ready`) instead of answering membership from a cut that might be wrong. Live-only slots and revisioned summaries are overlaid on the rows per projection generation, so heartbeats never rebuild catalog metadata. Canonical path normalization runs with at most 16 concurrent filesystem operations.
+
+The folder watcher attaches to the canonical realpath root, including when the configured
+root traverses a filesystem alias (such as macOS `/var` and `/private/var`). File hints
+advance only the named row without a catalog walk; directory hints re-read the folder's
+transcripts, and unnamed hints request a debounced reconciliation. The event debounce
+ceiling bounds delay **after a hint arrives**, not operating-system delivery latency or
+reliability. Focused catalog and registry regressions inject `SessionCatalogWatchRequest`
+hints and advance the owned debounce deterministically. Real-backend coverage checks
+canonical-root attachment and canonical row repair, with reconciliation as the backstop;
+it does not impose an FSEvents delivery deadline.
 
 `RuntimeRegistry` derives membership from the index rows, not a second catalog: `catalogAcquisition` projects canonical ID/path/cwd, the structural user-versus-subagent classification and the ambiguous-ID set from the owner's rows, with no filesystem read of its own. The index is authoritative for cold open, attention resolution, automation admission, workspace lookup and delete. A Gateway-owned change reaches a row at its commit point but asynchronously, so a read that finds no row for a named session waits for the owner's queued changes and re-resolves before it may answer `not_found`; an ID the owner read a header for but could not prove refuses retryably. Ordinary message/tool appends do not change membership. Additions, removals, aliases, duplicate identities, or same-path header identity replacement do. A malformed file under the reserved `subagent-artifacts` diagnostic subtree is ignored as a non-session artifact and cannot poison the cut. Malformed files in canonical session locations still fail closed. An unfinished delegated append therefore cannot force unrelated cold opens into discovery or prevent a user dashboard from serving its rows. The selected cold file is checked before SDK open, which can repair incomplete tails; an unfinished selected file fails retryably without being rewritten. Changing, replaced, symlinked, duplicate, or header-rewritten files remain strict; append-only tail growth of the exact inode currently owned by a live RuntimeSlot remains permitted. Directories named `*.jsonl` are not file candidates.
 

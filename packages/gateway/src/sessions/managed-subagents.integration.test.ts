@@ -9,12 +9,18 @@ import { PackageService } from "../admin/package-service.js";
 import { GatewayLogger } from "../transport/logger.js";
 import { TrustService } from "../admin/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /** Real Gateway/SDK execution; only the external model output is scripted.
  * The fixture owns home/cache/session state and disposes the runtime before files. */
-it.each([false, true])("activates offline and completes a canonical child with ignored user/project packages=%s", async (conflict) => {
+it.each([
+  { conflict: false, bound: true, foreignHome: false },
+  { conflict: true, bound: true, foreignHome: false },
+  { conflict: false, bound: false, foreignHome: false },
+  { conflict: false, bound: true, foreignHome: true },
+])("activates offline with ignored packages=$conflict and bound root=$bound and foreign registry home=$foreignHome", async ({ conflict, bound, foreignHome }) => {
   const root = await mkdtemp(join(tmpdir(), "tron-offline-subagents-"));
   const agentDir = join(root, "agent");
   const cache = join(root, "npm-cache");
@@ -22,6 +28,8 @@ it.each([false, true])("activates offline and completes a canonical child with i
   const tronHome = join(root, "tron");
   const overrides = {
     PI_CODING_AGENT_DIR: agentDir,
+    [DELEGATED_PROVIDER_ROOT_ENV]: undefined as string | undefined,
+    PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: undefined as string | undefined,
     npm_config_cache: cache,
     npm_config_offline: "true",
     npm_config_registry: "http://registry.invalid",
@@ -39,6 +47,9 @@ it.each([false, true])("activates offline and completes a canonical child with i
     facts.emptyAgentHome = true;
     facts.emptyNpmCache = true;
     Object.assign(process.env, overrides);
+    delete process.env[DELEGATED_PROVIDER_ROOT_ENV];
+    delete process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT;
+    if (bound) delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
     // Deny all TCP, including loopback: this case needs no HTTP fixture.
     net.Socket.prototype.connect = function () {
       networkAttempts++;
@@ -88,7 +99,7 @@ it.each([false, true])("activates offline and completes a canonical child with i
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     registry = new RuntimeRegistry({
-      agentDir, tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
+      agentDir, tronHome: foreignHome ? join(root, "foreign-tron") : tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
         runtime.registerNativeProvider(faux.provider);
@@ -97,6 +108,23 @@ it.each([false, true])("activates offline and completes a canonical child with i
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     await registry.initialize();
+    if (!bound || foreignHome) {
+      let failure: unknown;
+      let unexpectedSlot;
+      try { unexpectedSlot = await registry.create(cwd); }
+      catch (error) { failure = error; }
+      if (unexpectedSlot) {
+        // A negative control may admit the provider. Join its real execution
+        // before asserting refusal so disposal cannot race session-start work.
+        await unexpectedSlot.setModel(model.provider, model.id);
+        await unexpectedSlot.prompt("Launch offline-worker and report completion");
+        await waitFor(() => !unexpectedSlot!.isBusy, "unexpected unbound child completion");
+      }
+      expect(failure).toMatchObject({ message: expect.stringMatching(/managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT/) });
+      facts.invalidHomeBindingRefused = true;
+      facts.passed = true;
+      return;
+    }
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
     const resources = await slot.resources() as unknown as {
@@ -187,8 +215,12 @@ it.each([false, true])("activates offline and completes a canonical child with i
       }
       facts.networkAttempts = networkAttempts;
       await rm(root, { recursive: true, force: true });
+      const defaultRoot = join(tmpdir(), `pi-subagents-uid-${process.getuid?.() ?? "unknown"}`);
+      facts.defaultRootAbsent = !await stat(defaultRoot).then(() => true, () => false);
       await mkdir(dirname(reportPath), { recursive: true });
-      await writeFile(conflict ? reportPath.replace(/\.json$/u, ".conflict.json") : reportPath, `${JSON.stringify(facts, null, 2)}\n`);
+      const suffix = foreignHome ? ".foreign-home.json" : !bound ? ".unbound.json" : conflict ? ".conflict.json" : ".json";
+      await writeFile(reportPath.replace(/\.json$/u, suffix), `${JSON.stringify(facts, null, 2)}\n`);
+      expect(facts.defaultRootAbsent, "managed provider must never create the system-temp default root").toBe(true);
     }
   }
 }, 60_000);

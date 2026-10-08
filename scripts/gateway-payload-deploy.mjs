@@ -666,6 +666,7 @@ async function readUpdateConfig(paths) {
   const sourceRoot = await noSymlinkDirectory(value.sourceRoot, [
     "packages/gateway/package.json", "packages/gateway/package-lock.json",
     "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+    "scripts/gateway-install-inputs.mjs",
   ]);
   const artifactRoot = value.artifactRoot === undefined ? undefined : await noSymlinkDirectory(value.artifactRoot);
   return { ...value, sourceRoot, ...(artifactRoot === undefined ? {} : { artifactRoot }) };
@@ -2477,14 +2478,26 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
   try {
     let source;
+    let sourceRevision;
+    let sourceInputFingerprint;
     await withGatewaySourceBuildLock(config.sourceRoot, async () => {
-      // Capture dependency authority while bundle-gateway.sh cannot replace
-      // source node_modules, then hold that same lock through compilation.
+      // Bind the actual compiler/copy inputs, not just HEAD: development
+      // checkouts may be dirty, but their staged output must not claim to match
+      // the clean revision after those edits are reverted.
+      sourceRevision = await gitRevision(config.sourceRoot);
+      const installVerifierPath = join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs");
+      const { gatewayBuildInputFingerprint, verifyGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
+      sourceInputFingerprint = await gatewayBuildInputFingerprint(config.sourceRoot);
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
+      await verifyGatewayInstallInputs(gatewayRoot);
       await runCommand(process.execPath, [
         join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
         "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
       ], { cwd: gatewayRoot, timeoutMs });
+      if (await gitRevision(config.sourceRoot) !== sourceRevision
+        || await gatewayBuildInputFingerprint(config.sourceRoot) !== sourceInputFingerprint) {
+        throw new Error("Gateway source inputs changed during rebuild; retry from the current checkout");
+      }
     });
     // Source updates inherit the exact validated product configuration from
     // the selected immutable payload. The source checkout and environment are
@@ -2514,11 +2527,16 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         // The updater and helper are part of the trusted source revision, not
         // stale files inherited from whichever payload happened to be active.
         await copyTrustedSourceScripts(config.sourceRoot, temporary);
+        if (await gitRevision(config.sourceRoot) !== sourceRevision) {
+          throw new Error("Gateway source revision changed during rebuild; retry from the current checkout");
+        }
+        const { writeGatewayBuildInputReceipt } = await import(pathToFileURL(join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs")).href);
+        await writeGatewayBuildInputReceipt(config.sourceRoot, join(temporary, "app"), sourceRevision, sourceInputFingerprint);
         const fingerprint = await payloadFingerprint(temporary);
         const manifest = {
           ...active.manifest,
           schema: SCHEMA, kind: KIND, channel: paths.channel, version,
-          gatewayVersion: source.sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
+          gatewayVersion: source.sourcePackage.version, sourceRevision,
           runtimeEpoch: randomUUID(), payloadFingerprint: fingerprint,
         };
         payloadManifest(manifest, { channel: paths.channel, version });
