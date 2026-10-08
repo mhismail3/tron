@@ -42,6 +42,8 @@ export interface HomeTaskOneUseGrant {
 }
 
 export interface HomeTaskAuthorizationState {
+  /** Durable compare-and-replace revision, advanced only by the store. */
+  revision: number;
   scopes: HomeTaskAuthorizationScope[];
   decisions: HomeTaskAuthorizationDecision[];
   grants: HomeTaskOneUseGrant[];

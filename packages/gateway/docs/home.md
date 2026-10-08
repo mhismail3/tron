@@ -4,8 +4,8 @@ Tron Home is an opt-in persistent conversation, one per Gateway installation:
 `~/.tron` and `~/.tron-dev` each own their own Home. This document owns what
 Home does today: its designation record, its curated runtime, its memory, and the
 request seam that sends each activation the memory's view instead of the
-canonical transcript. Tasks, the wake inbox and Home's own client surface are
-later slices. Ordinary sessions are unaffected by every rule here.
+canonical transcript. The separate task persistence/authorization contract exists;
+task dispatch, the wake inbox and Home's own client surface are later slices. Ordinary sessions are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
 
@@ -251,6 +251,92 @@ refuses with a typed conflict while the record is unavailable; this is the
 canonical installation workspace identity that distinguishes sessions which
 may be Home's, including installations reached through a symlink. Sessions in
 ordinary project directories remain unaffected.
+
+## Task persistence and rollback
+
+`HomeTaskStore` owns a separate capability namespace at
+`<tronHome>/gateway/home/tasks/`, beside (not inside) the v2 Home ledger. It is
+not workspace content, canonical session JSONL, or episodic memory. The directory
+is 0700; every JSON file is 0600, bounded, and securely read without following a
+file symlink. Parent directories must also be owner-only real directories.
+There is no change to the Home record version or the frozen shared workspace
+setup record.
+
+Explicit namespace initialization publishes an empty `authorization.json` and
+synchronizes the namespace and parent directories before publishing the separate
+`gateway/workspace-state/home-tasks-initialized.json` marker. The marker has
+exactly `{ "version": 1 }`. No task or authorization write is allowed before
+this setup. An existing partial setup is preserved and refused, never completed
+by guessing. Once initialized, a missing namespace, marker, or authorization
+file is lost state, not a fresh installation.
+
+Each task occupies `tasks/<taskId>.json`, at most 256 KiB of encoded JSON. The
+strict v1 format requires exactly these keys:
+
+| fields | contract |
+| --- | --- |
+| `version`, `taskId`, `revision` | Version 1, filename-matching identity, positive safe-integer revision; create at 1, replace only at expected revision + 1 |
+| `homeId`, `generation` | Immutable originating Home identity and enabled generation |
+| `intent`, `intentDigest` | Immutable `{ revision, text }` snapshot (text at most 64 KiB UTF-8); SHA-256 of `JSON.stringify({ revision, text })` in that key order |
+| `target`, `workerProfile`, `policyRevision` | Immutable absolute target (at most 4 KiB UTF-8), qualified worker-profile identity and positive policy revision; storage is not trust/admission authority |
+| `grantRef`, `scopeRef` | Nullable authority references; at most one, must name an existing authorization record, fill once then cannot swap |
+| `lifecycle` | `pending`, `active`, or `terminal`; active requires authority and session/operation/controller identity; terminal requires terminal evidence |
+| `sessionId`, `operationId`, `controllerGeneration` | Nullable execution identity, populated by the later dispatch/control owner |
+| `spend` | Null or exact `{ inputTokens, outputTokens, knownCostUSD, pricingProvenance, unpriced }`; safe nonnegative token counts, finite nonnegative known cost only with bounded price provenance, and an explicit unpriced flag |
+| `reportRefs` | Null or at most 256 unique result references, each exact `{ resultId, sessionId, entryId }`; later result owner must verify canonical evidence |
+| `terminalEvidence` | Null or exact `{ outcome, sessionId, entryIds, reason }`; outcome is `progress`, `needs-input`, `final`, `limited`, `interrupted`, or `unknown`, at most 256 unique entry IDs and a bounded coded reason; `final` requires a report reference, never a last-reply substitution |
+
+`authorization.json` is independently owned by `HomeTaskAuthorization` through
+the store's durable adapter. Its exact v1 keys are `version`, `revision`,
+`scopes`, `decisions`, `grants`; it is at most 4 MiB, with at most 10,000 records
+in each array. Scope/decision/grant fields are strict, IDs unique, each grant
+names one approved human decision, and every scope/grant carries its restore
+epoch. Only the adapter advances revision. Concurrent saves based on the same
+revision cannot overwrite each other. Command payloads are snapshotted before
+queuing, so later caller edits cannot change an accepted write.
+
+Both file kinds replace durably via unique temporary file, file fsync, rename,
+and directory fsync before acknowledgment. Unknown versions/keys, malformed,
+unsafe, oversized or contradictory records preserve bytes and refuse with a
+typed `HomeTaskStoreError`. `home.task.store-refused` names only the bounded
+reason. A visible publication whose durability is uncertain fences the store
+instance; a fresh owner must securely reload it rather than continue with stale
+state. Failed pre-rename writes remove only their own temporary artifacts.
+Enumeration streams bounded directory entries and validates every file: no
+second task catalog, growing task snapshot, total task-count cap, or silent
+pruning. A listing that later refuses is not a publishable complete projection.
+
+There is deliberately no task-membership index. Future result, inbox, and
+canonical worker-marker owners must preserve and block on a missing/invalid
+referenced task; they may not recreate it or ignore the reference. An absent
+unreferenced task is indistinguishable from one never created and has no
+consumer. Results and inbox files arrive with their respective owners, not as
+empty speculative stores in this slice.
+
+Ordinary restart reloads scopes and unused grants unchanged; consumed grants
+stay consumed. Backup restore is different: the explicit restore owner must
+advance an authority epoch outside the restored snapshot. Epoch mismatch
+requires maintainer reconfirmation; dispatch must fail closed when that authority
+cannot be established. Startup must never infer a restore or rotate the epoch.
+The restore workflow is not implemented here. Future deletion may atomically
+retire terminal acknowledged task/result/event evidence only 90 days after ack;
+pending, unacknowledged, blocked and outcome-unknown evidence is never age-pruned.
+There is no deletion or dispatch API in this slice.
+
+**Rollback target:** the held pre-task Home-capable build already reads the same
+strict v2 ledger. It entirely ignores `gateway/home/tasks/` and its setup marker,
+so populated task data does not make Home unavailable or alter its profile,
+status, model selection, or record bytes. `home-task-rollback.integration.test.ts`
+executes that build's actual `home-owner.ts` from the held base ref, using unchanged
+Home/memory dependencies, against populated task and authorization files. It
+compares Home behavior and all namespace/marker bytes before and after. This is
+an owner-level rollback integration proof, not a full installed older Gateway
+binary or power-loss test.
+
+Production construction is deferred to task dispatch: HomeOwner and Gateway
+startup do not construct these owners, initialize the namespace, or enable a
+scope. Integration tests wire the existing authorization owner to its durable
+adapter. No new RPC or automatic task activation is exposed.
 
 ## Task authorization foundation
 

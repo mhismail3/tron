@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationState } from "./home-task-authorization.js";
 
 function fixture() {
-  let state: HomeTaskAuthorizationState = { scopes: [], grants: [], decisions: [] };
+  let state: HomeTaskAuthorizationState = { revision: 1, scopes: [], grants: [], decisions: [] };
   const diagnostics: Array<{ event: string; outcome: string; reason?: string }> = [];
   const store = {
     load: async () => structuredClone(state),
