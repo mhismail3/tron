@@ -30,6 +30,7 @@ it.each([
     PI_CODING_AGENT_DIR: agentDir,
     [DELEGATED_PROVIDER_ROOT_ENV]: undefined as string | undefined,
     PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: undefined as string | undefined,
+    PI_SUBAGENT_CHILD: undefined as string | undefined,
     npm_config_cache: cache,
     npm_config_offline: "true",
     npm_config_registry: "http://registry.invalid",

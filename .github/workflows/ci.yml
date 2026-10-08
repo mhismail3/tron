@@ -193,8 +193,8 @@ jobs:
             scripts/tron-ios-test
       - run: scripts/ios-release-toolchain-doctor.sh --self-test
 
-  # Advisory jobs retain real failure conclusions. Only policy and tron/verify
-  # gate work land; the dashboard reads these jobs directly from Actions.
+  # Gateway is required for land; other advisory jobs retain real failure
+  # conclusions visible in the dashboard without blocking unrelated work.
   gateway:
     needs: policy
     if: ${{ !cancelled() && needs.policy.outputs.gateway != 'false' }}
@@ -210,6 +210,7 @@ jobs:
         working-directory: packages/gateway
       - run: npm run check:pi-sdk
         working-directory: packages/gateway
+      - run: scripts/install-ci-tools.sh node
       - run: npm run check:pi-subagents
         working-directory: packages/gateway
       - run: npm run test:pi-subagents-scripts
