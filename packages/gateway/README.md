@@ -369,9 +369,32 @@ child JSONL and the Gateway's matching child-session reference. Regenerate its
 sanitized evidence with
 `npx vitest run src/sessions/managed-subagents.integration.test.ts --maxWorkers=2` from the
 Gateway directory; the report is `test-results/managed-subagents.integration.json`
-(or `TRON_SUBAGENTS_REPORT` for an external evidence destination). Managed
-payload activation, detached/control scenarios and previous → candidate → previous
-rollback qualification remain separate release gates.
+(or `TRON_SUBAGENTS_REPORT` for an external evidence destination).
+
+`npm run test:pi-subagents-rollback` runs the real previous → candidate → previous
+sequence against one isolated home. Each leg loads a fresh Gateway runtime with
+the selected exact closure, discovers packaged/project agents, and completes a
+real foreground child. The return leg reconstructs the candidate parent, reads
+its retained run through the previous provider, refuses terminal live control,
+and resumes the candidate child through the previous provider's workflow API.
+The original parent/child JSONL prefixes and all other retained session-tree run
+artifacts must remain unchanged; supported continuation appends canonical history rather
+than converting it. Both immutable installs/receipts survive rollback. Only the
+loopback model endpoint is scripted, including for the predecessor's CLI child.
+The loader and admission use the verified manifest's `pi.extensions`, not a
+candidate-specific filename; empty, escaping, missing or non-regular entries
+fail closed before loading. The suite also exercises invalid entries in actual
+receipt-verified closures.
+
+The sanitized report defaults to `test-results/managed-subagents.rollback.json`;
+set `TRON_SUBAGENTS_ROLLBACK_REPORT` to retain it elsewhere. To inspect the whole
+disposable home, set `TRON_SUBAGENTS_ROLLBACK_ROOT` to a **nonexistent** evidence
+directory; the probe refuses to overwrite an existing fixture. Without that
+explicit retention request, it removes the fixture on success and failure.
+Payload source copies always retire after the probe. This gate selects provider
+versions with the current Gateway/SDK, not historical Gateway executables or a
+Stable/Debug service transition. Managed payload activation and detached/live
+control scenarios remain separate release gates.
 
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
 layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote

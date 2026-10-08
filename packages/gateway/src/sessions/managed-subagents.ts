@@ -167,15 +167,43 @@ export class ManagedSubagents {
     }
   }
 
+  private extensionPaths(): string[] {
+    const root = this.verify();
+    const manifestPath = join(root, "package.json");
+    if (lstatSync(manifestPath).size > 64 * 1024) throw new GatewayError("conflict", "managed pi-subagents extension manifest is too large");
+    let manifest: { pi?: { extensions?: unknown } } | null;
+    try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); }
+    catch { throw new GatewayError("conflict", "managed pi-subagents extension manifest is unreadable or invalid"); }
+    const entries = manifest?.pi?.extensions;
+    if (!Array.isArray(entries) || entries.length === 0 || entries.length > 32) {
+      throw new GatewayError("conflict", "managed pi-subagents extension entries are absent or invalid");
+    }
+    // Entry identity belongs to the verified build, not a candidate-specific
+    // filename. Resolve loader and admission from this single authority.
+    return entries.map((entry: unknown) => {
+      if (typeof entry !== "string" || entry.length === 0 || entry.length > 1024 || isAbsolute(entry)
+        || entry.split(/[\\/]/u).includes("..")) {
+        throw new GatewayError("conflict", "managed pi-subagents extension entry escapes the verified root");
+      }
+      const path = resolve(root, entry);
+      const inside = relative(root, path);
+      if (!inside || inside.startsWith(`..${sep}`) || isAbsolute(inside) || !existsSync(path)
+        || !lstatSync(path).isFile() || realpathSync(path) !== path) {
+        throw new GatewayError("conflict", "managed pi-subagents extension entry is missing or not a regular file inside the verified root");
+      }
+      return path;
+    });
+  }
+
   loaderOptions(settings: SettingsManager, agentDir: string): { additionalExtensionPaths: string[] } {
     this.assertNoConflict(settings, agentDir);
-    return { additionalExtensionPaths: existsSync(this.root) ? [join(this.verify(), "index.js")] : [] };
+    return { additionalExtensionPaths: existsSync(this.root) ? this.extensionPaths() : [] };
   }
 
   admit(extensions: readonly Extension[]): void {
-    const root = extensions.some((extension) => extension.resolvedPath === join(this.root, "index.js")) ? this.verify() : undefined;
+    const paths = existsSync(this.root) ? this.extensionPaths() : [];
     for (const extension of extensions) {
-      if (root && extension.resolvedPath === join(root, "index.js")) managedExtensions.add(extension);
+      if (paths.includes(extension.resolvedPath)) managedExtensions.add(extension);
       else if (extension.tools.has("subagent")) throw new GatewayError("conflict", "The subagent tool is reserved by the Tron-managed provider");
     }
   }

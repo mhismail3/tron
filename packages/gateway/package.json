@@ -15,6 +15,7 @@
     "check:pi-subagents": "node scripts/check-pi-subagents.mjs",
     "install:pi-subagents": "node scripts/install-pi-subagents.mjs",
     "build:pi-subagents-closure": "python3 scripts/build-pi-subagents-closure.py",
+    "test:pi-subagents-rollback": "vitest run src/sessions/managed-subagents.rollback.test.ts --maxWorkers=2",
     "test:pi-subagents-scripts": "node --test scripts/check-pi-subagents.test.mjs scripts/build-pi-subagents-closure.test.mjs scripts/update-pi-subagents.test.mjs",
     "update:pi-subagents": "node scripts/update-pi-subagents.mjs",
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
