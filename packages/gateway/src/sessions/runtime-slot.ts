@@ -8916,7 +8916,8 @@ export class RuntimeSlot {
   }
 
   /** Queue a retirement barrier behind admitted lane work without disposing the
-   * slot. The Registry remains the sole owner of disposal and publication. */
+   * slot. The Registry remains the sole owner of disposal and publication. Work
+   * running on this lane must never await this barrier. */
   async retireAfterSettled(): Promise<void> {
     await this.lane.run(() => {});
   }

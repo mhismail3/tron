@@ -172,6 +172,8 @@ export class HomeOwner {
   private designating = false;
   private record: HomeRecord | undefined;
   private unavailable: string | undefined;
+  /** The fenced owner retains retirement work; a slot-lane writer must not await work queued on that same lane. */
+  private publicationRetirement: Promise<void> | undefined;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
@@ -962,8 +964,21 @@ export class HomeOwner {
         this.unavailable = "Home ledger publication is being reconciled";
         this.options.sessions.beginHomePublicationReconciliation();
         const reloaded = await this.load(false);
-        await this.options.sessions.retireHomeRuntimes(reloaded);
-        if (reloaded) this.unavailable = undefined;
+        // Do not await this here: writeLocked may be running inside a slot lane,
+        // and Registry retirement queues behind that lane. Keep the owner fenced
+        // until the retained retirement completes successfully.
+        const retirement = Promise.resolve()
+          .then(() => this.options.sessions.retireHomeRuntimes(reloaded))
+          .then(() => {
+            if (reloaded) this.unavailable = undefined;
+          })
+          .catch(error => {
+            this.unavailable = "Home runtime retirement failed after ledger publication uncertainty";
+            this.options.diagnostic?.({ outcome: "unavailable", reason: "publication-retirement-failed" });
+            throw error;
+          });
+        this.publicationRetirement = retirement;
+        void retirement.catch(() => {});
       }
       if (error instanceof Error && error.message === "JSON document exceeds its byte limit") {
         throw new GatewayError("conflict", "The Home chapter ledger exceeds its persisted size limit");
