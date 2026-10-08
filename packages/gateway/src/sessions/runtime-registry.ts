@@ -4655,15 +4655,55 @@ export class RuntimeRegistry {
     }
   }
 
-  /** Cold task inspection never constructs executable resources or repairs the
-   * canonical file. Sync and identity checks precede immutable publication. */
+  /** Shared live/cold task evidence boundary: never constructs executable
+   * resources or repairs the canonical file. Sync and identity checks precede
+   * immutable terminal/outbox publication and operation acknowledgement. */
   async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
+    const entries = await this.taskEvidenceFileCut(sessionId);
+    if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
+    return entries;
+  }
+
+  /** Registry ordering precedes the slot lane. The live caller is the dispatch
+   * closure, never in-lane receipt persistence. Cold inspection stays read-only. */
+  async readLiveTaskEvidence(sessionId: string, operationId: string): Promise<
+    | { state: "present"; entries: FileEntry[]; branch: FileEntry[] }
+    | { state: "absent"; operationSettled: boolean }
+  > {
+    return this.serializeSessionMutation(sessionId, async () => {
+      const slot = this.slots.get(sessionId);
+      if (!slot) throw new GatewayError("conflict", "Task runtime is missing");
+      return slot.inspectTaskSettlement(operationId, async operationSettled => {
+        const entries = await this.taskEvidenceFileCut(sessionId);
+        return entries ? { state: "present" as const, entries, branch: slot.canonicalSessionEntries() }
+          : { state: "absent" as const, operationSettled };
+      });
+    });
+  }
+
+  private async taskEvidenceFileCut(sessionId: string): Promise<FileEntry[] | null> {
     // Recovery publishes a permanent result. A loaded previous catalog cut or
     // a not-yet-ready projection cannot decide whether its report exists.
     await this.sessionCatalog.whenReconciled();
     const path = await this.homeSessionFile(sessionId);
     if (!path) throw new GatewayError("conflict", "Task canonical session is missing");
-    const before = await lstat(path);
+    const before = await lstat(path).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!before) {
+      // Pi can settle Stop before appending a conversation. Absence becomes
+      // evidence only after the parent is durable and the exact path is still
+      // absent; the live caller additionally proves settled operation + Stop.
+      const directory = await open(dirname(path), "r");
+      try { await syncDurably(directory); } finally { await directory.close(); }
+      const after = await lstat(path).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      });
+      if (after) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+      return null;
+    }
     if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Task canonical session is unsafe");
     for (const durablePath of [path, dirname(path)]) {
       const handle = await open(durablePath, "r");

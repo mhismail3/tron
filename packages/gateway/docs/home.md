@@ -437,8 +437,28 @@ Input totals include cache read/write; output tokens are always shown. Pi's
 computed `usage.cost` has no authoritative billing provenance, so all current
 provider amounts are explicitly unpriced, never estimated bills.
 `home.task.transition`, `home.task.spend` and `home.task.runaway-stop` emit only
-bounded/hash references after durable publication. Reports enter the task-owned
-inbox described below, never a result-triggered Home model call.
+bounded/hash references after durable publication. Live settlement joins the
+worker's terminal/Stop boundary, then uses the same Registry durable canonical
+file cut as cold `readTaskEvidence`. Live `readLiveTaskEvidence` orders Registry
+session serialization before the RuntimeSlot lane, excluding late steering
+receipt writes from inspection. Canonical file and parent-directory sync precede
+report qualification, terminal/result/outbox publication and operation-marker
+acknowledgement. Sync or source-validation failure rejects settlement, leaving
+the task active without a terminal result, report references, wake or push;
+existing cold recovery reconciles it on restart, never by replaying its prompt.
+If no conversation file was created, the shared boundary syncs its parent and
+verifies absence again. Only a settled in-process operation with a durable,
+append-only Stop intent can then settle live `interrupted`, reason
+`stopped-before-conversation`, with no canonical entry/report references.
+Without that intent or settled operation, absence cannot qualify a live result.
+Cold recovery still uses exact canonical evidence or settles `unknown`.
+`home-task-dispatch.e2e.test.ts` covers live file/directory sync failure, absence
+of publication/ack, report recovery without replay, stopped-before-conversation,
+absent-without-Stop refusal, and the serialized report/steer race.
+Reports enter the task-owned inbox described below, never a result-triggered Home
+model call. Home's provider instructions describe attributed delivery on the
+next maintainer message and the at-most-once advisory push, not automatic wake;
+admission alone never establishes task success.
 
 ### Cold task reconciliation
 

@@ -2,7 +2,7 @@ import * as fileSystem from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -328,6 +328,71 @@ describe("Home task cold reconciliation", () => {
 });
 
 describe("Home task production dispatch", () => {
+  it.each(["file", "directory"] as const)("refuses live settlement before canonical %s sync and recovers without replay", async target => {
+    const f = await fixture();
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let providers = 0;
+    f.faux.setResponses([async () => { providers++; await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    try {
+      const run = await dispatch(f);
+      const worker = await f.registry.acquire(run.sessionId);
+      const anchor = await fileSystem.open(f.cwd, "r");
+      const prototype = Object.getPrototypeOf(anchor); const sync = prototype.sync;
+      await anchor.close();
+      let failedSync = false;
+      vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+        const path = worker.sessionFile;
+        const expected = path ? await fileSystem.stat(target === "file" ? path : dirname(path)).catch(() => undefined) : undefined;
+        const current = await this.stat();
+        if (expected && current.dev === expected.dev && current.ino === expected.ino) { failedSync = true; throw new Error("live canonical sync refused"); }
+        return sync.call(this);
+      });
+      const acknowledge = vi.spyOn(f.registry, "clearOwnedOperationMarker");
+      release();
+      const completion = await run.completion.then(() => "published", error => String(error));
+      const frozen = await store.read(run.taskId);
+      expect(frozen).toMatchObject({ lifecycle: "active", reportRefs: null, terminalEvidence: null, wake: null });
+      expect(completion).toContain("live canonical sync refused");
+      expect(failedSync).toBe(true);
+      expect(acknowledge).not.toHaveBeenCalled();
+      expect(f.notifications).toHaveLength(0);
+      vi.restoreAllMocks();
+      const recovered = await f.restart();
+      const task = await recovered.homeOwner().taskResult(run.taskId);
+      expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" }, wake: { state: "pending", push: "decided" } });
+      expect(task.reportRefs).toHaveLength(1);
+      expect(providers).toBe(1);
+      expect(f.notifications).toHaveLength(1);
+      evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, frozen, completion, task, providers });
+    } finally { release(); }
+  }, 20_000);
+
+  it("leaves absent canonical evidence without a durable Stop intent unqualified until cold recovery", async () => {
+    const f = await fixture();
+    const create = OwnedSessionDispatch.prototype.createWorker;
+    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+      const lease = await create.call(this, cwd, reports);
+      vi.spyOn((lease.slot as any).runtime.session, "prompt").mockRejectedValue(new Error("preflight refused"));
+      return lease;
+    });
+    let providers = 0;
+    f.faux.setResponses([() => { providers++; return fauxAssistantMessage("must not start"); }]);
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow("Task canonical evidence is unavailable");
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const frozen = await store.read(run.taskId);
+    expect(frozen).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null, reportRefs: null, wake: null });
+    expect(f.notifications).toHaveLength(0);
+    vi.restoreAllMocks();
+    const recovered = await f.restart();
+    const task = await recovered.homeOwner().taskResult(run.taskId);
+    expect(task.terminalEvidence).toMatchObject({ outcome: "unknown", entryIds: [] });
+    expect(providers).toBe(0);
+    evidence.push({ case: "absent-without-stop", frozen, task, providers });
+  });
+
   it("commits one push plus pending wake and consumes the immutable report only on the next Home message", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
@@ -343,12 +408,19 @@ describe("Home task production dispatch", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
     let request = "";
-    f.faux.setResponses([(context) => { request = JSON.stringify(context); return fauxAssistantMessage("Result consumed"); }]);
+    let instructions = "";
+    f.faux.setResponses([(context) => { request = JSON.stringify(context); instructions = JSON.stringify(context.messages.filter(message => message.role === "system")); return fauxAssistantMessage("Result consumed"); }]);
     await home.prompt("What happened?");
     await waitFor(() => !home.isBusy, "Home inbox terminal");
     const consumed = await f.registry.homeOwner().taskResult(run.taskId);
     expect(consumed).toMatchObject({ wake: { state: "acknowledged" } });
     expect(request).toContain("Verified result");
+    // The actual provider instructions must explain the delivery happening in
+    // this activation, rather than telling Home the result is unavailable.
+    expect(instructions).toMatch(/attributed work messages on the next maintainer message/);
+    expect(instructions).toMatch(/advisory push.*does not wake Home/);
+    expect(instructions).toContain("do not assume task success from admission");
+    expect(instructions).not.toContain("not yet delivered into Home");
     const attributed = home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1");
     expect(attributed).toHaveLength(1);
     expect(home.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.context-delivery.v4",
@@ -599,14 +671,19 @@ describe("Home task production dispatch", () => {
       if (surface === "taskRPC") expect(output).toHaveBeenCalledWith(expect.stringContaining("Stop joined"));
       output.mockRestore();
       expect(cancelled).toBe(true);
-      const result = await run.completion;
+      const result = await run.completion.catch(() => undefined);
+      const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+      expect(await store.read(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "interrupted", reason: "stopped-before-conversation" } });
+      if (!result) throw new Error("Live Stop did not settle");
       if (surface === "taskRPC") expect(await service.invoke(client, "home.stopTask", stopParams)).toEqual({ accepted: true });
       expect(await f.registry.homeOwner().taskResult(run.taskId)).toEqual(result);
       expect(providerCalls).toBe(0);
       expect(result.stopIntent).toMatchObject({ operationId: run.operationId, controllerGeneration: 1 });
-      expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
-      const receipts = result.terminalEvidence!.entryIds.map(id => slot.canonicalSessionEntries().find(entry => entry.id === id));
-      expect(receipts).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.chat-invocation.v1", data: expect.objectContaining({ receiptKind: "terminal", operationId: run.operationId, lifecycle: "interrupted" }) }));
+      expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "stopped-before-conversation", entryIds: [] });
+      expect(result.reportRefs).toBeNull();
+      expect(result.wake).toMatchObject({ state: "pending", push: "decided" });
+      expect(f.notifications).toHaveLength(1);
+      await expect(fileSystem.stat(slot.sessionFile!)).rejects.toMatchObject({ code: "ENOENT" });
       expect(slot.isBusy).toBe(false);
       expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "stop", disposition: "persisted" }));
       evidence.push({ case: `task-preflight-stop-${owner}-${surface}`, providerCalls, intent: result.stopIntent, evidence: result.terminalEvidence });
@@ -626,6 +703,18 @@ describe("Home task production dispatch", () => {
       () => { afterReportCalls += 1; return fauxAssistantMessage("forbidden successor"); }]);
     const run = await dispatch(f);
     const slot = await f.registry.acquire(run.sessionId);
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor); const sync = prototype.sync; await anchor.close();
+    let canonicalSynced = false;
+    vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
+      const target = slot.sessionFile ? await fileSystem.stat(slot.sessionFile).catch(() => undefined) : undefined;
+      const current = await this.stat();
+      if (target && current.dev === target.dev && current.ino === target.ino) canonicalSynced = true;
+      return sync.call(this);
+    });
+    let inspectionRequested = false;
+    const inspect = f.registry.readLiveTaskEvidence.bind(f.registry);
+    vi.spyOn(f.registry, "readLiveTaskEvidence").mockImplementation((...args) => { inspectionRequested = true; return inspect(...args); });
     let steer: Promise<unknown> | undefined;
     try {
       await waitFor(() => workerEntered, "worker report gate");
@@ -637,12 +726,20 @@ describe("Home task production dispatch", () => {
       await waitFor(() => steerEntered, "steer SDK preflight gate");
       releaseWorker();
       await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "custom" && entry.customType === "tron-home-task-report"), "immutable report append");
+      await waitFor(() => inspectionRequested, "live settlement queued behind steer");
+      // The existing lane still owns SDK preflight/refusal receipt publication.
+      // A bounded observation proves durability cannot race that canonical write.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(canonicalSynced).toBe(false);
+      }
       releaseSteer();
       await expect(steer).rejects.toThrow(/cancel|stopped|outcome|admission/i);
       const result = await run.completion;
       expect(result.terminalEvidence?.outcome).toBe("final");
+      expect(canonicalSynced).toBe(true);
       expect(afterReportCalls).toBe(0);
-      evidence.push({ case: "report-steer-race", afterReportCalls });
+      evidence.push({ case: "report-steer-race", afterReportCalls, serializedCanonicalSync: canonicalSynced });
     } finally { releaseWorker(); releaseSteer(); await steer?.catch(() => {}); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
 

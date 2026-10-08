@@ -1123,6 +1123,17 @@ export class RuntimeSlot {
       && (entry.customType === HOME_TASK_MARKER || entry.customType === HOME_TASK_REPORT));
   }
 
+  /** Live task settlement enters from outside the lane after terminal/Stop
+   * joining. Keep late steering receipt writes out of its durable file cut.
+   * Never await this seam from work already running on the session lane. */
+  async inspectTaskSettlement<T>(operationId: string, inspect: (settled: boolean) => Promise<T>): Promise<T> {
+    return this.lane.run(() => {
+      this.assertUsable();
+      if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
+      return inspect(!this.hasActiveAgentRun && !this.isAgentAdmissionSettling && this.operation === undefined);
+    });
+  }
+
   /** Read-only owner seam for bounded derived projections; callers never
    * mutate. Branch-sensitive consumers must use the SDK-selected branch, not
    * the file-wide entry set (which also contains sibling fork history). */

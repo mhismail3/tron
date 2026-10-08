@@ -201,12 +201,17 @@ export class HomeTaskDispatcher {
         if (!deadlineStopFailed) await admitted.catch(() => {});
         let reportStopFailed = false;
         try { await reports.joinStop(); } catch { reportStopFailed = true; }
-        // A report is canonical append evidence; generic completed is not final.
-        const entries = slot.canonicalSessionEntries();
+        // Share cold recovery's durable file cut before publishing any terminal
+        // references/outbox or acknowledging the operation. SDK append visibility
+        // alone cannot guarantee the worker evidence survives a power loss.
+        const cut = await this.sessions.readLiveTaskEvidence(slot.id, operationId);
+        // Spend and last-reply evidence remain selected-branch projections;
+        // immutable report addresses are qualified across the durable file.
+        const entries = cut.state === "present" ? cut.branch : [];
         const markerIndex = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
           && (entry.data as { operationId?: string }).operationId === operationId);
         const runEntries = markerIndex < 0 ? [] : entries.slice(markerIndex + 1);
-        const evidence = await this.reportEvidence(active, slot.canonicalTaskEvidence());
+        const evidence = cut.state === "present" ? await this.reportEvidence(active, cut.entries) : undefined;
         const report = evidence?.report;
         const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
         const lastMessage = last?.type === "message" && last.message.role === "assistant" ? last.message : undefined;
@@ -221,11 +226,17 @@ export class HomeTaskDispatcher {
               && receipt.operationId === operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
           });
         const interrupted = interruption !== undefined;
+        // Stop intent is append-only. Qualify before entering the store update:
+        // missing proof is not namespace corruption or a publication attempt.
+        const stoppedBeforeConversation = cut.state === "absent";
+        if (stoppedBeforeConversation && (!cut.operationSettled || !(await this.store.read(active.taskId))?.stopIntent || deadlineStopFailed || reportStopFailed || detached)) {
+          throw new GatewayError("conflict", "Task canonical evidence is unavailable");
+        }
         const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
           reportRefs: report && evidence ? [{ resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) }] : null,
-          terminalEvidence: { outcome: detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
+          terminalEvidence: { outcome: stoppedBeforeConversation ? "interrupted" : detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
             sessionId: slot.id, entryIds: evidence ? [evidence.entryId] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
-            reason: detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
+            reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
