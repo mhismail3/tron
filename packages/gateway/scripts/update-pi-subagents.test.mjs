@@ -130,10 +130,10 @@ test("one staging owner excludes overlapping updates without changing its candid
   });
 });
 
-for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-check", "build", "execution", "rollback"]) {
+for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-check", "build", "execution", "rollback", "join"]) {
   test(`refuses ${failure} and restores only invocation-owned files`, async () => {
     const { runUpdate } = await import(updater);
-    fixture(({ target, fork, commit, spawn, git, env }) => {
+    fixture(({ target, fork, commit, spawn, git, env, root }) => {
       if (failure === "ancestor") {
         const files = Object.fromEntries(["package.json", "package-lock.json", "build.mjs"].map((name) => [name, readFileSync(join(fork, name))]));
         git(fork, "checkout", "--orphan", "unrelated"); git(fork, "rm", "-rf", ".");
@@ -163,22 +163,61 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
         assert.notEqual(altered, source);
         writeFileSync(probe, altered);
       }
+      let writerPid;
+      let preserved;
       const injected = (bin, args, options) => {
+        if (failure === "join" && args.includes("src/sessions/managed-subagents.rollback.test.ts")) {
+          const pidFile = join(root, "writer.pid");
+          const writer = `const fs=require('node:fs'); process.removeAllListeners('SIGTERM'); process.on('SIGTERM',()=>{});
+            fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid)); setInterval(()=>fs.writeFileSync(${JSON.stringify(join(root, "live"))},'writing'),1);`;
+          // Permission-denied KILL is the unjoinable OS boundary. A process
+          // cannot literally refuse SIGKILL; never make this a runtime hook.
+          const program = `const fs=require('node:fs'); const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(writer)}],{detached:true,stdio:'ignore'});
+            const kill=process.kill.bind(process); process.kill=(pid,signal)=>{ if(signal==='SIGKILL') { const error=new Error('fixture termination denied'); error.code='EPERM'; throw error; } return kill(pid,signal); };
+            const timer=setInterval(()=>{if(!fs.existsSync(${JSON.stringify(pidFile)})) return; clearInterval(timer); process.exit(0);},10);`;
+          const result = spawnSync(process.execPath, ["--import", join(gateway, "test-support/fixture-process-owner.mjs"), "-e", program], {
+            ...options, env: { ...options.env, TRON_TEST_PROCESS_OWNER: root,
+              TRON_TEST_PROCESS_OWNER_FAILURE: options.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(target, ".pi-subagents-update-staging", "process-owner-failure.jsonl"),
+              NODE_OPTIONS: `--import=${join(gateway, "test-support/fixture-process-owner.mjs")}` }, timeout: 10_000,
+          });
+          writerPid = Number(readFileSync(pidFile, "utf8"));
+          preserved = dirname(options.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(target, ".pi-subagents-update-staging", "process-owner-failure.jsonl"));
+          return result;
+        }
         if (failure === "late-check" && bin === "npm" && args.join(" ") === "run check:pi-subagents") {
           assert.equal(JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8")).version, "0.76.1-tron.99");
           return { status: 1, stderr: "injected offline check failure" };
         }
         return spawn(bin, args, options);
       };
-      assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: failure === "missing-source" ? undefined : fork, commit, spawn: injected }), {
-        message: failure === "ancestor" ? /ancestor/ : failure === "version" ? /-tron/ : failure === "missing-source" ? /--fork-repo/ : failure === "dirty" ? /uncommitted|dirty/ : failure === "build" ? /pack/ : failure === "execution" ? /execution gate/ : failure === "rollback" ? /rollback probe/ : /offline check failure/,
-      });
-      assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
-      assert.deepEqual(snapshot(target), originalArtifacts);
-      assert.equal(readFileSync(unrelated, "utf8"), "keep");
-      assert.deepEqual(readdirSync(env.TMPDIR), []);
-      assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
-      assert.equal(existsSync(join(target, "pi-subagents-pin.json.tmp")), false);
-    }, failure === "late-check" || failure === "rollback");
+      try {
+        assert.throws(() => runUpdate({ gatewayDir: target, forkRepo: failure === "missing-source" ? undefined : fork, commit, spawn: injected }), {
+          message: failure === "ancestor" ? /ancestor/ : failure === "version" ? /-tron/ : failure === "missing-source" ? /--fork-repo/ : failure === "dirty" ? /uncommitted|dirty/ : failure === "build" ? /pack/ : failure === "execution" ? /execution gate/ : failure === "rollback" ? /rollback probe/ : failure === "join" ? /staging preserved.*fixture termination denied/s : /offline check failure/,
+        });
+        assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
+        assert.deepEqual(snapshot(target), originalArtifacts);
+        assert.equal(readFileSync(unrelated, "utf8"), "keep");
+        assert.deepEqual(readdirSync(env.TMPDIR), []);
+        if (failure === "join") {
+          assert.equal(existsSync(preserved), true);
+          const records = readFileSync(join(preserved, "process-owner-failure.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+          assert.ok(records.some(record => record.pids.includes(writerPid)));
+          assert.ok(records.some(record => record.attemptedSignals.includes("SIGKILL")));
+        } else assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
+        assert.equal(existsSync(join(target, "pi-subagents-pin.json.tmp")), false);
+      } finally {
+        // The denied OS boundary is injected only in the probe. The test owner
+        // still kills and joins the actual writer before fixture retirement.
+        if (writerPid) {
+          try { process.kill(-writerPid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+          const deadline = Date.now() + 5_000;
+          while (true) {
+            try { process.kill(writerPid, 0); } catch (error) { if (error.code === "ESRCH") break; throw error; }
+            assert.ok(Date.now() < deadline, "writer must exit before removing preserved staging");
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+          }
+        }
+      }
+    }, failure === "late-check" || failure === "rollback" || failure === "join");
   });
 }

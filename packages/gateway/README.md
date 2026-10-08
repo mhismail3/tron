@@ -416,7 +416,11 @@ conflict: remove that declaration explicitly before loading delegated work.
 Tron neither silently overrides it nor warns and runs it. Missing installation
 leaves delegated discovery unavailable in read-only/unactivated fixtures; managed
 startup activates it before discovery. Corrupt bytes or receipts fail closed. Catalog and package reads retain their
-bounded unavailable diagnostic. `managed-subagents.test.ts` exercises the real
+bounded unavailable diagnostic. `managed-subagents.test.ts` installs one real
+immutable closure per file and shares it among admission/discovery cases;
+destructive byte/receipt cases own separate state. Only the two cold real-loader
+cases have measured, explicit deadlines for parallel verification.
+It exercises the real
 closure and SDK loader/discovery in an isolated empty home, plus exact host SDK
 export identity across two payload paths sharing one install.
 `managed-subagents.integration.test.ts` invokes the same startup activation
@@ -443,7 +447,19 @@ its retained run through the previous provider, refuses terminal live control,
 and resumes the candidate child through the producer's documented `action: resume`
 management API. Revival is detached even with `async: false`: the probe awaits the
 same canonical child identity/output and the producer's observed runner/writer
-exit-0 proof, then reads terminal producer status. Scripted model responses are
+exit-0 proof, then reads terminal producer status. Fixture retirement is a
+separate test-support process owner: each leg records native spawn handles/PIDs
+and detached groups, propagates its scoped `--import` preload to runner descendants,
+and stops/joins the trees before retiring HTTP state or removing roots. Normal
+exit, assertion failure and termination signals all use this owner; TERM is
+bounded and escalates to KILL, and disposal confirms PID/group absence (including
+zombies), never retrying directory removal.
+The updater supplies the exclusive `TRON_TEST_PROCESS_OWNER_FAILURE` JSONL path
+inside its staging owner, outside disposable leg roots. Join failures record
+unjoined PIDs, attempted signals and the error there. Any record fails the update,
+restores owned publications and preserves staging for explicit diagnosis; a
+later update refuses that still-owned staging directory. Standalone probes own
+the same failure record within their fixture root and likewise refuse removal. Scripted model responses are
 turn-addressed, not globally queued, so parent notifications and the revived
 child cannot steal each other's responses. The fixture supplies the same reserved
 delegated-artifact root and process-owned Pi host binding as Gateway startup,

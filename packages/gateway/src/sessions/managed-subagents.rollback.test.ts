@@ -65,7 +65,10 @@ it("executes previous → candidate → previous with detached resume through th
       const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "src/sessions/managed-subagents.rollback.test.ts", "--maxWorkers=2"], {
         cwd: payload, timeout: 30_000, maxBuffer: 1024 * 1024,
         env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), PI_SKIP_VERSION_CHECK: "1",
-          TRON_SUBAGENTS_ROLLBACK_LEG: name, TRON_SUBAGENTS_ROLLBACK_FIXTURE: root },
+          TRON_SUBAGENTS_ROLLBACK_LEG: name, TRON_SUBAGENTS_ROLLBACK_FIXTURE: root,
+          TRON_TEST_PROCESS_OWNER: root,
+          TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
+          NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
       }).catch(async (error: Error & { stdout?: string; stderr?: string }) => {
         await writeFile(join(root, `${name}.log`), (error.stdout ?? "") + (error.stderr ?? ""));
         const failed = JSON.parse(await readFile(join(root, `${name}.json`), "utf8"));
@@ -101,12 +104,20 @@ it("executes previous → candidate → previous with detached resume through th
     report.error = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
-    await rm(payloads, { recursive: true, force: true });
-    if (!retainedRoot) await rm(root, { recursive: true, force: true });
     await mkdir(dirname(reportPath), { recursive: true });
     await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+    await refuseUnjoinedFixture(root);
+    await rm(payloads, { recursive: true, force: true });
+    if (!retainedRoot) await rm(root, { recursive: true, force: true });
   }
 }, 100_000);
+
+async function refuseUnjoinedFixture(root: string): Promise<void> {
+  let failure: string;
+  try { failure = await readFile(process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"), "utf8"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  throw new Error(`Refusing fixture removal after process join failure: ${failure}`);
+}
 
 async function copyPayload(payload: string): Promise<void> {
   await mkdir(payload);
@@ -156,9 +167,15 @@ it.skipIf(Boolean(leg)).each([
     await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "src/sessions/managed-subagents.rollback.test.ts", "--maxWorkers=2"], {
       cwd: payload, timeout: 15_000, maxBuffer: 1024 * 1024,
       env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
-        TRON_SUBAGENTS_ROLLBACK_LEG: "invalid", TRON_SUBAGENTS_ROLLBACK_FIXTURE: root, TRON_SUBAGENTS_ROLLBACK_REJECTION: reason },
+        TRON_SUBAGENTS_ROLLBACK_LEG: "invalid", TRON_SUBAGENTS_ROLLBACK_FIXTURE: root, TRON_SUBAGENTS_ROLLBACK_REJECTION: reason,
+        TRON_TEST_PROCESS_OWNER: root,
+        TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
+        NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
     });
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await refuseUnjoinedFixture(root);
+    await rm(root, { recursive: true, force: true });
+  }
 }, 20_000);
 
 async function runLeg(): Promise<void> {
@@ -172,7 +189,6 @@ async function runLeg(): Promise<void> {
   const previous = Object.fromEntries(Object.keys(overrides).map((name) => [name, process.env[name]]));
   let registry: RuntimeRegistry | undefined;
   let server: Server | undefined;
-  let revival: { asyncId: string; asyncDir: string } | undefined;
   let resumeTarget: string | undefined;
   let candidateTarget: string | undefined;
   let requests = 0;
@@ -333,7 +349,6 @@ async function runLeg(): Promise<void> {
       const detail = resumed.message.details as { asyncId: string; asyncDir: string };
       expect(detail.asyncId).toBeTruthy();
       expect(detail.asyncDir).toBeTruthy();
-      revival = detail;
       resumeTarget = detail.asyncId;
       const childFile = join(root, candidate.completion.childFile);
       await waitFor(() => SessionManager.open(childFile).getEntries().some((entry) => entry.type === "message"
@@ -376,15 +391,14 @@ async function runLeg(): Promise<void> {
     throw error;
   } finally {
     try {
-      // Accepted detached revival outlives the presentation turn. Its owner
-      // observes runner/writer exit before retiring HTTP and fixture state,
-      // including when a later assertion fails.
-      if (revival) await waitFor(async () => {
-        try { return JSON.parse(await readFile(join(revival!.asyncDir, "process-terminal.json"), "utf8")).state === "observed"; }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
-      }, "fixture-owned revival exit", { intervalMs: 100 });
-    } finally {
       await registry?.dispose();
+    } finally {
+      // Producer terminal evidence proves the run, not fixture retirement.
+      // Join spawn-owned trees even if an assertion failed before asyncDir was
+      // returned. The inherited preload also owns runner descendants and joins
+      // on process exit/signals before the outer harness can remove roots.
+      const { disposeFixtureProcesses } = await import("../../test-support/fixture-process-owner.mjs");
+      await disposeFixtureProcesses();
       server?.closeAllConnections();
       if (server) await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
       for (const [name, value] of Object.entries(previous)) {

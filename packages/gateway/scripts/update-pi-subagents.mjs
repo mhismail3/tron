@@ -23,6 +23,10 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     if (error.code === "EEXIST") throw new Error("provider update already running or interrupted: inspect the staging owner before removing .pi-subagents-update-staging");
     throw error;
   }
+  // Explicit probe/fixture retirement contract: descendants record failed
+  // joins here, outside their disposable roots. Only this updater owns the
+  // path; a record means staging remains owned and must not be removed.
+  const processOwnerFailure = join(staging, "process-owner-failure.jsonl");
   const created = [];
   let published = false;
   let originalBytes;
@@ -113,7 +117,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     const gate = (label, file, reportName, reportEnv) => {
       const reportPath = join(staging, reportName);
       try {
-        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", file, "--maxWorkers=2"], candidateRoot, { ...env, [reportEnv]: reportPath });
+        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", file, "--maxWorkers=2"], candidateRoot, { ...env, [reportEnv]: reportPath, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
         const report = JSON.parse(readFileSync(reportPath, "utf8"));
         if (report.passed !== true) throw new Error("execution report did not pass");
         return report;
@@ -121,6 +125,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     };
     const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT");
     const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT");
+    if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));
       const destination = join(root, path);
@@ -141,7 +146,15 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     }
     for (const path of created) rmSync(path);
     throw error;
-  } finally { rmSync(staging, { recursive: true, force: true }); }
+  } finally {
+    if (existsSync(processOwnerFailure)) {
+      // Catch above restores publications first. Do not race unjoined writers
+      // with recursive removal or let another update sweep this owner away.
+      const failure = readFileSync(processOwnerFailure, "utf8").slice(0, 4_096).trim();
+      throw new Error(`probe process join failed; staging preserved at ${staging}: ${failure}`);
+    }
+    rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
