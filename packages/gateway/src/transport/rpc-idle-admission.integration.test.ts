@@ -38,6 +38,7 @@ const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   const results = await Promise.allSettled(cleanup.splice(0).map((dispose) => dispose()));
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "RPC idle fixture cleanup failed");
 });
@@ -492,6 +493,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
 
 describe("authenticated intentional stop preserves accepted provider login", () => {
   it("replays the accepted stop receipt while provider login keeps the drain waiting", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     let completedCredential = "";
     const authRuntime = {
       getProvider: () => ({ auth: { apiKey: { login: async () => "" } } }),
@@ -532,6 +534,7 @@ describe("authenticated intentional stop preserves accepted provider login", () 
   });
 
   it("keeps accepted auth work through stop failure, refuses new work, and completes only after explicit retry", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     let completedCredential = "";
     const authRuntime = {
       getProvider: () => ({ auth: { apiKey: { login: async () => "" } } }),

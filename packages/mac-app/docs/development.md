@@ -373,23 +373,24 @@ session JSONL, provider credentials and runtime settings stay under
 replacement and local settings/credential reset do not delete the internal
 workspace. See the [workspace ownership and restore contract](../../gateway/docs/internal-workspace.md).
 Build and validate the replacement artifact first; source preparation does not
-require changing the running services. Before replacing an already-installed app, use the old installed wrapper to
-complete native helper retirement from **Permissions… → Disable Helper for
-Update**. A pending or failed drain stops the update. Then quit Tron, replace
-the application in Finder, and launch the new installed copy. Stop any legacy
-Debug SMAppService separately; Release never takes over Debug lifecycle.
+require changing the running services. Before replacing an installed app, choose
+**Quit Tron** in the old wrapper. Quit waits for accepted Gateway work, requests
+an authenticated stop, verifies the exact observed process has exited without a
+replacement, and joins native-helper retirement. If any stage fails or cannot
+be proved, the wrapper stays open and presents the failure. Replace the app only
+after Quit succeeds, then launch the new copy. Stop any legacy Debug
+SMAppService separately; Release never takes over Debug lifecycle. Neither
+process absence alone nor a timer substitutes for a successful Quit.
 
-Old and new wrapper/helper builds pin each other's signed code hashes. If the app
-was replaced before this drain, the new wrapper may be unable to contact the old
-helper. Do not weaken the pins, force unregister/kill surviving work, or assume
-Restart Helper repairs that mismatch. If an older installed build lacks the
-pre-update control, stop for an explicitly reviewed maintainer bootstrap based on
-that build's actual capabilities; the capture-owning sequence cannot be skipped.
-Likewise, a `.notFound`/unknown native-service status refuses drain without XPC,
-registration or Gateway/file changes. Some never-registered optional helpers can
-report `.notFound`; successful uninstall/refresh for that first-install case is
-an open availability gate, not evidence that native work has retired. Do not
-register a helper or infer absence just to bypass the refusal.
+Quit leaves the approved Login Items registered. The Gateway LaunchAgent's
+successful exit policy prevents relaunch after its intentional clean stop; the
+next wrapper launch uses the existing approved LaunchAgent owner to start it.
+The native helper drains capture and automation work, then exits while its
+SMAppService registration remains enabled; its Mach service is started on demand
+by the next authenticated XPC connection. No new approval or desired-state
+record is created. An unapproved or unknown service is never registered to make
+Quit succeed. A `.notFound` native-service status refuses retirement rather
+than being treated as evidence that work is absent.
 
 Prepare a Release app with an explicit derived-data directory inside the
 worktree, so concurrent worktrees never share a build database or hand over each
@@ -412,10 +413,10 @@ on command forms whose argument parsing changed between Xcode releases.
 
 In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
 launch it. The existing onboarding marker keeps the wrapper in menu-bar mode.
-The wrapper repairs and starts its approved Gateway registration at launch; if
-macOS requires Login Item approval, approve Tron Agent under System Settings →
-General → Login Items. Explicitly enable the native helper in **Permissions…**
-when native capture is wanted; this does not request new TCC grants. Wait for the
+Startup reloads only the already-approved Gateway Login Item and reconnects to
+the native helper only while macOS reports it enabled. If Login Item approval
+was revoked, Tron leaves the service alone and surfaces the existing approval
+path; it does not register without consent or request TCC grants. Wait for the
 menu-bar status to report Running before reconnecting iOS. The new wrapper also
 detects a running same-bundle job without the supervision marker and repairs its
 registration before it settles into the healthy state.

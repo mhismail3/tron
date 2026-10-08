@@ -268,6 +268,7 @@ describe("Gateway update control plane", () => {
     const base = {
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac" },
       updateService: new GatewayUpdateService({ tronHome: "/tmp", updater: callback }),
+      sessions: { isAdministrativeDrainStarted: false },
       receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
     } as unknown as GatewayServiceDependencies;
     const configured = new GatewayService(base).info() as Record<string, unknown>;
@@ -308,6 +309,7 @@ describe("Gateway update control plane", () => {
     const service = new GatewayUpdateService({ tronHome: "/tmp", updater: callback, runtimeChannel: "stable" });
     const base = {
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac" }, updateService: service,
+      sessions: { isAdministrativeDrainStarted: false },
       receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
     } as unknown as GatewayServiceDependencies;
     const client: ClientContext = {

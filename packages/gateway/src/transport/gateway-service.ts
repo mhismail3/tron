@@ -452,7 +452,7 @@ export class GatewayService {
 
   async invoke(client: ClientContext, method: string, rawParams: unknown): Promise<JsonValue> {
     const params = object(rawParams ?? {}, "params");
-    if (this.dependencies.sessions?.isAdministrativeDrainStarted && !restartDrainMethods.has(method)) {
+    if (this.dependencies.sessions.isAdministrativeDrainStarted && !restartDrainMethods.has(method)) {
       throw new GatewayError("busy", "The Gateway is draining accepted work", true);
     }
     switch (method) {

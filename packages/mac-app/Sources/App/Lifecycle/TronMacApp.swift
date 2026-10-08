@@ -224,6 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var wizardCompletionObserver: NSObjectProtocol?
     private var instanceLock: SingleInstanceLock?
+    private var quitCoordinator: MacQuitCoordinator?
+    private var quitInProgress = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let setup = EnvironmentSetup.live
@@ -262,6 +264,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         instanceLock = lock
+        quitCoordinator = MacQuitCoordinator(
+            readRuntime: { try await setup.readRuntimeForQuit() },
+            processStartIdentity: { pid in await ServerProcessProbe.processStartIdentity(pid: pid) },
+            runtimeOwnershipHealthy: setup.runtimeOwnershipHealthy,
+            stopGateway: setup.stopGateway,
+            retireNativeHost: setup.retireNativeHostForQuit
+        )
 
         if case .onboarded = startupMode {
             installMenuBar(setup: setup, context: .existingOnboardedLaunch)
@@ -336,6 +345,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "Command-mode unregister helper missing: \(path)", outcome: "failed")
             }
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard MacQuitCoordinator.shouldCoordinate(
+            mode: startupMode,
+            ownsLock: instanceLock != nil,
+            canManage: EnvironmentSetup.live.canManageLaunchAgent
+        ), let quitCoordinator else { return .terminateNow }
+        guard !quitInProgress else { return .terminateCancel }
+        quitInProgress = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await quitCoordinator.quit()
+                ApplicationTermination.replyToPendingTermination(shouldTerminate: true)
+            } catch {
+                self.quitInProgress = false
+                let alert = NSAlert()
+                alert.messageText = "Quit blocked"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Keep Tron Open")
+                alert.runModal()
+                ApplicationTermination.replyToPendingTermination(shouldTerminate: false)
+            }
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
