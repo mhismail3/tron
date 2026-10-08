@@ -15,6 +15,19 @@ edits, branch changes, bash, and extension-driven session replacement. Registry
 owners also preflight attention, archive and delete mutations against that same
 provider. A sealed result is a
 typed `conflict` (`details.reason: "sealed-chapter"`) and is never redirected.
+Every bound Home slot also refuses physical identity/path replacement (RPC fork,
+extension newSession/fork/switchSession), including active and disabled chapters,
+with typed `conflict` (`details.reason: "home-identity-replacement"`). One slot
+replacement boundary rejects before SDK effects; HomeOwner alone transfers the
+logical binding to a separately Registry-owned chapter. Ordinary slot replacement
+is unchanged.
+The canonical append guard is installed before SDK runtime bootstrap, once per
+SessionManager instance. The manager's append method carries its immutable slot
+owner; reloads and profile rebuilds reuse it, never stack wrappers. A different
+manager gets its own guard at construction, and manager retirement retires it.
+`home-request-seam.integration.test.ts` retains identity/path/byte refusal and
+five rebuilds plus five reloads per ordinary/Home manager in
+`test-results/home-activation/seam-report.json`.
 The version-2 Home record carries an ordered chapter ledger. At a quiescent
 turn boundary, crossing either the 24 MiB canonical-byte or 50,000-entry soft
 limit seals the active chapter and durably reserves its successor; this writes
@@ -252,8 +265,9 @@ owner's answer for that session id: `home` when the enabled record names it as a
 chapter, `ordinary` when a disabled record names it, and `unnamed` when the
 record names another session. A new Home's *first* runtime is already the Home profile:
 `RuntimeRegistry.create(cwd, "home")` carries an explicit creation profile,
-which applies only to that session and only while the record does not name it —
-so a fork or a reset, which produce a new session id, is never Home.
+which applies only to that session and only while the record does not name it.
+Bound Home slots cannot fork/reset/switch their physical identity; a separately
+imported Registry target is ordinary unless the ledger names it.
 
 | | Home | Ordinary |
 | --- | --- | --- |
@@ -394,7 +408,16 @@ path while rebuilding the runtime before routing is exposed. The session identit
 its subscribers, its presentation and its (possibly never-persisted) in-memory
 session manager all survive. If the session is not idle the mutation is refused
 with a retryable `busy` error and nothing changes. A session with no live runtime
-needs no rebuild: the next runtime creation reads the record, including its model.
+and no construction in flight needs no rebuild: Registry commits under its
+construction-selection mutex so the next constructor reads the new record,
+including its model. When reserved materialization or a cold load is in flight,
+the profile owner joins that existing single-flight before selecting the
+published slot and rebuilding it. A failed constructor settles first, then the
+profile change re-reads current ownership; no stale candidate is published under
+the changed ledger. Disable always enters this owner, even when the catalog has
+not seen the reserved session. The four reserved/cold disable/re-enable orderings
+and failed-construction case in `home-activation.e2e.test.ts` retain their final
+profile/identity evidence in `test-results/home-activation/report.json`.
 Lifecycle updates merge against the current record at the serialized profile
 commit boundary. Durable record commits use one serialization authority for
 memory and model updates; it is separate from the lifecycle mutex so a model
@@ -456,21 +479,15 @@ read — a model that is not spelled `provider/id`, a budget that is not a whole
 number of tokens — is reported with its own reason. A refused RPC is printed and
 the chat continues.
 
-## Fork and disable both keep the transcript's tool loadout
-
-Designation is keyed by session id, so forking the Home session yields an
-ordinary session: it registers the ordinary extensions and tools, uses the
-canonical compaction budget, and is not cache-warming excluded.
+## Disable keeps the transcript's tool loadout
 
 A profile change does not rewrite the chat's tool loadout, because Pi replays
 the *declared* loadout from the canonical transcript at every runtime creation.
-So both a fork of Home and a disabled Home start with the Home tools this
-profile can activate — `ask_user`, `display`, `notify` — while the ordinary
-tools are merely registered, exactly as every other session keeps the loadout
-its chat declared (`runtime-tool-loadout.integration.test.ts`). The three memory
-tools belong to the Home-only module, so an ordinary profile neither registers
-nor activates them: a fork of Home can never read Home's memory, and its memory
-tool accessor answers `undefined` for that session id. The user restores the
+A disabled Home starts with the Home tools its ordinary profile can activate —
+`ask_user`, `display`, `notify` — while the ordinary tools are merely registered,
+exactly as every other session keeps the loadout its chat declared
+(`runtime-tool-loadout.integration.test.ts`). The three memory tools belong to
+the Home-only module, so an ordinary profile neither registers nor activates them. The user restores the
 ordinary tools with `session.setTools`, which is the same control every session
 has; the integration suite asserts the active set across a disable and that
 `setTools` restores it.
@@ -523,8 +540,8 @@ images with Pi's disabled-image placeholder without triggering a false refusal,
 including when the setting changes between turns. Non-system context mutation
 and subsequent outgoing message mutation still fail closed.
 
-Only a runtime whose profile is Home's gets them. A fork of the Home session is a
-different session id, hence an ordinary session with no seam and no activation.
+Only a runtime whose profile is Home's gets them. A separate ordinary Registry
+target has no Home seam or activation; bound Home slot replacement is refused.
 
 ### Prompt caching
 

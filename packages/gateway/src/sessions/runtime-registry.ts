@@ -858,14 +858,7 @@ export class RuntimeRegistry {
           return cut.tornBytes === 0 && hasConversation;
         },
 
-        replaceRuntimeForProfile: async (sessionId, commit) => {
-          const slot = this.slots.get(sessionId);
-          if (!slot || slot.isDisposed) {
-            await commit();
-            return;
-          }
-          await slot.replaceRuntimeForProfile(commit);
-        },
+        replaceRuntimeForProfile: (sessionId, commit) => this.replaceHomeRuntimeForProfile(sessionId, commit),
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
         beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
         retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
@@ -1056,6 +1049,28 @@ export class RuntimeRegistry {
         await this.mutex.run(() => { this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1); });
       }
       finishAdmission();
+    }
+  }
+
+  /** Join the existing writer construction owner before changing its profile.
+   * With no owner, commit under construction selection so a new start cannot
+   * latch the old ledger. Never hold that mutex while joining a constructor. */
+  private async replaceHomeRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void> {
+    const selected = await this.mutex.run(async () => {
+      const flight = this.homeMaterializations.get(sessionId) ?? this.pendingSlotStarts.get(sessionId)?.operation;
+      if (flight) return { flight };
+      const slot = this.slots.get(sessionId);
+      if (slot && !slot.isDisposed) return { slot };
+      await commit();
+      return {};
+    });
+    if (selected.flight) {
+      // Construction failure has already retired its candidate. Re-read the
+      // published owner even on failure; a durable profile change still applies.
+      await selected.flight.catch(() => {});
+      await this.replaceHomeRuntimeForProfile(sessionId, commit);
+    } else if (selected.slot) {
+      await selected.slot.replaceRuntimeForProfile(commit);
     }
   }
 

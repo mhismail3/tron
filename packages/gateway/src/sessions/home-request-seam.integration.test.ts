@@ -738,7 +738,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.policyInstalled).toBe(false);
   }, 30_000);
 
-  it("C2 exclusion, frozen view, tool loop, persistence and fork", async () => {
+  it("C2 exclusion, frozen view, tool loop and persistence", async () => {
     const item = await open("c2", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C2 first activation input"));
@@ -755,10 +755,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const jsonl = await item.jsonl();
     const entries = await item.entries();
     const memoryStatus = await item.memoryStatus();
-    const leafBeforeFork = item.session.sessionManager.getLeafId()!;
-    const fork = await item.slot.fork(leafBeforeFork);
-    const forkedSession = (item.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
-    const forkBlob = JSON.stringify(forkedSession.sessionManager.buildSessionProjection().messages);
     const row = {
       providerRequests: item.requests.length,
       roleSequences: item.requests.map((request) => request.roles),
@@ -771,9 +767,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       viewFrozenAcrossSteps: viewOf(activationRequest) !== "" && viewOf(activationRequest) === viewOf(toolStepRequest),
       nonceAbsentFromJsonl: !jsonl.includes(HOME_NONCE_MARKER),
       viewAbsentFromJsonl: !jsonl.includes(HOME_MEMORY_VIEW_MARKER) && !jsonl.includes(SUMMARY_MARKER),
-      forkProfile: item.registry.homeOwner().profileFor(fork.sessionId),
-      forkExcludesView: !forkBlob.includes(HOME_MEMORY_VIEW_MARKER),
-      forkHasNoSeam: item.registry.homeOwner().requestPolicyFor(fork.sessionId) === undefined,
       canonicalEntryCount: entries.length,
       memory: { configured: memoryStatus.configured, open: memoryStatus.open, messages: memoryStatus.episodic?.messages ?? 0, blocked: memoryStatus.blocked ?? null },
       transformObservations,
@@ -788,9 +781,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.viewFrozenAcrossSteps).toBe(true);
     expect(row.nonceAbsentFromJsonl).toBe(true);
     expect(row.viewAbsentFromJsonl).toBe(true);
-    expect(row.forkProfile).not.toBe("home");
-    expect(row.forkExcludesView).toBe(true);
-    expect(row.forkHasNoSeam).toBe(true);
     // The SDK's context stage clones every message, so the fidelity check's
     // identity comparison is a fallback in practice: the header says so, and this
     // is where the claim is observed rather than inferred.
@@ -798,6 +788,63 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(transformObservations.every((observation) => observation.identity === false)).toBe(true);
     // The memory covers the whole first activation by the time the second one runs.
     expect(row.memory.messages).toBeGreaterThanOrEqual(2);
+  }, 30_000);
+
+  it.each([true, false])("keeps bound Home identity and path immutable when enabled=%s", async enabled => {
+    const item = await open(`home-identity-${enabled}`, { home: true });
+    item.faux.setResponses([item.response("identity baseline")]);
+    await item.slot.prompt("identity baseline input");
+    await waitUntil(() => !item.slot.isBusy);
+    if (!enabled) await item.registry.homeOwner().disable();
+    const manager = (item.slot as unknown as { sessionManager: AgentSession["sessionManager"] }).sessionManager;
+    const originalId = item.slot.id;
+    const originalPath = item.slot.sessionFile;
+    const originalFile = await item.jsonl();
+    const originalEntries = manager.getEntries();
+    const originalLeaf = manager.getLeafId()!;
+    const target = await item.registry.create(item.agentDir);
+    const targetFile = target.sessionFile!;
+    const actions = (item.slot as unknown as { commandActions: () => Record<string, (...args: unknown[]) => unknown> }).commandActions();
+    const paths: Array<[string, () => unknown]> = [
+      ["RPC fork", () => item.slot.fork(originalLeaf)],
+      ["extension newSession", () => actions.newSession!()],
+      ["extension fork", () => actions.fork!(originalLeaf)],
+      ["extension switchSession", () => actions.switchSession!(targetFile)],
+    ];
+    for (const [name, replace] of paths) {
+      await expect(Promise.resolve().then(replace), name).rejects.toMatchObject({
+        code: "conflict", details: { reason: "home-identity-replacement", sessionId: originalId },
+      });
+      expect(item.slot.id, name).toBe(originalId);
+      expect(item.slot.sessionFile, name).toBe(originalPath);
+      expect(manager.getLeafId(), name).toBe(originalLeaf);
+      expect(manager.getEntries(), name).toEqual(originalEntries);
+      expect(await item.jsonl(), name).toBe(originalFile);
+      expect(await item.registry.acquire(originalId), name).toBe(item.slot);
+    }
+    item.record("home-identity-immutable", { enabled, paths: paths.map(([name]) => name), identityPreserved: true, bytesPreserved: true });
+  }, 30_000);
+
+  it.each([true, false])("owns one canonical append guard across Home=%s runtime rebuilds", async home => {
+    const item = await open(`manager-guard-${home}`, { home });
+    const slot = item.slot as unknown as {
+      sessionManager: AgentSession["sessionManager"] & { _appendEntry: unknown };
+      replaceRuntimeForProfile: (commit: () => Promise<void>) => Promise<void>;
+      observeHomeChapterGrowth: () => void;
+    };
+    const manager = slot.sessionManager;
+    const append = manager._appendEntry;
+    const observations = vi.spyOn(slot, "observeHomeChapterGrowth");
+    for (let rebuild = 0; rebuild < 5; rebuild += 1) {
+      await slot.replaceRuntimeForProfile(async () => {});
+      await item.slot.reload();
+      observations.mockClear();
+      manager.appendCustomEntry("guard-rebuild-proof", { rebuild });
+      expect(observations, `rebuild ${rebuild} stacked canonical observers`).toHaveBeenCalledTimes(1);
+      expect(manager._appendEntry).toBe(append);
+    }
+    expect(manager.getEntries().filter(entry => entry.type === "custom" && entry.customType === "guard-rebuild-proof")).toHaveLength(5);
+    item.record("manager-guard-rebuild", { home, rebuilds: 5, reloads: 5, observersPerAppend: 1 });
   }, 30_000);
 
   it("C3 steering during the activation keeps the earlier tool exchange", async () => {

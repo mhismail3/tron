@@ -36,7 +36,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
-import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
+import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
@@ -158,6 +158,7 @@ import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from 
 // named `lifecycleProjection` is presentation data until this private marker is
 // attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
+const canonicalAppendOwner = Symbol("canonical-append-owner");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
 
 function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
@@ -894,20 +895,27 @@ export class RuntimeSlot {
     this.unregisterProcessExpiry = dependencies.processActivityRecency.registerExpiryCallback((frame) => this.onProcessActivityExpiry(frame));
   }
 
-  private installCanonicalWriteGuard(): void {
-    const manager = this.sessionManager as unknown as {
-      _appendEntry: (entry: FileEntry) => void;
+  private installCanonicalWriteGuard(sessionManager: SessionManager): void {
+    const manager = sessionManager as unknown as {
+      _appendEntry: ((entry: FileEntry) => void) & { [canonicalAppendOwner]?: RuntimeSlot };
     };
+    // The guarded method belongs to the manager, not a runtime rebuild. Its
+    // immutable owner also rejects sharing one writer instance across slots.
+    const owner = manager._appendEntry[canonicalAppendOwner];
+    if (owner === this) return;
+    if (owner) throw new GatewayError("conflict", "Canonical session manager already has a runtime owner");
     const appendEntry = manager._appendEntry.bind(manager);
-    manager._appendEntry = (entry) => {
-      if (this.isHomeProfile(this.sessionManager)) {
-        const path = this.sessionManager.getSessionFile();
+    const guardedAppend = (entry: FileEntry) => {
+      if (this.isHomeProfile(sessionManager)) {
+        const path = sessionManager.getSessionFile();
         const fileExists = path ? existsSync(path) : false;
-        if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable();
+        if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable(sessionManager);
       }
       appendEntry(entry);
-      this.observeHomeChapterGrowth();
+      if (sessionManager === this.sessionManager) this.observeHomeChapterGrowth();
     };
+    Object.defineProperty(guardedAppend, canonicalAppendOwner, { value: this });
+    manager._appendEntry = guardedAppend;
   }
 
   private createSemanticBroker(): SemanticUIBroker {
@@ -1080,7 +1088,6 @@ export class RuntimeSlot {
     const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority);
     try {
       await slot.initialize();
-      slot.installCanonicalWriteGuard();
       return slot;
     } catch (error) {
       slot.detachOpenAIEligibility?.();
@@ -1677,6 +1684,7 @@ export class RuntimeSlot {
 
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
     return async ({ cwd, sessionManager, sessionStartEvent }) => {
+      this.installCanonicalWriteGuard(sessionManager);
       const trust = await this.dependencies.trust.requireResolved(cwd);
       // A ModelRuntime is scoped to one Pi session runtime. Extension provider
       // registration is mutable, so sharing one instance across projects would
@@ -2015,6 +2023,10 @@ export class RuntimeSlot {
     disposition: SessionAttentionRebindDisposition,
     operation: () => Promise<T>,
   ): Promise<T> {
+    this.assertChapterWritable();
+    if (this.dependencies.homeChapterState?.(this.id).homeId || this.liveProfile() === "home") {
+      throw new HomeChapterIdentityReplacementError(this.id);
+    }
     const previous = this.rebindAttentionDisposition;
     this.rebindAttentionDisposition = disposition;
     try {
@@ -2059,7 +2071,6 @@ export class RuntimeSlot {
           this.rebindAttentionDisposition,
           () => {
             this.sessionManager = nextManager;
-            this.installCanonicalWriteGuard();
             this.clearExtensionActivityWatchers();
             this.extensionActivities.clear();
             this.extensionActivitySequences.clear();
@@ -2069,7 +2080,6 @@ export class RuntimeSlot {
         );
       } else {
         this.sessionManager = nextManager;
-        this.installCanonicalWriteGuard();
       }
     } catch (error) {
       nextUnsubscribe();
@@ -9405,8 +9415,8 @@ export class RuntimeSlot {
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
-  private assertChapterWritable(): void {
-    const state = this.dependencies.homeChapterState?.(this.id);
+  private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
+    const state = this.dependencies.homeChapterState?.(manager.getSessionId());
     if (!state) return;
     const authority = this.homeMaterializationAuthority;
     const ownsMaterialization = Boolean(authority
@@ -9416,8 +9426,8 @@ export class RuntimeSlot {
       && state.sessionId === authority.sessionId
       && state.attemptId === authority.attemptId
       && state.expectedPath === authority.expectedPath
-      && this.sessionManager.getSessionId() === authority.sessionId
-      && this.sessionManager.getSessionFile() === authority.expectedPath);
+      && manager.getSessionId() === authority.sessionId
+      && manager.getSessionFile() === authority.expectedPath);
     try { assertChapterWritable(state, ownsMaterialization); }
     catch (error) {
       if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");

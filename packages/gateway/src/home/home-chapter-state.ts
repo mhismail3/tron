@@ -18,6 +18,15 @@ export interface HomeChapterState {
   expectedPath?: string;
 }
 
+export class HomeChapterIdentityReplacementError extends GatewayError {
+  constructor(sessionId: string) {
+    super("conflict", "A Home chapter cannot replace its physical session identity or path", false, {
+      reason: "home-identity-replacement", sessionId,
+    });
+    this.name = "HomeChapterIdentityReplacementError";
+  }
+}
+
 export class SealedChapterMutationError extends GatewayError {
   constructor(state: HomeChapterState) {
     super("conflict", "This Home chapter is sealed and cannot be changed", false, {

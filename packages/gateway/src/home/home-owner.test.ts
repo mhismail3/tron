@@ -451,7 +451,6 @@ describe("Tron Home record", () => {
 
     const disabled = await f.owner.disable();
     expect(disabled).toEqual({ ...first, generation: 2 });
-    expect(f.replaced).toEqual([]);
     expect(await f.owner.status()).toMatchObject({
       enabled: false, sessionPresent: false, phase: "disabled",
       readiness: { ready: false, gaps: ["disabled", "session-missing", "memory-not-configured"] },

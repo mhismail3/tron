@@ -891,18 +891,9 @@ export class HomeOwner {
         next = { ...current, enabled: false, generation: current.generation + 1, updatedAt: new Date().toISOString() };
         return next;
       };
-      // A session that is gone needs no runtime work; a live one is rebuilt in
-      // place, which is also where a running session is refused.
-      const existingSessionId = homeSessionId(existing);
-      if (await this.options.sessions.sessionPresent(existingSessionId)) {
-        await this.commitProfileChange(existingSessionId, update);
-      } else {
-        await this.recordMutex.run(async () => {
-          const current = this.record;
-          if (!current || homeSessionId(current) !== existingSessionId) throw new GatewayError("conflict", "Tron Home changed while disabling");
-          await this.writeLocked(update(current));
-        });
-      }
+      // Registry owns both constructing and published runtimes. Catalog
+      // absence is not absence of an in-flight writer/profile owner.
+      await this.commitProfileChange(homeSessionId(existing), update);
       if (!next) throw new Error("Home disable did not commit its record");
       // Only once the change is committed: a refused (busy) disable must leave
       // the memory and the activation waiting in it exactly as they were.

@@ -31,6 +31,20 @@ vi.mock("../home/home-chapter-state.js", async importOriginal => ({
   get HOME_HARD_ENTRIES() { return admissionLimits.entries; },
 }));
 
+const runtimeServices = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
+vi.mock("@earendil-works/pi-coding-agent", async importOriginal => {
+  const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+  return {
+    ...actual,
+    createAgentSessionServices: async (...args: Parameters<typeof actual.createAgentSessionServices>) => {
+      const hold = runtimeServices.hold;
+      runtimeServices.hold = undefined;
+      await hold?.();
+      return actual.createAgentSessionServices(...args);
+    },
+  };
+});
+
 const materializationScan = vi.hoisted(() => ({ hold: undefined as undefined | (() => Promise<void>) }));
 vi.mock("../home/home-session-recovery.js", async importOriginal => {
   const actual = await importOriginal<typeof import("../home/home-session-recovery.js")>();
@@ -177,6 +191,7 @@ const registries: RuntimeRegistry[] = [];
 const disposals: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
+  runtimeServices.hold = undefined;
   materializationScan.hold = undefined;
   admissionLimits.bytes = 200 * 1_024 * 1_024;
   admissionLimits.entries = 100_000;
@@ -1146,6 +1161,106 @@ describe("Tron Home activations end to end", () => {
     const recovered = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(recovered.chapters.at(-1)).toMatchObject({ state: "materializing", expectedPath });
   });
+
+  it.each([
+    ["reserved", false], ["reserved", true], ["cold", false], ["cold", true],
+  ] as const)("owns in-flight %s construction while transitioning enabled to %s", async (construction, enabled) => {
+    const f = await fixture(`profile-construction-${construction}-${enabled}`);
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const active = await designateHome(f, `profile-flight-${construction}-${enabled}`);
+    f.faux.setResponses([fauxAssistantMessage("profile construction baseline")]);
+    await active.prompt("profile construction baseline input");
+    await waitUntil(() => !active.isBusy);
+    let sessionId = active.id;
+    if (construction === "reserved") {
+      const owner = f.registry.homeOwner();
+      const port = (owner as unknown as { options: { sessions: { chapterMetrics: (id: string) => Promise<unknown> } } }).options.sessions;
+      const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      await owner.chapterQuiescent(active.id);
+      metrics.mockRestore();
+      sessionId = owner.routeBinding().physicalSessionId;
+    }
+    if (enabled) await f.registry.homeOwner().disable();
+    if (construction === "cold") await restart(f);
+    let reached!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { reached = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    runtimeServices.hold = async () => { reached(); await held; };
+    const flight = construction === "reserved" ? f.registry.materializeReservedHome(sessionId) : f.registry.acquire(sessionId);
+    void flight.catch(() => {});
+    let transition: Promise<unknown> | undefined;
+    try {
+      await awaitsWithin(entered, "latched runtime profile before services");
+      const owner = f.registry.homeOwner() as unknown as {
+        writeLocked: (record: HomeRecord) => Promise<void>;
+        options: { sessions: { replaceRuntimeForProfile: (id: string, commit: () => Promise<void>) => Promise<void> } };
+      };
+      let transitionReached!: () => void;
+      const changing = new Promise<void>(resolve => { transitionReached = resolve; });
+      const originalPort = owner.options.sessions.replaceRuntimeForProfile;
+      vi.spyOn(owner.options.sessions, "replaceRuntimeForProfile").mockImplementation((...args) => {
+        const result = originalPort(...args); transitionReached(); return result;
+      });
+      // The unfixed disable bypasses Registry entirely for an unpublished
+      // reservation. Observe that old commit cut too, without rescuing it.
+      const originalWrite = owner.writeLocked.bind(owner);
+      vi.spyOn(owner, "writeLocked").mockImplementation(record => {
+        const result = originalWrite(record); transitionReached(); return result;
+      });
+      transition = enabled
+        ? f.registry.homeOwner().designate({ model: OTHER_MODEL }, () => MODEL)
+        : f.registry.homeOwner().disable();
+      void transition.catch(() => {});
+      await awaitsWithin(changing, "profile transition owner entered");
+      release();
+      const slot = await awaitsWithin(flight, "profile construction completion");
+      await awaitsWithin(transition, "profile transition completion");
+      const profile = (slot as unknown as { liveProfile: () => string }).liveProfile();
+      expect(profile).toBe(enabled ? "home" : "ordinary");
+      expect(f.registry.homeOwner().profileFor(slot.id)).toBe(profile);
+      expect(await f.registry.acquire(sessionId)).toBe(slot);
+      if (enabled) expect(slot.snapshot().model).toMatchObject(OTHER_MODEL);
+      report.cases.push({ case: "in-flight-profile-transition", construction, enabled, publishedProfile: profile, exactIdentity: slot.id === sessionId });
+    } finally {
+      release();
+      await Promise.allSettled([flight, ...(transition ? [transition] : [])]);
+    }
+  }, 30_000);
+
+  it("settles a failed Home construction before committing disable", async () => {
+    const f = await fixture("failed-profile-construction");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const active = await designateHome(f, "failed-profile-flight");
+    const owner = f.registry.homeOwner();
+    const port = (owner as unknown as { options: { sessions: { chapterMetrics: (id: string) => Promise<unknown> } } }).options.sessions;
+    const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+    await owner.chapterQuiescent(active.id);
+    metrics.mockRestore();
+    const sessionId = owner.routeBinding().physicalSessionId;
+    let reached!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { reached = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    runtimeServices.hold = async () => { reached(); await held; throw new Error("fixture service construction failed"); };
+    const flight = f.registry.materializeReservedHome(sessionId);
+    void flight.catch(() => {});
+    let transition: Promise<unknown> | undefined;
+    try {
+      await awaitsWithin(entered, "failed construction barrier");
+      transition = owner.disable();
+      void transition.catch(() => {});
+      release();
+      await expect(flight).rejects.toThrow("fixture service construction failed");
+      await awaitsWithin(transition, "disable after failed construction");
+      expect((await owner.status()).enabled).toBe(false);
+      expect((f.registry as unknown as { slots: Map<string, RuntimeSlot> }).slots.has(sessionId)).toBe(false);
+      report.cases.push({ case: "failed-profile-construction", enabled: false, staleRuntimePublished: false });
+    } finally {
+      release();
+      await Promise.allSettled([flight, ...(transition ? [transition] : [])]);
+    }
+  }, 30_000);
 
   it.each(["reserved", "materializing"] as const)("rebuilds a live runtime when re-enabling a pending %s chapter", async state => {
     const f = await fixture(`reenable-pending-${state}`);
