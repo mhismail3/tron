@@ -54,13 +54,36 @@ The retired `~/.tron-machine-group-id` source is never read as startup fallback:
 an operator migration must preserve its exact bytes and retire it before either
 profile starts.
 
+## Coordinated Quit and approved-service restoration
+
+User Quit is owned by `MacQuitCoordinator`, reached through AppKit's deferred
+termination callback. It reads the exact Stable Gateway PID, command and process
+start identity, sends one authenticated receipt-backed `gateway.stop` command,
+then waits until that process is gone with no replacement PID. Only then does it
+join native-host retirement. An unavailable response, runtime change, failed
+Gateway exit or failed native drain keeps the wrapper open; there is no forced
+termination, automatic retry or permission bypass. A manual retry for the same
+captured runtime reuses its command ID.
+
+Quit does not unregister either approved Login Item. The Gateway LaunchAgent is
+`RunAtLoad` with `KeepAlive.SuccessfulExit=false`, so its clean intentional exit
+does not relaunch it; startup invokes the existing launch owner only while
+ServiceManagement reports `.enabled`. Approval revocation is shown through the
+existing Login Items path and never causes registration from startup. The native
+host LaunchAgent exposes Mach services with `RunAtLoad` and no `KeepAlive`.
+After native capture and automation retirement joins, the helper exits; its
+registration and macOS approval remain intact. Startup probes the native Mach
+service only while ServiceManagement reports `.enabled`, causing launchd to
+start the approved helper on demand. TCC grants remain native permission-probe
+results, not a wrapper-maintained desired-state flag.
+
 ## Source owners
 
 - `packages/mac-app/Sources/App/` — wrapper modes, lifecycle, single-instance ownership
 - `packages/mac-app/Sources/Wizard/` — location, installation, permissions, Tailscale, pairing, finish
 - `packages/mac-app/Sources/MenuBar/` — status poller, controls, pairing window, gateway logs
 - `packages/mac-app/Sources/Server/LaunchAgent/` — the retained internal name for SMAppService ownership
-- `packages/mac-app/Sources/Server/Health/` — authenticated `system.info` gateway probe and the shared Gateway response-envelope decoder
+- `packages/mac-app/Sources/Server/Health/` — authenticated Gateway health, restart and stop clients, and the shared response-envelope decoder
 - `packages/mac-app/Sources/Server/Paths/` — canonical wrapper identities and filesystem paths
 - `packages/mac-app/Sources/Support/Pairing/` — strict invitation URL and QR generation
 - `packages/mac-app/Sources/Resources/Library/` — tracked Gateway Login Item and LaunchAgent skeletons

@@ -355,8 +355,8 @@ embedding under Resources.
 ## Reinstall a local Release build
 
 This is a manual developer installation, not a production deployment command.
-The user or maintainer performs Pause, replacement, launch, Resume, and every
-Gateway transition. Repository agents may prepare and validate the `.app` artifact and
+The user or maintainer performs replacement and launch, and every Gateway
+transition. Repository agents may prepare and validate the `.app` artifact and
 report its path, but must not initiate those operations. It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
 the new signed launcher rejects a previously selected payload whose manifest
 protocol differs and falls back to the matching bundled Gateway. The final Mac
@@ -381,29 +381,24 @@ session JSONL, provider credentials and runtime settings stay under
 replacement and local settings/credential reset do not delete the internal
 workspace. See the [workspace ownership and restore contract](../../gateway/docs/internal-workspace.md).
 Build and validate the replacement artifact first; source preparation does not
-require changing the running services. Before replacing an already-installed app,
-the user must complete this sequence using the **old installed wrapper**:
+require changing the running services. Before replacing an installed app, choose
+**Quit Tron** in the old wrapper. Quit waits for accepted Gateway work, requests
+an authenticated stop, verifies the exact observed process has exited without a
+replacement, and joins native-helper retirement. If any stage fails or cannot
+be proved, the wrapper stays open and presents the failure. Replace the app only
+after Quit succeeds, then launch the new copy. Stop any legacy Debug
+SMAppService separately; Release never takes over Debug lifecycle. Neither
+process absence alone nor a timer substitutes for a successful Quit.
 
-1. Wait for active agent work to finish.
-2. Open **Permissions… → Disable Helper for Update** and wait for successful
-   native drain and unregister. A pending/failed result stops the update. Neither
-   Gateway Pause, wrapper quit, process absence nor an elapsed timer substitutes
-   for joined native retirement.
-3. Only after that succeeds, choose **Pause Tron** and quit the wrapper. Stop any
-   legacy Debug SMAppService separately; Release never takes over Debug lifecycle.
-4. Replace the application in Finder, then launch the new installed copy.
-
-Old and new wrapper/helper builds pin each other's signed code hashes. If the app
-was replaced before this drain, the new wrapper may be unable to contact the old
-helper. Do not weaken the pins, force unregister/kill surviving work, or assume
-Restart Helper repairs that mismatch. If an older installed build lacks the
-pre-update control, stop for an explicitly reviewed maintainer bootstrap based on
-that build's actual capabilities; the capture-owning sequence cannot be skipped.
-Likewise, a `.notFound`/unknown native-service status refuses drain without XPC,
-registration or Gateway/file changes. Some never-registered optional helpers can
-report `.notFound`; successful uninstall/refresh for that first-install case is
-an open availability gate, not evidence that native work has retired. Do not
-register a helper or infer absence just to bypass the refusal.
+Quit leaves the approved Login Items registered. The Gateway LaunchAgent's
+successful exit policy prevents relaunch after its intentional clean stop; the
+next wrapper launch uses the existing approved LaunchAgent owner to start it.
+The native helper drains capture and automation work, then exits while its
+SMAppService registration remains enabled; its Mach service is started on demand
+by the next authenticated XPC connection. No new approval or desired-state
+record is created. An unapproved or unknown service is never registered to make
+Quit succeed. A `.notFound` native-service status refuses retirement rather
+than being treated as evidence that work is absent.
 
 Prepare a Release app with an explicit derived-data directory inside the
 worktree, so concurrent worktrees never share a build database or hand over each
@@ -425,17 +420,14 @@ Mac asset validators therefore use stable tool projections rather than relying
 on command forms whose argument parsing changed between Xcode releases.
 
 In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
-launch it after the old-wrapper sequence above. The existing onboarding marker
-keeps the wrapper in menu-bar mode. Explicitly enable the new native helper in
-**Permissions…** when native capture is wanted; enabling does not request new TCC
-grants. Choose **Resume Tron** so macOS registers the new bundled LaunchAgent plist
-and starts the new helper. Approve Tron Agent under System Settings → General →
-Login Items if macOS asks. Wait for the menu-bar status to report Running before
-reconnecting iOS. Pause/Resume is intentional here: it reloads the plist and
-its supervision environment, whereas **Restart Tron** only restarts the
-currently registered job. The new wrapper also detects a running same-bundle
-job without the supervision marker and repairs its registration before it
-settles into the healthy state.
+launch it. The existing onboarding marker keeps the wrapper in menu-bar mode.
+Startup reloads only the already-approved Gateway Login Item and reconnects to
+the native helper only while macOS reports it enabled. If Login Item approval
+was revoked, Tron leaves the service alone and surfaces the existing approval
+path; it does not register without consent or request TCC grants. Wait for the
+menu-bar status to report Running before reconnecting iOS. The new wrapper also
+detects a running same-bundle job without the supervision marker and repairs its
+registration before it settles into the healthy state.
 
 Do not install the new iOS app before this Mac verification succeeds. Verify
 the result with the read-only check:

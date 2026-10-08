@@ -1,4 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -10,6 +14,7 @@ const client: ClientContext = {
   beginSynchronization: () => "sync",
   establishSynchronization: () => {},
   completeSynchronization: () => {},
+  setPresentationVisibility: () => ({ visible: true, revision: 1 }),
   unsubscribe: () => true,
   attachTerminal: () => {},
   detachTerminal: () => {},
@@ -29,28 +34,33 @@ function service(options: {
   activeSessions?: string[];
   activeTerminals?: string[];
   requestRestart?: () => void;
+  requestStop?: () => void;
   executeReceipt?: GatewayServiceDependencies["receipts"]["execute"];
+  receipts?: GatewayServiceDependencies["receipts"];
   workRegistry?: GatewayWorkRegistry;
   rename?: (name: string) => Promise<void>;
   upsertGrant?: (input: unknown) => Promise<unknown>;
   cancelWaitingLogins?: () => void;
 } = {}) {
   const snapshot = drain((options.activeSessions ?? []).length);
+  let drainStarted = false;
   const dependencies = {
     sessions: {
+      get isAdministrativeDrainStarted() { return drainStarted; },
       activeSessionIds: () => options.activeSessions ?? [],
       beginAdministrativeDrain: () => {
+        drainStarted = true;
         options.workRegistry?.beginDrain();
         return snapshot;
       },
-      administrativeDrainSnapshot: () => snapshot,
+      administrativeDrainSnapshot: () => drainStarted ? snapshot : { ...snapshot, phase: "idle" },
       acquire: async () => ({ rename: options.rename ?? (async () => {}) }),
     },
     terminals: {
       activeTerminalIds: () => options.activeTerminals ?? [],
       beginRestartDrain: () => (options.activeTerminals ?? []).length === 0,
     },
-    receipts: { execute: options.executeReceipt ?? (async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation()) },
+    receipts: options.receipts ?? { execute: options.executeReceipt ?? (async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation()) },
     auth: { cancelWaitingForRestart: options.cancelWaitingLogins ?? (() => {}) },
     devices: { hasDevice: async () => true },
     notifications: {
@@ -61,6 +71,7 @@ function service(options: {
       removeDevice: async () => true,
     },
     requestRestart: options.requestRestart ?? (() => {}),
+    requestStop: options.requestStop ?? (() => {}),
     ...(options.workRegistry ? { workRegistry: options.workRegistry } : {}),
   } as unknown as GatewayServiceDependencies;
   return new GatewayService(dependencies);
@@ -315,5 +326,90 @@ describe("Gateway administrative restart", () => {
     await restarting;
     await vi.advanceTimersByTimeAsync(100);
     expect(requestRestart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Gateway administrative stop", () => {
+  it("fails closed when the Gateway is not externally supervised", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "0");
+    await expect(service().invoke(client, "gateway.stop", { commandId: "stop-command" }))
+      .rejects.toMatchObject({ code: "unsupported" });
+  });
+
+  it("refuses a stop while a terminal PTY is alive", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    await expect(service({ activeTerminals: ["terminal-1"] }).invoke(client, "gateway.stop", { commandId: "stop-command" }))
+      .rejects.toMatchObject({ code: "busy" });
+  });
+
+  it("replays the completed stop receipt without repeating process retirement", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    const root = await mkdtemp(join(tmpdir(), "gateway-stop-receipt-"));
+    const receipts = new CommandReceiptStore(root);
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    let retirementEpoch = 0;
+    const gateway = service({
+      receipts, workRegistry: registry,
+      requestStop: () => { retirementEpoch += 1; },
+    });
+    try {
+      const first = await gateway.invoke(client, "gateway.stop", { commandId: "stop-command" });
+      const retry = await gateway.invoke(client, "gateway.stop", { commandId: "stop-command" });
+      expect(retry).toEqual(first);
+      await waitFor(() => retirementEpoch === 1, "the process owner to receive the accepted stop");
+      expect(retirementEpoch).toBe(1);
+      expect(registry.isAdmissionOpen).toBe(false);
+      expect(registry.size).toBe(0);
+    } finally {
+      await receipts.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("closes ordinary mutation admission while an accepted mutation and its receipt settle", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    let releaseRename!: () => void;
+    const renameBarrier = new Promise<void>((resolve) => { releaseRename = resolve; });
+    let renameCount = 0;
+    let stopReceiptSettled = false;
+    let drainSettled = false;
+    let stopObservedSettledReceipt = false;
+    const gateway = service({
+      activeSessions: ["session-1"], workRegistry: registry,
+      rename: async () => { renameCount += 1; await renameBarrier; },
+      requestStop: () => {
+        void registry.waitUntilSettled().then(() => {
+          drainSettled = true;
+          stopObservedSettledReceipt = stopReceiptSettled;
+        });
+      },
+      executeReceipt: async (_identity, method, _commandId, operation) => {
+        const result = await operation();
+        if (method === "gateway.stop") stopReceiptSettled = true;
+        return result;
+      },
+    });
+
+    const accepted = gateway.invoke(client, "session.rename", {
+      commandId: "rename-command", sessionId: "session-1", name: "Renamed",
+    });
+    await waitFor(() => renameCount === 1, "accepted rename to enter its mutation owner");
+    const stopping = gateway.invoke(client, "gateway.stop", { commandId: "stop-command" });
+    await waitFor(() => !registry.isAdmissionOpen, "the administrative drain admission cutoff");
+    await expect(gateway.invoke(client, "session.rename", {
+      commandId: "late-rename-command", sessionId: "session-1", name: "Late",
+    })).rejects.toMatchObject({ code: "busy" });
+
+    releaseRename();
+    await accepted;
+    await expect(stopping).resolves.toMatchObject({
+      stopping: false, scheduled: true, activeSessionIds: ["session-1"], drainId: "drain-1",
+    });
+    expect(renameCount).toBe(1);
+    await waitFor(() => drainSettled, "the process owner to observe all owned work settle");
+    expect(stopReceiptSettled).toBe(true);
+    expect(stopObservedSettledReceipt).toBe(true);
+    expect(registry.size).toBe(0);
   });
 });

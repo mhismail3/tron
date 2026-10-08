@@ -17,6 +17,11 @@ private final class NativePermissionService: NSObject, NativeHostPermissionServi
             let capturesJoined = await captures.drainForServiceRetirement()
             await cua.retire()
             reply(capturesJoined)
+            if capturesJoined {
+                await MainActor.run {
+                    RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) }
+                }
+            }
         }
     }
     func probePermissions(withReply reply: @escaping @Sendable ([String: String]) -> Void) {
