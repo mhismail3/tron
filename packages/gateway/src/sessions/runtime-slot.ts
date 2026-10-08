@@ -467,6 +467,7 @@ class CanonicalCustomEntryConflictError extends Error {}
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
+  terminal?: Promise<AutomationOperationTerminal | undefined>;
   observationSettled: boolean;
   observationCursor?: { entryIndex: number; branchId: string };
   fallbackWork?: GatewayWorkHandle;
@@ -3146,6 +3147,17 @@ export class RuntimeSlot {
     owner?: GatewayWorkHandle,
     assistantCompletionId?: string,
   ): Promise<void> {
+    const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
+    if (terminal) await this.notifyAutomationTerminal(terminal);
+  }
+
+  private async persistInvocationTerminal(
+    operationId: string | undefined,
+    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
+    errorCode?: string,
+    owner?: GatewayWorkHandle,
+    assistantCompletionId?: string,
+  ): Promise<AutomationOperationTerminal | undefined> {
     if (operationId) {
       this.consumedSteeringOperationIDs.delete(operationId);
       for (let index = this.dequeuedSteeringOwners.indexOf(operationId);
@@ -3183,13 +3195,13 @@ export class RuntimeSlot {
       createdAt: new Date().toISOString(),
     }), owner ?? this.operationWork.get(invocation.operationId));
     this.invocations.delete(invocation.invocationId);
-    await this.notifyAutomationTerminal({
+    return {
       lifecycle,
       operationId: invocation.operationId,
       invocationId: invocation.invocationId,
       ...(errorCode === undefined ? {} : { errorCode }),
       ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
-    });
+    };
   }
 
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
@@ -3267,6 +3279,22 @@ export class RuntimeSlot {
         }),
       };
       this.completionOwnershipQueue.push(item);
+    }
+    if (!item.terminal && item.completion.operationId) {
+      const interrupted = this.abortedOperations.has(item.completion.operationId);
+      // A successful first append fixes the receipt's canonical position at
+      // completion admission, before any await returns control to Pi's loop.
+      // A pre-staging failure retains the existing asynchronous retry: receipt
+      // position then reflects recovery, not completion order. Acknowledgement
+      // stays on this owner; attention I/O and notification cannot move the append.
+      item.terminal = this.persistInvocationTerminal(
+        item.completion.operationId,
+        interrupted ? "interrupted" : "completed",
+        interrupted ? "user-abort" : undefined,
+        item.fallbackWork,
+        item.completion.id,
+      );
+      void item.terminal.catch(() => {});
     }
     void this.startCompletionStamp(item).catch(() => {});
     return item;
@@ -3385,17 +3413,8 @@ export class RuntimeSlot {
         }
       }
       if (lastError !== undefined) throw lastError;
-      const completionLifecycle = completion.operationId !== undefined
-        && this.abortedOperations.has(completion.operationId)
-        ? "interrupted" as const
-        : "completed" as const;
-      await this.terminalizeInvocation(
-        completion.operationId,
-        completionLifecycle,
-        completionLifecycle === "interrupted" ? "user-abort" : undefined,
-        item.fallbackWork,
-        completion.id,
-      );
+      const terminal = await item.terminal;
+      if (terminal) await this.notifyAutomationTerminal(terminal);
       if (completion.operationId) this.abortedOperations.delete(completion.operationId);
       if (!completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);

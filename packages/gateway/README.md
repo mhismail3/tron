@@ -10,11 +10,19 @@ only in their canonical user entries rather than being duplicated into receipts;
 resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
 automatically replayed. When Pi appends a canonical successful assistant reply,
-RuntimeSlot immediately starts that exact completion's durable attention
-settlement; it does not wait for `agent_settled`, because Pi can begin a queued
-follow-up inside the same run. Settlement retires only the prior completion's
-receipt and marker while the follow-up remains active, and admits that exact
-completed observation cut once from the same completion owner. The operation
+RuntimeSlot synchronously positions its invocation's terminal receipt, if that
+append succeeds, at the completion's canonical admission before returning
+control to Pi's loop, then starts the exact completion's durable attention
+settlement. Marker and attention I/O cannot move the receipt behind later
+steering or queued follow-up entries. A pre-staging append failure retains the
+existing asynchronous persistence retry, which may record the receipt later;
+consumers must not infer completion order from receipt position in that failure
+case. RuntimeSlot does not wait for `agent_settled`, because Pi can begin a queued
+follow-up inside the same run. The receipt acknowledgement stays on the completion's
+ownership-queue item; automation terminal notification still follows attention
+settlement. Settlement retires only the prior completion's marker and work while
+the follow-up remains active, and admits that exact completed observation cut
+once from the same completion owner. The operation
 observation record owns both its cursor and terminal-callback
 completion deduplication. Ownership transfer retires that per-operation record;
 a completion already admitted to the durable ownership queue carries its exact

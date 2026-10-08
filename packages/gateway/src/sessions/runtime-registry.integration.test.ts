@@ -7476,7 +7476,8 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
-  it("retires completion observations after queued successful operations settle", async () => {
+  it.each(["successful append", "pre-staging append failure"])(
+    "retires completion observations after queued successful operations settle (%s)", async (appendOutcome) => {
     const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -7489,10 +7490,11 @@ export default function (pi) {
     const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
     const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
     const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
-    onTestFinished(() => {
+    onTestFinished(async () => {
       releaseInitial();
       releaseFollowUp();
       releaseAttention();
+      await rm(root, { recursive: true, force: true });
     });
     const faux = fauxProvider({ provider: "tron-completion-observation-retirement", tokensPerSecond: 10_000 });
     faux.setResponses([
@@ -7541,14 +7543,60 @@ export default function (pi) {
     const initialOperationId = slot.snapshot().operation?.id;
     expect(initialOperationId).toBeTruthy();
     const queued = await slot.prompt("queued follow-up", [], "followUp");
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    const append = manager.appendCustomEntry.bind(manager);
+    let failed = false;
+    const receiptAppend = vi.spyOn(manager, "appendCustomEntry").mockImplementation((customType, data) => {
+      const receipt = data as { receiptKind?: unknown; operationId?: unknown } | undefined;
+      if (appendOutcome === "pre-staging append failure" && !failed && customType === INVOCATION_RECEIPT_TYPE
+        && receipt?.receiptKind === "terminal" && receipt?.operationId === initialOperationId) {
+        failed = true;
+        throw new Error("injected pre-staging terminal receipt failure");
+      }
+      return append(customType, data);
+    });
     releaseInitial();
-    await followUpStart;
-    releaseFollowUp();
+    try {
+      await followUpStart;
+      // Canonical receipt ordering cannot depend on the delayed attention store:
+      // the prior completion owns its receipt before the next operation appends.
+      const entries = slot.canonicalSessionEntries();
+      const completionIndex = entries.findIndex(entry => entry.type === "message"
+        && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"));
+      expect(completionIndex).toBeGreaterThanOrEqual(0);
+      const followUpIndex = entries.findIndex(entry => entry.type === "message" && entry.message.role === "user"
+        && contentText(entry.message.content).includes("queued follow-up"));
+      if (appendOutcome === "successful append") {
+        expect(entries[completionIndex + 1]).toMatchObject({
+          type: "custom",
+          customType: INVOCATION_RECEIPT_TYPE,
+          data: { receiptKind: "terminal", operationId: initialOperationId, lifecycle: "completed" },
+        });
+        expect(followUpIndex).toBeGreaterThan(completionIndex + 1);
+      } else {
+        // A rejected append stages nothing; its existing retry may honestly land
+        // after the already-accepted next operation's entries.
+        expect(failed).toBe(true);
+        expect(entries[completionIndex + 1]).toMatchObject({ type: "message", message: { role: "user" } });
+      }
+    } catch (error) {
+      releaseAttention();
+      throw error;
+    } finally {
+      releaseFollowUp();
+    }
     await waitFor(() => faux.state.callCount === 2, "both successful model responses");
     await initial;
     releaseAttention();
     await waitFor(() => !slot.isBusy, "both operations to settle");
 
+    receiptAppend.mockRestore();
+    const persisted = (await readFile(manager.getSessionFile()!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line));
+    const terminalEntries = persisted.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.receiptKind === "terminal" && entry.data?.operationId === initialOperationId);
+    expect(terminalEntries).toHaveLength(1);
+    expect(terminalEntries[0].data).toMatchObject({ lifecycle: "completed" });
     expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
     expect(slotInternals.operationObservations.has(queued.operationId)).toBe(false);
     expect(slotInternals.operationObservations.size).toBe(0);
