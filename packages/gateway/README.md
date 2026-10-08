@@ -10,11 +10,24 @@ only in their canonical user entries rather than being duplicated into receipts;
 resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
 automatically replayed. When Pi appends a canonical successful assistant reply,
-RuntimeSlot immediately starts that exact completion's durable attention
-settlement; it does not wait for `agent_settled`, because Pi can begin a queued
-follow-up inside the same run. Settlement retires only the prior completion's
-receipt and marker while the follow-up remains active, and admits that exact
-completed observation cut once from the same completion owner. The operation
+RuntimeSlot starts the exact completion's durable attention settlement immediately
+rather than waiting for `agent_settled` (#522). A response completion is not an
+operation terminal outcome: automatic compaction and same-owner continuation may
+still run, and Stop during those phases must remain authoritative. Terminal
+receipts are decided only at final `agent_settled` or transfer to a distinct
+follow-up/extension operation. At transfer, the predecessor's exact completion
+is captured before its observation record retires. The SDK's awaited public
+admission hooks join pending canonical terminal receipt writes before the next
+operation's admitted user input, including bounded retries after a pre-staging
+failure. SDK-owned between-turn entries emitted before that input (for example,
+a tool-loadout system message) are outside this ordering guarantee and may fall
+on either side of the receipt. Consumers must not infer anything from receipt-
+versus-SDK-entry order. The hooks do not join attention I/O; already accepted follow-ups remain free
+to run while preceding attention commits. No terminal promise is retained on a
+completion-ownership item. Automation terminal notification still follows the
+owning attention settlement. Completion settlement retires only the prior
+completion's marker and work while the follow-up remains active, and admits that
+exact completed observation cut once from the same completion owner. The operation
 observation record owns both its cursor and terminal-callback
 completion deduplication. Ownership transfer retires that per-operation record;
 a completion already admitted to the durable ownership queue carries its exact
@@ -434,9 +447,12 @@ attribution headers.
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
 purpose, declared tool and command names), so the installed list cannot name a
-module a session does not load or omit one it does. MCP servers are managed only
-through the explicit `mcp.*` methods below; they are not projected as Tron
-connection instances.
+module a session does not load or omit one it does. The always-loaded
+`tron-invocation-settlement` module comes first in definition and registration
+order. It has no tools or commands: its awaited hooks join RuntimeSlot-owned
+terminal receipt writes before the next admitted input, without waiting for
+attention settlement. MCP servers are managed only through the explicit `mcp.*`
+methods below; they are not projected as Tron connection instances.
 
 `hooks.list` serves the same hook fields `session.resources` returns
 (`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
