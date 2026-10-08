@@ -14,12 +14,13 @@
  */
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ModelRuntime, AgentSession } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +44,7 @@ import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
+import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
@@ -685,6 +687,79 @@ describe("Tron Home activations end to end", () => {
     expect(f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop")).toBe(false);
     report.cases.push({ case: "hard-admission-signal", boundary: boundary === "hard bytes" ? "hard-bytes" : "hard-entries",
       metricsInjected: true, refusalBeforeEffects: true, successorTarget: true });
+  });
+
+  it("continues in a successor after a real hard-byte stop retains an oversized chapter", async () => {
+    const f = await fixture("real-byte-stop-successor");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "real-byte-stop-home");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize canonical evidence");
+    await waitUntil(() => !slot.isBusy);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered = false;
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage("abort settlement"); }]);
+    const running = slot.prompt("stop this operation at the byte limit");
+    void running.catch(() => {});
+    try {
+      await waitUntil(() => entered);
+      const padding = "x".repeat(1_024 * 1_024);
+      // Real canonical SDK appends cross the byte boundary while the provider is
+      // running; no metric getter is substituted and no append is suppressed.
+      for (let index = 0; index < 201 && statSync(slot.sessionFile!).size < 200 * 1_024 * 1_024; index += 1) {
+        slot.sessionManager.appendCustomEntry("byte-stop-fixture", { padding: index === 190 ? padding.repeat(11) : padding });
+      }
+    } finally { release(); }
+    await running;
+    await waitUntil(() => !slot.isBusy);
+    const before = statSync(slot.sessionFile!).size;
+    expect(before).toBeGreaterThan(200 * 1_024 * 1_024);
+    await expect(scanReservedHomeSession({ directory: dirname(slot.sessionFile!), expectedPath: slot.sessionFile!, sessionId: slot.id }))
+      .resolves.toEqual({ action: "blocked" });
+    expect(f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop"))
+      .toMatchObject([{ boundary: "hard-bytes" }]);
+    expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id)
+      .find(receipt => receipt.receiptKind === "terminal" && receipt.errorCode === "chapter-limit")).toBeDefined();
+    f.faux.setResponses([async context => {
+      expect(JSON.stringify(context.messages)).toContain("initialize canonical evidence");
+      return fauxAssistantMessage("successor continues");
+    }]);
+    const accepted = await f.service.invoke(client, "home.prompt", { commandId: "real-byte-stop-next", text: "continue after the stopped chapter" }) as unknown as { sessionId: string; operationId: string };
+    expect(accepted.sessionId).not.toBe(slot.id);
+    const ledger = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    expect(ledger.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: before });
+    const successor = await f.registry.acquire(accepted.sessionId);
+    await waitUntil(() => !successor.isBusy && successor.sessionManager.getBranch().some(entry => entry.type === "message"
+      && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("successor continues")));
+    expect(successor.sessionManager.getBranch().some(entry => entry.type === "message"
+      && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("continue after the stopped chapter"))).toBe(true);
+    expect(f.faux.state.callCount).toBe(3);
+    expect(statSync(slot.sessionFile!).size).toBe(before);
+    const stop = f.homeDiagnostics.find(record => record.outcome === "chapter-limit-stop")!;
+    report.cases.push({ case: "real-byte-stop-successor", metricsInjected: false, retainedBytes: before,
+      crossingBytes: stop.crossingBytes, settledBytes: stop.settledBytes, boundary: stop.boundary,
+      predecessorSealed: true, predecessorUnchanged: true, crossingEntryOver8MiB: true, successorPrompted: true, priorMemoryPresent: true });
+  }, 30_000);
+
+  it("refuses a cyclic cold Home file before SDK construction", async () => {
+    const f = await fixture("cyclic-cold-home");
+    disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const slot = await designateHome(f, "cyclic-cold-home");
+    f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
+    await slot.prompt("initialize canonical evidence");
+    const path = slot.sessionFile!;
+    await restart(f);
+    const original = await readFile(path, "utf8");
+    const malformed = original + JSON.stringify({ type: "thinking_level_change", id: "cycle", parentId: "cycle",
+      timestamp: "2026-10-07T00:00:00.000Z", thinkingLevel: "off" }) + "\n";
+    await writeFile(path, malformed);
+    // Do not let the negative control enter Pi's unbounded parent traversal.
+    const open = vi.spyOn(SessionManager, "open").mockImplementation(() => { throw new Error("unsafe SDK construction reached"); });
+    await expect(f.registry.acquire(slot.id)).rejects.toThrow(/uncertain canonical evidence/);
+    expect(open).not.toHaveBeenCalled();
+    expect(await readFile(path, "utf8")).toBe(malformed);
+    report.cases.push({ case: "cyclic-cold-home", sdkConstructions: 0, canonicalPreserved: true });
   });
 
   it("stops one running Home operation on its first canonical hard-entry crossing and retains its writes", async () => {

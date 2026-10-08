@@ -36,9 +36,23 @@ chapter, scans every candidate before adoption or creation. The same strict
 complete-file scan runs before a cold Home runtime is opened and before a Home
 chapter is used as a fork source. It scans the exact canonical file's owning
 directory, not a directory re-encoded from cwd: workspace aliases must not change
-evidence ownership, including cold search. Unknown entry shapes and
-non-newline-terminated evidence block before Pi's loader can repair it. Sealed chapter memory reads use
+evidence ownership, including cold search. The version-3 scanner validates the
+header, supported entry/message content and usage shapes, unique IDs, and one
+append-ordered parent chain beginning with a null parent. Cycles, forward or
+missing parents, duplicate IDs, extra roots and branches refuse before SDK
+construction; parent validation is one pass, never a graph traversal. Unknown
+entry shapes and non-newline-terminated evidence block before Pi's loader can
+repair it. Evidence is streamed one line at a time under an unchanged-file stat
+fence. The 200 MiB scan bound applies only to the matching identity or expected
+path being adopted: a retained oversized stopped predecessor cannot block its
+successor. No arbitrary per-entry cap discards valid abort settlement evidence.
+Sealed chapter memory reads use
 the read-only canonical JSONL projection, never a writer-capable SessionManager.
+`home-session-recovery.test.ts` covers malformed graphs and supported entry
+shapes. The real-byte-stop and cyclic-cold cases in `home-activation.e2e.test.ts`
+retain rows in `test-results/home-activation/report.json`: real SDK appends stop
+a running operation over 200 MiB, preserve its oversized chapter and prompt a
+successor; malformed cold evidence reaches zero writer-capable constructions.
 The materializer durably records
 the exact SDK path and attempt ID before the caller can receive the runtime.
 The constructed RuntimeSlot owns immutable authority for that exact Home chapter,
