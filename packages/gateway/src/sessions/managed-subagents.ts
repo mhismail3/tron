@@ -79,8 +79,8 @@ function validateSdkPeers(entries: Entry[]): void {
   }
 }
 
-/** One payload/home selection. Install is an explicit activation command,
- * never a networked startup fallback or an in-place replacement. */
+/** One payload/home selection. Activation uses only the selected offline closure,
+ * never a user package declaration, network fallback or in-place replacement. */
 export class ManagedSubagents {
   readonly root: string;
   constructor(tronHome: string) {
@@ -91,6 +91,14 @@ export class ManagedSubagents {
       ancestor = dirname(ancestor);
     }
     this.root = join(realpathSync(ancestor), ...missing, "internal", "pi-subagents", pin.version);
+  }
+
+  /** Startup returns a selection only after its immutable build is usable.
+   * The same boundary owns fresh activation and restart verification. */
+  static activateForStartup(tronHome: string): ManagedSubagents {
+    const provider = new ManagedSubagents(tronHome);
+    provider.install();
+    return provider;
   }
 
   install(): string {

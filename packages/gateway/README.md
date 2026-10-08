@@ -337,7 +337,22 @@ by directory rename. Failed staging is removed; an existing valid root is reused
 and a damaged root is refused rather than overwritten in place. Previous version
 roots are not pruned. This activation entry point never defaults to a home and
 never edits `agent/npm/package.json`, runs npm installation, or downloads bytes.
-Stable activation remains a maintainer action; startup only reads the selection.
+Every Gateway startup activates the exact closure carried by its selected
+payload, after delegated-root cutover admission and before Pi extension discovery.
+A verified existing root is reused without changing files or its receipt; a
+missing root is installed offline and damaged bytes/receipts fail startup closed.
+There is no channel-dependent installer, registry fetch, or user package update.
+`scripts/tron dev start` therefore builds/stages the Debug payload and its startup
+installs or verifies that payload's pin in `~/.tron-dev/internal/pi-subagents/`.
+Restart and rollback derive their selection from the newly selected payload.
+
+**Stable installation is maintainer-only:** update/promote the reviewed Gateway
+payload using the supported Stable payload workflow (or the Mac Release reinstall
+runbook if the installed launcher cannot select it). Startup of that selected
+payload performs the same offline activation in Stable's home; no separate agent
+install into Stable is authorized. Previous roots and all historical runs remain
+untouched. Remove an explicitly reported user-provider conflict yourself; Tron
+never edits that user declaration.
 
 One `ManagedSubagents` selection belongs to the Gateway payload and configured
 home, including when the agent directory is customized. Runtime extension loads,
@@ -355,17 +370,22 @@ that owner at load and for late registrations; it is not a one-shot load check.
 A user `pi-subagents` npm manifest dependency or configured npm source is a hard
 conflict: remove that declaration explicitly before loading delegated work.
 Tron neither silently overrides it nor warns and runs it. Missing installation
-leaves delegated discovery unavailable without installing during startup; corrupt
-bytes or receipts fail closed. Catalog and package reads retain their
+leaves delegated discovery unavailable in read-only/unactivated fixtures; managed
+startup activates it before discovery. Corrupt bytes or receipts fail closed. Catalog and package reads retain their
 bounded unavailable diagnostic. `managed-subagents.test.ts` exercises the real
 closure and SDK loader/discovery in an isolated empty home, plus exact host SDK
 export identity across two payload paths sharing one install.
-`managed-subagents.integration.test.ts` activates the checked-in closure from an
-empty agent home and npm cache with npm offline and all TCP denied, then runs a
+`managed-subagents.integration.test.ts` invokes the same startup activation
+boundary as `gateway-main` from an empty agent home and npm cache with npm offline
+and all TCP denied, verifies a second startup preserves root/receipt inode and
+mtime, then runs a
 real foreground child through `RuntimeRegistry` / `RuntimeSlot` and the host SDK.
 Only model output is scripted. It checks packaged/project discovery, the
 build-bound canonical activity owner, successful child completion, canonical
-child JSONL and the Gateway's matching child-session reference. Regenerate its
+child JSONL, the Gateway's matching child-session reference, and read-only
+transcript admission/projection through that declared child binding. Damaged bytes
+and receipt restart refusals are covered by `managed-subagents.test.ts`.
+Regenerate its
 sanitized evidence with
 `npx vitest run src/sessions/managed-subagents.integration.test.ts --maxWorkers=2` from the
 Gateway directory; the report is `test-results/managed-subagents.integration.json`
@@ -393,7 +413,7 @@ directory; the probe refuses to overwrite an existing fixture. Without that
 explicit retention request, it removes the fixture on success and failure.
 Payload source copies always retire after the probe. This gate selects provider
 versions with the current Gateway/SDK, not historical Gateway executables or a
-Stable/Debug service transition. Managed payload activation and detached/live
+Stable/Debug service transition. Actual service qualification and detached/live
 control scenarios remain separate release gates.
 
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,

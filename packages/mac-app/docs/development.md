@@ -663,12 +663,22 @@ lifecycle or handoff command. Repository agents report the needed command but do
 execute it:
 
 ```bash
-scripts/tron dev start       # build, immutable-stage, and start 9848
+scripts/tron dev start       # build, immutable-stage, offline provider activation, start 9848
 scripts/tron dev restart     # stage and authentically drain/restart
 scripts/tron dev status
 scripts/tron dev stop
 scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable candidate
 ```
+
+Each selected Gateway payload carries the Tron-owned `pi-subagents` pin/closure.
+Startup installs it offline into the home-owned versioned reserved root before
+extension discovery, or verifies and reuses an existing exact install; damaged
+bytes/receipts refuse startup. Debug uses `~/.tron-dev/internal/pi-subagents/`.
+Stable receives this build only when the maintainer updates/promotes its reviewed
+payload (or performs the Release reinstall runbook above). No user npm manifest
+or Stable package tree is modified by Debug staging. The
+[Gateway install contract](../../gateway/README.md#tron-owned-pi-subagents-build)
+owns provider activation and rollback.
 
 Fresh starts default to loopback; pass `--tailscale` when iOS must connect.
 Status, restart, handoff, and stop without a host flag inherit a live

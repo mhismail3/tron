@@ -74,7 +74,14 @@ agent execution, session state, inbox, badge, or reminder policy.
    files. Prior artifacts and install roots stay untouched for rollback. Do not
    install through the user package updater, edit a user's package manifest, or
    deploy/restart a Gateway as dependency maintenance. Conflicting user-installed
-   providers are refused rather than replaced or run alongside Tron.
+   providers are refused rather than replaced or run alongside Tron. Every
+   Gateway startup installs/verifies its selected payload's closure offline before
+   discovery, reusing a valid immutable root and refusing damage. Debug activation
+   uses `scripts/tron dev start`; inspect status first and coordinate any other
+   worktree's running candidate. Stable installation happens only when the
+   maintainer updates/promotes the reviewed Stable payload (or follows the Mac
+   Release reinstall runbook); agents never install into Stable. This is payload
+   activation, not part of the dependency updater.
 10. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
    compaction/retries, extension UI, projections, settings/auth/models,
    packaging, or user-visible UI/UX changes must be compared with the approved

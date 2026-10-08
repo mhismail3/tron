@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import net from "node:net";
@@ -42,10 +42,18 @@ it("activates offline from empty home/cache, discovers and completes a real cano
       networkAttempts++;
       throw new Error("Network denied during managed subagent activation/execution");
     } as typeof connect;
-    const managedSubagents = new ManagedSubagents(tronHome);
-    const installedRoot = managedSubagents.install();
-    const receipt = JSON.parse(await readFile(join(installedRoot, "tron-install-receipt.json"), "utf8"));
+    const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
+    const installedRoot = managedSubagents.verify();
+    const receiptPath = join(installedRoot, "tron-install-receipt.json");
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    const beforeRestart = await Promise.all([stat(installedRoot), stat(receiptPath)]);
+    const restarted = ManagedSubagents.activateForStartup(tronHome);
+    expect(restarted.root).toBe(installedRoot);
+    const afterRestart = await Promise.all([stat(installedRoot), stat(receiptPath)]);
+    expect(afterRestart.map(({ ino, mtimeMs }) => ({ ino, mtimeMs })))
+      .toEqual(beforeRestart.map(({ ino, mtimeMs }) => ({ ino, mtimeMs })));
     facts.receipt = receipt;
+    facts.restartReusedImmutableRoot = true;
     const faux = fauxProvider({ provider: "tron-offline-subagents", tokensPerSecond: 10_000 });
     const model = faux.getModel();
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
@@ -106,6 +114,16 @@ it("activates offline from empty home/cache, discovers and completes a real cano
     expect(activity).toMatchObject({
       kind: "subagent", runId: details.runId, childSessionRef: child.getSessionId(), lifecycle: { state: "completed" },
     });
+    expect(activity).toBeDefined();
+    const admitted = await registry.resolveReadOnlySubagentPath(
+      child.getSessionId(), await realpath(result.sessionFile), slot.id, activity!.processId, details.runId,
+    );
+    const transcript = await registry.readOnlySubagentTranscriptPage(
+      child.getSessionId(), admitted.path, slot.id, activity!.processId, details.runId,
+    );
+    expect(transcript.total).toBeGreaterThan(0);
+    expect(JSON.stringify(transcript)).toContain("CHILD_OFFLINE_COMPLETE");
+    facts.declaredTranscript = { sessionRef: child.getSessionId(), total: transcript.total };
     const receiptEntry = session.getEntries().find((entry) => entry.type === "custom"
       && entry.customType === "tron.extension-activity.v1");
     expect(receiptEntry).toMatchObject({ data: {

@@ -1,8 +1,8 @@
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { attributeExtensions } from "../extensions/owner-attribution.js";
@@ -98,7 +98,9 @@ it("refuses a tampered installed byte for both admission and discovery", async (
   mkdirSync(agentDir);
   const settings = SettingsManager.create(home, agentDir, { projectTrusted: false });
   expect(() => provider.loaderOptions(settings, agentDir)).toThrow(/installed closure mismatch/);
-  expect(() => provider.install()).toThrow(/installed closure mismatch/);
+  expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/installed closure mismatch/);
+  expect(readFileSync(join(root, "index.js"))).toEqual(bytes);
+  expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(root)]);
   const catalog = await loadSubagentCatalog({ agentDir, cwd: home, settingsManager: settings, managedSubagents: provider });
   expect(catalog.subagents).toEqual([]);
   expect(catalog.diagnostic).toContain("installed closure mismatch");
@@ -133,5 +135,8 @@ it("refuses a forged receipt and exposes no uninstalled provider", () => {
   expect(() => provider.verify()).toThrow(/managed pi-subagents unavailable/);
   const root = provider.install();
   writeFileSync(join(root, "tron-install-receipt.json"), JSON.stringify({ version: "0.59.0", sha512: "forged" }));
-  expect(() => provider.verify()).toThrow(/install receipt mismatch/);
+  expect(() => ManagedSubagents.activateForStartup(home)).toThrow(/install receipt mismatch/);
+  expect(JSON.parse(readFileSync(join(root, "tron-install-receipt.json"), "utf8")))
+    .toEqual({ version: "0.59.0", sha512: "forged" });
+  expect(readdirSync(join(home, "internal", "pi-subagents"))).toEqual([basename(root)]);
 });
