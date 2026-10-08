@@ -34,7 +34,7 @@ function task(): HomeTaskRecord {
     intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
     target: "/trusted/project", workerProfile: "home-task-v1", policyRevision: 1,
     grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
-    controllerGeneration: null, spend: null, reportRefs: null, terminalEvidence: null,
+    controllerGeneration: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
   };
 }
 
@@ -189,8 +189,8 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), lifecycle: "terminal" },
       { ...task(), lifecycle: "terminal", terminalEvidence: { outcome: "final", sessionId: "session-1", entryIds: [], reason: "report" } },
       { ...task(), reportRefs: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", surprise: true }] },
-      { ...task(), spend: { inputTokens: -1, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } },
-      { ...task(), spend: { inputTokens: 1, outputTokens: 0, knownCostUSD: 1, pricingProvenance: null, unpriced: false } },
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } },
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, knownCostUSD: 1, pricingProvenance: null, unpriced: false } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);

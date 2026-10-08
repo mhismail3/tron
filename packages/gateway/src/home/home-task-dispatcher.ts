@@ -3,10 +3,12 @@ import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
 import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
+import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
+import { homeTaskSpend } from "./home-task-spend.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, type HomeTaskReport } from "./home-task-report.js";
 
 export type HomeTaskDiagnostic =
@@ -16,8 +18,10 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number; unpriced: true }
+  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted"; controllerGeneration: number }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export interface HomeTaskDispatchRequest { taskId: string; intent: string; target: string }
+export interface HomeTaskControlRequest { taskId: string; operationId: string; controllerGeneration: number }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -57,7 +61,7 @@ export class HomeTaskDispatcher {
       intent: { revision: 1, text: input.intent }, intentDigest: createHash("sha256").update(JSON.stringify({ revision: 1, text: input.intent })).digest("hex"),
       target: await this.sessions.canonicalTaskTarget(input.target), workerProfile: "home-task-v1", policyRevision: 1,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null,
-      spend: null, reportRefs: null, terminalEvidence: null,
+      stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
     };
     await this.store.put(task, null);
     this.transition(task, "created");
@@ -67,7 +71,14 @@ export class HomeTaskDispatcher {
         target: task.target, authorizationScope: "full-work", workerProfile: task.workerProfile, policyRevision: task.policyRevision, restoreEpoch: epoch });
       if (epoch !== await this.store.restoreEpoch()) throw new GatewayError("conflict", "Task namespace identity changed during admission");
       const operationId = `task-${randomUUID()}`;
-      const reports = new HomeTaskReportOwner({ taskId: task.taskId, intentRevision: task.intent.revision, homeId: task.homeId, generation: task.generation, operationId });
+      const reports = new HomeTaskReportOwner({ taskId: task.taskId, intentRevision: task.intent.revision, homeId: task.homeId, generation: task.generation, operationId }, async () => {
+        await this.store.update(task.taskId, current => {
+          if (current.lifecycle !== "active" || current.operationId !== operationId || current.controllerGeneration !== 1) throw new GatewayError("conflict", "Task operation changed before Stop");
+          return current.stopIntent ? current : { ...current, stopIntent: { operationId, controllerGeneration: 1, requestedAt: new Date().toISOString() } };
+        });
+        this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(operationId), action: "stop", disposition: "persisted", controllerGeneration: 1 });
+        await cancellation("task-stop");
+      });
       const dispatch = new OwnedSessionDispatch(this.sessions);
       // Trust is rechecked by the neutral creation/admission boundary too.
       lease = await dispatch.createWorker(task.target, reports);
@@ -79,10 +90,9 @@ export class HomeTaskDispatcher {
       this.transition(task, "operation-bound");
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
-      const signal = new AbortController();
       const cancellation = async (reason = "interrupted") => {
-        signal.abort();
-        if (slot.snapshot().operation?.id === operationId) await slot.abort("agent", operationId, reason);
+        reports.cancel();
+        await slot.cancelHomeTaskOperation(operationId, reason);
       };
       let deadlineDiagnostic: { operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed" } | undefined;
       const deadline = new OwnedSessionDispatch(this.sessions, { diagnostic: record => { deadlineDiagnostic = record; } });
@@ -91,7 +101,7 @@ export class HomeTaskDispatcher {
       const bounded = deadline.enforceDeadline({ operationId, completion: terminal, cancel: cancellation });
       work.transition("foreground-agent-operation");
       const admitted = dispatch.admit(slot, `${task.intent.text}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
-        { operationId, signal: signal.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
+        { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
         if (slot.snapshot().operation?.id !== operationId) resolve({ lifecycle: "outcomeUnknown", operationId, invocationId: "admission-unknown", errorCode: "admission-refused" });
@@ -121,21 +131,20 @@ export class HomeTaskDispatcher {
         const lastMessage = last?.type === "message" && last.message.role === "assistant" ? last.message : undefined;
         const deadlineStopped = outcome.state === "deadline-stopped";
         const detached = slot.catalogHasActiveSubagents;
-        const spend: NonNullable<HomeTaskRecord["spend"]> = { inputTokens: 0, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true };
-        for (const entry of runEntries) {
-          if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-          const usage = entry.message.usage;
-          spend.inputTokens += usage.input + usage.cacheRead + usage.cacheWrite;
-          spend.outputTokens += usage.output;
-        }
-        const final: HomeTaskRecord = { ...active, revision: active.revision + 1, lifecycle: "terminal", spend,
+        const spend = homeTaskSpend(runEntries);
+        const interruption = outcome.state !== "terminal" || outcome.terminal.lifecycle !== "interrupted" ? undefined
+          : runEntries.find(entry => {
+            if (entry.type !== "custom" || entry.customType !== INVOCATION_RECEIPT_TYPE) return false;
+            const receipt = parseInvocationReceipt(entry.data);
+            return receipt?.receiptKind === "terminal" && receipt.lifecycle === "interrupted"
+              && receipt.operationId === operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
+          });
+        const interrupted = interruption !== undefined;
+        const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend,
           reportRefs: report && reportEntry ? [{ resultId: report.resultId, sessionId: slot.id, entryId: reportEntry.id, digest: reportDigest(report) }] : null,
-          terminalEvidence: { outcome: detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : "unknown",
-            sessionId: slot.id, entryIds: reportEntry ? [reportEntry.id] : last ? [last.id] : [],
-            reason: detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : "no-report" } };
-        // Exact task existence/CAS and report identity are checked before commit.
-        if (!await this.store.read(active.taskId)) throw new GatewayError("conflict", "Referenced task is missing");
-        await this.store.put(final, active.revision);
+          terminalEvidence: { outcome: detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
+            sessionId: slot.id, entryIds: reportEntry ? [reportEntry.id] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
+            reason: detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
@@ -146,7 +155,7 @@ export class HomeTaskDispatcher {
           cancelAndJoin: deadlineDiagnostic.cancelAndJoin, spendReference });
         await dispatch.acknowledge(slot.id, operationId, ownedLease);
         return final;
-      })().finally(() => ownedLease.release());
+      })().finally(() => { reports.retire(); ownedLease.release(); });
       // Tool callers return admission immediately, but failures remain observed.
       void completion.catch(() => {});
       return { taskId: task.taskId, sessionId: slot.id, operationId, completion };
@@ -170,9 +179,51 @@ export class HomeTaskDispatcher {
       || task.homeId !== value.homeId || task.generation !== value.generation || value.receiptId !== `task:${task.operationId}`) throw new GatewayError("conflict", "Referenced task is missing or contradictory");
   }
 
+  async reconfirmPermissions(): Promise<void> {
+    await this.setup.run(async () => {
+      const epoch = await this.store.restoreEpoch();
+      await this.authorization.reconfirmPermissions(epoch);
+      if (epoch !== await this.store.restoreEpoch()) throw new GatewayError("conflict", "Task namespace changed during reconfirmation");
+    });
+  }
+
+  async steer(control: HomeTaskControlRequest & { text: string }): Promise<void> {
+    const task = await this.activeControl(control);
+    if (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536) throw new GatewayError("invalid_request", "Invalid task steering text");
+    const slot = await this.sessions.acquire(task.sessionId!);
+    await slot.steerHomeTask(control, control.text);
+  }
+
+  async stop(control: HomeTaskControlRequest): Promise<void> {
+    const task = await this.activeControl(control);
+    // No session mutation lane here: Stop must be able to cancel its admission.
+    await (await this.sessions.acquire(task.sessionId!)).stopHomeTask(control);
+  }
+
+  private async activeControl(control: HomeTaskControlRequest): Promise<HomeTaskRecord> {
+    const task = await this.store.read(control.taskId);
+    if (!task || task.lifecycle !== "active" || !task.sessionId || task.operationId !== control.operationId || task.controllerGeneration !== control.controllerGeneration) throw new GatewayError("conflict", "Stale or terminal task operation");
+    return task;
+  }
+
   async result(taskId: string): Promise<HomeTaskRecord> {
-    const task = await this.store.read(taskId);
+    let task = await this.store.read(taskId);
     if (!task) throw new GatewayError("conflict", "Referenced task is missing");
+    if (task.lifecycle === "active" && task.sessionId && task.operationId) {
+      const slot = await this.sessions.acquire(task.sessionId);
+      task = await this.store.update(taskId, current => {
+        if (current.lifecycle !== "active") return current;
+        // Read canonical deltas while this publication owns the store mutex;
+        // an older status read cannot replace a newer usage projection.
+        const entries = slot.canonicalSessionEntries();
+        const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
+          && (entry.data as { operationId?: string }).operationId === current.operationId);
+        const spend = homeTaskSpend(marker < 0 ? [] : entries.slice(marker + 1));
+        return JSON.stringify(current.spend) === JSON.stringify(spend) ? current : { ...current, spend };
+      });
+      this.diagnostic?.({ event: "home.task.spend", taskHash: hash(task.taskId), spendReference: `${hash(task.taskId)}:${task.revision}`,
+        inputTokens: task.spend?.inputTokens ?? 0, outputTokens: task.spend?.outputTokens ?? 0, unpriced: true });
+    }
     if (task.reportRefs?.length) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
       const entries = (await this.sessions.acquire(task.sessionId)).canonicalTaskEvidence();

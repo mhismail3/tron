@@ -67,7 +67,7 @@ it("runs the held pre-task Home owner against a populated namespace without chan
     version: 1, taskId: "task-1", revision: 1, homeId: "home-1", generation: 1,
     intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
     target: "/trusted/project", workerProfile: "home-task-v1", policyRevision: 1, grantRef: null, scopeRef: null,
-    lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null, spend: null, reportRefs: null, terminalEvidence: null,
+    lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
   }, null);
   const directory = join(homeDirectory, "tasks");
   const snapshot = Object.fromEntries(await Promise.all((await readdir(directory)).map(async name => [name, await readFile(join(directory, name), "utf8")])));

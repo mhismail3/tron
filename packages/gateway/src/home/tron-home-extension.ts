@@ -19,8 +19,8 @@ export const HOME_OPERATING_CONTEXT = [
   "## Tron Home",
   "This conversation is Tron Home: one persistent conversation for this Gateway installation. The user reaches it deliberately; nothing else wakes it, and no scheduled or background work runs here.",
   "Each turn starts from the memory view that opens this request: one-line summaries of this conversation from its start up to the user's current message, and then the messages since. Nothing before this turn is replayed in full, so read the view before you act, guess or ask, zoom the lines you need, and say in your reply whatever you learned that will matter later: summaries keep little of tool output.",
-  "Home is delegate-only for project work. It runs in its own empty working directory with no project resources, skills, prompt templates or context files. Use delegate to assign finite work in a trusted project to an ordinary worker session with project tools and an explicit report tool. In v1, task workers cannot launch subagents or scheduled work, because those can outlive their task. Only ask_user, display, notify, zoom, date, memory_search and delegate are available here.",
-  "Give each delegation a stable unique taskId, explicit intent and target directory. Accepted task IDs cannot replay work. The worker must call report with exact acceptance evidence; an ordinary reply is not success. Each task has an internal fixed 24-hour ceiling and records actual token usage. Results are stored but are not yet delivered into Home; do not assume task success from admission.",
+  "Home is delegate-only for project work. It runs in its own empty working directory with no project resources, skills, prompt templates or context files. Use delegate to assign finite work in a trusted project to an ordinary worker session with project tools and an explicit report tool. In v1, task workers cannot launch subagents or scheduled work, because those can outlive their task. Only ask_user, display, notify, zoom, date, memory_search, delegate and task are available here.",
+  "Give each delegation a stable unique taskId, explicit intent and target directory. Accepted task IDs cannot replay work. The worker must call report with exact acceptance evidence; an ordinary reply is not success. Each task has an internal fixed 24-hour ceiling and records actual token usage. Use task status to read durable spend/results and task steer/stop with its exact operation and controller generation. You and the maintainer share steering in accepted session-lane order; viewing never takes control. Results are stored but are not yet delivered into Home; do not assume task success from admission.",
   "Do not assume shell, file, browser or project tools exist in Home, and do not ask to change this directory. Delegate authorized project work rather than performing it here.",
   "Compaction is disabled for Home, so this conversation's history stays canonical and grows as it is used.",
 ].join("\n");
@@ -43,8 +43,13 @@ export const HOME_OPERATING_CONTEXT = [
  * runtime directly, outside every request wrapper, so this handler is the only
  * mechanism that keeps Home's prompt-cache refreshes at zero.
  */
+export type HomeTaskToolRequest = { action: "status"; taskId: string }
+  | ({ action: "steer"; text: string } & import("./home-task-dispatcher.js").HomeTaskControlRequest)
+  | ({ action: "stop" } & import("./home-task-dispatcher.js").HomeTaskControlRequest);
+
 export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess | undefined,
-  delegate?: (request: HomeTaskDispatchRequest) => Promise<HomeTaskHandle>): ExtensionFactory {
+  delegate?: (request: HomeTaskDispatchRequest) => Promise<HomeTaskHandle>,
+  task?: (request: HomeTaskToolRequest) => Promise<unknown>): ExtensionFactory {
   return (pi) => {
     for (const tool of homeMemoryTools(memoryTools)) pi.registerTool(tool);
     pi.registerTool({ name: "delegate", label: "Delegate", description: "Dispatch finite work once in a trusted project. Returns admission identity, not success; results are stored separately.",
@@ -53,6 +58,17 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
         if (!delegate) throw new Error("Home dispatch is unavailable");
         const { taskId, sessionId, operationId } = await delegate(request);
         return { content: [{ type: "text", text: "Task admitted; a report is required for its result." }], details: { taskId, sessionId, operationId } };
+      },
+    });
+    pi.registerTool({ name: "task", label: "Task", description: "Read durable task status/spend, steer a shared active task, or Stop its exact operation. Status has no control effect. Mutations require the operation and controller generation from status.",
+      parameters: Type.Union([
+        Type.Object({ action: Type.Literal("status"), taskId: Type.String({ minLength: 1, maxLength: 160 }) }, { additionalProperties: false }),
+        Type.Object({ action: Type.Literal("steer"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), controllerGeneration: Type.Integer({ minimum: 1 }), text: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
+        Type.Object({ action: Type.Literal("stop"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), controllerGeneration: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
+      ]), executionMode: "sequential", execute: async (_id, request) => {
+        if (!task) throw new Error("Home task control is unavailable");
+        const result = await task(request);
+        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },
     });
     pi.on("before_agent_start", async (event) => ({

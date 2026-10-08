@@ -30,7 +30,9 @@ export interface HomeTaskRecord {
   sessionId: string | null;
   operationId: string | null;
   controllerGeneration: number | null;
+  stopIntent: { operationId: string; controllerGeneration: number; requestedAt: string } | null;
   spend: {
+    sourceDigest: string;
     inputTokens: number;
     outputTokens: number;
     knownCostUSD: number | null;
@@ -162,9 +164,36 @@ export class HomeTaskStore {
         || next.revision !== (expectedRevision ?? 0) + 1) throw new HomeTaskStoreError("revision-conflict");
       if (current?.lifecycle === "terminal") throw new HomeTaskStoreError("invalid-record");
       if (current && (immutableTask(current) !== immutableTask(next)
+        || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))
+        || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
         || ((current.grantRef !== null || current.scopeRef !== null)
           && (current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef)))) throw new HomeTaskStoreError("invalid-record");
       await this.publish(join(this.directory, `${next.taskId}.json`), next, TASK_BYTES);
+    });
+  }
+
+  /** Domain mutations use the latest durable record under the same mutex as
+   * publication. Terminal settlement cannot overwrite accepted Stop/spend. */
+  async update(taskId: string, change: (current: HomeTaskRecord) => HomeTaskRecord): Promise<HomeTaskRecord> {
+    return this.run(async () => {
+      if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
+      const authorization = await this.inspect();
+      if (!authorization) throw new HomeTaskStoreError("not-initialized");
+      const current = await this.readTask(taskId);
+      if (!current) throw new HomeTaskStoreError("missing-state");
+      const next = structuredClone(change(structuredClone(current)));
+      if (JSON.stringify(next) === JSON.stringify(current)) return current;
+      next.revision = current.revision + 1;
+      validateTask(next);
+      validateAuthorityReferences(next, authorization);
+      if (current.lifecycle === "terminal" || immutableTask(current) !== immutableTask(next)
+        || current.operationId !== next.operationId || current.sessionId !== next.sessionId
+        || current.controllerGeneration !== next.controllerGeneration
+        || current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef
+        || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
+        || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))) throw new HomeTaskStoreError("invalid-record");
+      await this.publish(join(this.directory, `${taskId}.json`), next, TASK_BYTES);
+      return next;
     });
   }
 
@@ -277,7 +306,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "homeId", "generation", "intent", "intentDigest", "target", "workerProfile",
-    "policyRevision", "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "controllerGeneration", "spend", "reportRefs", "terminalEvidence"])
+    "policyRevision", "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "controllerGeneration", "stopIntent", "spend", "reportRefs", "terminalEvidence"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !identifier(value.homeId) || !positive(value.generation)
     || !keys(value.intent, ["revision", "text"]) || !positive(value.intent.revision) || !text(value.intent.text, 64 * 1_024)
@@ -287,7 +316,12 @@ function validateTask(value: unknown): HomeTaskRecord {
     || !["pending", "active", "terminal"].includes(value.lifecycle as string)
     || !nullableId(value.sessionId) || !nullableId(value.operationId)
     || (value.controllerGeneration !== null && !positive(value.controllerGeneration))) invalid();
-  if (value.spend !== null && (!keys(value.spend, ["inputTokens", "outputTokens", "knownCostUSD", "pricingProvenance", "unpriced"])
+  if (value.stopIntent !== null && (!keys(value.stopIntent, ["operationId", "controllerGeneration", "requestedAt"])
+    || !identifier(value.stopIntent.operationId) || !positive(value.stopIntent.controllerGeneration)
+    || value.stopIntent.operationId !== value.operationId || value.stopIntent.controllerGeneration !== value.controllerGeneration
+    || !text(value.stopIntent.requestedAt, 64) || !Number.isFinite(Date.parse(value.stopIntent.requestedAt)))) invalid();
+  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens", "knownCostUSD", "pricingProvenance", "unpriced"])
+    || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
     || !count(value.spend.inputTokens) || !count(value.spend.outputTokens) || typeof value.spend.unpriced !== "boolean"
     || (value.spend.knownCostUSD !== null && (typeof value.spend.knownCostUSD !== "number" || !Number.isFinite(value.spend.knownCostUSD) || value.spend.knownCostUSD < 0))
     || (value.spend.pricingProvenance !== null && !text(value.spend.pricingProvenance, 512))

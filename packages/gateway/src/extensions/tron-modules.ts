@@ -46,6 +46,7 @@ export interface TronModuleHost {
    * here is what keeps the wiring honest: the only Home runtime is built by a
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
+  homeTask?: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
   homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
 }
 
@@ -193,12 +194,15 @@ export const HOME_MODULE_NAMES: readonly string[] = [
 export const TRON_HOME_MODULE: TronModule = {
   name: "tron-home",
   purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-  tools: ["zoom", "date", "memory_search", "delegate"],
+  tools: ["zoom", "date", "memory_search", "delegate", "task"],
   commands: [],
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
     request => {
       if (!host.homeDelegate) throw new Error("Home dispatch is unavailable");
       return host.homeDelegate(host.sessionId(), request);
+    }, request => {
+      if (!host.homeTask) throw new Error("Home task control is unavailable");
+      return host.homeTask(host.sessionId(), request);
     }),
 };
 
@@ -206,7 +210,7 @@ export const TRON_HOME_MODULE: TronModule = {
  * registration allowlist. MCP is excluded structurally: no MCP extension is
  * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
  * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate"];
+export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task"];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */

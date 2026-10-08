@@ -9,7 +9,10 @@ import { TrustService } from "../admin/trust-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { HomeTaskStore } from "./home-task-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { OWNED_OPERATION_DEADLINE_MS } from "../sessions/owned-session-dispatch.js";
+import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { runHomeInput } from "../client/terminal-chat.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const evidence: Array<Record<string, unknown>> = [];
@@ -88,6 +91,241 @@ async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-o
 }
 
 describe("Home task production dispatch", () => {
+  it("wires Home's real task tool to exact-operation shared steering", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    let release!: () => void;
+    let entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    const home = await f.registry.acquire(f.home.sessionId);
+    try {
+      await waitFor(() => entered, "worker provider barrier");
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "steer", taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1, text: "Home tool instruction" })], { stopReason: "toolUse" }), fauxAssistantMessage("shared steering accepted")]);
+      await home.prompt("Steer the active task");
+      await waitFor(() => !home.isBusy, "Home task tool terminal");
+      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home tool instruction"]);
+      release(); await run.completion;
+      evidence.push({ case: "home-task-tool", steering: "accepted" });
+    } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("orders Home and maintainer steering in the same lane and refuses stale or post-report work", async () => {
+    const f = await fixture();
+    let entered = false;
+    let release!: () => void;
+    let releaseSteer: (() => void) | undefined;
+    let firstSteer: Promise<unknown> | undefined;
+    let secondSteer: Promise<unknown> | undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }); },
+      fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "task provider active");
+      const control = { taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 };
+      const session = (slot as any).runtime.session;
+      const prompt = session.prompt.bind(session);
+      let steeringEntered = false;
+      const steeringGate = new Promise<void>(resolve => { releaseSteer = resolve; });
+      const called: string[] = [];
+      vi.spyOn(session, "prompt").mockImplementation(async (text: string, options: unknown) => {
+        called.push(text);
+        if (text === "Home first") { steeringEntered = true; await steeringGate; }
+        return prompt(text, options);
+      });
+      const first = firstSteer = f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, text: "Home first" });
+      void first.catch(() => {});
+      await waitFor(() => steeringEntered, "Home steering in session lane");
+      const second = secondSteer = slot.prompt("Maintainer second", [], "steer");
+      void second.catch(() => {});
+      let observationTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Observe non-admission while the SDK gate is held, rather than testing
+        // before the second command's asynchronous persistence can run.
+        const admittedWhileHeld = await Promise.race([second.then(() => true),
+          new Promise<false>(resolve => { observationTimer = setTimeout(() => resolve(false), 100); })]);
+        expect(admittedWhileHeld).toBe(false);
+        expect(called).toEqual(["Home first"]);
+      } finally { if (observationTimer) clearTimeout(observationTimer); releaseSteer?.(); }
+      await Promise.all([first, second]);
+      expect(called).toEqual(["Home first", "Maintainer second"]);
+      expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(2);
+      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
+      await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, controllerGeneration: 2, text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
+      await expect(slot.steerHomeTask({ ...control, controllerGeneration: 2 }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
+      release();
+      const result = await run.completion;
+      expect(result.terminalEvidence?.outcome).toBe("final");
+      const canonicalUser = JSON.stringify(slot.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "user"));
+      expect(canonicalUser).toContain("Home first");
+      expect(canonicalUser.indexOf("Maintainer second")).toBeGreaterThan(canonicalUser.indexOf("Home first"));
+      await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, text: "late" })).rejects.toThrow(/active|stale|settled|terminal/i);
+      evidence.push({ case: "shared-control-order", order: ["Home first", "Maintainer second"], staleRefused: true, afterReportRefused: true });
+    } finally { releaseSteer?.(); release(); await Promise.allSettled([firstSteer, secondSteer]); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it.each([
+    { owner: "prompt", surface: "taskRPC" },
+    { owner: "automatic-compaction", surface: "taskRPC" },
+    { owner: "automatic-compaction", surface: "sessionStop" },
+  ] as const)("persists exact task Stop outside blocked SDK preflight ($owner/$surface) and reconciles interrupted evidence", async ({ owner, surface }) => {
+    const f = await fixture();
+    let release!: () => void;
+    let entered = false;
+    let cancelled = false;
+    let providerCalls = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([() => { providerCalls += 1; return fauxAssistantMessage("must not start"); }]);
+    const create = OwnedSessionDispatch.prototype.createWorker;
+    vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
+      const lease = await create.call(this, cwd, reports);
+      const session = (lease.slot as any).runtime.session;
+      const prompt = session.prompt.bind(session);
+      vi.spyOn(session, "prompt").mockImplementation(async (...args: any[]) => {
+        if (owner === "automatic-compaction") (lease.slot as any).onEvent({ type: "compaction_start", reason: "threshold" });
+        entered = true; await gate; return prompt(...args);
+      });
+      const abortCompaction = session.abortCompaction.bind(session);
+      vi.spyOn(session, "abortCompaction").mockImplementation(() => {
+        if (owner === "automatic-compaction") (lease.slot as any).onEvent({ type: "compaction_end", reason: "threshold", result: undefined, aborted: true, willRetry: false });
+        abortCompaction();
+      });
+      const abort = session.abort.bind(session);
+      vi.spyOn(session, "abort").mockImplementation(async () => { cancelled = true; release(); await abort(); });
+      return lease;
+    });
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "SDK preflight barrier");
+      const control = { taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 };
+      await expect(f.registry.homeOwner().stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      await expect(slot.stopHomeTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
+      expect(cancelled).toBe(false);
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+        receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
+      // A draining transport must keep status/exact Stop available; this is an
+      // isolated service flag, never a live Gateway restart.
+      (service as any).restartRequested = true;
+      const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
+      let stopParams: unknown;
+      const terminal = { request: async (method: string, params: unknown) => { if (method === "home.stopTask") stopParams = params; return service.invoke(client, method, params); } };
+      const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const stopping = surface === "sessionStop" ? slot.abort("compaction", slot.snapshot().operation!.id)
+        : runHomeInput(terminal as any, `/home stop ${run.taskId}`);
+      void stopping.catch(() => {});
+      await waitFor(() => cancelled, "task Stop bypasses blocked admission lane");
+      await stopping;
+      if (surface === "taskRPC") expect(output).toHaveBeenCalledWith(expect.stringContaining("Stop joined"));
+      output.mockRestore();
+      expect(cancelled).toBe(true);
+      const result = await run.completion;
+      if (surface === "taskRPC") expect(await service.invoke(client, "home.stopTask", stopParams)).toEqual({ accepted: true });
+      expect(await f.registry.homeOwner().taskResult(run.taskId)).toEqual(result);
+      expect(providerCalls).toBe(0);
+      expect(result.stopIntent).toMatchObject({ operationId: run.operationId, controllerGeneration: 1 });
+      expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
+      const receipts = result.terminalEvidence!.entryIds.map(id => slot.canonicalSessionEntries().find(entry => entry.id === id));
+      expect(receipts).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.chat-invocation.v1", data: expect.objectContaining({ receiptKind: "terminal", operationId: run.operationId, lifecycle: "interrupted" }) }));
+      expect(slot.isBusy).toBe(false);
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "stop", disposition: "persisted" }));
+      evidence.push({ case: `task-preflight-stop-${owner}-${surface}`, providerCalls, intent: result.stopIntent, evidence: result.terminalEvidence });
+    } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("refuses steering whose SDK preflight resumes after an immutable report", async () => {
+    const f = await fixture();
+    let releaseWorker!: () => void;
+    let releaseSteer!: () => void;
+    let workerEntered = false;
+    let steerEntered = false;
+    const workerGate = new Promise<void>(resolve => { releaseWorker = resolve; });
+    const steerGate = new Promise<void>(resolve => { releaseSteer = resolve; });
+    let afterReportCalls = 0;
+    f.faux.setResponses([async () => { workerEntered = true; await workerGate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      () => { afterReportCalls += 1; return fauxAssistantMessage("forbidden successor"); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    let steer: Promise<unknown> | undefined;
+    try {
+      await waitFor(() => workerEntered, "worker report gate");
+      const session = (slot as any).runtime.session;
+      const prompt = session.prompt.bind(session);
+      vi.spyOn(session, "prompt").mockImplementation(async (...args: any[]) => { steerEntered = true; await steerGate; return prompt(...args); });
+      steer = slot.prompt("racing maintainer", [], "steer");
+      void steer.catch(() => {});
+      await waitFor(() => steerEntered, "steer SDK preflight gate");
+      releaseWorker();
+      await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "custom" && entry.customType === "tron-home-task-report"), "immutable report append");
+      releaseSteer();
+      await expect(steer).rejects.toThrow(/cancel|stopped|outcome|admission/i);
+      const result = await run.completion;
+      expect(result.terminalEvidence?.outcome).toBe("final");
+      expect(afterReportCalls).toBe(0);
+      evidence.push({ case: "report-steer-race", afterReportCalls });
+    } finally { releaseWorker(); releaseSteer(); await steer?.catch(() => {}); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("publishes deduplicated live usage before status and retains the same tokens at settlement", async () => {
+    const f = await fixture();
+    let entered = false;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse", usage: { input: 7, output: 3, cacheRead: 2, cacheWrite: 1 } }),
+      async () => { entered = true; await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "second provider turn");
+      const entries = slot.canonicalSessionEntries.bind(slot);
+      vi.spyOn(slot, "canonicalSessionEntries").mockImplementation(() => { const values = entries(); const usage = values.find(value => value.type === "message" && value.message.role === "assistant"); return usage ? [...values, usage] : values; });
+      const one = await f.registry.homeOwner().taskResult(run.taskId);
+      const two = await f.registry.homeOwner().taskResult(run.taskId);
+      const canonical = entries().find(value => value.type === "message" && value.message.role === "assistant")!;
+      const usage = (canonical as any).message.usage;
+      expect(one.spend).toMatchObject({ inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, knownCostUSD: null, unpriced: true });
+      expect(two).toEqual(one);
+      const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const terminal = { request: (_method: string, params: any) => f.registry.homeOwner().taskResult(params.taskId) };
+      await runHomeInput(terminal as any, `/home task ${run.taskId}`);
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input/cache + ${one.spend!.outputTokens} output tokens; unpriced`));
+      output.mockRestore();
+      release();
+      const final = await run.completion;
+      expect(final.spend!.inputTokens).toBeGreaterThanOrEqual(one.spend!.inputTokens);
+      expect(final.spend!.outputTokens).toBeGreaterThanOrEqual(one.spend!.outputTokens);
+      expect(final.spend!.unpriced).toBe(true);
+      evidence.push({ case: "live-spend", live: one.spend, final: final.spend });
+    } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  it("reconfirms copied-namespace scopes only through explicit RPC and terminal control", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f)).completion;
+    const namespace = join(f.tronHome, "gateway/home/tasks");
+    const copy = join(f.root, "restored-tasks");
+    await cp(namespace, copy, { recursive: true, preserveTimestamps: true });
+    await rm(namespace, { recursive: true }); await rename(copy, namespace);
+    await expect(dispatch(f, "before-confirmation")).rejects.toThrow(/reconfirmation/);
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      receipts: new CommandReceiptStore(join(f.root, "receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "terminal-test", identity: "device:task-test", isLocal: true } as unknown as ClientContext;
+    await expect(service.invoke(client, "home.reconfirmPermissions", { commandId: "confirm-permissions", unexpected: true })).rejects.toThrow(/unexpected|unknown/i);
+    const terminal = { request: (method: string, params: unknown) => service.invoke(client, method, params) };
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    expect(await runHomeInput(terminal as any, "/home reconfirm-permissions")).toBe(true);
+    expect(output).toHaveBeenCalledWith(expect.stringContaining("reconfirmed"));
+    output.mockRestore();
+    f.faux.setResponses([fauxAssistantMessage([reportCall("after-confirmation")], { stopReason: "toolUse" })]);
+    expect((await (await dispatch(f, "after-confirmation")).completion).terminalEvidence?.outcome).toBe("final");
+    evidence.push({ case: "explicit-permission-reconfirmation", refusedBefore: true, admittedAfter: true });
+  }, 20_000);
   it.each([
     { label: "async", version: "0.76.1-tron.4", input: { agent: "worker", task: "work", async: true }, allowed: false },
     { label: "foreground", version: "0.76.1-tron.4", input: { agent: "worker", task: "work", async: false }, allowed: false },
@@ -127,7 +365,8 @@ describe("Home task production dispatch", () => {
     await slot.abort("agent", run.operationId);
     const result = await run.completion;
     expect(existsSync(join(f.cwd, "wait-aborted"))).toBe(true);
-    expect(result.terminalEvidence?.outcome).toBe("unknown");
+    expect(result.terminalEvidence?.outcome).toBe("interrupted");
+    expect(result.stopIntent).toMatchObject({ operationId: run.operationId });
     expect(slot.isBusy).toBe(false);
     evidence.push({ case: "wait-owned-stop", joined: true });
   }, 20_000);
@@ -376,8 +615,14 @@ describe("Home task production dispatch", () => {
     stop.mockRestore();
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "deadline-stop-failed" });
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.runaway-stop", cancelAndJoin: "failed", spendReference: expect.any(String) }));
-    await slot.abort("agent", run.operationId);
-    evidence.push({ case: "deadline-join-failed", injectedFailure: true, outcome: "unknown", actualStopCleanedUp: true });
+    try {
+      const before = slot.canonicalSessionEntries().length;
+      await expect((slot as any).taskWorker.accept(slot.id, run.operationId,
+        { resultId: "late-result", outcome: "final", text: "late report", evidence: [] },
+        (data: unknown) => (slot as any).persistCanonicalCustomEntry("tron-home-task-report", data, "late-report"))).rejects.toThrow(/retired/);
+      expect(slot.canonicalSessionEntries()).toHaveLength(before);
+    } finally { await slot.abort("agent", run.operationId); }
+    evidence.push({ case: "deadline-join-failed", injectedFailure: true, outcome: "unknown", lateReportRefused: true, actualStopCleanedUp: true });
   }, 20_000);
 
   it("preserves authority on restart/file replacement but requires reconfirmation after copying a namespace", async () => {

@@ -208,7 +208,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context", "home.open",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context", "home.open", "home.taskStatus", "home.stopTask",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -468,6 +468,25 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
         return safeJson(await this.requireHome().status());
       }
+      case "home.taskStatus": {
+        rejectUnknownFields(params, ["taskId"], method);
+        return safeJson(await this.requireHome().taskResult(string(params.taskId, "taskId", { max: 160 })));
+      }
+      case "home.reconfirmPermissions":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().reconfirmTaskPermissions());
+        });
+      case "home.steerTask":
+      case "home.stopTask":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, method === "home.steerTask" ? ["commandId", "taskId", "operationId", "controllerGeneration", "text"] : ["commandId", "taskId", "operationId", "controllerGeneration"], method);
+          if (!Number.isSafeInteger(params.controllerGeneration) || (params.controllerGeneration as number) < 1) throw new GatewayError("invalid_request", "Invalid controllerGeneration");
+          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }), controllerGeneration: params.controllerGeneration as number };
+          if (method === "home.steerTask") await this.requireHome().maintainTask({ ...control, text: string(params.text, "text", { max: 65536 }) });
+          else await this.requireHome().stopTask(control);
+          return safeJson({ accepted: true });
+        }, method === "home.stopTask");
       case "home.open": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
         const home = this.requireHome();

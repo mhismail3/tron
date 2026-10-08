@@ -185,7 +185,7 @@ export async function listSessions(
 function usage(): never {
   process.stderr.write(`Usage: tron-chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]\n\n`);
   process.stderr.write(`Attaches to the Gateway-owned canonical runtime. It never opens Pi JSONL directly.\n`);
-  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id>, /home resume, /home context, /abort, /quit\n`);
+  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id>, /home resume, /home context, /home reconfirm-permissions, /home task <id>, /home steer <id> <text>, /home stop <id>, /abort, /quit\n`);
   process.exit(64);
 }
 
@@ -207,6 +207,10 @@ export type HomeCommand =
   | { kind: "status" }
   | { kind: "designate"; model?: { provider: string; id: string } }
   | { kind: "disable" }
+  | { kind: "reconfirm-permissions" }
+  | { kind: "task"; taskId: string }
+  | { kind: "stop-task"; taskId: string }
+  | { kind: "steer-task"; taskId: string; text: string }
   | { kind: "memory"; model: { provider: string; id: string } }
   | { kind: "resume" }
   | { kind: "context" }
@@ -219,6 +223,12 @@ export function parseHomeCommand(input: string): HomeCommand | undefined {
   if (input !== "/home" && !input.startsWith("/home ")) return undefined;
   if (input === "/home" || input === "/home status") return { kind: "status" };
   if (input === "/home disable") return { kind: "disable" };
+  if (input === "/home reconfirm-permissions") return { kind: "reconfirm-permissions" };
+  const task = /^\/home (task|stop|steer) ([A-Za-z0-9][A-Za-z0-9._-]{0,159})(?: (.+))?$/u.exec(input);
+  if (task) {
+    if (task[1] === "steer" && task[3]?.trim()) return { kind: "steer-task", taskId: task[2]!, text: task[3] };
+    if (task[1] !== "steer" && !task[3]) return { kind: task[1] === "stop" ? "stop-task" : "task", taskId: task[2]! };
+  }
   if (input === "/home resume") return { kind: "resume" };
   if (input === "/home context") return { kind: "context" };
   if (input === "/home designate") return { kind: "designate" };
@@ -245,7 +255,7 @@ export function describeHomeStatus(status: HomeStatusEnvelope): string {
   return `${designation} Phase: ${status.phase}. Readiness: ${status.readiness.ready ? "ready" : `not ready; ${gaps}`}. ${describeHomeMemory(status.memory)} ${describeHomeContext(status.activation)} Recovery: ${recovery}.`;
 }
 
-const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context\n";
+const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context | /home reconfirm-permissions | /home task <id> | /home steer <id> <text> | /home stop <id>\n";
 
 export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
@@ -352,6 +362,22 @@ export async function runHomeCommand(client: Pick<GatewayProtocolClient, "reques
     else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.model)}\n`);
     else if (command.kind === "resume") process.stdout.write(`${await resumeHomeMemory(client)}\n`);
     else if (command.kind === "context") process.stdout.write(`${await homeContextCommand(client)}\n`);
+    else if (command.kind === "reconfirm-permissions") {
+      await client.request("home.reconfirmPermissions", { commandId: randomUUID() });
+      process.stdout.write("Home task standing permissions reconfirmed. Revoked scopes and one-use grants were not renewed.\n");
+    } else if (command.kind === "task" || command.kind === "stop-task" || command.kind === "steer-task") {
+      const task = await client.request("home.taskStatus", { taskId: command.taskId }) as unknown as import("../home/home-task-store.js").HomeTaskRecord;
+      if (command.kind === "task") {
+        const spend = task.spend;
+        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.inputTokens ?? 0} input/cache + ${spend?.outputTokens ?? 0} output tokens; ${spend?.knownCostUSD === null || !spend ? "unpriced" : `$${spend.knownCostUSD} (${spend.pricingProvenance})`}.\n`);
+      } else {
+        if (task.lifecycle !== "active" || !task.operationId || !task.controllerGeneration) throw new Error("Task is not active");
+        await client.request(command.kind === "stop-task" ? "home.stopTask" : "home.steerTask", { commandId: randomUUID(),
+          taskId: task.taskId, operationId: task.operationId, controllerGeneration: task.controllerGeneration,
+          ...(command.kind === "steer-task" ? { text: command.text } : {}) });
+        process.stdout.write(`Task ${task.taskId}: ${command.kind === "stop-task" ? "Stop joined" : "steering accepted"}.\n`);
+      }
+    }
     else process.stdout.write(`${await disableHome(client)}\n`);
   } catch (error) {
     process.stderr.write(`home: ${error instanceof Error ? error.message : String(error)}\n`);

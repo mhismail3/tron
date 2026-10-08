@@ -49,6 +49,9 @@ export class HomeTaskReportOwner {
   private readonly mutex = new AsyncMutex();
   private sealed: { request: string; report: HomeTaskReport; entryId: string } | undefined;
   private stopping: Promise<void> | undefined;
+  private readonly cancellation = new AbortController();
+  get signal(): AbortSignal { return this.cancellation.signal; }
+  cancel(): void { this.cancellation.abort(); }
   requestStop(stop: () => Promise<void>): void {
     if (!this.stopping) {
       this.stopping = stop();
@@ -57,18 +60,36 @@ export class HomeTaskReportOwner {
   }
   async joinStop(): Promise<void> { await this.stopping; }
   readonly identity: Readonly<HomeTaskWorkerIdentity>;
-  constructor(identity: HomeTaskWorkerIdentity) { this.identity = Object.freeze({ ...identity }); }
+  private admission: { interrupt?: () => Promise<void> } | undefined;
+  constructor(identity: HomeTaskWorkerIdentity, interrupt?: () => Promise<void>) {
+    this.identity = Object.freeze({ ...identity });
+    this.admission = { ...(interrupt ? { interrupt } : {}) };
+  }
+
+  get controlsActive(): boolean { return !!this.admission?.interrupt; }
+  get acceptsSteering(): boolean { return !!this.admission && !this.sealed && !this.stopping; }
+  /** Settlement releases execution callbacks with the lease, even when exact
+   * Stop failed. Immutable evidence remains, but no late report can rewrite it. */
+  retire(): void { this.admission = undefined; this.cancel(); }
+
+  async stop(): Promise<void> {
+    if (!this.admission?.interrupt) throw new Error("Task control is unavailable");
+    this.requestStop(this.admission.interrupt);
+    await this.joinStop();
+  }
 
   async accept(sessionId: string, operationId: string | undefined, value: unknown,
     append: (report: HomeTaskReport) => Promise<string>): Promise<string> {
     const request = admit(value);
     if (operationId !== this.identity.operationId) throw new Error("Stale task operation");
     return this.mutex.run(async () => {
+      if (!this.admission) throw new Error("Task operation is retired");
       const payload = JSON.stringify(request);
       if (this.sealed) {
         if (payload !== this.sealed.request || this.sealed.report.sessionId !== sessionId) throw new Error("Conflicting task report");
         return this.sealed.entryId;
       }
+      if (this.stopping) throw new Error("Task operation is stopping");
       const report: HomeTaskReport = { version: 1, ...this.identity, ...request,
         receiptId: `report:${this.identity.operationId}`, sessionId, acceptedAt: new Date().toISOString() };
       const entryId = await append(report);

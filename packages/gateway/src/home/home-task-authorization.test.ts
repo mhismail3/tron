@@ -30,6 +30,23 @@ function fixture() {
 }
 
 describe("HomeTaskAuthorization", () => {
+  it("explicitly reconfirms only active standing scopes, never revoked scopes or restored grants", async () => {
+    const { owner, request, store } = fixture();
+    const revoked = await owner.enableInitialScope("older-epoch");
+    await owner.revokeScope(revoked.id);
+    const active = await owner.enableInitialScope(request.restoreEpoch);
+    const grant = await owner.recordDecisionAndGrant(request, { decisionId: "restored-grant", expiresAt: 2_000 });
+    await expect(owner.authorize({ ...request, restoreEpoch: "restored-epoch" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
+    await owner.reconfirmPermissions("restored-epoch");
+    const state = await store.load();
+    expect(state.scopes.find(scope => scope.id === active.id)).toMatchObject({ active: true, restoreEpoch: "restored-epoch" });
+    expect(state.scopes.find(scope => scope.id === revoked.id)).toMatchObject({ active: false, restoreEpoch: "older-epoch" });
+    expect(state.grants.find(candidate => candidate.id === grant.id)).toMatchObject({ state: "available", restoreEpoch: request.restoreEpoch });
+    await expect(owner.authorize({ ...request, restoreEpoch: "restored-epoch" })).resolves.toMatchObject({ scopeId: active.id });
+    await owner.revokeScope(active.id);
+    await owner.reconfirmPermissions("restored-epoch");
+    await expect(owner.authorize({ ...request, restoreEpoch: "restored-epoch" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
+  });
   it("binds a standing scope to its restore epoch and requires explicit reconfirmation after restore", async () => {
     const { owner, request, diagnostics } = fixture();
     const scope = await owner.enableInitialScope(request.restoreEpoch);

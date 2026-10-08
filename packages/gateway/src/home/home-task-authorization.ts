@@ -64,7 +64,7 @@ export interface HomeTaskAuthorizationOptions {
 
 export interface HomeTaskAuthorizationDiagnostic {
   event: "home.task.authorization";
-  outcome: "scope-enabled" | "scope-revoked" | "decision-recorded" | "grant-consumed" | "refused";
+  outcome: "scope-enabled" | "scope-revoked" | "permissions-reconfirmed" | "decision-recorded" | "grant-consumed" | "refused";
   reason?: "untrusted-target" | "grant-required" | "invalid-decision" | "scope-reconfirmation-required";
   referenceHash?: string;
 }
@@ -107,6 +107,17 @@ export class HomeTaskAuthorization {
       for (const retired of retiredScopes) this.diagnostic("scope-revoked", retired.id);
       this.diagnostic("scope-enabled", scope.id);
       return scope;
+    });
+  }
+
+  /** Explicit maintainer control only. A restore never renews one-use grants or
+   * resurrects revoked scopes; their original authority remains inspectable. */
+  async reconfirmPermissions(restoreEpoch: string): Promise<void> {
+    await this.mutex.run(async () => {
+      const state = await this.options.store.load();
+      await this.options.store.save({ ...state, scopes: state.scopes.map(scope => scope.active
+        ? { ...scope, restoreEpoch } : scope) });
+      this.diagnostic("permissions-reconfirmed");
     });
   }
 

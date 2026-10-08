@@ -810,7 +810,7 @@ model; there is no budget to manage (memory spend is bounded by construction and
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
-`ask_user`/`display`/`notify`/memory-tools/`delegate` executable allowlist, per-session compaction
+`ask_user`/`display`/`notify`/memory-tools/`delegate`/`task` executable allowlist, per-session compaction
 disabled, a fixed physical model, and zero cache-warming requests), and its
 designation is keyed by session id, so a fork is ordinary. A profile change
 replaces the live runtime in place inside the session's own lane, and a record
@@ -832,8 +832,15 @@ report is limited/unknown. A fixed internal 24-hour deadline cancels and joins
 operation-owned work, and terminal usage remains explicitly unpriced. Unknown
 tracked detached work yields unknown, not a clean stop claim. Separate strict
 Home task state is initialized on first dispatch; recreated task directory
-identity requires permission reconfirmation. Status/control, wake delivery and
-task push are subsequent slices, not automatically triggered Home calls.
+identity requires explicit `home.reconfirmPermissions` (terminal
+`/home reconfirm-permissions`); this renews active standing scopes only, never
+revoked scopes or one-use grants. `home.taskStatus`, `home.steerTask` and
+`home.stopTask` expose durable spend and shared control; terminal `/home task`,
+`/home steer` and `/home stop` target one task. Steering shares the session lane;
+Stop persists exact intent and cancels outside blocked admission. Canonical usage
+identities dedupe tokens before display; money is explicitly unpriced without
+authoritative billing provenance. Wake delivery and task push are subsequent
+slices, not automatically triggered Home calls.
 
 ## Runtime and state
 

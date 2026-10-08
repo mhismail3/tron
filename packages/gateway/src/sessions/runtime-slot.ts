@@ -438,6 +438,7 @@ interface RuntimeSlotHooks {
 
 interface PromptOwnership {
   operationId: string;
+  taskFence?: import("../home/home-task-dispatcher.js").HomeTaskControlRequest;
   /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
   signal?: AbortSignal;
   origin: ChatOrigin;
@@ -447,6 +448,7 @@ interface PromptOwnership {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  homeTask?: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
   homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker?: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
@@ -1758,6 +1760,7 @@ export class RuntimeSlot {
         // running Home reads can be reconfigured, blocked or released.
         homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools?.(sessionId),
         ...(this.dependencies.homeDelegate ? { homeDelegate: this.dependencies.homeDelegate } : {}),
+        ...(this.dependencies.homeTask ? { homeTask: this.dependencies.homeTask } : {}),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
@@ -7079,6 +7082,29 @@ export class RuntimeSlot {
     }
   }
 
+  async steerHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
+    return this.prompt(text, [], "steer", undefined, undefined, {
+      operationId: randomUUID(), taskFence: structuredClone(control),
+      origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
+    });
+  }
+
+  async stopHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
+    if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
+      || this.taskWorker.identity.operationId !== control.operationId || control.controllerGeneration !== 1) {
+      throw new GatewayError("conflict", "Task operation changed before Stop");
+    }
+    await this.taskWorker.stop();
+  }
+
+  /** Task cancellation follows the root prompt owner, not its disposable
+   * presentation primitive (automatic compaction/retry may have another ID). */
+  async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
+    if (!this.taskWorker || this.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
+    if (this.activeOperationId !== operationId && this.operation?.id !== operationId) return;
+    await this.abort("agent", operationId, reason);
+  }
+
   async prompt(
     text: string,
     images: ImageContent[] = [],
@@ -7090,7 +7116,7 @@ export class RuntimeSlot {
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
     this.assertHomePromptAdmission();
-    if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
+    if (!ownership && !this.taskWorker && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
       return result;
@@ -7274,9 +7300,17 @@ export class RuntimeSlot {
       if (this.taskWorker) {
         const trust = await this.dependencies.trust.requireResolved(this.cwd);
         if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
-        if (ownership?.operationId !== this.taskWorker.identity.operationId) throw new GatewayError("conflict", "Task worker admission requires its exact operation");
-        await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
-          JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
+        if (ownership?.operationId === this.taskWorker.identity.operationId) {
+          await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
+            JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
+        } else {
+          const fence = ownership?.taskFence;
+          if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
+            || !session.isStreaming || !this.taskWorker.acceptsSteering
+            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId || fence.controllerGeneration !== 1))) {
+            throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
+          }
+        }
       }
       while (this.isAgentAdmissionSettling) {
         await this.waitForStateChange();
@@ -7521,7 +7555,9 @@ export class RuntimeSlot {
             // Pi has no active Agent signal during pre-prompt compaction. Stop
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
-            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)) {
+            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
+              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId
+                && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
               preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
@@ -7534,6 +7570,12 @@ export class RuntimeSlot {
             // resumes. Record the SDK's disposition now, not one turn later.
             invocation.lifecycle = "accepted";
             this.invocations.set(invocationId, invocation);
+            if (this.taskWorker && operationId !== this.taskWorker.identity.operationId) {
+              this.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
+                taskHash: createHash("sha256").update(this.taskWorker.identity.taskId).digest("hex").slice(0, 16),
+                operationHash: createHash("sha256").update(this.taskWorker.identity.operationId).digest("hex").slice(0, 16),
+                action: "steer", disposition: "accepted", controllerGeneration: 1 });
+            }
             acceptedResolve(true);
           },
         }));
@@ -7934,7 +7976,17 @@ export class RuntimeSlot {
     // proves exact operation identity and reports any unresolved receipt after
     // cancellation instead of clearing the persistence fence.
     this.assertAvailable();
-    if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
+    const taskOperationId = this.taskWorker?.identity.operationId;
+    const taskOwnsForeground = taskOperationId !== undefined && this.activeOperationId === taskOperationId;
+    const targetsTask = expectedOperationId === taskOperationId
+      || (expectedOperationId === undefined && (taskOwnsForeground || !this.operation))
+      || (taskOwnsForeground && expectedOperationId === this.operation?.id);
+    if (this.taskWorker?.controlsActive && terminalErrorCode === "user-abort" && targetsTask) {
+      await this.taskWorker.stop();
+      return;
+    }
+    if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId
+      && !(taskOwnsForeground && expectedOperationId === taskOperationId)) {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
 

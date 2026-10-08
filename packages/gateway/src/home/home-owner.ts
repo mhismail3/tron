@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeTaskStore } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
 import { chmod, mkdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef } from "../protocol/types.js";
@@ -195,6 +195,41 @@ export class HomeOwner {
       throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
     }
     return this.tasks.start({ homeId: record.homeId, generation: record.generation }, request);
+  }
+
+  async reconfirmTaskPermissions(): Promise<{ reconfirmed: true }> {
+    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
+    await this.tasks.reconfirmPermissions();
+    return { reconfirmed: true };
+  }
+
+  async steerTask(sessionId: string, control: HomeTaskControlRequest & { text: string }): Promise<void> {
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task steering is unavailable");
+    const task = await this.tasks.store.read(control.taskId);
+    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
+    await this.tasks.steer(control);
+  }
+
+  async taskTool(sessionId: string, request: import("./tron-home-extension.js").HomeTaskToolRequest): Promise<unknown> {
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task control is unavailable");
+    const task = await this.tasks.store.read(request.taskId);
+    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
+    if (request.action === "status") return this.taskResult(request.taskId);
+    if (request.action === "steer") await this.steerTask(sessionId, request);
+    else await this.stopTask(request);
+    return { accepted: true };
+  }
+
+  async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
+    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
+    await this.tasks.steer(control);
+  }
+
+  async stopTask(control: HomeTaskControlRequest): Promise<void> {
+    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
+    await this.tasks.stop(control);
   }
 
   async validateTaskMarker(sessionId: string, marker: unknown): Promise<void> {

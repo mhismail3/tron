@@ -5,8 +5,8 @@ Tron Home is an opt-in persistent conversation, one per Gateway installation:
 Home does today: its designation record, its curated runtime, its memory, and the
 request seam that sends each activation the memory's view instead of the
 canonical transcript. Home delegates finite project work through `delegate` into
-ordinary worker sessions with explicit immutable reports. Task status/control,
-wake delivery and Home's own client surface are later slices. Ordinary sessions
+ordinary worker sessions with explicit immutable reports, shared task controls
+and durable spend status. Wake delivery and Home's own client surface are later slices. Ordinary sessions
 are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
@@ -283,8 +283,9 @@ strict v1 format requires exactly these keys:
 | `target`, `workerProfile`, `policyRevision` | Immutable absolute target (at most 4 KiB UTF-8), qualified worker-profile identity and positive policy revision; storage is not trust/admission authority |
 | `grantRef`, `scopeRef` | Nullable authority references; at most one, must name an existing authorization record, fill once then cannot swap |
 | `lifecycle` | `pending`, `active`, or `terminal`; active requires authority and session/operation/controller identity; terminal requires terminal evidence |
-| `sessionId`, `operationId`, `controllerGeneration` | Nullable execution identity, populated by dispatch; shared control is a later slice |
-| `spend` | Null or exact `{ inputTokens, outputTokens, knownCostUSD, pricingProvenance, unpriced }`; safe nonnegative token counts, finite nonnegative known cost only with bounded price provenance, and an explicit unpriced flag |
+| `sessionId`, `operationId`, `controllerGeneration` | Nullable execution identity, populated by dispatch; shared control fences the active operation/controller generation |
+| `stopIntent` | Null or exact `{ operationId, controllerGeneration, requestedAt }`; durable exact-operation Stop intent, never cleared or replaced |
+| `spend` | Null or exact `{ sourceDigest, inputTokens, outputTokens, knownCostUSD, pricingProvenance, unpriced }`; safe nonnegative token counts, finite nonnegative known cost only with bounded price provenance, and an explicit unpriced flag |
 | `reportRefs` | Null or at most 256 unique result references, each exact `{ resultId, sessionId, entryId, digest }`; SHA-256 pins the exact canonical report payload, which the result owner verifies |
 | `terminalEvidence` | Null or exact `{ outcome, sessionId, entryIds, reason }`; outcome is `progress`, `needs-input`, `final`, `limited`, `interrupted`, or `unknown`, at most 256 unique entry IDs and a bounded coded reason; `final` requires a report reference, never a last-reply substitution |
 
@@ -325,8 +326,9 @@ recreation changes the epoch, and old scopes/grants are preserved but refused
 with `scope-reconfirmation-required`. An unreadable identity fails closed.
 In-place overwrite that preserves the physical directory is not distinguishable
 from ordinary file replacement; this is not protection against a privileged
-actor restoring files into the live directory. Explicit reconfirmation controls
-arrive in the control slice. Future deletion may atomically retire terminal
+actor restoring files into the live directory. Only explicit `home.reconfirmPermissions` (terminal `/home reconfirm-permissions`)
+re-stamps active standing scopes to the current epoch. Revoked scopes stay revoked;
+one-use grants are never re-stamped or renewed. Future deletion may atomically retire terminal
 acknowledged task/result/event evidence only 90 days after ack; pending,
 unacknowledged, blocked and outcome-unknown evidence is never age-pruned.
 There is no deletion API yet.
@@ -344,8 +346,8 @@ binary or power-loss test.
 HomeOwner constructs the store, its authorization adapter and dispatcher beside
 Home's memory. Startup does not initialize the task namespace or enable a scope:
 first dispatch explicitly initializes it and enables the initial trusted-project
-scope. Existing/revoked/stale authority is never silently renewed. No task RPC or
-automatic Home activation is exposed.
+scope. Existing/revoked/stale authority is never silently renewed. Task status/control RPCs expose durable projections and exact commands; there
+is no automatic Home activation.
 
 ## Task authorization foundation
 
@@ -360,7 +362,8 @@ scope, worker profile, policy revision, expiry, and restore epoch; admission
 atomically consumes it. Revoked,
 expired, spent, mismatched, or stale-epoch grants do not authorize work. HomeTaskStore supplies the physical-directory epoch; authorization never infers
 restore from ordinary startup. Dispatch uses this owner before prompt admission;
-user-facing authorization controls are a later slice.
+explicit permission reconfirmation is available, while creating/revoking scopes
+and issuing grants through user-facing controls remains a later slice.
 
 The shared `OwnedSessionDispatch` seam contains a fixed 24-hour wall-time
 ceiling. Only a caller that opts in owns that deadline; ordinary sessions and
@@ -419,15 +422,64 @@ never a latest-assistant pointer.
 A normal final reply without report is `unknown`; a provider length stop or a
 joined deadline stop without report is `limited`. The last canonical assistant
 entry is attached only as evidence. A failed exact stop is `unknown`, with
-`deadline-stop-failed` or `report-stop-failed`, not a false successful join.
-Canonical provider usage is summed once for this exact operation's branch and
-persisted in its terminal task record; monetary cost remains explicitly unpriced.
+`deadline-stop-failed`, `task-stop-failed` or `report-stop-failed`, not a false successful join.
+Canonical provider usage is deduplicated by canonical entry identity over this
+exact operation's history and persisted before live status publication and
+terminal settlement. Contradictory duplicate identities or invalid/overflowing
+counters refuse publication. A digest pins the source identities and deltas.
+Input totals include cache read/write; output tokens are always shown. Pi's
+computed `usage.cost` has no authoritative billing provenance, so all current
+provider amounts are explicitly unpriced, never estimated bills.
 `home.task.transition`, `home.task.spend` and `home.task.runaway-stop` emit only
-bounded/hash references after durable settlement. Reports are stored but are
-not yet delivered: no task status/control RPC, wake inbox, task push or
+bounded/hash references after durable publication. Reports are stored but are
+not yet delivered: no wake inbox, task push or
 result-triggered Home model call is added in this slice. Restart never replays
 accepted work; reconciliation of abandoned active tasks is a later recovery
 slice, so this change does not claim crash-cut task recovery.
+
+## Shared task control and spend status
+
+`home.taskStatus { taskId }` reads the task's durable record, exact active
+operation/controller generation, cumulative token spend and immutable result.
+Status/viewing never changes control. Terminal `/home task <id>` shows lifecycle,
+result outcome, input/cache and output tokens, and explicit unpriced money.
+Home's `task` tool exposes `status`, `steer` and `stop`; it can only control tasks
+bound to the enabled Home's exact identity/generation, never reconfirm permissions.
+
+`home.steerTask { commandId, taskId, operationId, controllerGeneration, text }`
+and `home.stopTask { commandId, taskId, operationId, controllerGeneration }`
+are receipt-backed maintainer controls. Terminal `/home steer <id> <text>` and
+`/home stop <id>` read status then issue the exact fenced command; an intervening
+operation change refuses rather than targeting a successor. Stop receipts may be
+queried/repeated after terminal settlement without repeating cancellation.
+
+Home and maintainer steering share RuntimeSlot's ordinary session lane. Accepted
+lane order, not the caller's wall-clock arrival before asynchronous resolution,
+is authoritative. Steering cannot start a successor operation: both lane admission
+and SDK preflight check the original operation and retired report/Stop admission.
+A report racing a delayed steer prevents that steer from starting after settlement.
+There is no takeover state or transfer command.
+
+Stop is deliberately outside that lane. The operation-owned report/control
+binding persists exact generation-fenced `stopIntent` before aborting its
+pre-admission signal and cancelling/joining the exact RuntimeSlot root prompt
+owner. Automatic compaction/retry presentation can carry a different primitive
+ID: cancellation follows its root ownership, not a snapshot-ID comparison. An
+ordinary session Stop on that task-owned primitive reaches the same durable
+intent owner. Terminal settlement modifies the latest durable task under the store mutex, so
+it cannot erase Stop intent or overwrite a newer usage projection. Canonical
+interrupted evidence plus that intent yields `interrupted`, pinned to the exact
+canonical terminal invocation receipt; absent proof remains
+`unknown`. An already-accepted canonical report remains authoritative. The
+operation binding retires its executable callbacks with the worker lease on all
+settlement outcomes, including failed Stop; late reports/steers are refused.
+An uncertain leftover foreground operation still has RuntimeSlot's exact Stop
+escape hatch, without rewriting an already immutable terminal task.
+
+`home.reconfirmPermissions { commandId }` is an explicit maintainer mutation;
+`/home reconfirm-permissions` is its terminal spelling. It is not a model tool,
+startup refresh, grant renewal or recovery replay. It fails closed if the physical
+namespace identity changes during the command. No iOS task surface is added here.
 
 Regenerate task E2E evidence with the named `home-task-dispatch.e2e.test.ts` file
 and `HOME_TASK_REPORT=<artifact-path>`. It includes the actual Home delegate tool,
@@ -462,7 +514,7 @@ imported Registry target is ordinary unless the ledger names it.
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module plus Pi built-ins (codemode, tool-search, MCP) |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles` | agent directory and trusted project resources |
 | System prompt | the agent directory's `SYSTEM.md` and `APPEND_SYSTEM.md` are dropped through `systemPromptOverride`/`appendSystemPromptOverride` | loaded |
-| Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate` | the SDK defaults plus Tron's direct bash tool |
+| Executable tool allowlist | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task` | the SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | a session-local view of the Gateway-wide user-scope runtime | one per session runtime |
