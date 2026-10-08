@@ -13,6 +13,7 @@ import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { delegatedProviderEnvironment } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -34,7 +35,7 @@ async function retainedFiles(root: string): Promise<Record<string, string>> {
 
 // Each selection gets a fresh module/process lifetime, just as a payload restart
 // does. Never mutate the repository pin or reuse a loaded extension across legs.
-it("executes previous → candidate → previous and retains candidate history on rollback", async () => {
+it("executes previous → candidate → previous with detached resume through the selected Gateway host", async () => {
   if (leg) return runLeg();
   const retainedRoot = process.env.TRON_SUBAGENTS_ROLLBACK_ROOT;
   const root = retainedRoot ?? await mkdtemp(join(tmpdir(), "tron-subagents-rollback-"));
@@ -166,6 +167,7 @@ async function runLeg(): Promise<void> {
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
   const overrides = { PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "internal", "subagents"),
+    PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: join(root, "unavailable-inherited-host"),
     npm_config_cache: join(root, "npm-cache"), npm_config_offline: "true", npm_config_registry: "http://registry.invalid" };
   const previous = Object.fromEntries(Object.keys(overrides).map((name) => [name, process.env[name]]));
   let registry: RuntimeRegistry | undefined;
@@ -177,6 +179,10 @@ async function runLeg(): Promise<void> {
   const facts: Record<string, unknown> = { leg, passed: false };
   try {
     Object.assign(process.env, overrides);
+    // Match Gateway startup: the process selects its own host (overriding an
+    // inherited selection) before loading the reserved extension, whose
+    // detached children cannot resolve the Gateway SDK locally.
+    delegatedProviderEnvironment(overrides.PI_SUBAGENTS_TEMP_ROOT);
     const managedSubagents = new ManagedSubagents(tronHome);
     const installedRoot = managedSubagents.install();
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));

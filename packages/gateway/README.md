@@ -280,8 +280,20 @@ The delegated provider is distributed separately from the Gateway's Pi SDK. Its
 single source of version authority is `pi-subagents-pin.json`: the fork commit,
 source archive SHA-256, fork lockfile SHA-256, Node/npm build versions, and
 SHA-512 of the self-contained closure are bound together. `npm run
-check:pi-subagents` validates both immutable inputs, their package identity, and
-every bundled runtime dependency without registry access. A retained predecessor
+check:pi-subagents` validates both selections' immutable inputs and package
+identity, compares source/closure runtime declarations, and traverses the complete
+lock-resolved runtime graph without registry access. Every direct or transitive
+non-peer dependency must resolve within the closure at the exact locked package
+path and version, with matching runtime declarations and installed npm lock
+`resolved`/`integrity` values. Nested versions, scoped packages, hoisting and cycles
+use the same graph check; an unpinned nested package cannot shadow a checked
+hoisted dependency. Pi host-provided peers are excluded, not dependencies merely
+sharing a peer's name. The integrity trust chain has three links: build-time
+`npm ci` verifies dependency tarballs against the lockfile SRI, deterministic
+packaging pins the resulting closure bytes with SHA-512, and the offline checker
+verifies that digest plus graph completeness and installed lock metadata. It does
+not attempt to recompute original registry-tarball SRI from extracted files.
+A retained predecessor
 pin must bind its exact source archive, lockfile, and self-contained closure;
 a fork predecessor carries the complete prior build provenance, while a registry
 predecessor also binds registry integrity. A partial rollback record is rejected. The retained
@@ -326,7 +338,10 @@ inputs, reused artifact paths, and mismatched provenance are refused. The update
 installed Gateway homes, deploys, or starts a service. `test:pi-subagents-scripts`
 covers real local-git export/pack/build/check, both execution gates, unusable
 candidate and return-leg resume refusal, and late-failure restoration; only the
-online release metadata boundary is faked in those tests. Work verification selects the offline
+online release metadata boundary is faked in those tests. The successful update
+regression compares the complete retained prior pin unchanged (repository,
+commit, source/lock/closure paths and hashes), and real previous/return legs
+require its exact fork-bound receipt. Work verification selects the offline
 checker and script suite for provider pin/artifacts/scripts, package manifests,
 and Node pin changes, not unrelated runtime sources.
 
@@ -370,7 +385,15 @@ every installed closure file against the pinned archive; a receipt alone cannot
 bless changed bytes. SDK peer ranges are checked against the selected Gateway payload. Pi's extension
 loader aliases their imports to its own host SDK exports; no SDK peer copies or
 links are installed, so a new Gateway payload can reuse the same immutable root.
-They never resolve from user or global npm.
+Before provider initialization, the delegated-provider environment owner also
+sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the running payload's own
+resolved `@earendil-works/pi-coding-agent` package root, replacing any inherited
+override. This process-lifetime binding lets the reserved provider's detached
+children use the selected host even when argv is not a Pi CLI and the reserved
+install has no SDK ancestor. Restart/rollback selects the new process's host;
+no SDK files or links are added to the provider install. They never resolve from
+user or global npm. Arbitrary shell commands still filter `PI_*`; this binding
+is for the provider's own children, not a shell command environment.
 The exact loaded extension gets a build-bound `tron:pi-subagents@…#…` owner;
 user npm sources and provider-shaped local paths grant no delegated authority.
 The existing per-extension registration admission also reserves `subagent` for
@@ -410,7 +433,10 @@ same canonical child identity/output and the producer's observed runner/writer
 exit-0 proof, then reads terminal producer status. Scripted model responses are
 turn-addressed, not globally queued, so parent notifications and the revived
 child cannot steal each other's responses. The fixture supplies the same reserved
-delegated-artifact root as Gateway startup, before extension initialization.
+delegated-artifact root and process-owned Pi host binding as Gateway startup,
+before extension initialization. Its return-leg detached resume proves the host
+binding works from a reserved install, including overriding an unavailable
+inherited host selection.
 The original parent/child JSONL prefixes and all other retained session-tree run
 artifacts must remain unchanged; supported continuation appends canonical history rather
 than converting it. Both immutable installs/receipts survive rollback. Only the

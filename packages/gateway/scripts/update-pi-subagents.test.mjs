@@ -90,9 +90,9 @@ test("packs committed objects, builds a closure and retains current as previous"
     const candidate = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
     assert.equal(candidate.version, "0.76.1-tron.99");
     assert.deepEqual(candidate.fork, { repository: null, commit });
-    assert.equal(candidate.previous?.version, pin.version);
-    assert.deepEqual(candidate.previous.fork, pin.fork);
-    assert.deepEqual(candidate.previous.closure, pin.closure);
+    const { previous: _olderPin, ...retainedPin } = pin;
+    // A rollback selection is the original build, not just a version/digest pair.
+    assert.deepEqual(candidate.previous, retainedPin);
     assert.equal(result.latestUpstream, "0.77.0");
     assert.equal(readFileSync(unrelated, "utf8"), "keep");
     for (const [name, bytes] of Object.entries(original)) assert.deepEqual(readFileSync(join(target, "artifacts", name)), bytes);
@@ -102,7 +102,9 @@ test("packs committed objects, builds a closure and retains current as previous"
     for (const name of ["previous", "candidate", "rollback"]) {
       const leg = result.rollbackProbe.legs.find((item) => item.leg === name);
       assert.ok(leg, `missing ${name} execution`);
-      assert.equal(leg.receipt.forkCommit, name === "candidate" ? commit : pin.fork.commit);
+      const selection = name === "candidate" ? candidate : retainedPin;
+      assert.deepEqual(leg.receipt, { version: selection.version, sha512: selection.closure.sha512,
+        forkCommit: selection.fork.commit });
     }
     assert.equal(git(fork, "rev-parse", "HEAD"), commit);
     assert.deepEqual(readdirSync(join(env.TMPDIR)), []);

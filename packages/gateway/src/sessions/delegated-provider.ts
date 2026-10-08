@@ -1,7 +1,8 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Extension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ExtensionToolOrigin } from "../protocol/types.js";
 import { isManagedSubagentExtension } from "./managed-subagents.js";
@@ -41,22 +42,26 @@ const DELEGATED_ARTIFACT_FILES = [
 ] as const;
 
 /** One Gateway-admitted provider root per resolved Tron home. */
-/** pi-subagents 0.59.0 reads this before deriving async/results/chain roots. */
 export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
+
+// The pinned SDK exports dist/index.js. Resolve from this running payload once,
+// not from the reserved provider install (which deliberately has no SDK copy).
+const PI_HOST_PACKAGE_ROOT = realpathSync(dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")))));
 
 export function delegatedArtifactRoot(tronHome: string): string {
   return join(resolve(tronHome), "internal", "subagents");
 }
 
 /**
- * Propagates the provider's supported root contract to every child launch.
- * The installed extension remains provider-owned; this is intentionally an
- * environment contract rather than a settings or source rewrite.
+ * Binds provider children to this process's artifact root and selected Pi host
+ * before extension initialization. A payload restart selects a new host; neither
+ * the user npm tree nor an inherited override can choose the detached runtime.
  */
 export function delegatedProviderEnvironment(root: string, environment: NodeJS.ProcessEnv = process.env): void {
   const canonicalRoot = resolve(root);
   if (!isAbsolute(canonicalRoot) || canonicalRoot === sep) throw new Error("delegated artifact root must be absolute");
   environment[DELEGATED_PROVIDER_ROOT_ENV] = canonicalRoot;
+  environment.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = PI_HOST_PACKAGE_ROOT;
 }
 
 /** Prepare the admission root before the provider can publish a run. */
