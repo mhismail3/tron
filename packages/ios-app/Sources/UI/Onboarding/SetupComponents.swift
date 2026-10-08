@@ -430,15 +430,13 @@ struct ProviderConfigurationSheet: View {
             if provider.isLocalOnly {
                 // Local models have no account, so this status is authoritative
                 // without a Gateway usage capability or a provider.usage read.
-                TronGlassCard(accent: .tronEmerald) {
-                    TronSettingsRow(
-                        icon: "infinity",
-                        title: "Unlimited",
-                        subtitle: "Local models run on this Mac with no account usage limits.",
-                        accent: .tronEmerald
-                    )
-                    .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
-                }
+                TronSettingsRow(
+                    icon: "infinity",
+                    title: "Unlimited",
+                    subtitle: "Local models run on this Mac with no account usage limits.",
+                    accent: .tronEmerald
+                )
+                .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
             } else if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
                 TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
             } else if let usage = usageController.snapshots[provider.id] {
