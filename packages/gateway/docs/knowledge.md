@@ -442,6 +442,20 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
 extension. Connection setup owns the selected account, its Raindrop collection-role mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
+The Mac Keychain credential adapter accepts nonempty printable ASCII tokens
+(`0x20`–`0x7E`) on write. Apple's `find-generic-password -w` hex-encodes values
+containing non-printable bytes without a marker, so Unicode/control-character
+secrets cannot round-trip unambiguously and are rejected before starting a child.
+Writes send one exactly quoted `add-generic-password` command to `security -i`
+through stdin, never secret process arguments; the entire escaped UTF-8 command
+must fit below the CLI's 4096-byte input-buffer limit. Reads preserve token
+whitespace, removing only the CLI's output newline. Production uses the default
+Keychain target. `connector-credentials.test.ts` injects a private temporary
+keychain path for every credential command, creates/unlocks it without user
+interaction or search-list changes, and deletes it in `finally`. Construction
+under Vitest or `NODE_ENV=test` without that path refuses before any Keychain
+operation. See [verification diagnostics](observability.md#test-and-verification-environment-preflight).
+
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
