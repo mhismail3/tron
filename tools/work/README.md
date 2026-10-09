@@ -923,8 +923,10 @@ as does `acceptance` for the journeys it can run.
 6. **Wait.** It polls the pull request every `land.pollSeconds`, for at most
    `land.waitSeconds`. It waits until every check run named in
    `land.requiredChecks` and the `verify.statusContext` status succeed on the
-   pull request's head, and that head is the commit it pushed. A required check
-   that fails stops `land` and names the check. A timeout also stops it.
+   pull request's head, and that head is the commit it pushed. A required job
+   that CI skipped because the change does not touch its inputs counts as
+   passed, as in GitHub's own required-check rule. A required check that fails
+   or is cancelled stops `land` and names the check. A timeout also stops it.
    Neither merges.
 7. **Base moves.** Once the checks pass, it fetches the base branch again.
    When the head no longer contains its tip, steps 2 to 6 repeat, at most
@@ -1133,6 +1135,7 @@ Project state and records every call. The live E2E covers GitHub itself.
     head with `--match-head-commit`.
 35. **A red or pending required check is merged.** `land` merges only after
     every required check run and the verify status succeed on the pushed head.
+    A scope-skipped required job counts as passed; a cancelled one stops `land`.
     A failure or a timeout stops `land` without merging.
 36. **The base branch moves between the check and the merge.** A base tip
     the head lacks once the checks pass starts another round, and the merge
