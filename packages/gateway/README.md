@@ -1799,10 +1799,12 @@ enter that owner and are not cancelled by foreground Stop. The same owner enforc
 tool's `timeout` (seconds, validated as Pi validates it): on expiry it terminates the owned
 tree the same way, and the call fails with Pi's "Command timed out after N seconds" and the
 output written so far. If the shell has already exited, its process group is still killed.
-After the shell exits, a call keeps reading output for as long as descendants write to the
-inherited pipe, as Pi does; once a timeout or Stop has asked for termination, that output can
-extend the call by at most two seconds, so a descendant that escaped the group cannot hold
-it open. Pi's tool only passes the timeout to the operations it runs on, so operations that
+After the shell exits, a call keeps reading output while descendants write to the inherited
+pipe, as Pi does (pi#5303). The pipe must stay busy: once it has been silent for 100 ms after
+the shell's exit, the call settles, so a quiet descendant that holds the pipe cannot hang it,
+and output that descendant writes after that silence is not read. Once a timeout or Stop has
+asked for termination, that output can extend the call by at most two seconds, so a
+descendant that escaped the group cannot hold it open. Pi's tool only passes the timeout to the operations it runs on, so operations that
 ignore it leave every command unbounded (#499).
 Stop is scoped to one invocation, not to an extension workflow. A stopped run's canonical
 assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
