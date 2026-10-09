@@ -611,6 +611,7 @@ export class RuntimeSlot {
   /** Only an admitted agent_start may own a terminal candidate. Later SDK
    * progress can reconstruct a projection even for a drain-rejected run. */
   private notificationRun: { assistant?: AgentMessage } | undefined;
+  private waitingNotificationEpisode: string | undefined;
   /** One foreground-observation decision is shared by durable attention and
    * automatic completion notification policy for the same canonical entry. */
   private readonly completionDispositions = new Map<string, boolean>();
@@ -2856,6 +2857,8 @@ export class RuntimeSlot {
     const notifications = this.dependencies.notifications;
     if (!notifications) return;
     try {
+      const pendingBackgroundProcesses = this.pendingBackgroundProcesses();
+      const waitingEpisode = pendingBackgroundProcesses.join("\0");
       await notifyTronAgentTerminal({
         sessionId: this.id,
         sourceId,
@@ -2863,13 +2866,26 @@ export class RuntimeSlot {
         sessionTitle: this.notificationTitle(),
         ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
         observed: this.completionObserved(sourceId),
+        pendingBackgroundWork: pendingBackgroundProcesses.length,
+        waitingEpisode: waitingEpisode !== "" && waitingEpisode === this.waitingNotificationEpisode,
         suppressAutomatic: (input) => notifications.suppressAutomatic(input),
         enqueue: (input) => notifications.enqueue(input),
       });
+      this.waitingNotificationEpisode = waitingEpisode || undefined;
     } catch {
       // Push admission is best-effort and must never fail canonical settlement.
       this.emit("session.diagnostic", { code: "terminal-notification-failed" });
     }
+  }
+
+  /** The process activity projection owns live delegated work that may wake
+   * this session; paused and recent history are not pending work. */
+  private pendingBackgroundProcesses(): string[] {
+    return [...this.extensionActivities.values()]
+      .filter((activity) => this.extensionActivityOwnsLiveWork(activity)
+        && ["asynchronous", "workflow"].includes(activity.mode?.toLowerCase() ?? ""))
+      .map((activity) => `${activity.toolCallId}:${activity.runId ?? activity.activityId ?? activity.id}`)
+      .sort();
   }
 
   private takeAgentTerminal(operationId: string | undefined): { sourceId: string; outcome: AgentTerminalOutcome } | undefined {

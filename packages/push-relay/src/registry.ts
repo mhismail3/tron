@@ -11,6 +11,7 @@ import {
   type InstallationRegistration,
   type LedgerRow,
   type RegistrationResult,
+  type NotificationRequest,
   type RelayResult,
   type StoredGrant,
   type StoredInstallation,
@@ -34,10 +35,11 @@ const MAX_CHALLENGE_ATTEMPTS = 3;
 const MAX_INSTALLATIONS = 50_000;
 const MAX_GRANTS = 100_000;
 const MAX_GRANTS_PER_INSTALLATION = 8;
-const HOURLY_LIMIT = 30;
-const DAILY_LIMIT = 200;
-const INSTALLATION_HOURLY_LIMIT = 50;
-const INSTALLATION_DAILY_LIMIT = 300;
+// Per-device runaway backstop; routine use is not throttled below this ceiling.
+const HOURLY_LIMIT = 120;
+const DAILY_LIMIT = 1_000;
+const INSTALLATION_HOURLY_LIMIT = 120;
+const INSTALLATION_DAILY_LIMIT = 1_000;
 const RECEIPT_RETENTION_SECONDS = 7 * 24 * 60 * 60;
 // APNs owns a 15-second timeout. A second request inside this wider bound can
 // safely poll the exact in-flight provider attempt; beyond it, a crashed Worker
@@ -311,7 +313,7 @@ export class PushRegistry {
       : undefined;
     if (!grant || grant.enabled !== 1 || !authentication) return json({ error: "invalid_signature" }, 401);
     const bodyHash = authentication.bodyHash;
-    const installation = await this.beginDispatch(requestId, grant.grant_id, bodyHash);
+    const installation = await this.beginDispatch(requestId, grant.grant_id, bodyHash, notification);
     if (installation instanceof Response) return installation;
 
     const route = ROUTES[installation.route];
@@ -378,7 +380,7 @@ export class PushRegistry {
     });
   }
 
-  private async beginDispatch(requestId: string, grantId: string, bodyHash: string): Promise<Response | StoredInstallation> {
+  private async beginDispatch(requestId: string, grantId: string, bodyHash: string, notification: NotificationRequest): Promise<Response | StoredInstallation> {
     return this.state.storage.transaction(async () => {
       // Capture authority, current token and quota together after async crypto.
       // A pre-admission token snapshot can already belong to a retired registration.
@@ -421,11 +423,16 @@ export class PushRegistry {
       }>("SELECT hourly_window, hourly_count, daily_window, daily_count FROM installation_limits WHERE installation_id = ?", installationId).toArray()[0];
       const installationHourly = installationLimit && Number(installationLimit.hourly_window) === hour ? Number(installationLimit.hourly_count) : 0;
       const installationDaily = installationLimit && Number(installationLimit.daily_window) === day ? Number(installationLimit.daily_count) : 0;
-      if (hourlyCount >= HOURLY_LIMIT || dailyCount >= DAILY_LIMIT
-        || installationHourly >= INSTALLATION_HOURLY_LIMIT || installationDaily >= INSTALLATION_DAILY_LIMIT) {
-        const hourlyLimited = hourlyCount >= HOURLY_LIMIT || installationHourly >= INSTALLATION_HOURLY_LIMIT;
+      const dailyExempt = notification.notificationKind === "ask" || notification.notificationKind === "explicit";
+      const hourlyLimited = hourlyCount >= HOURLY_LIMIT || installationHourly >= INSTALLATION_HOURLY_LIMIT;
+      const dailyLimited = !dailyExempt && (dailyCount >= DAILY_LIMIT || installationDaily >= INSTALLATION_DAILY_LIMIT);
+      if (hourlyLimited || dailyLimited) {
         const retryAfterSeconds = hourlyLimited ? Math.max(1, hour + 3600 - now) : Math.max(1, day + 86400 - now);
-        const result: RelayResult = { status: "rate_limited", reason: "rate_limited", retryAfterSeconds };
+        const result: RelayResult = {
+          status: "rate_limited",
+          reason: hourlyLimited ? "hourly_limit" : "daily_limit",
+          retryAfterSeconds,
+        };
         this.state.storage.sql.exec(
           "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'terminal', ?, 0, ?)",
           requestId, grant.grant_id, bodyHash, JSON.stringify(result), now,
@@ -434,7 +441,7 @@ export class PushRegistry {
       }
       this.state.storage.sql.exec(
         "UPDATE grants SET hourly_window = ?, hourly_count = ?, daily_window = ?, daily_count = ?, updated_at = ? WHERE grant_id = ?",
-        hour, hourlyCount + 1, day, dailyCount + 1, now, grant.grant_id,
+        hour, hourlyCount + 1, day, dailyCount + (dailyExempt ? 0 : 1), now, grant.grant_id,
       );
       this.state.storage.sql.exec(
         `INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at)
@@ -442,7 +449,7 @@ export class PushRegistry {
          ON CONFLICT(installation_id) DO UPDATE SET hourly_window = excluded.hourly_window,
          hourly_count = excluded.hourly_count, daily_window = excluded.daily_window,
          daily_count = excluded.daily_count, updated_at = excluded.updated_at`,
-        installationId, hour, installationHourly + 1, day, installationDaily + 1, now,
+        installationId, hour, installationHourly + 1, day, installationDaily + (dailyExempt ? 0 : 1), now,
       );
       this.state.storage.sql.exec(
         "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'in_progress', NULL, 1, ?)",
