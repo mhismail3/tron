@@ -2,7 +2,7 @@ import XCTest
 @testable import TronMobile
 import TronMobileCore
 
-/// Task DTO corruption and late publication are not reliably gesture-reproducible.
+/// Task and permission DTO admission. Late read publication is owned by `HomeSheetTests`.
 @MainActor
 final class HomeTaskSheetTests: XCTestCase {
     private func page() throws -> JSONValue {
@@ -40,39 +40,5 @@ final class HomeTaskSheetTests: XCTestCase {
             "approved": .bool(false), "decidedAt": .number(1000), "expiresAt": .number(2000)])
         wrong = value.objectValue!; wrong["decisions"] = .array([decision, decision])
         XCTAssertThrowsError(try HomeTaskPermissionsDTO.decode(.object(wrong)))
-    }
-
-    func testTaskReadRejectsOutOfOrderSuccessAndLateErrorAfterRetirement() async throws {
-        let coordinator = PresentationActivityCoordinator()
-        let token = PresentationSurfaceToken(id: "tasks", generation: UUID())
-        coordinator.register(token, parent: nil)
-        defer { coordinator.retire(token) }
-        let identity = HomeSheetReadIdentity(profileID: "p", connectionID: 1, lifecycleGeneration: 1, surfaceToken: token)
-        let owner = HomeSheetReadOwner()
-        let started = expectation(description: "old task read")
-        var resume: CheckedContinuation<HomeSheetContent, Error>?
-        let old = Task {
-            await owner.load(requestID: UUID(), identity: identity, coordinator: coordinator, isCurrent: { true }) {
-                try await withCheckedThrowingContinuation { resume = $0; started.fulfill() }
-            }
-        }
-        await fulfillment(of: [started], timeout: 1)
-        let status = try HomeStatusDTO.decode(try JSONDecoder().decode(JSONValue.self, from: Data(#"{"phase":"ready","activation":{"available":false},"readiness":{"ready":true,"gaps":[]},"recovery":{"action":"none"},"available":true,"enabled":true,"live":false,"sessionPresent":true,"memory":{"configured":true,"open":true},"taskRecovery":{"available":false,"reason":"unsafe-state"}}"#.utf8)))
-        await owner.load(requestID: UUID(), identity: identity, coordinator: coordinator, isCurrent: { true }) {
-            .tasks(nil, status)
-        }
-        resume?.resume(returning: .tasks(try HomeTaskPageDTO.decode(page()), status)); await old.value
-        guard case .loaded(_, .tasks(nil, let installed)) = owner.state else { return XCTFail("Old task list replaced recovery fence") }
-        XCTAssertEqual(installed.taskRecovery?.reason, "unsafe-state")
-        owner.retire()
-        let lateStarted = expectation(description: "retired permission read")
-        let late = Task {
-            await owner.load(requestID: UUID(), identity: identity, coordinator: coordinator, isCurrent: { true }) {
-                try await withCheckedThrowingContinuation { resume = $0; lateStarted.fulfill() }
-            }
-        }
-        await fulfillment(of: [lateStarted], timeout: 1); owner.retire()
-        resume?.resume(throwing: NSError(domain: "late", code: 1)); await late.value
-        guard case .idle = owner.state else { return XCTFail("Retired permission read published error") }
     }
 }
