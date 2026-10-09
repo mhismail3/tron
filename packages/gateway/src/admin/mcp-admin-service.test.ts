@@ -187,6 +187,8 @@ describe("McpAdminService", () => {
 
   it("maps a contended token configuration lock to a retryable busy error", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-token-lock-"));
+    // Registered before the lock is taken, so a failed setup still removes the root.
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
     const config = join(root, "mcp.json");
     await writeFile(config, JSON.stringify({ mcpServers: { fixture: { url: "https://fixture.invalid/mcp" } } }));
     const owner: McpCredentialOwner = { async store() { return "account"; }, async remove() {} };
@@ -197,7 +199,7 @@ describe("McpAdminService", () => {
       const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
       await expect(service.storeBearer({ scope: "global" }, "fixture", "token"))
         .rejects.toMatchObject({ code: "busy", retryable: true });
-    } finally { await release(); await rm(root, { recursive: true, force: true }); }
+    } finally { await release(); }
   });
 
   it("scopes credential removal to the same config scope", async () => {
