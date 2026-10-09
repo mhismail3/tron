@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
@@ -51,6 +51,8 @@ import {
   requireBundledPayload,
   resolveRecoveryPayload,
   restoreSelectionStateAndClearAttempt,
+  makeMutable,
+  makeImmutable,
   stagePayload,
   stagedCandidate,
   runBounded,
@@ -919,6 +921,137 @@ async function assertSealedPayload(root) {
     for (const entry of await readdir(root)) await assertSealedPayload(join(root, entry));
   } else assert.ok([0o444, 0o555].includes(info.mode & 0o777), `${root} must be a sealed file`);
 }
+
+// Entry modes keyed by path relative to root. Links are recorded without a mode:
+// their own inode mode is not a payload authority and must not be touched.
+async function entryModes(root) {
+  const modes = {};
+  const visit = async (path) => {
+    const info = await lstat(path);
+    const key = relative(root, path) || ".";
+    if (info.isSymbolicLink()) modes[key] = "link";
+    else modes[key] = `${info.isDirectory() ? "dir" : "file"}:${(info.mode & 0o7777).toString(8)}`;
+    if (info.isDirectory()) for (const entry of await readdir(path)) await visit(join(path, entry));
+  };
+  await visit(root);
+  return modes;
+}
+
+// Representative payload entries: executables with and without owner-only bits,
+// setuid/setgid, read-only and unreadable files, nested directories with restrictive
+// modes, and an in-tree link. An out-of-tree link target lives beside the root.
+async function makeModeTree(root, { escapingLink = false } = {}) {
+  await mkdir(join(root, "app", "dist"), { recursive: true });
+  await mkdir(join(root, "app", "a", "b"), { recursive: true });
+  await mkdir(join(root, "app", "c"), { recursive: true });
+  const files = {
+    "app/dist/index.js": 0o644, "app/dist/tool": 0o755, "app/dist/owner-exec": 0o700, "app/dist/x-only": 0o100,
+    "app/dist/setuid": 0o4755, "app/dist/setgid": 0o2755, "app/dist/readonly": 0o400, "app/dist/zero": 0o000,
+    "app/dist/readonly-exec": 0o555, "app/a/b/deep": 0o600,
+  };
+  for (const [path, mode] of Object.entries(files)) {
+    await writeFile(join(root, path), "payload\n");
+    await chmod(join(root, path), mode);
+  }
+  await symlink("dist/index.js", join(root, "app", "rel-file"));
+  if (escapingLink) {
+    await mkdir(join(dirname(root), "outside"), { recursive: true });
+    await writeFile(join(dirname(root), "outside", "target"), "outside\n");
+    await chmod(join(dirname(root), "outside", "target"), 0o600);
+    await symlink("../../outside/target", join(root, "app", "out-link"));
+  }
+  await chmod(join(root, "app", "a", "b"), 0o555);
+  await chmod(join(root, "app", "a"), 0o500);
+  await chmod(join(root, "app", "c"), 0o700);
+}
+
+const UNSEALED_FILE_MODES = {
+  "app/dist/index.js": "file:644", "app/dist/tool": "file:755", "app/dist/owner-exec": "file:755",
+  "app/dist/x-only": "file:755", "app/dist/setuid": "file:755", "app/dist/setgid": "file:755",
+  "app/dist/readonly": "file:644", "app/dist/zero": "file:644", "app/dist/readonly-exec": "file:755",
+  "app/a/b/deep": "file:644",
+};
+const SEALED_FILE_MODES = {
+  "app/dist/index.js": "file:444", "app/dist/tool": "file:555", "app/dist/owner-exec": "file:555",
+  "app/dist/x-only": "file:555", "app/dist/setuid": "file:555", "app/dist/setgid": "file:555",
+  "app/dist/readonly": "file:444", "app/dist/zero": "file:444", "app/dist/readonly-exec": "file:555",
+  "app/a/b/deep": "file:444",
+};
+const UNSEALED_DIRECTORY_MODES = {
+  ".": "dir:755", "app": "dir:755", "app/dist": "dir:755", "app/a": "dir:755", "app/a/b": "dir:755", "app/c": "dir:755",
+};
+const SEALED_DIRECTORY_MODES = {
+  ".": "dir:555", "app": "dir:555", "app/dist": "dir:555", "app/a": "dir:555", "app/a/b": "dir:555", "app/c": "dir:555",
+};
+
+// Sealing sets exactly these modes and never follows or re-modes a link: an
+// out-of-tree target keeps its mode, and a refused escaping link leaves the tree
+// unsealed instead of half-sealed.
+test("payload sealing sets exact entry modes and never follows links", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-modes-")));
+  try {
+    const tree = join(root, "tree");
+    await mkdir(tree);
+    await makeModeTree(tree, { escapingLink: true });
+    const outside = join(root, "outside", "target");
+    const linkInfo = await lstat(join(tree, "app", "out-link"));
+
+    await makeMutable(tree);
+    assert.deepEqual(await entryModes(tree), { ...UNSEALED_DIRECTORY_MODES, ...UNSEALED_FILE_MODES, "app/rel-file": "link", "app/out-link": "link" });
+    assert.equal((await lstat(outside)).mode & 0o7777, 0o600, "an out-of-tree link target must not be re-moded");
+    assert.equal((await lstat(join(tree, "app", "out-link"))).mode & 0o7777, linkInfo.mode & 0o7777, "link inode modes are not payload modes");
+
+    const unsealed = await entryModes(tree);
+    await assert.rejects(makeImmutable(tree), /payload symlink escapes root/);
+    assert.deepEqual(await entryModes(tree), unsealed, "a refused payload is not partially sealed");
+
+    await rm(join(tree, "app", "out-link"));
+    await makeImmutable(tree);
+    assert.deepEqual(await entryModes(tree), { ...SEALED_DIRECTORY_MODES, ...SEALED_FILE_MODES, "app/rel-file": "link" });
+    await makeMutable(tree);
+    assert.deepEqual(await entryModes(tree), { ...UNSEALED_DIRECTORY_MODES, ...UNSEALED_FILE_MODES, "app/rel-file": "link" });
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+// Sealing refuses an unsupported entry before any mode changes. Unsealing opens
+// each directory before reading it, so it may already have opened directories
+// when it refuses; cleanup removes that tree either way. A failed staging tree
+// with an unreadable directory must still unseal, or cleanup cannot remove it.
+test("payload sealing refuses unsupported entries and opens unreadable directories", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-modes-refuse-")));
+  try {
+    const tree = join(root, "tree");
+    await mkdir(tree);
+    await makeModeTree(tree);
+    await runBounded("/usr/bin/mkfifo", [join(tree, "app", "fifo")]);
+    const before = await entryModes(tree);
+    await assert.rejects(makeImmutable(tree), /payload contains unsupported entry/);
+    assert.deepEqual(await entryModes(tree), before, "a refused payload keeps its modes");
+    await assert.rejects(makeMutable(tree), /payload contains unsupported entry/);
+    await rm(join(tree, "app", "fifo"));
+
+    await mkdir(join(tree, "app", "stuck"));
+    await writeFile(join(tree, "app", "stuck", "file"), "stuck\n");
+    await chmod(join(tree, "app", "stuck"), 0o000);
+    await makeMutable(tree);
+    assert.equal((await entryModes(tree))["app/stuck"], "dir:755");
+    assert.equal((await entryModes(tree))["app/stuck/file"], "file:644");
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+// Modes are not part of the fingerprint, so sealing a real payload must keep its
+// fingerprint, and its runtime executables must stay executable for admission.
+test("sealing a real payload preserves its fingerprint and executable runtime", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-seal-fingerprint-")));
+  try {
+    const payload = await makePreflightFixture(join(root, "payload"));
+    const fingerprint = await payloadFingerprint(payload);
+    await makeImmutable(payload);
+    assert.equal(await payloadFingerprint(payload), fingerprint);
+    await makeMutable(payload);
+    assert.equal(await payloadFingerprint(payload), fingerprint);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
 
 // Failure modes (#116), each observed through the real publication paths:
 // 1. stagePayload freezes its staging root before renaming it into versions/,
