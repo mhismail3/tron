@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, open, opendir } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, readdir, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -13,6 +13,10 @@ const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u;
 const OUTCOMES = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"] as const;
+/** The staged name `durableAtomicWriteJson` gives a publication in flight:
+ * `<name>.json.<pid>.<12 hex>.tmp`. A crash can leave one behind; it is never a
+ * record, so enumeration skips it and only startup recovery removes it. */
+const ownedTemporaryName = /^(?:authorization|\d{13}-.+)\.json\.\d+\.[0-9a-f]{12}\.tmp$/u;
 
 export interface HomeTaskRecord {
   version: 1;
@@ -155,7 +159,7 @@ export class HomeTaskStore {
     if (!await this.run(() => this.inspect())) return;
     const directory = await this.run(() => opendir(this.directory, { bufferSize: 32 }));
     for await (const entry of directory) {
-      if (entry.name === "authorization.json") continue;
+      if (!isTaskEntry(entry.name)) continue;
       const task = await this.run(async () => {
         const name = parseTaskName(entry.name);
         const authority = await this.inspectAuthority();
@@ -254,6 +258,22 @@ export class HomeTaskStore {
     });
   }
 
+  /** Startup recovery only, before any task surface exists. A temporary is
+   * removed only when it is this user's regular file: anything else in the
+   * namespace is not ours to delete and refuses recovery. */
+  async removeAbandonedTemporaries(): Promise<void> {
+    await this.run(async () => {
+      if (!(await this.inspectAuthority())) return;
+      for (const name of await readdir(this.directory)) {
+        if (!ownedTemporaryName.test(name)) continue;
+        const path = join(this.directory, name);
+        const info = await lstat(path);
+        if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.()) throw new HomeTaskStoreError("unsafe-state");
+        await rm(path, { force: true });
+      }
+    });
+  }
+
   private async run<T>(operation: () => Promise<T>): Promise<T> {
     return this.mutex.run(async () => {
       try {
@@ -306,7 +326,7 @@ export class HomeTaskStore {
     // before the next one; filename/identity equality makes duplicates impossible.
     const directory = await opendir(this.directory, { bufferSize: 32 });
     for await (const entry of directory) {
-      if (entry.name === "authorization.json") continue;
+      if (!isTaskEntry(entry.name)) continue;
       const name = parseTaskName(entry.name);
       const task = await this.readTask(name.taskId);
       if (!task) throw new HomeTaskStoreError("missing-state");
@@ -322,7 +342,7 @@ export class HomeTaskStore {
 
   private async *taskNames(): AsyncGenerator<TaskName> {
     for await (const entry of await opendir(this.directory, { bufferSize: 32 })) {
-      if (entry.name !== "authorization.json") yield parseTaskName(entry.name);
+      if (isTaskEntry(entry.name)) yield parseTaskName(entry.name);
     }
   }
 
@@ -404,6 +424,9 @@ async function assertDirectory(path: string): Promise<void> {
   if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o777) !== 0o700) {
     throw new HomeTaskStoreError("unsafe-state");
   }
+}
+function isTaskEntry(name: string): boolean {
+  return name !== "authorization.json" && !ownedTemporaryName.test(name);
 }
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

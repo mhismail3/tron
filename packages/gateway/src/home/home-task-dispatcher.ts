@@ -61,6 +61,7 @@ export class HomeTaskDispatcher {
   }
 
   private async recoverOwned(): Promise<void> {
+    await this.store.removeAbandonedTemporaries();
     for await (const task of this.store.records()) {
       if (task.lifecycle === "terminal" && task.wake?.push !== "pending") continue;
       if (task.lifecycle !== "terminal") {

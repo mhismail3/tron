@@ -651,6 +651,30 @@ describe("Home task cold reconciliation", () => {
     evidence.push({ case: "task-recovery-fence", operations: result, ordinaryPrompt: true, bytesPreserved: true, restartAvailable: true });
   }, 20_000);
 
+  it("removes a crash-leftover task temporary at the next start, and Home activates", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    // Home's chapter file exists only after its first activation; a cold start
+    // can re-acquire that session only once it has been written.
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const before = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started before restart")]);
+    await before.prompt("Start Home"); await waitFor(() => before.snapshot().configurationBlocker === null, "Home before restart");
+    const leftover = `${await taskFile(f, run.taskId)}.4242.0123456789ab.tmp`;
+    await writeFile(leftover, "{\"partial\":", { mode: 0o600 });
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    const cold = await f.restart();
+    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: true } });
+    await expect(readFile(leftover)).rejects.toMatchObject({ code: "ENOENT" });
+    const home = await cold.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home activates after temporary cleanup")]);
+    await home.prompt("Continue after restart"); await waitFor(() => home.snapshot().configurationBlocker === null, "activation after temporary cleanup");
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Home activates after temporary cleanup");
+    expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
+  }, 20_000);
+
   it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {
     const f = await fixture();
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;

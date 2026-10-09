@@ -398,3 +398,41 @@ describe("Home task recency pages", () => {
     expect(await readFile(oldPath)).toEqual(original);
   });
 });
+
+describe("HomeTaskStore staged publications", () => {
+  // A crash between the temporary write and its rename leaves this name behind.
+  const leftover = (name: string) => `${name}.4242.0123456789ab.tmp`;
+
+  it("skips a crash-leftover temporary in every enumeration and removes it only at recovery", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    const record = (await f.store.read("task-1"))!;
+    const taskTemporary = join(f.directory, leftover(`${String(record.createdAt + 1).padStart(13, "0")}-task-2.json`));
+    const authorizationTemporary = join(f.directory, leftover("authorization.json"));
+    await writeFile(taskTemporary, "{\"partial\":", { mode: 0o600 });
+    await writeFile(authorizationTemporary, "{", { mode: 0o600 });
+    expect((await listed(f.store)).map(row => row.taskId)).toEqual(["task-1"]);
+    expect((await f.store.page({})).items.map(row => row.taskId)).toEqual(["task-1"]);
+    expect(await f.store.read("task-1")).toMatchObject({ taskId: "task-1" });
+    const streamed: string[] = [];
+    for await (const row of f.store.records()) streamed.push(row.taskId);
+    expect(streamed).toEqual(["task-1"]);
+    await f.store.put({ ...task(), taskId: "task-3" }, null);
+    expect(await readFile(taskTemporary, "utf8")).toBe("{\"partial\":");
+    await f.store.removeAbandonedTemporaries();
+    expect((await readdir(f.directory)).filter(name => name.endsWith(".tmp"))).toEqual([]);
+    expect((await listed(f.store)).map(row => row.taskId).sort()).toEqual(["task-1", "task-3"]);
+  });
+
+  it("refuses recovery for a staged name that is not this user's regular file, and removes nothing", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    const outside = join(f.root, "outside.json");
+    await writeFile(outside, "{}", { mode: 0o600 });
+    const linked = join(f.directory, leftover("authorization.json"));
+    await symlink(outside, linked);
+    await expect(f.store.removeAbandonedTemporaries()).rejects.toMatchObject({ code: "unsafe-state" });
+    expect(await readFile(outside, "utf8")).toBe("{}");
+    expect((await lstat(linked)).isSymbolicLink()).toBe(true);
+  });
+});

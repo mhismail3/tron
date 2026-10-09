@@ -310,7 +310,10 @@ unsafe, oversized or contradictory records preserve bytes and refuse with a
 typed `HomeTaskStoreError`. `home.task.store-refused` names only the bounded
 reason. A visible publication whose durability is uncertain fences the store
 instance; a fresh owner must securely reload it rather than continue with stale
-state. Failed pre-rename writes remove only their own temporary artifacts.
+state. Failed pre-rename writes remove only their own temporary artifacts. A crash
+can leave a staged `<name>.json.<pid>.<12 hex>.tmp` behind: enumeration skips it,
+and startup recovery removes it under the store mutex, but only when it is this
+user's regular file; any other entry in the namespace refuses recovery.
 The fixed creation filename survives every replacement; task-ID lookup scans names
 only and refuses multiple matching suffixes before reading a record. Creation time
 in the name and record must agree. Older unreleased `<taskId>.json` layouts and
