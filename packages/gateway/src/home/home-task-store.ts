@@ -94,7 +94,7 @@ export class HomeTaskStore {
     this.authorizationPath = join(this.directory, "authorization.json");
     this.authorization = {
       load: () => this.run(async () => {
-        const state = await this.inspect();
+        const state = await this.inspectAuthority();
         if (!state) throw new HomeTaskStoreError("not-initialized");
         return state;
       }),
@@ -102,9 +102,13 @@ export class HomeTaskStore {
         const next = structuredClone(state);
         return this.run(async () => {
           validateAuthorization({ version: 1, ...next });
-          const current = await this.inspect(task => validateAuthorityReferences(task, next));
+          const current = await this.inspectAuthority();
           if (!current) throw new HomeTaskStoreError("not-initialized");
           if (next.revision !== current.revision || !positive(current.revision + 1)) throw new HomeTaskStoreError("revision-conflict");
+          // Tasks cite scopes and grants by ID and are not re-read on save, so
+          // authority may only append or mark records; removal would dangle them.
+          if (current.scopes.some(scope => !next.scopes.some(candidate => candidate.id === scope.id))
+            || current.grants.some(grant => !next.grants.some(candidate => candidate.id === grant.id))) invalid();
           await this.publish(this.authorizationPath, { version: 1, ...next, revision: current.revision + 1 }, AUTHORIZATION_BYTES);
         });
       },
@@ -156,17 +160,25 @@ export class HomeTaskStore {
   /** Sequential consumers may await mutations between records. Namespace
    * validation finishes under the mutex; no lock is held across a yield. */
   async *records(): AsyncGenerator<HomeTaskRecord> {
-    if (!await this.run(() => this.inspect())) return;
+    // Full validation runs first, so recovery refuses before it acts on any record.
+    let authority = await this.run(() => this.inspect());
+    if (!authority) return;
     const directory = await this.run(() => opendir(this.directory, { bufferSize: 32 }));
     for await (const entry of directory) {
       if (!isTaskEntry(entry.name)) continue;
       const task = await this.run(async () => {
-        const name = parseTaskName(entry.name);
-        const authority = await this.inspectAuthority();
-        if (!authority) throw new HomeTaskStoreError("missing-state");
-        const current = await this.readTask(name.taskId);
-        if (!current) throw new HomeTaskStoreError("missing-state");
-        validateAuthorityReferences(current, authority);
+        // Each record re-checks the namespace path, so a directory swapped
+        // between yields is refused; the authority file itself is not re-read.
+        if (!await this.assertNamespace()) throw new HomeTaskStoreError("missing-state");
+        const current = await this.readNamedTask(parseTaskName(entry.name));
+        if (!authorityReferencesResolve(current, authority!)) {
+          // A task created after this scan's authority read may cite authority
+          // published since then. Refresh once; a reference still unresolved is refused.
+          const refreshed = await this.inspectAuthority();
+          if (!refreshed) throw new HomeTaskStoreError("missing-state");
+          authority = refreshed;
+          validateAuthorityReferences(current, authority);
+        }
         return current;
       });
       yield task;
@@ -178,8 +190,9 @@ export class HomeTaskStore {
   async read(taskId: string): Promise<HomeTaskRecord | undefined> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
-      if (!(await this.inspect())) throw new HomeTaskStoreError("not-initialized");
-      return this.readTask(taskId);
+      const authority = await this.inspectAuthority();
+      if (!authority) throw new HomeTaskStoreError("not-initialized");
+      return this.readTask(taskId, authority);
     });
   }
 
@@ -188,10 +201,10 @@ export class HomeTaskStore {
     // accepted command while an earlier durable write owns the mutex.
     const input = structuredClone(record);
     return this.run(async () => {
-      const authorization = await this.inspect();
+      const authorization = await this.inspectAuthority();
       if (!authorization) throw new HomeTaskStoreError("not-initialized");
       if (!identifier(input.taskId) || input.taskId === "authorization") invalid();
-      const current = await this.readTask(input.taskId);
+      const current = await this.readTask(input.taskId, authorization);
       // Creation is strictly monotonic even within one wall-clock millisecond.
       // The filename owns ordering across reopen; no clock/index state survives.
       let creationTime = Date.now();
@@ -218,9 +231,9 @@ export class HomeTaskStore {
   async update(taskId: string, change: (current: HomeTaskRecord) => HomeTaskRecord): Promise<HomeTaskRecord> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
-      const authorization = await this.inspect();
+      const authorization = await this.inspectAuthority();
       if (!authorization) throw new HomeTaskStoreError("not-initialized");
-      const current = await this.readTask(taskId);
+      const current = await this.readTask(taskId, authorization);
       if (!current) throw new HomeTaskStoreError("missing-state");
       const next = structuredClone(change(structuredClone(current)));
       if (JSON.stringify(next) === JSON.stringify(current)) return current;
@@ -244,8 +257,9 @@ export class HomeTaskStore {
   async updateWake(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent): Promise<HomeTaskRecord> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
-      if (!(await this.inspect())) throw new HomeTaskStoreError("not-initialized");
-      const current = await this.readTask(taskId);
+      const authorization = await this.inspectAuthority();
+      if (!authorization) throw new HomeTaskStoreError("not-initialized");
+      const current = await this.readTask(taskId, authorization);
       if (!current || current.lifecycle !== "terminal" || !current.wake) throw new HomeTaskStoreError("missing-state");
       const wake = structuredClone(change(structuredClone(current.wake)));
       if (JSON.stringify(wake) === JSON.stringify(current.wake)) return current;
@@ -301,7 +315,9 @@ export class HomeTaskStore {
     }
   }
 
-  private async inspectAuthority(): Promise<HomeTaskAuthorizationState | undefined> {
+  /** Directory checks for the namespace path, without reading any file. False
+   * means the namespace was never created; a half-present namespace is refused. */
+  private async assertNamespace(): Promise<boolean> {
     if (!(await this.workspace.describe()).available) throw new HomeTaskStoreError("unsafe-state");
     await assertDirectory(this.tronHome);
     await assertDirectory(join(this.tronHome, "gateway"));
@@ -311,9 +327,14 @@ export class HomeTaskStore {
     const present = homePresent && await directoryPresent(this.directory);
     if (!present) {
       if (initialized) throw new HomeTaskStoreError("missing-state");
-      return undefined;
+      return false;
     }
     if (!initialized) throw new HomeTaskStoreError("missing-state");
+    return true;
+  }
+
+  private async inspectAuthority(): Promise<HomeTaskAuthorizationState | undefined> {
+    if (!await this.assertNamespace()) return undefined;
     const auth = await readSecureJson<unknown>(this.authorizationPath, AUTHORIZATION_BYTES);
     if (!auth.present) throw new HomeTaskStoreError("missing-state");
     return validateAuthorization(auth.value);
@@ -323,13 +344,16 @@ export class HomeTaskStore {
     const state = await this.inspectAuthority();
     if (!state) return undefined;
     // opendir has a bounded entry buffer. Each file is validated and released
-    // before the next one; filename/identity equality makes duplicates impossible.
+    // before the next one. The only state retained across records is one ID
+    // per record, so a duplicate suffix (never written by this store) is refused.
+    const taskIds = new Set<string>();
     const directory = await opendir(this.directory, { bufferSize: 32 });
     for await (const entry of directory) {
       if (!isTaskEntry(entry.name)) continue;
       const name = parseTaskName(entry.name);
-      const task = await this.readTask(name.taskId);
-      if (!task) throw new HomeTaskStoreError("missing-state");
+      if (taskIds.has(name.taskId)) invalid();
+      taskIds.add(name.taskId);
+      const task = await this.readNamedTask(name);
       validateAuthorityReferences(task, state);
       visit?.(task);
     }
@@ -346,7 +370,10 @@ export class HomeTaskStore {
     }
   }
 
-  private async readTask(taskId: string): Promise<HomeTaskRecord | undefined> {
+  /** One record by ID. The directory is listed for names only: the target is
+   * the only record read, and its authority references are checked against the
+   * caller's single authority read. */
+  private async readTask(taskId: string, authority: HomeTaskAuthorizationState): Promise<HomeTaskRecord | undefined> {
     let name: TaskName | undefined;
     for await (const candidate of this.taskNames()) {
       if (candidate.taskId === taskId) {
@@ -355,10 +382,18 @@ export class HomeTaskStore {
       }
     }
     if (!name) return undefined;
+    const task = await this.readNamedTask(name);
+    validateAuthorityReferences(task, authority);
+    return task;
+  }
+
+  /** Reads the record a directory entry names, and refuses it unless its body
+   * agrees with that name. Authority references are the caller's to check. */
+  private async readNamedTask(name: TaskName): Promise<HomeTaskRecord> {
     const read = await readSecureJson<unknown>(this.taskPath(name), TASK_BYTES);
     if (!read.present) throw new HomeTaskStoreError("missing-state");
     const task = validateTask(read.value);
-    if (task.taskId !== taskId || task.createdAt !== name.createdAt) invalid();
+    if (task.taskId !== name.taskId || task.createdAt !== name.createdAt) invalid();
     return task;
   }
 
@@ -393,8 +428,7 @@ export class HomeTaskStore {
       }
       const items: HomeTaskSummary[] = [];
       for (const name of selected.slice(0, limit)) {
-        const task = (await this.readTask(name.taskId))!;
-        validateAuthorityReferences(task, authority);
+        const task = (await this.readTask(name.taskId, authority))!;
         items.push({ taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt,
           title: [...task.intent.text].slice(0, 160).join(""), target: task.target, lifecycle: task.lifecycle,
           outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
@@ -450,9 +484,13 @@ function immutableTask(task: HomeTaskRecord): string {
     task.target, task.workerProfile, task.policyRevision]);
 }
 
+function authorityReferencesResolve(task: HomeTaskRecord, authorization: HomeTaskAuthorizationState): boolean {
+  return (task.scopeRef === null || authorization.scopes.some(scope => scope.id === task.scopeRef))
+    && (task.grantRef === null || authorization.grants.some(grant => grant.id === task.grantRef));
+}
+
 function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTaskAuthorizationState): void {
-  if ((task.scopeRef !== null && !authorization.scopes.some(scope => scope.id === task.scopeRef))
-    || (task.grantRef !== null && !authorization.grants.some(grant => grant.id === task.grantRef))) invalid();
+  if (!authorityReferencesResolve(task, authorization)) invalid();
 }
 
 function validateTask(value: unknown): HomeTaskRecord {
