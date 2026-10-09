@@ -322,6 +322,15 @@ configurations and Node test scripts.
    with a positive integer; `--jobs 1` runs sequentially. The bound does not
    replace the native tools' live-memory admission or leases: exit 73 remains
    a refusal, never an automatic retry, and lease waits count in check time.
+   A check marked `"heavy": true` in `.github/work.json` also takes one of
+   `verify.heavySlots` host-wide slots (default `max(1, CPUs // 8)`), held as
+   flock'd files in the git common directory, so every worktree and session on
+   the host shares them. A check waiting for a slot prints
+   `waiting for a heavy slot`, its wait counts in its wall time, and independent
+   checks keep running. Heavy checks receive `VERIFY_CPU_SHARE` (CPUs divided by
+   the slot count); the Gateway's Vitest width follows it. Slots are released
+   when a check's process group is retired. Heavy flags and the slot count are
+   execution choices, so they do not change the configuration hash.
    Checks sharing an optional `exclusiveGroup` name in `.github/work.json`
    never overlap within one invocation. Optional nonempty `exclusivePaths`
    restricts membership to diffs matching those globs (and requires a group).
