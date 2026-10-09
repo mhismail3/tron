@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, opendirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
-import type { Extension, SettingsManager, PackageSource } from "@earendil-works/pi-coding-agent";
+import { DefaultPackageManager, SettingsManager, type Extension, type ExtensionFactory, type InlineExtension, type DefaultResourceLoader, type PackageSource, type ResolvedPaths, type SourceInfo } from "@earendil-works/pi-coding-agent";
 import type { GatewayLogger } from "../transport/logger.js";
 import { GatewayError } from "../errors.js";
 import { delegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
+import { managedProducerAPI, type ManagedInternalWake } from "../extensions/managed-producer.js";
+import { loadSubagentCatalog } from "./subagent-catalog.js";
+import { producerIdentity, withExtensionOwner } from "../extensions/owner-attribution.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
@@ -14,6 +18,10 @@ const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), 
 };
 export const MANAGED_SUBAGENTS_SOURCE = `tron:pi-subagents@${pin.version}#${pin.closure.sha512}`;
 type Settings = ReturnType<SettingsManager["getSettings"]>;
+type ManagedLoaderOptions = Required<Pick<ConstructorParameters<typeof DefaultResourceLoader>[0],
+  "settingsManager" | "additionalSkillPaths" | "additionalPromptTemplatePaths" | "skillsOverride" | "promptsOverride">> & {
+  extensionFactories: Exclude<InlineExtension, ExtensionFactory>[];
+};
 
 export const IGNORED_SUBAGENTS_MESSAGE = "Tron manages pi-subagents; this user declaration is ignored. Remove it with `pi remove npm:pi-subagents`.";
 export function isUserSubagentsPackage(pkg: PackageSource): boolean {
@@ -201,37 +209,53 @@ export class ManagedSubagents {
 
   /** Called by the load owner after startup/reload, once per operation rather
    * than on each scoped read or in the pre-trust pass. No paths or user specs. */
-  reportIgnoredPackages(settings: SettingsManager): void {
+  async completeLoad(settings: SettingsManager, cwd: string, agentDir: string, extensions: readonly Extension[]): Promise<void> {
+    // Pi finalizes extension metadata after extensionsOverride. Complete that
+    // same load with the verified package metadata before publishing resources.
+    const resources = await this.resources();
+    const metadata = new Map(resources.extensions.map(resource => [resource.path, resource.metadata]));
+    for (const extension of extensions) {
+      const source = metadata.get(extension.resolvedPath);
+      if (!isManagedSubagentExtension(extension) || !source) continue;
+      extension.sourceInfo = { path: extension.resolvedPath, ...source };
+      for (const tool of extension.tools.values()) tool.sourceInfo = extension.sourceInfo;
+      for (const command of extension.commands.values()) command.sourceInfo = extension.sourceInfo;
+    }
     const count = [...(settings.getGlobalSettings().packages ?? []), ...(settings.getProjectSettings().packages ?? [])]
       .filter(isUserSubagentsPackage).length;
     if (count) this.logger?.log("warning", IGNORED_SUBAGENTS_MESSAGE, {
       event: "pi-subagents.user-package-ignored", source: "managed-subagents", counts: { declarations: count },
     });
+
+    const catalog = await loadSubagentCatalog({ agentDir, cwd, settingsManager: settings, managedSubagents: this });
+    if (catalog.invalidDefinitionCount) this.logger?.log("warning", "Invalid subagent definitions; inspect session resource diagnostics", {
+      event: "pi-subagents.agent-definition-invalid", source: "managed-subagents", counts: { definitions: catalog.invalidDefinitionCount },
+    });
   }
 
-  private extensionPaths(): string[] {
+  private resourcePaths(kind: "extensions" | "skills" | "prompts"): string[] {
     const root = this.verify();
     const manifestPath = join(root, "package.json");
-    if (lstatSync(manifestPath).size > 64 * 1024) throw new GatewayError("conflict", "managed pi-subagents extension manifest is too large");
-    let manifest: { pi?: { extensions?: unknown } } | null;
+    if (lstatSync(manifestPath).size > 64 * 1024) throw new GatewayError("conflict", "managed pi-subagents resource manifest is too large");
+    let manifest: { pi?: Partial<Record<typeof kind, unknown>> } | null;
     try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); }
-    catch { throw new GatewayError("conflict", "managed pi-subagents extension manifest is unreadable or invalid"); }
-    const entries = manifest?.pi?.extensions;
-    if (!Array.isArray(entries) || entries.length === 0 || entries.length > 32) {
-      throw new GatewayError("conflict", "managed pi-subagents extension entries are absent or invalid");
+    catch { throw new GatewayError("conflict", "managed pi-subagents resource manifest is unreadable or invalid"); }
+    const entries = manifest?.pi?.[kind] ?? (kind === "extensions" ? undefined : []);
+    if (!Array.isArray(entries) || (kind === "extensions" && entries.length === 0) || entries.length > 32) {
+      throw new GatewayError("conflict", `managed pi-subagents ${kind} entries are absent or invalid`);
     }
-    // Entry identity belongs to the verified build, not a candidate-specific
-    // filename. Resolve loader and admission from this single authority.
+    // Resource identity belongs to the verified build. Extension files and
+    // resource files/directories share one confinement/admission boundary.
     return entries.map((entry: unknown) => {
       if (typeof entry !== "string" || entry.length === 0 || entry.length > 1024 || isAbsolute(entry)
         || entry.split(/[\\/]/u).includes("..")) {
-        throw new GatewayError("conflict", "managed pi-subagents extension entry escapes the verified root");
+        throw new GatewayError("conflict", `managed pi-subagents ${kind} entry escapes the verified root`);
       }
       const path = resolve(root, entry);
       const inside = relative(root, path);
       if (!inside || inside.startsWith(`..${sep}`) || isAbsolute(inside) || !existsSync(path)
-        || !lstatSync(path).isFile() || realpathSync(path) !== path) {
-        throw new GatewayError("conflict", "managed pi-subagents extension entry is missing or not a regular file inside the verified root");
+        || !(lstatSync(path).isFile() || kind !== "extensions" && lstatSync(path).isDirectory()) || realpathSync(path) !== path) {
+        throw new GatewayError("conflict", `managed pi-subagents ${kind} entry is missing or not a regular resource inside the verified root`);
       }
       return path;
     });
@@ -247,18 +271,91 @@ export class ManagedSubagents {
     }
   }
 
-  loaderOptions(settings: SettingsManager): { settingsManager: SettingsManager; additionalExtensionPaths: string[] } {
+  /** Exact SDK-expanded resources and package provenance of this verified build. */
+  async resources(): Promise<ResolvedPaths> {
+    const root = this.verify();
+    for (const kind of ["extensions", "skills", "prompts"] as const) this.resourcePaths(kind);
+    // Use the SDK's manifest expansion, not a second resource walker. The
+    // returned files are the exact admitted identities for both consumers.
+    const resolved = await new DefaultPackageManager({ cwd: root, agentDir: root, settingsManager: SettingsManager.inMemory() })
+      .resolveExtensionSources([root]);
+    const admitted = (kind: keyof ResolvedPaths) => resolved[kind].map(resource => {
+      const inside = relative(root, resource.path);
+      if (!inside || inside.startsWith(`..${sep}`) || isAbsolute(inside) || realpathSync(resource.path) !== resource.path) {
+        throw new GatewayError("conflict", "managed pi-subagents resource escapes the verified root");
+      }
+      return { ...resource, metadata: { source: MANAGED_SUBAGENTS_SOURCE, scope: "user" as const, origin: "package" as const, baseDir: root, packageRoot: root } };
+    });
+    return { extensions: admitted("extensions"), skills: admitted("skills"), prompts: admitted("prompts"), themes: [] };
+  }
+
+  async loaderOptions(settings: SettingsManager, internalWake?: ManagedInternalWake): Promise<ManagedLoaderOptions> {
     // Check before executing extension code; admission repeats it for reloads
     // and to refuse a process binding changed while the loader was awaiting I/O.
     this.requireBoundArtifactRoot(this.tronHome);
-    return { settingsManager: managedProviderSettingsView(settings), additionalExtensionPaths: existsSync(this.root) ? this.extensionPaths() : [] };
+    const resources = existsSync(this.root) ? await this.resources() : { extensions: [], skills: [], prompts: [], themes: [] };
+    const paths = resources.extensions.filter(resource => resource.enabled).map(resource => resource.path);
+    const sourceInfo = new Map<string, SourceInfo>([...resources.skills, ...resources.prompts].filter(resource => resource.enabled)
+      .map(resource => [resource.path, { path: resource.path, ...resource.metadata }]));
+    const attribute = <T extends { filePath: string }>(resource: T): T => {
+      const source = sourceInfo.get(resource.filePath);
+      return source ? { ...resource, sourceInfo: source } : resource;
+    };
+    return { settingsManager: managedProviderSettingsView(settings),
+      additionalSkillPaths: resources.skills.filter(resource => resource.enabled).map(resource => resource.path),
+      additionalPromptTemplatePaths: resources.prompts.filter(resource => resource.enabled).map(resource => resource.path),
+      skillsOverride: (base) => ({ ...base, skills: base.skills.map(attribute) }),
+      promptsOverride: (base) => ({ ...base, prompts: base.prompts.map(attribute) }),
+      extensionFactories: paths.map((path, index) => ({
+        name: `tron-managed-subagents-${index + 1}`,
+        factory: async (pi) => {
+          this.requireBoundArtifactRoot(this.tronHome);
+          this.verify();
+          const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, path, "Subagents");
+          await withExtensionOwner(owner, async () => {
+            const factory = await this.loadFactory(path);
+            await factory(managedProducerAPI(pi, owner, internalWake));
+          });
+        },
+      })),
+    };
+  }
+
+  /** Use the closure's declared TypeScript loader with exact host peer aliases.
+   * No user package tree or copied SDK participates in factory execution. */
+  private async loadFactory(path: string): Promise<ExtensionFactory> {
+    const require = createRequire(join(this.root, "package.json"));
+    const { createJiti } = await import(pathToFileURL(require.resolve("jiti")).href) as {
+      createJiti: (base: string, options: { moduleCache: boolean; alias: Record<string, string> }) => { import: (path: string, options: { default: true }) => Promise<unknown> };
+    };
+    const hostRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const aliases: Record<string, string> = {};
+    for (const name of ["@earendil-works/pi-coding-agent", "@earendil-works/pi-agent-core", "@earendil-works/pi-tui",
+      "@earendil-works/pi-ai/compat", "@earendil-works/pi-ai/oauth", "@earendil-works/pi-ai/providers/all"]) {
+      aliases[name] = fileURLToPath(import.meta.resolve(name));
+    }
+    aliases["@earendil-works/pi-ai"] = aliases["@earendil-works/pi-ai/compat"]!;
+    for (const name of ["typebox", "typebox/compile", "typebox/value"]) aliases[name] = hostRequire.resolve(name);
+    const factory = await createJiti(import.meta.url, { moduleCache: false, alias: aliases }).import(path, { default: true });
+    if (typeof factory !== "function") throw new GatewayError("conflict", "managed pi-subagents entry does not export a factory");
+    return factory as ExtensionFactory;
   }
 
   admit(extensions: readonly Extension[]): void {
     this.requireBoundArtifactRoot(this.tronHome);
-    const paths = existsSync(this.root) ? this.extensionPaths() : [];
+    const paths = existsSync(this.root) ? this.resourcePaths("extensions") : [];
     for (const extension of extensions) {
-      if (paths.includes(extension.resolvedPath)) managedExtensions.add(extension);
+      if (managedExtensions.has(extension)) {
+        if (!paths.includes(extension.resolvedPath)) throw new GatewayError("conflict", "Managed subagent extension belongs to a different verified root");
+        continue;
+      }
+      const index = paths.findIndex((_, index) => extension.path === `<inline:tron-managed-subagents-${index + 1}>`);
+      if (index >= 0) {
+        // Restore the verified entry identity before SDK source finalization.
+        extension.path = paths[index]!;
+        extension.resolvedPath = paths[index]!;
+        managedExtensions.add(extension);
+      }
       else if (extension.tools.has("subagent")) throw new GatewayError("conflict", "The subagent tool is reserved by the Tron-managed provider");
     }
   }

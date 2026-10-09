@@ -1762,20 +1762,7 @@ struct ChatView: View {
             }
             return .none
         }
-        guard let pending = snapshot.pendingPrompt,
-              !hasCanonicalPendingPrompt(pending, in: snapshot) else { return .none }
-        return .pending(ChatPendingPromptPresentation(
-            snapshot: pending,
-            isCompacting: snapshot.phase == .compacting
-                || snapshot.operation?.kind == .compaction
-        ))
-    }
-
-    private func hasCanonicalPendingPrompt(
-        _ pending: SessionSnapshot.PendingPrompt,
-        in snapshot: SessionSnapshot
-    ) -> Bool {
-        ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: snapshot.transcript)
+        return ChatTranscriptHandoffCommit.pending(in: snapshot)
     }
 
     private var submissionPending: Bool {

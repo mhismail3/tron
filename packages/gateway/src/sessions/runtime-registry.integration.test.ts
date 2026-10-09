@@ -5228,7 +5228,119 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(JSON.stringify(warnings)).not.toContain("output");
   });
 
-  it("discovers real producer-serialized lifecycle headers without parsing reports", async () => {
+  it.each(["missing directory", "malformed status", "foreign header", "watcher error", "temporary status absence"] as const)(
+    "keeps root admission and observation independent of child %s", async (failure) => {
+      const fixture = await coldFixture("optional-child-detail");
+      try {
+        const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+        const runId = "optional-root";
+        const toolCallId = "optional-tool";
+        const childRun = "optional-child";
+        const artifactRoot = join(await realpath(fixture.cwd), ".pi", "subagents", "async-subagent-runs");
+        const asyncDir = join(artifactRoot, runId);
+        const childDir = join(artifactRoot, childRun);
+        const childSessionDir = join(dirname(slot.sessionFile!), basename(slot.sessionFile!, ".jsonl"), childRun, "run-0");
+        await mkdir(childSessionDir, { recursive: true });
+        const manager = SessionManager.create(fixture.cwd, childSessionDir, { id: "optional-child-session" });
+        manager.appendMessage(fauxAssistantMessage("Child transcript"));
+        const childFile = join(childSessionDir, "session.jsonl");
+        await rename(manager.getSessionFile()!, childFile);
+        await mkdir(asyncDir, { recursive: true });
+        // Derive the workflow/child documents from the producer capture, retaining
+        // its real header and lifecycle shape rather than mocking the read owner.
+        const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "frozen-real-active.json"), "utf8"));
+        const started = captured.startedAt as number;
+        const edge = { agent: "worker", label: "Worker", status: "running", async: true, runId: childRun,
+          workflowKey: "worker", sessionOwnerId: childRun, sessionFile: childFile };
+        const document = (id: string, mode: string, steps: unknown[], update: number) => ({
+          lifecycleProjection: { ...captured.lifecycleProjection, runId: id, toolCallId, sessionId: slot.sessionFile,
+            generatedAt: update, omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+            root: { id, kind: mode === "workflow" ? "workflow" : "subagent", label: "Root", state: "running", startedAt: started, updatedAt: update, children: [] } },
+          runId: id, toolCallId, sessionId: slot.sessionFile, mode, state: "running", startedAt: started, lastUpdate: update, steps,
+        });
+        const root = document(runId, "workflow", [edge], started + 5_000);
+        const child = { ...document(childRun, "single", [{ agent: "worker", sessionFile: childFile, status: "running", model: "fixture/child", toolCount: 3 }], started + 5_000),
+          parentWorkflowRunId: runId, workflowKey: "worker", sessionOwnerId: childRun };
+        const replace = async (directory: string, value: unknown) => {
+          await mkdir(directory, { recursive: true });
+          const temp = join(directory, "replacement.json");
+          await writeFile(temp, typeof value === "string" ? value : JSON.stringify(value));
+          await rename(temp, join(directory, "status.json"));
+        };
+        const internal = slot as unknown as {
+          extensionActivityWatchers: Map<string, { watcher: import("node:fs").FSWatcher; children: Map<string, import("node:fs").FSWatcher> }>;
+          extensionActivities: Map<string, ExtensionRunActivity>;
+          extensionRunOwnership: Map<string, { toolCallId: string; asyncDir: string; terminal: boolean }>;
+        };
+        try {
+          // Seed the same admitted launcher boundary as the producer-capture fixture.
+          internal.extensionActivities.set(toolCallId, { id: toolCallId, runId, toolCallId,
+            source: { source: "pi-subagents" }, title: "Subagents", status: "running", children: [],
+            startedAt: new Date(started).toISOString(), updatedAt: new Date(started).toISOString(),
+            lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: new Date(started).toISOString() } });
+          internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+          // Canonical launch evidence, not optional child detail, admits the root.
+          const runtimeManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+          runtimeManager.appendMessage({ role: "toolResult", toolName: "subagent", toolCallId, content: [{ type: "text", text: "Workflow started" }],
+            details: { runId, asyncId: runId, asyncDir, mode: "workflow", state: "running" }, isError: false, timestamp: started });
+          const activity = () => internal.extensionActivities.get(toolCallId);
+          const partial = () => activity()?.lifecycleOmissions?.children;
+          if (failure !== "missing directory") await replace(childDir, child);
+          await replace(asyncDir, root);
+          expect(await slot.discoverExtensionArtifact(asyncDir), "root artifact admission").toBe("accepted");
+          expect(activity(), "root admitted on its own evidence").toMatchObject({ runId, status: "running", updatedAt: new Date(started + 5_000).toISOString() });
+          expect(internal.extensionActivityWatchers.has(toolCallId), "root watcher started").toBe(true);
+          if (failure !== "missing directory") expect(activity()?.children[0], "reciprocal fixture detail").toMatchObject({ model: "fixture/child" });
+          await waitFor(() => internal.extensionActivityWatchers.get(toolCallId)?.children.has(childDir) === true, "root edge owns subscription");
+          if (failure === "missing directory") {
+            expect(partial()).toBe(1);
+          } else {
+            await waitFor(() => activity()?.children[0]?.model === "fixture/child", "initial optional detail hydrated");
+            if (failure === "malformed status") await replace(childDir, "{malformed");
+            if (failure === "foreign header") await replace(childDir, { ...child,
+              lifecycleProjection: { ...child.lifecycleProjection, sessionId: "/foreign/parent.jsonl" },
+              steps: [{ ...child.steps[0], model: "FORGED_MODEL" }] });
+            if (failure === "temporary status absence") await rm(join(childDir, "status.json"));
+            if (failure === "watcher error") {
+              const rootWatcher = internal.extensionActivityWatchers.get(toolCallId)!.watcher;
+              internal.extensionActivityWatchers.get(toolCallId)!.children.get(childDir)!.emit("error", new Error("Injected child observation failure"));
+              expect(internal.extensionActivityWatchers.get(toolCallId)?.watcher, "child error preserves the same root observer").toBe(rootWatcher);
+            }
+            const updated = { ...root, lastUpdate: started + 10_000,
+              lifecycleProjection: { ...root.lifecycleProjection, generatedAt: started + 10_000, root: { ...root.lifecycleProjection.root, updatedAt: started + 10_000 } } };
+            await replace(asyncDir, updated);
+            await waitFor(() => activity()?.updatedAt === new Date(started + 10_000).toISOString(), "root watcher publishes despite child failure");
+            expect(internal.extensionActivityWatchers.get(toolCallId)?.children.has(childDir), "unchanged edge stays subscribed").toBe(true);
+            expect(await slot.discoverExtensionArtifact(asyncDir), "optional detail never rejects discovery").toBe("accepted");
+            if (failure !== "watcher error") expect(partial()).toBe(1);
+            expect(JSON.stringify(activity())).not.toContain("FORGED_MODEL");
+          }
+          expect(internal.extensionActivityWatchers.has(toolCallId), "child failure cannot retire root").toBe(true);
+          // No discovery or root write: the child edge observation alone must wake
+          // hydration after a missing directory, invalid document or absent status.
+          await replace(childDir, { ...child, steps: [{ ...child.steps[0], model: "fixture/recovered", toolCount: 4 }] });
+          await waitFor(() => activity()?.children[0]?.model === "fixture/recovered", "child-only write hydrates detail");
+          expect(partial() ?? 0).toBe(0);
+          expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/recovered", toolCount: 4 })]));
+          // Retire subscriptions only on authoritative edge removal/root disposal.
+          await replace(asyncDir, { ...root, steps: [] });
+          await waitFor(() => internal.extensionActivityWatchers.get(toolCallId)?.children.size === 0, "root edge removal retires observation");
+        } finally {
+          // This fixture owns synthetic running evidence, not a provider process.
+          // Always settle it before the registry's drain-aware cleanup, even when
+          // an assertion fails against the unfixed optional-detail reader.
+          await replace(asyncDir, { ...root, state: "completed", endedAt: started + 20_000, lastUpdate: started + 20_000, steps: [],
+            lifecycleProjection: { ...root.lifecycleProjection, root: { ...root.lifecycleProjection.root, state: "complete", endedAt: started + 20_000, updatedAt: started + 20_000 } } });
+          await slot.discoverExtensionArtifact(asyncDir);
+        }
+        expect(internal.extensionActivityWatchers.size).toBe(0);
+      } finally {
+        await fixture.registry.dispose().finally(() => rm(fixture.root, { recursive: true, force: true }));
+      }
+    }, 15_000,
+  );
+
+  it("discovers real producer-serialized lifecycle headers without parsing oversized reports", async () => {
     const fixture = await coldFixture("embedded-lifecycle-header");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const runId = "frozen-real-run";
@@ -5256,7 +5368,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       };
       // The frozen producer capture uses a placeholder owner; bind it to this
       // fixture's exact canonical parent session before exercising admission.
-      parsed.lifecycleProjection.sessionId = slot.id;
+      parsed.lifecycleProjection.sessionId = slot.sessionFile;
       return JSON.stringify(parsed)
         .replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
         .replaceAll("/tmp/frozen-real-nested/session.jsonl", nestedFile);
@@ -5284,7 +5396,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(active).not.toHaveProperty("output");
     expect(JSON.stringify(active)).not.toContain("x".repeat(1_024));
     expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ childSessionRef: "frozen-child-session", currentTool: "bash" })]));
-    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: false });
+    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: true });
 
     // A legacy status payload may contain a presentation-shaped
     // `lifecycleProjection`, but that key is not proof that its sessionOwnerId
@@ -5332,7 +5444,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // These compact first-property headers were serialized by writeAsyncStatusAtomic
     // from packed pi-subagents d3bd36e5c1767c807615151922192554fef36ec3.
     const ownedHeader = await loadHeader("packed-producer-owned-lifecycle-header.json");
-    ownedHeader.sessionId = slot.id;
+    ownedHeader.sessionId = slot.sessionFile;
     const foreignHeader = await loadHeader("packed-producer-foreign-lifecycle-header.json");
     const foreignTerminalHeader = await loadHeader("packed-producer-foreign-terminal-lifecycle-header.json");
     expect(foreignHeader).toMatchObject({ runId, toolCallId, sessionId: "foreign-parent-session", root: { children: expect.arrayContaining([expect.objectContaining({ id: "step-a", state: "failed" })]) } });
@@ -5425,7 +5537,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ],
     };
     const projection = () => ({
-      version: 1, runId, toolCallId, sessionId: slot.id, generatedAt: root.updatedAt,
+      version: 1, runId, toolCallId, sessionId: slot.sessionFile, generatedAt: root.updatedAt,
       caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 30_720 },
       omitted: { runs: 0, children: 0, byteLimitExceeded: false }, root: structuredClone(root),
     });
@@ -5456,6 +5568,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         expect.objectContaining({ id: "step-c", status: "running" }),
       ]),
     });
+    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ byteLimitExceeded: true });
     expect((await readFile(statusPath)).byteLength).toBeGreaterThan(256 * 1_024);
 
     const foreignProjection = projection();
