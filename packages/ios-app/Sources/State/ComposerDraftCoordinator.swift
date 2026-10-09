@@ -229,6 +229,14 @@ enum ComposerAttachmentPolicy {
     }
 }
 
+/// The logical route a submission is admitted for. A Home conversation keeps
+/// its physical chapter as presentation identity, but its prompts go through
+/// `home.prompt`, which resolves the current chapter when the prompt is sent.
+enum ComposerSubmissionRoute: Equatable, Sendable {
+    case session
+    case home
+}
+
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
@@ -239,6 +247,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let resourceInvocation: ComposerResourceInvocation?
     let attachmentIDs: [String]
     let behavior: String?
+    let route: ComposerSubmissionRoute
     let baselineQueuedMessageIDs: Set<String>
 
     init(
@@ -248,6 +257,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         resourceInvocation: ComposerResourceInvocation? = nil,
         attachmentIDs: [String],
         behavior: String?,
+        route: ComposerSubmissionRoute = .session,
         baselineQueuedMessageIDs: Set<String> = [],
         localNonce: UInt64
     ) {
@@ -258,6 +268,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         self.resourceInvocation = resourceInvocation
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
+        self.route = route
         self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
     }
 
@@ -348,7 +359,8 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ sessionID: String,
     _ uploadIDs: [String],
     _ behavior: String?,
-    _ resourceInvocation: ComposerResourceInvocation?
+    _ resourceInvocation: ComposerResourceInvocation?,
+    _ route: ComposerSubmissionRoute
 ) async throws -> String
 
 typealias ComposerAttachmentPreviewPreparation = @Sendable (
@@ -1433,6 +1445,7 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         behavior: String?,
         resourceInvocation: ComposerResourceInvocation? = nil,
+        route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -1441,6 +1454,7 @@ final class ComposerDraftCoordinator {
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
+            route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration
@@ -1472,7 +1486,8 @@ final class ComposerDraftCoordinator {
                 submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
                 admission.snapshot.behavior,
-                admission.snapshot.resourceInvocation
+                admission.snapshot.resourceInvocation,
+                admission.snapshot.route
             )
         } catch {
             // A route may disappear after admission. The exact submission
@@ -1880,6 +1895,7 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         behavior: String?,
         resourceInvocation: ComposerResourceInvocation?,
+        route: ComposerSubmissionRoute,
         canonicalTranscript: [TranscriptItem],
         queuedMessages: [SessionSnapshot.QueuedMessage],
         runtimeGeneration: String?
@@ -1972,6 +1988,7 @@ final class ComposerDraftCoordinator {
             resourceInvocation: selectedResource,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
+            route: route,
             baselineQueuedMessageIDs: Set(queuedMessages.map(\.id)),
             localNonce: sequence
         )

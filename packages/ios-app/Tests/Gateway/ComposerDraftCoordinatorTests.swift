@@ -22,7 +22,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in "unused" },
                 fileUpload: { _, _, _, _ in "unused" },
                 draftStore: store,
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let firstTarget = SessionPresentationIdentity(sessionID: "session", generation: 1)
@@ -48,7 +48,7 @@ struct ComposerDraftCoordinatorTests {
                 },
                 fileUpload: { _, _, _, _ in "unused" },
                 draftStore: store,
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let secondTarget = SessionPresentationIdentity(sessionID: "session", generation: 2)
@@ -119,7 +119,7 @@ struct ComposerDraftCoordinatorTests {
                 discardUpload: { discarded.append($0) },
                 fileUpload: { _, _, _, _ in "unused" },
                 draftStore: store,
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: scope.sessionID, generation: 1)
@@ -162,7 +162,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in "unused" },
                 fileUpload: { _, _, _, _ in "unused" },
                 draftStore: delayedStore,
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             _ = coordinator.prepareDraft(
@@ -209,7 +209,7 @@ struct ComposerDraftCoordinatorTests {
                     await gate.prepare(data: data, mimeType: mimeType, name: name)
                 },
                 draftStore: store,
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             _ = coordinator.prepareDraft(
@@ -255,7 +255,7 @@ struct ComposerDraftCoordinatorTests {
                 },
                 fileUpload: { _, _, _, _ in "unused" },
                 draftStore: store,
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let first = SessionPresentationIdentity(sessionID: scope.sessionID, generation: 1)
@@ -292,7 +292,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in "upload" },
                 fileUpload: { _, _, _, _ in "upload" },
                 draftStore: store,
-                send: { _, _, _, _, _ in "operation" },
+                send: { _, _, _, _, _, _ in "operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let acceptedScope = accepted.installHostedPresentation(
@@ -316,7 +316,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in "fresh-upload" },
                 fileUpload: { _, _, _, _ in "unused" },
                 draftStore: store,
-                send: { _, _, _, _, _ in throw DefinitiveFailure() },
+                send: { _, _, _, _, _, _ in throw DefinitiveFailure() },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let failedScope = failed.installHostedPresentation(
@@ -558,7 +558,7 @@ struct ComposerDraftCoordinatorTests {
                     return "unexpected"
                 },
                 fileUpload: { _, _, _, _ in "unused" },
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 72)
@@ -639,7 +639,7 @@ struct ComposerDraftCoordinatorTests {
                     return "document-id"
                 },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _, _ in "unused-operation" },
+                send: { _, _, _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 9)
@@ -678,7 +678,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
                 fileUpload: { _, _, _, _ in "image-id" },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _, _ in "unused-operation" },
+                send: { _, _, _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 10)
@@ -706,7 +706,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
                 fileUpload: { name, _, file, _ in try await gate.upload(name: name, file: file) },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _, _ in "unused-operation" },
+                send: { _, _, _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 11)
@@ -877,7 +877,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in uploadIDs.removeFirst() },
                 discardUpload: { discarded.append($0) },
                 fileUpload: { _, _, _, _ in "unused" },
-                send: { _, _, _, _, _ in "unused" },
+                send: { _, _, _, _, _, _ in "unused" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 92)
@@ -3109,7 +3109,7 @@ private final class ComposerHarness {
             Issue.record("unexpected file upload")
             throw CancellationError()
         },
-        send: { [weak self] text, sessionID, uploadIDs, behavior, resourceInvocation in
+        send: { [weak self] text, sessionID, uploadIDs, behavior, resourceInvocation, _ in
             guard let self else { throw CancellationError() }
             let index = self.sendCalls.count
             self.sendCalls.append(.init(

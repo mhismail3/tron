@@ -279,7 +279,7 @@ struct HomeTaskSheet: View {
         let intent = requestID
         Task { @MainActor in
             do {
-                _ = try await model.homeMutations.perform(command, authority: authority)
+                try await model.performHomeControl(command, authority: authority)
                 guard self.identity == identity, self.requestID == intent,
                       coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication else { return }
                 failure = nil; steering = ""; reload()
@@ -296,7 +296,7 @@ struct HomeTaskSheet: View {
         let intent = requestID
         Task { @MainActor in
             do {
-                _ = try await model.homeMutations.checkCompletion(authority: authority)
+                try await model.checkHomeControlCompletion(authority: authority)
                 guard self.identity == identity, self.requestID == intent,
                       coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication else { return }
                 failure = nil; reload()

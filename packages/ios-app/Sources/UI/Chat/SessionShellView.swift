@@ -146,8 +146,20 @@ struct SessionShellView: View {
         }
     }
 
+    /// A Home conversation follows the chapter Home now names. Replacing the
+    /// route remounts the chat on that session, under the same logical route.
+    private func followHomeRoute() {
+        guard let route = presentedSession, route.isHome,
+              let profileID = model.profiles.selected?.id,
+              let status = model.homeStatus.status,
+              let next = try? model.navigationRouteForHome(profileID: profileID, status: status),
+              next.sessionID != route.sessionID else { return }
+        present(next)
+    }
+
     private func dashboardSurface(activity: PresentationSurfaceActivity) -> some View {
         dashboardNavigation
+            .onChange(of: model.homeStatus.status) { _, _ in followHomeRoute() }
             .tronManagedSheet(
                 isPresented: $showNewSession,
                 identity: "dashboard.new-session"
@@ -436,6 +448,7 @@ struct SessionShellView: View {
                     initialModel: route.initialModel,
                     initialHistoryEntryID: route.initialHistoryEntryID,
                     initialSearchResult: route.initialSearchResult,
+                    isHomeRoute: route.isHome,
                     onForkCreated: present,
                     performanceSignposts: model.performanceSignposts
                 )
@@ -454,8 +467,8 @@ struct SessionShellView: View {
                     mountedSessionRouteToken = token
                     guard let profileID = model.profiles.selected?.id,
                           let status = model.homeStatus.status,
-                          status.sessionId == route.sessionID,
-                          route.id == "\(profileID):\(route.sessionID)",
+                          route.isHome || (status.sessionId == route.sessionID
+                              && route.id == "\(profileID):\(route.sessionID)"),
                           let presentationActivityCoordinator else { return }
                     mountedHomeChatRouteID = route.id
                     model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentationActivityCoordinator)
@@ -1118,7 +1131,8 @@ struct SessionShellView: View {
                 isDesignating: model.homeMutations.isRunning,
                 hasUnresolvedCommand: model.homeMutations.ownsUnresolvedCommand(
                     profileID: model.profiles.selected?.id ?? ""
-                )
+                ),
+                isStatusUnavailable: model.homeStatus.isStatusUnavailable
             )
         }
         .buttonStyle(.plain)

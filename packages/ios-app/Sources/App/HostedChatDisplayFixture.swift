@@ -111,6 +111,8 @@ struct HostedHomeDashboardFixture: View {
     @State private var controlCount = 0
     @State private var abortCount = 0
     @State private var staleActionFinished = false
+    @State private var promptRoute = "none"
+    @State private var openedSession = "none"
     private let actionProbe = HostedHomeHeaderActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -155,6 +157,8 @@ struct HostedHomeDashboardFixture: View {
                             Text(model.homeMutations.isRunning ? "running" : model.homeMutations.hasUnresolvedCommand ? "unresolved" : "idle")
                                 .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
+                            Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
+                            Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
                             Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
                             Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
@@ -220,6 +224,8 @@ struct HostedHomeDashboardFixture: View {
                 taskListReads = await gateway.taskListReadCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
                 configuredModel = await gateway.configuredModelIdentity()
+                promptRoute = await gateway.lastPromptRoute()
+                openedSession = await gateway.lastOpenedSession()
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
                 // sheet must observe by re-reading, so it fires after the first read. A profile switch
                 // fires after the second, so a test can observe the presented sheet first (its reload).
@@ -364,13 +370,16 @@ private actor HostedHomeShellGateway {
     private var scopeRevoked = false
     private var grantRevoked = false
     private var taskDecisions: [String: JSONValue] = [:]
+    private var materialized = false
+    private var promptRoutes: [String] = []
+    private var openedSessions: [String] = []
     init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
         self.emptyContext = emptyContext
         self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
-        designated = initialState == "ready"
+        designated = initialState == "ready" || initialState == "rollover"
         phase = headerState ?? "ready"
         paused = headerState == "paused"
         configured = headerState != "unconfigured"
@@ -381,6 +390,8 @@ private actor HostedHomeShellGateway {
     func taskListReadCount() -> Int { taskListReads }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
+    func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
+    func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
@@ -460,6 +471,17 @@ private actor HostedHomeShellGateway {
             if offset == 0 { result["nextOffset"] = .number(Double(first.utf16.count)) }
             else { result["previousOffset"] = .number(0) }
             return (.object(result), nil)
+        case "home.prompt":
+            // The rollover journey: the logical route materializes the reserved
+            // successor, and only the route's text is admitted.
+            promptRoutes.append("home.prompt")
+            guard params["commandId"]?.stringValue != nil, params["text"]?.stringValue == "After rollover" else { return taskRefusal() }
+            materialized = true
+            return (.object(["logicalSessionId": .string("home"), "homeId": .string("home-fixture"), "bindingRevision": .number(2),
+                "sessionId": .string("home-successor"), "operationId": .string("successor-operation")]), nil)
+        case "session.prompt":
+            promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
+            return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
         case "home.status":
             homeStatusCount += 1
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
@@ -502,8 +524,9 @@ private actor HostedHomeShellGateway {
             return (.object(["aborted": .bool(abortCount > 0)]), nil)
         case "session.open":
             let sessionID = params["sessionId"]?.stringValue ?? "home-session"
+            openedSessions.append(sessionID)
             let snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
-                phase: phase == "active" ? .running : .idle, name: sessionID == "home-session" ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
+                phase: phase == "active" ? .running : .idle, name: sessionID.hasPrefix("home-") ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
                 parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
                 stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                     tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
@@ -603,7 +626,25 @@ private actor HostedHomeShellGateway {
         return .object(page)
     }
 
+    /// The Gateway's rollover shape: the reserved successor is named but absent.
+    /// The sealed predecessor is the openable route until a logical prompt
+    /// materializes the successor.
+    private func rolloverStatus() -> JSONValue {
+        .object(["taskRecovery": .object(["available": .bool(true)]), "routeGeneration": .number(2),
+            "phase": .string(materialized ? "ready" : "rollover-pending"),
+            "activation": .object(["available": .bool(true), "activationOpen": .bool(false), "effectiveTokens": .number(320),
+                "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
+            "readiness": .object(["ready": .bool(materialized), "gaps": .array(materialized ? [] : [.string("session-missing")])]),
+            "recovery": .object(["action": .string(materialized ? "none" : "designate")]),
+            "available": .bool(true), "enabled": .bool(true), "homeId": .string("home-fixture"),
+            "sessionId": .string("home-successor"), "openSessionId": .string(materialized ? "home-successor" : "home-session"),
+            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(materialized),
+            "memory": .object(["configured": .bool(true), "open": .bool(true), "paused": .bool(false),
+                "spentTokens": .number(42), "model": .null])])
+    }
+
     private func homeStatus() -> JSONValue {
+        if initialState == "rollover" { return rolloverStatus() }
         let phase = designated ? (phase == "unconfigured" ? "blocked" : phase) : self.phase == "disabled" || initialState == "disabled" ? "disabled"
             : initialState == "missing-session" ? "missing-session" : "undesignated"
         let sessionPresent = designated || initialState == "disabled" || phase == "disabled"
@@ -617,6 +658,7 @@ private actor HostedHomeShellGateway {
             "available": .bool(true), "enabled": .bool(enabled),
             "homeId": designated || initialState == "disabled" || initialState == "missing-session" ? .string("home-fixture") : .null,
             "sessionId": sessionPresent ? .string("home-session") : .null,
+            "openSessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,

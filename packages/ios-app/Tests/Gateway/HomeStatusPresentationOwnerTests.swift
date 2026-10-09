@@ -8,6 +8,9 @@ import Observation
 /// retirement, unobserved projection replacement, and refresh cadence.
 @MainActor
 final class HomeStatusPresentationOwnerTests: XCTestCase {
+    /// The owner holds its presentation coordinator weakly, so each mounted
+    /// coordinator stays alive for the life of its test case.
+    private var mountedCoordinators: [PresentationActivityCoordinator] = []
     private let validStatus = #"{"phase":"ready","activation":{"available":false},"readiness":{"ready":true,"gaps":[]},"recovery":{"action":"none"},"available":true,"enabled":true,"live":false,"sessionPresent":true,"memory":{"configured":true,"open":true}}"#
 
     func testDecodesTypedHomeStatusAndRequiresAllProtocolSections() throws {
@@ -85,7 +88,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         let coordinatorB = PresentationActivityCoordinator()
         let tokenB = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
         coordinatorB.register(tokenB, parent: nil)
-        owner.mountSurface(token: tokenB, coordinator: coordinatorB)
+        owner.mountSurface(token: tokenB, coordinator: coordinatorB, fetch: { _ in throw CancellationError() })
         let current = try XCTUnwrap(owner.beginRead(profileID: "p", connectionID: "c", capabilityEnabled: true, token: tokenB, coordinator: coordinatorB))
         XCTAssertTrue(owner.publish(value, for: current))
         owner.retireSurface(tokenA)
@@ -94,15 +97,15 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     }
 
     func testCoordinatorRetirementWhileFetchSuspendedCannotPublish() async throws {
-        let (owner, coordinator, token) = mountedOwner()
         let started = expectation(description: "status read started")
         let fetchReturned = expectation(description: "resumed fetch returned to owner")
         var continuation: CheckedContinuation<HomeStatusDTO, Error>?
-        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true) { _ in
+        let (owner, coordinator, token) = mountedOwner { _ in
             let value = try await withCheckedThrowingContinuation { continuation = $0; started.fulfill() }
             fetchReturned.fulfill()
             return value
         }
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
         await fulfillment(of: [started], timeout: 1)
         coordinator.retire(token)
         owner.presentationActivityChanged(for: token)
@@ -115,15 +118,15 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     }
 
     func testCoordinatorRetirementWithoutActivityCallbackFencesCompletedFetch() async throws {
-        let (owner, coordinator, token) = mountedOwner()
         let started = expectation(description: "status read started")
         let fetchReturned = expectation(description: "resumed fetch returned to owner")
         var continuation: CheckedContinuation<HomeStatusDTO, Error>?
-        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true) { _ in
+        let (owner, coordinator, token) = mountedOwner { _ in
             let value = try await withCheckedThrowingContinuation { continuation = $0; started.fulfill() }
             fetchReturned.fulfill()
             return value
         }
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
         await fulfillment(of: [started], timeout: 1)
         coordinator.retire(token)
         continuation?.resume(returning: try decodeStatus())
@@ -142,6 +145,57 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         XCTAssertFalse(owner.publish(value, for: fence))
     }
 
+    /// The dashboard mounts before pairing, so the surface has no profile yet.
+    /// Pairing then configures the profile; the read must still run, because the
+    /// surface, not the profile, owns the fetch.
+    func testSurfaceMountedBeforePairingReadsOnceProfileIsConnected() async throws {
+        let fetched = expectation(description: "status read after pairing")
+        var fetchCount = 0
+        let (owner, _, token) = mountedOwner { _ in
+            fetchCount += 1
+            fetched.fulfill()
+            return try self.decodeStatus()
+        }
+        owner.connectionAvailable(profileID: "paired", connectionID: "c", capabilityEnabled: true)
+        await fulfillment(of: [fetched], timeout: 1)
+        XCTAssertEqual(fetchCount, 1)
+        owner.retireSurface(token)
+    }
+
+    /// A profile transition forgets the capability; a dropped connection keeps it,
+    /// so reconnecting to the same profile does not flicker the Home row.
+    func testProfileRetirementForgetsCapabilityButConnectionLossKeepsIt() {
+        let (owner, _, token) = mountedOwner()
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
+        XCTAssertTrue(owner.isCapabilityEnabled)
+        owner.connectionRetired()
+        XCTAssertTrue(owner.isCapabilityEnabled)
+        owner.profileRetired()
+        XCTAssertFalse(owner.isCapabilityEnabled)
+        owner.retireSurface(token)
+    }
+
+    /// A Gateway status this client cannot admit is a typed unavailable state,
+    /// not a row that keeps saying it is loading, and the next valid read clears it.
+    func testUndecodableStatusIsUnavailableUntilAValidReadPublishes() async throws {
+        var admitsStatus = false
+        let (owner, _, token) = mountedOwner { _ in
+            if !admitsStatus {
+                return try HomeStatusDTO.decode(JSONValue.parse(Data(#"{"phase":"future-phase"}"#.utf8)))
+            }
+            return try self.decodeStatus()
+        }
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
+        await owner.invalidateMounted()
+        XCTAssertNil(owner.status)
+        XCTAssertTrue(owner.isStatusUnavailable)
+        admitsStatus = true
+        await owner.invalidateMounted()
+        XCTAssertNotNil(owner.status)
+        XCTAssertFalse(owner.isStatusUnavailable)
+        owner.retireSurface(token)
+    }
+
     func testRejectsOversizedStatusProjection() {
         let gaps = Array(repeating: "gap", count: 129).map { "\"\($0)\"" }.joined(separator: ",")
         let oversized = validStatus.replacingOccurrences(of: "\"gaps\":[]", with: "\"gaps\":[\(gaps)]")
@@ -149,17 +203,16 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     }
 
     func testMountedFallbackRefreshesAtFiveSecondCadence() async throws {
-        let (owner, coordinator, _) = mountedOwner()
         let initial = expectation(description: "mounted initial refresh")
         let fallback = expectation(description: "five-second mounted fallback")
         var fetchCount = 0
-        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true) { [coordinator] _ in
-            _ = coordinator
+        let (owner, _, _) = mountedOwner { _ in
             fetchCount += 1
             if fetchCount == 1 { initial.fulfill() }
             if fetchCount == 2 { fallback.fulfill() }
             return try self.decodeStatus()
         }
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
         await fulfillment(of: [initial], timeout: 1)
         try await Task.sleep(for: .milliseconds(4_800))
         XCTAssertEqual(fetchCount, 1)
@@ -168,17 +221,16 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     }
 
     func testMountedStatusRefreshesImmediatelyOnInvalidation() async throws {
-        let (owner, coordinator, _) = mountedOwner()
         let initial = expectation(description: "mounted initial refresh")
         let invalidated = expectation(description: "immediate invalidation refresh")
         var fetchCount = 0
-        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true) { [coordinator] _ in
-            _ = coordinator
+        let (owner, _, _) = mountedOwner { _ in
             fetchCount += 1
             if fetchCount == 1 { initial.fulfill() }
             if fetchCount == 2 { invalidated.fulfill() }
             return try self.decodeStatus()
         }
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
         await fulfillment(of: [initial], timeout: 1)
         await owner.invalidateMounted()
         await fulfillment(of: [invalidated], timeout: 1)
@@ -186,12 +238,16 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         if let token = owner.surfaceToken { owner.retireSurface(token) }
     }
 
-    private func mountedOwner(id: String = "home") -> (HomeStatusPresentationOwner, PresentationActivityCoordinator, PresentationSurfaceToken) {
+    private func mountedOwner(
+        id: String = "home",
+        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO = { _ in throw CancellationError() }
+    ) -> (HomeStatusPresentationOwner, PresentationActivityCoordinator, PresentationSurfaceToken) {
         let owner = HomeStatusPresentationOwner()
         let coordinator = PresentationActivityCoordinator()
         let token = PresentationSurfaceToken(id: id, generation: UUID())
         coordinator.register(token, parent: nil)
-        owner.mountSurface(token: token, coordinator: coordinator)
+        mountedCoordinators.append(coordinator)
+        owner.mountSurface(token: token, coordinator: coordinator, fetch: fetch)
         return (owner, coordinator, token)
     }
 

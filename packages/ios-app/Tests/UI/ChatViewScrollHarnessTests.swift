@@ -1263,7 +1263,7 @@ final class ChatViewScrollHarness {
             GatewayClient()
         }
         let hostedSend: ComposerSendOperation = {
-            _, _, _, _, _ in harnessHostedPromptOperationID
+            _, _, _, _, _, _ in harnessHostedPromptOperationID
         }
         let composerSend: ComposerSendOperation? = enablesComposerSubmission
             ? hostedSend

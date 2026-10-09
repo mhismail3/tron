@@ -23,8 +23,9 @@ enum HomePinnedRowPolicy {
         case .unavailable:
             return .unavailable
         case .ready, .active, .blocked, .paused, .rolloverPending:
-            guard status.enabled, status.sessionPresent,
-                  let sessionID = status.sessionId, !sessionID.isEmpty else { return .unavailable }
+            // `openSessionId` is the only route target: during a rollover it names
+            // the sealed predecessor, because the reserved successor is not openable.
+            guard status.enabled, let sessionID = status.openSessionId, !sessionID.isEmpty else { return .unavailable }
             return .open(sessionID: sessionID)
         }
     }
@@ -34,6 +35,9 @@ struct HomePinnedRow: View {
     let status: HomeStatusDTO?
     let isDesignating: Bool
     var hasUnresolvedCommand = false
+    /// The mounted read reached a Gateway whose status could not be read or
+    /// admitted; the row must not keep saying it is loading.
+    var isStatusUnavailable = false
 
     private var action: HomePinnedRowAction {
         HomePinnedRowPolicy.action(for: status, hasUnresolvedCommand: hasUnresolvedCommand)
@@ -41,7 +45,7 @@ struct HomePinnedRow: View {
     private var detail: String {
         if isDesignating { return hasUnresolvedCommand ? "Checking Home change…" : "Setting up Home…" }
         if hasUnresolvedCommand { return "Home change pending · Tap to check" }
-        guard let status else { return "Loading Home status…" }
+        guard let status else { return isStatusUnavailable ? "Home status unavailable" : "Loading Home status…" }
         switch status.phase {
         case .undesignated: return "Set up your Home session"
         case .disabled: return "Disabled · Tap to re-enable"
@@ -72,7 +76,7 @@ struct HomePinnedRow: View {
             case .blocked: return "Blocked"
             default: return "Ready"
             }
-        case .unavailable: return status == nil ? "Loading" : "Unavailable"
+        case .unavailable: return status == nil && !isStatusUnavailable ? "Loading" : "Unavailable"
         }
     }
 

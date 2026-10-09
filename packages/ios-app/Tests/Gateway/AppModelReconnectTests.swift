@@ -1871,7 +1871,8 @@ struct AppModelReconnectTests {
             #expect(!fixture.model.homeMutations.hasUnresolvedCommand)
             let route = try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
             #expect(route.sessionID == "home-session")
-            #expect(route.id == "\(profile.id):home-session")
+            #expect(route.isHome)
+            #expect(route.id == "\(profile.id):home-session:home")
 
             let oldFrames = await first.sentFrames()
             let newFrames = await replacement.sentFrames()
@@ -2134,7 +2135,8 @@ struct AppModelReconnectTests {
 
             let route = try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
             #expect(route.sessionID == "home-session")
-            #expect(route.id == "\(profile.id):home-session")
+            #expect(route.isHome)
+            #expect(route.id == "\(profile.id):home-session:home")
             #expect(fixture.model.ownsNavigationRoute(route))
             fixture.model.unmountHomeStatus(surfaceToken: token)
         }
@@ -2556,7 +2558,7 @@ struct AppModelReconnectTests {
             "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
             "recovery": .object(["action": .string("none")]),
             "available": .bool(true), "enabled": .bool(true), "homeId": .string("home"),
-            "sessionId": .string("home-session"), "generation": .number(1),
+            "sessionId": .string("home-session"), "openSessionId": .string("home-session"), "generation": .number(1),
             "live": .bool(false), "sessionPresent": .bool(true),
             "memory": .object(["configured": .bool(true), "open": .bool(true)]),
         ])

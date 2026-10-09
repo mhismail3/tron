@@ -557,7 +557,7 @@ struct AppModelLifecycleTests {
         let token = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
         coordinator.register(token, parent: nil)
         let owner = fixture.model.homeStatus
-        owner.mountSurface(token: token, coordinator: coordinator)
+        owner.mountSurface(token: token, coordinator: coordinator, fetch: { _ in throw CancellationError() })
         guard let fence = owner.beginRead(
             profileID: fixture.initialProfile.id,
             connectionID: "mounted-connection",
@@ -580,7 +580,7 @@ struct AppModelLifecycleTests {
             "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
             "recovery": .object(["action": .string("none")]),
             "available": .bool(true), "enabled": .bool(true),
-            "homeId": .string("home"), "sessionId": .string("home-session"),
+            "homeId": .string("home"), "sessionId": .string("home-session"), "openSessionId": .string("home-session"),
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(true),
             "memory": .object(["configured": .bool(true), "open": .bool(true)]),
         ]))

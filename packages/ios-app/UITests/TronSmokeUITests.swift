@@ -87,6 +87,31 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// The row stays routable while the successor is reserved: it opens the sealed
+    /// predecessor, the send goes through the logical Home route, and the chat
+    /// follows Home to the chapter it names once that send materializes it.
+    @MainActor
+    func testHomeRolloverPendingRoutesSendAndFollowsSuccessor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-rollover"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["home-header-state"], containing: "Recovery needed", timeout: 10))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-session", timeout: 10))
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap(); composer.typeText("After rollover")
+        let send = app.buttons["Send message"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: send)], timeout: 5), .completed)
+        send.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-prompt-route"], containing: "prompt-route:home.prompt", timeout: 10))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-successor", timeout: 20))
+        XCTAssertTrue(waitForLabel(app.staticTexts["home-header-state"], containing: "Home ·", timeout: 10))
+        keepScreenshot(named: "home-rollover-followed")
+    }
+
     @MainActor
     private func chooseHomeGrantExpiry(_ app: XCUIApplication) {
         let picker = app.descendants(matching: .any)["home-grant-expiry"]

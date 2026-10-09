@@ -115,15 +115,20 @@ final class AppModel {
         /// Full search evidence is retained through route replacement so the
         /// anchor RPC can validate branch/file identity before paging.
         let initialSearchResult: SessionSearchResult?
+        /// The Home conversation's logical route. Its `sessionID` is the physical
+        /// chapter it currently opens; sends go through `home.prompt`, and the
+        /// route follows Home to the chapter Home names next.
+        let isHome: Bool
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
         var id: String {
             let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
+            let home = isHome ? "home" : nil
             let history = initialHistoryEntryID.map { "history:\($0)" }
             let evidence = initialSearchResult.map { result in
                 "search:\(result.anchorRevision.indexRevision):\(result.anchorRevision.fileIdentity):\(result.anchorRevision.branchDigest):\(result.anchorRevision.entryOrdinal)"
             }
-            return [base, history, evidence].compactMap { $0 }.joined(separator: ":")
+            return [base, home, history, evidence].compactMap { $0 }.joined(separator: ":")
         }
 
         init(
@@ -132,6 +137,7 @@ final class AppModel {
             initialModel: ModelRef? = nil,
             initialHistoryEntryID: String? = nil,
             initialSearchResult: SessionSearchResult? = nil,
+            isHome: Bool = false,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
         ) {
@@ -140,12 +146,13 @@ final class AppModel {
             self.initialModel = initialModel
             self.initialHistoryEntryID = initialHistoryEntryID
             self.initialSearchResult = initialSearchResult
+            self.isHome = isHome
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
         func withEditorText(_ text: String?) -> SessionNavigationRoute {
-            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -155,6 +162,7 @@ final class AppModel {
                 initialModel: model,
                 initialHistoryEntryID: initialHistoryEntryID,
                 initialSearchResult: initialSearchResult,
+                isHome: isHome,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
             )
@@ -623,9 +631,10 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation in
-                try await sessionMutations.prompt(
+            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation, route in
+                try await sessionMutations.submitComposer(
                     text,
+                    route: route,
                     sessionID: sessionID,
                     uploadIDs: uploadIDs,
                     behavior: behavior,
@@ -3734,6 +3743,7 @@ final class AppModel {
         target: SessionPresentationTarget,
         behavior: String? = nil,
         resourceInvocation: ComposerResourceInvocation? = nil,
+        route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -3756,6 +3766,7 @@ final class AppModel {
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
+            route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration
@@ -4700,15 +4711,9 @@ final class AppModel {
     /// The visible Home owner registers only authenticated focused-Gateway
     /// status reads. This is disposable presentation work, never a mutation.
     func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
-        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator)
-        guard let profileID = lifecycle.selectedProfileID else { return }
-        let connectionID = lifecycle.admission?.connectionID.map(String.init)
-        let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
-        homeStatus.configure(
-            profileID: profileID,
-            connectionID: connectionID,
-            capabilityEnabled: capable
-        ) { [weak self] fence in
+        // The read belongs to the surface, not to a selected profile: a dashboard
+        // mounted before pairing reads Home as soon as pairing configures it.
+        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator) { [weak self] fence in
             guard let self,
                   self.lifecycle.selectedProfileID == fence.profileID,
                   let admission = self.lifecycle.admission,
@@ -4725,6 +4730,10 @@ final class AppModel {
                   String(currentConnectionID) == fence.connectionID else { throw CancellationError() }
             return try HomeStatusDTO.decode(value)
         }
+        guard let profileID = lifecycle.selectedProfileID else { return }
+        let connectionID = lifecycle.admission?.connectionID.map(String.init)
+        let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
+        homeStatus.configure(profileID: profileID, connectionID: connectionID, capabilityEnabled: capable)
     }
 
     /// Sheet reads share lifecycle authority, but not the covered chat's status
@@ -4812,13 +4821,14 @@ final class AppModel {
               gatewayInfo?.capabilities.contains("home.v1") == true,
               homeStatus.isCapabilityEnabled,
               homeStatus.status == status,
-              status.enabled, status.sessionPresent,
-              let sessionID = status.sessionId, !sessionID.isEmpty else {
+              status.enabled,
+              let sessionID = status.openSessionId, !sessionID.isEmpty else {
             throw CancellationError()
         }
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,
+            isHome: true,
             gatewayProfileID: profileID,
             gatewayLifecycleGeneration: lifecycle.currentLifecycleGeneration
         )
@@ -5757,6 +5767,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         diagnosticsAreReady = false
         // Revoke connection-bound owners before this transition can suspend or fail.
         invalidateSessionConnectionOwnership()
+        homeStatus.profileRetired()
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = nil
         mountedOptionalRefreshTask?.cancel()

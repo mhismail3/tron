@@ -81,6 +81,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     let enabled: Bool
     let homeId: String?
     let sessionId: String?
+    /// The newest chapter a client may open; the sealed predecessor while a
+    /// rollover is pending. Nil when nothing is openable.
+    let openSessionId: String?
     let generation: Int?
     let live: Bool
     let sessionPresent: Bool
@@ -98,7 +101,7 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
                status.activation.lastRefusalReason, status.activation.lastRefusalDetail]
                 .compactMap({ $0 }).allSatisfy({ $0.utf8.count <= 1_024 }),
-              [status.homeId, status.sessionId, status.activation.activationStartEntryId]
+              [status.homeId, status.sessionId, status.openSessionId, status.activation.activationStartEntryId]
                 .compactMap({ $0 }).allSatisfy({ $0.utf8.count <= 512 }),
               [status.activation.viewLines, status.activation.viewBytes, status.activation.effectiveTokens, status.activation.contextWindow]
                 .compactMap({ $0 }).allSatisfy({ $0 >= 0 }) else {
@@ -124,6 +127,9 @@ final class HomeStatusPresentationOwner {
     static let fallbackInterval: Duration = .seconds(5)
 
     private(set) var status: HomeStatusDTO?
+    /// The latest read reached a Gateway whose status this client could not read
+    /// or admit. It is cleared with the status and by the next publication.
+    private(set) var isStatusUnavailable = false
     var isCapabilityEnabled: Bool { capabilityEnabled }
     @ObservationIgnored private var readGeneration: UInt64 = 0
     @ObservationIgnored private var surfaceGeneration: UInt64 = 0
@@ -139,32 +145,32 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private var mountedTask: Task<Void, Never>?
 
     /// Replacing a mount creates a new authority. A late retirement callback for
-    /// the prior token is intentionally a no-op.
-    func mountSurface(token: PresentationSurfaceToken, coordinator: PresentationActivityCoordinator) {
+    /// the prior token is intentionally a no-op. The surface owns the read, so a
+    /// mount before pairing (no selected profile yet) can still read once a
+    /// profile is configured.
+    func mountSurface(
+        token: PresentationSurfaceToken,
+        coordinator: PresentationActivityCoordinator,
+        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
+    ) {
         guard token != surfaceToken || activityCoordinator !== coordinator else { return }
         stopWork(clearStatus: true)
         surfaceGeneration &+= 1
         surfaceToken = token
         activityCoordinator = coordinator
+        self.fetch = fetch
         profileID = nil
         connectionID = nil
         capabilityEnabled = false
-        fetch = nil
         suspended = false
     }
 
-    func configure(
-        profileID: String,
-        connectionID: String?,
-        capabilityEnabled: Bool,
-        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
-    ) {
+    func configure(profileID: String, connectionID: String?, capabilityEnabled: Bool) {
         let identityChanged = self.profileID != profileID || self.connectionID != connectionID
         if identityChanged { stopWork(clearStatus: true) }
         self.profileID = profileID
         self.connectionID = connectionID
         self.capabilityEnabled = capabilityEnabled
-        self.fetch = fetch
         suspended = false
         guard capabilityEnabled else {
             stopWork(clearStatus: true)
@@ -175,8 +181,17 @@ final class HomeStatusPresentationOwner {
 
     /// Lifecycle retirement drops connection-scoped data, but keeps the exact
     /// visible surface so an authenticated reconnect can install a new admission.
+    /// The capability survives: a reconnect to the same profile must not flicker.
     func connectionRetired() {
         connectionID = nil
+        stopWork(clearStatus: true)
+    }
+
+    /// A profile transition forgets what the previous profile advertised.
+    func profileRetired() {
+        profileID = nil
+        connectionID = nil
+        capabilityEnabled = false
         stopWork(clearStatus: true)
     }
 
@@ -244,7 +259,10 @@ final class HomeStatusPresentationOwner {
             invalidateRead(clearStatus: !capabilityEnabled)
             return nil
         }
-        if self.profileID != profileID || self.connectionID != connectionID { status = nil }
+        if self.profileID != profileID || self.connectionID != connectionID {
+            status = nil
+            isStatusUnavailable = false
+        }
         self.profileID = profileID
         self.connectionID = connectionID
         self.capabilityEnabled = true
@@ -275,6 +293,7 @@ final class HomeStatusPresentationOwner {
               ),
               !suspended else { return false }
         status = value
+        isStatusUnavailable = false
         return true
     }
 
@@ -319,9 +338,13 @@ final class HomeStatusPresentationOwner {
                 let value = try await fetch(fence)
                 guard !Task.isCancelled, let self else { return }
                 _ = self.publish(value, for: fence)
+            } catch is CancellationError {
+                // A superseded or retired read is not an answer from the Gateway.
             } catch {
-                // Status is disposable; keep its last projection and allow the
-                // next event or mounted fallback to retry.
+                // Status is disposable: the next event or mounted fallback retries.
+                // The row must still say why it has no status, not keep loading.
+                guard !Task.isCancelled, let self, fence == self.latestFence else { return }
+                self.isStatusUnavailable = true
             }
         }
         activeReadTask = task
@@ -377,6 +400,9 @@ final class HomeStatusPresentationOwner {
     private func invalidateRead(clearStatus: Bool) {
         readGeneration &+= 1
         latestFence = nil
-        if clearStatus { status = nil }
+        if clearStatus {
+            status = nil
+            isStatusUnavailable = false
+        }
     }
 }
