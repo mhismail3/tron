@@ -207,6 +207,7 @@ async function validateRuntimeNodeAlias(root, architecture) {
 
 async function npmRuntimeTreeDigest(root) {
   const records = [];
+  const reads = [];
   async function visit(directory, relativeDirectory) {
     const entries = await readdir(directory, { withFileTypes: true });
     entries.sort((left, right) => Buffer.from(left.name).compare(Buffer.from(right.name)));
@@ -216,11 +217,20 @@ async function npmRuntimeTreeDigest(root) {
       const path = join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`npm runtime contains a symlink: ${relative}`);
       if (entry.isDirectory()) await visit(path, relative);
-      else if (entry.isFile()) records.push({ path: `file:${relative}`, data: await readFile(path) });
-      else throw new Error(`npm runtime contains an unsupported entry: ${relative}`);
+      else if (entry.isFile()) {
+        const record = { path: `file:${relative}`, data: undefined };
+        records.push(record);
+        reads.push({ record, path });
+      } else throw new Error(`npm runtime contains an unsupported entry: ${relative}`);
     }
   }
   await visit(root, "");
+  // The records are sorted below, so bounded parallel reads do not change the digest.
+  for (let start = 0; start < reads.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
+    await Promise.all(reads.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY).map(async ({ record, path }) => {
+      record.data = await readFile(path);
+    }));
+  }
   records.sort((left, right) => Buffer.from(left.path).compare(Buffer.from(right.path)));
   const hash = createHash("sha256");
   for (const record of records) {
@@ -355,6 +365,12 @@ async function regularFiles(root, prefix) {
 /** Must remain byte-for-byte compatible with hash-gateway-payload.sh. */
 export async function payloadFingerprint(root) {
   await completePayload(root);
+  return payloadTreeFingerprint(root);
+}
+
+// Callers must run completePayload on this root first. validatePayload already
+// does, so it must not pay for the npm runtime digest a second time.
+async function payloadTreeFingerprint(root) {
   const files = [
     ...(await regularFiles(root, "app")),
     ...(await regularFiles(root, "runtime")),
@@ -595,7 +611,7 @@ export async function validatePayload(root, expected = {}, checkFingerprint = tr
   const manifest = payloadManifest(document.value, expected);
   await validatePayloadPushConfiguration(root, manifest.channel);
   if (checkFingerprint) {
-    const actual = await payloadFingerprint(root);
+    const actual = await payloadTreeFingerprint(root);
     if (actual !== manifest.payloadFingerprint) throw new Error("payload fingerprint does not match staged files");
   }
   return manifest;
@@ -787,43 +803,66 @@ export async function restoreSelectionStateAndClearAttempt(paths, state) {
   });
 }
 
-async function makeMutable(root) {
-  const visit = async (path) => {
-    const info = await lstat(path);
-    // Cleanup never follows links. Admission validates live payload links;
-    // malformed failed staging trees must still be removable without
-    // traversing a target outside the store.
-    if (info.isSymbolicLink()) return;
-    if (info.isDirectory()) {
-      await chmod(path, 0o755);
-      for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
-    } else if (info.isFile()) {
-      await chmod(path, (info.mode & 0o111) !== 0 ? 0o755 : 0o644);
-    } else throw new Error("payload contains unsupported entry");
-  };
+// Walks the payload without following links. Directories are listed parents
+// first (root included); openDirectory runs before each one is read. Unsupported
+// entries are refused before the caller changes any mode.
+async function payloadTreeEntries(root, openDirectory, onSymlink) {
   const rootInfo = await lstat(root);
   if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
+  if (!rootInfo.isDirectory()) throw new Error("payload root is not a directory");
+  const files = [];
+  const directories = [];
+  const visit = async (directory) => {
+    directories.push(directory);
+    await openDirectory(directory);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) await onSymlink(path);
+      else if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(path);
+      else throw new Error("payload contains unsupported entry");
+    }
+  };
   await visit(root);
+  return { files, directories };
 }
 
-async function makeImmutable(root) {
-  const payloadRoot = await realpath(root);
-  const visit = async (path) => {
+// Regular files keep their executable bit: 0755/0644 unsealed, 0555/0444 sealed.
+// Batches bound the concurrent lstat/chmod pairs so a ~9k-entry payload does not
+// pay one serial await per entry.
+async function forEachPayloadFile(paths, operation) {
+  for (let start = 0; start < paths.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
+    await Promise.all(paths.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY).map(operation));
+  }
+}
+
+export async function makeMutable(root) {
+  // Cleanup never follows links. Admission validates live payload links;
+  // malformed failed staging trees must still be removable without
+  // traversing a target outside the store.
+  const { files } = await payloadTreeEntries(root, (directory) => chmod(directory, 0o755), () => {});
+  await forEachPayloadFile(files, async (path) => {
     const info = await lstat(path);
-    if (info.isSymbolicLink()) {
-      await validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path));
-      return;
-    }
-    if (info.isDirectory()) {
-      for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
-      await chmod(path, 0o555);
-    } else if (info.isFile()) {
-      await chmod(path, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
-    } else throw new Error("payload contains unsupported entry");
-  };
-  const rootInfo = await lstat(root);
-  if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
-  await visit(root);
+    await chmod(path, (info.mode & 0o111) !== 0 ? 0o755 : 0o644);
+  });
+}
+
+export async function makeImmutable(root) {
+  const payloadRoot = await realpath(root);
+  // Every link is validated before any mode changes, so a refused payload is not
+  // left partially sealed.
+  const { files, directories } = await payloadTreeEntries(
+    root,
+    async () => {},
+    (path) => validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path)),
+  );
+  await forEachPayloadFile(files, async (path) => {
+    const info = await lstat(path);
+    await chmod(path, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
+  });
+  // Directories are sealed last, deepest first, so every entry is still reachable
+  // while the walk changes modes.
+  for (const directory of directories.reverse()) await chmod(directory, 0o555);
 }
 
 // Moves a validated staging tree into versions/ as a sealed version. macOS 15
@@ -1634,16 +1673,14 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       await makeMutable(temporary);
       const copiedFingerprint = await payloadFingerprint(temporary);
       if (copiedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload changed during copy");
+      let stagedFingerprint = copiedFingerprint;
       if (useInstalledRuntime) {
         await rm(join(temporary, "runtime"), { recursive: true, force: true });
         await copyPayloadTree(join(runtimeSnapshotRoot, "runtime"), join(temporary, "runtime"));
         const copiedRuntimeFingerprint = await payloadSubtreeFingerprint(temporary, "runtime");
         if (copiedRuntimeFingerprint !== runtimeSourceFingerprint) throw new Error("installed runtime changed during dev staging");
         await adoptInstalledNativeFiles(temporary, runtimeSnapshotRoot);
-      }
-      const stagedFingerprint = await payloadFingerprint(temporary);
-      if (!useInstalledRuntime && stagedFingerprint !== sourceManifest.payloadFingerprint) {
-        throw new Error("staged payload fingerprint changed during copy");
+        stagedFingerprint = await payloadFingerprint(temporary);
       }
       if (useInstalledRuntime) {
         const existingInfo = await lstat(target).catch((error) => {
@@ -1670,7 +1707,9 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       };
       payloadManifest(manifest, { channel, version: targetVersion });
       await atomicJson(join(temporary, "manifest.json"), manifest);
-      await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, true);
+      // manifest.json is outside the fingerprinted app/ and runtime/ trees, so the
+      // fingerprint computed above still describes the tree being published.
+      await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, false);
       await publishImmutablePayload(temporary, target);
       return markCandidateResult({ root: target, manifest, reused: false });
     } catch (error) {
