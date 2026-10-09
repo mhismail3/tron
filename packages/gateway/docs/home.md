@@ -389,15 +389,9 @@ There is no deletion API yet.
 
 **Rollback contract:** A build older than the record format refuses the record
 (Home unavailable) and preserves it unchanged; there is no down-conversion.
-The unreleased held pre-route build rejects the required `routeGeneration` field
-in v2 without changing the format version or adding a version gate. Home is
-unavailable for the Home-workspace cwd; ordinary chats elsewhere are unaffected.
-`home-task-rollback.integration.test.ts` executes that build's actual
-`home-owner.ts` from the held base ref against populated task and authorization
-files. It verifies unavailable status, unchanged record/namespace/marker bytes,
-and that the current owner afterwards still reads the enabled Home record. This
-is an owner-level rollback integration proof, not a full installed older Gateway
-binary or power-loss test.
+Home is unavailable for the Home-workspace cwd; ordinary chats elsewhere are
+unaffected. `home-owner.test.ts` ("preserves an unknown-version record instead
+of migrating it") proves the refusal and the unchanged bytes at the owner.
 
 HomeOwner constructs the store, its authorization adapter and dispatcher beside
 Home's memory. Startup does not initialize the task namespace or enable a scope:
