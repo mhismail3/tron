@@ -2840,32 +2840,65 @@ private func recordMotionPixels(
     }
     let trackedPhysicalID = physicalID ?? initialTarget?.physicalID ?? targetSemanticID
     var previousFrame = initialTarget?.windowFrame
+    var previousGeometryFrame = initialTarget?.windowFrame
     var previousImage: UIImage? = try ChatMotionPixelSupport.captureWindow(harness: harness)
-    let window = try #require(harness.visibleRootView.window)
-    let previousAnimationClockSpeed = window.layer.speed
-    window.layer.speed = ChatMotionPixelSupport.animationClockSpeed
-    defer { window.layer.speed = previousAnimationClockSpeed }
+    let rootLayer = harness.visibleRootView.layer
+    let previousAnimationClockSpeed = rootLayer.speed
+    rootLayer.speed = ChatMotionPixelSupport.animationClockSpeed
+    defer { rootLayer.speed = previousAnimationClockSpeed }
     harness.replaceAuthoritativeSnapshot(updated)
     var changedFrames = 0
-    for _ in 0..<ChatMotionPixelSupport.sampledFrameCount {
+    var stablePixelCaptures = 0
+    var stableGeometryCaptures = 0
+    var observedPixelChange = false
+    var didSettle = false
+    var captureCount = 0
+    for _ in 0..<ChatMotionPixelSupport.maximumSampleCount {
         try await harness.driveFrameBoundary()
         let current = try ChatMotionPixelSupport.captureWindow(harness: harness)
+        captureCount += 1
         let currentFrame = harness.recorder.samples.last?.nativeRows.first {
             $0.physicalID == trackedPhysicalID
         }?.windowFrame
-        if let previousImage {
-            let region = previousFrame.map { prior in
-                currentFrame.map { prior.union($0) } ?? prior
-            } ?? currentFrame
-            if let region, ChatMotionPixelSupport.changedPixels(previousImage, current, in: region) {
-                changedFrames += 1
+        let geometryChanged: Bool
+        if let previousGeometryFrame, let currentFrame {
+            geometryChanged = geometrySizeStep(previousGeometryFrame, currentFrame) > 0.5
+        } else {
+            geometryChanged = previousGeometryFrame != currentFrame
+        }
+        if geometryChanged {
+            stableGeometryCaptures = 0
+        } else {
+            stableGeometryCaptures += 1
+        }
+        previousGeometryFrame = currentFrame
+        let region = previousFrame.map { prior in
+            currentFrame.map { prior.union($0) } ?? prior
+        } ?? currentFrame
+        let pixelsChanged = previousImage.flatMap { previous in
+            region.map { ChatMotionPixelSupport.changedPixels(previous, current, in: $0) }
+        } ?? false
+        if pixelsChanged {
+            changedFrames += 1
+            observedPixelChange = true
+            stablePixelCaptures = 0
+        } else if observedPixelChange {
+            stablePixelCaptures += 1
+            if stablePixelCaptures >= ChatMotionPixelSupport.requiredStablePixelCaptures,
+               stableGeometryCaptures >= ChatMotionPixelSupport.requiredStablePixelCaptures {
+                didSettle = true
+                previousImage = current
+                previousFrame = currentFrame ?? previousFrame
+                break
             }
         }
         previousImage = current
         previousFrame = currentFrame ?? previousFrame
     }
+    #expect(didSettle,
+            "pixel region and row geometry did not settle within \(ChatMotionPixelSupport.maximumSampleCount) captures (observedChange=\(observedPixelChange))")
     try writeMotionPixelMetric(scenario.rawValue, changedFrames: changedFrames)
-    print("CHAT-MOTION-PIXELS \(scenario.rawValue) changedFrames=\(changedFrames)")
+    print("CHAT-MOTION-PIXELS \(scenario.rawValue) changedFrames=\(changedFrames) captures=\(captureCount) settled=\(didSettle)")
     if scenario != .depart {
         #expect(changedFrames >= ChatMotionConformanceBounds.minimumPixelChangingFrames,
                 "pixel change occupied only \(changedFrames) frames")

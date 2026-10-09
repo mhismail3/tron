@@ -69,9 +69,10 @@ enum ChatMotionPixelSupport {
     /// frame. Slow the local clock so real-time animations remain observable
     /// across captures instead of aliasing differently on each run.
     static let animationClockSpeed: Float = 0.1
-    /// Sixty 20–80 ms captures span a full slow-clock curve without tying the
-    /// animation oracle to display-link timing.
-    static let sampledFrameCount = 60
+    /// Fifty pixel- and row-geometry-stable captures span the local gaps between
+    /// expensive hosted snapshots; the larger cap remains only a hang guard.
+    static let maximumSampleCount = 120
+    static let requiredStablePixelCaptures = 50
 
     /// Pixel sampling is a separate, slower pass; use the orientation fixture's
     /// shared hosted-window capture and sample points only within this row.
