@@ -272,6 +272,12 @@ export class EpisodicStore {
     await assertOwnerDirectory(join(stateRoot, "episodic"), true);
     await assertOwnerDirectory(paths.root, true);
     if (!(await fileExists(paths.initialized))) {
+      // The marker turns a later missing container into lost state, so each
+      // directory entry on its path must be durable first. This call may have
+      // just created `state/` and `episodic/`, so their parents are synced too.
+      for (const directory of [dirname(stateRoot), stateRoot, join(stateRoot, "episodic")]) {
+        await syncDirectory(directory, this.fileSystem);
+      }
       await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
       // The feature record tells a later start that a missing shared container
       // is lost state rather than a fresh installation.

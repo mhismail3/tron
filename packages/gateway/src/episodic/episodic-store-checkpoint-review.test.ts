@@ -1,4 +1,5 @@
-import { lstat, mkdir, mkdtemp, open as realOpen, readFile, readdir, rename as realRename, rm, rm as realRm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { lstat, mkdir, mkdtemp, open as realOpen, readFile, readdir, realpath, rename as realRename, rm, rm as realRm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -291,6 +292,37 @@ describe("episodic checkpoint review regressions", () => {
       await checkpoint.catch(() => {});
     }
     expect(names).toContain(".checkpoint-staging");
+  });
+
+  it("syncs the container's parent directories before recording the store as initialized", async () => {
+    const fx = await fixture("container-parents");
+    // The workspace reports its canonical root (macOS `/tmp` is a link to `/private/tmp`).
+    const workspaceRoot = join(await realpath(fx.root), "home", "workspace");
+    const stateRoot = join(workspaceRoot, "state");
+    const marker = join(stateRoot, "episodic", fx.sessionId, "initialized.json");
+    const synced: Array<{ path: string; markerPresent: boolean }> = [];
+    const fileSystem = {
+      mkdir, lstat, readdir, rename: realRename, rm: realRm, writeFile,
+      syncDurably: async (handle: { sync(): Promise<void> }) => handle.sync(),
+      open: async (path: string, ...args: unknown[]) => {
+        const handle = await (realOpen as (...values: unknown[]) => Promise<any>)(path, ...args);
+        return new Proxy(handle, {
+          get(target, key) {
+            if (key === "sync") return async () => {
+              synced.push({ path, markerPresent: existsSync(marker) });
+              return target.sync();
+            };
+            const value = Reflect.get(target, key, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      },
+    };
+    const store = new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes, fileSystem as never);
+    await store.appendCatalog(storeRecord(fx.sessionId));
+    const beforeMarker = synced.filter(entry => !entry.markerPresent).map(entry => entry.path);
+    expect(beforeMarker).toEqual(expect.arrayContaining([workspaceRoot, stateRoot, join(stateRoot, "episodic")]));
+    expect(existsSync(marker)).toBe(true);
   });
 
   it("reconciles same-size source replacement before adopting a full-refresh cursor", async () => {
