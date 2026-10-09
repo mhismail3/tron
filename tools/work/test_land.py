@@ -265,6 +265,7 @@ FAKE_GH = textwrap.dedent(
             git("update-ref", "refs/heads/" + state["base"], move)
         sha = head_of(p)
         done({"state": p["state"], "headRefOid": sha, "mergeCommit": p["mergeCommit"],
+              "mergeable": state.get("mergeable", "MERGEABLE"),
               "baseRefName": p.get("base") or state["base"], "statusCheckRollup": contexts(sha)})
     if command == ["pr", "merge"]:
         p = pull(args[2])
@@ -1256,6 +1257,25 @@ class RequiredCheckTests(LandFixture):
 
     def test_waits_through_pending_checks_then_merges(self):
         self.set_state(pendingViews=3)
+        self.assertEqual(self.land(), 0)
+        self.assertEqual(len(self.sleeps), 3)
+        self.assertEqual(len(self.merges()), 1)
+
+    # Failure mode 80.
+    def test_conflicting_pull_request_stops_at_the_first_poll_without_merging(self):
+        # Hosted CI never runs on a conflicting pull request, so its checks stay pending forever.
+        self.set_state(mergeable="CONFLICTING", pendingViews=10 ** 6)
+        with self.assertRaises(land.LandError) as raised:
+            self.land()
+        self.assertIn("conflicts", str(raised.exception))
+        self.assertIn(f"merge {REMOTE}/{BASE} into the branch", str(raised.exception))
+        self.assertEqual(self.sleeps, [])
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.issue()["state"], "OPEN")
+
+    def test_unknown_mergeability_keeps_waiting_then_merges(self):
+        # GitHub reports UNKNOWN while it computes mergeability; that is not a conflict.
+        self.set_state(mergeable="UNKNOWN", pendingViews=3)
         self.assertEqual(self.land(), 0)
         self.assertEqual(len(self.sleeps), 3)
         self.assertEqual(len(self.merges()), 1)
