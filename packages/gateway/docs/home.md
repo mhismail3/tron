@@ -590,9 +590,8 @@ real directories.
     control fences the active operation and controller generation.
   - `stopIntent`: null or exact `{ operationId, controllerGeneration, requestedAt
     }`, durable and never replaced.
-  - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens, knownCostUSD,
-    pricingProvenance, unpriced }`. Counts are safe nonnegative integers; a known
-    cost is finite, nonnegative and has bounded provenance.
+  - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
+    safe nonnegative integers. No cost is recorded.
   - `reportRefs`: null or at most 256 unique `{ resultId, sessionId, entryId, digest
     }`; the digest pins the canonical report payload.
   - `wake`: null before terminal, then the event (stable identity, route epoch,
@@ -733,8 +732,8 @@ success.
 **Spend.** Canonical usage is deduplicated by entry identity over the operation's
 history and persisted before live status and settlement. Contradictory duplicates,
 invalid counters or overflow refuse. Input totals include cache read and write;
-output is always shown. Pi's `usage.cost` has no authoritative billing provenance,
-so provider amounts are explicitly unpriced.
+output is always shown. Pi's `usage.cost` is not authoritative billing evidence,
+so no provider amount is recorded or shown; spend is tokens only.
 
 **Live settlement** joins the worker's terminal and Stop boundary, then reads the
 same Registry durable canonical cut as cold recovery. Session serialization orders
@@ -806,7 +805,7 @@ work. One per-process result is shared by every task surface.
   `invalid-record`). Each row carries task ID, dates, intent title (first 160 code
   points), target, lifecycle, terminal outcome or null, spend or null, `attention`
   (needs-input or unknown) and `pendingGrant`. Null spend is unavailable, not zero;
-  unpriced stays explicit. A never-initialized listing returns `{ items: [] }`
+  A never-initialized listing returns `{ items: [] }`
   without creating authority.
 - **`home.taskStatus`** returns the record, exact active operation and controller
   generation, spend and the immutable result. Viewing never changes control. Home's
@@ -1155,7 +1154,7 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home revoke-grant <id>` | `home.revokeTaskGrant` | Revokes an available grant. Already-admitted work is unchanged. |
 | `/home approve-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Approves a pending request with a one-use grant that expires at the given Unix-millisecond time. |
 | `/home deny-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Denies a pending request. Records the decision without a grant. |
-| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, input and output tokens, and explicit unpriced money. |
+| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and input and output tokens. |
 | `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation and controller generation read from status. |
 | `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation and controller generation read from status. |
 | `/home redeliver <id>` | `home.status`, then `home.redeliverTaskResult` | Re-stamps an unadmitted task result to the current Home route. |

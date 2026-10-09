@@ -1083,7 +1083,7 @@ record, RPC shapes, chapters, runtime profile, memory, task delegation and termi
   through the neutral owned-session boundary. Workers keep normal project capabilities plus the explicit `report`
   tool. v1 refuses subagent execution and revival, scheduled work and durable `bg_wait` wake subscriptions.
   Reports seal exact canonical evidence, never the latest assistant reply; a missing report is `limited` or
-  `unknown`. A fixed internal 24-hour deadline cancels and joins operation-owned work. Usage is explicitly unpriced,
+  `unknown`. A fixed internal 24-hour deadline cancels and joins operation-owned work. Usage is reported as tokens only,
   and unknown tracked detached work yields `unknown`, never a clean-stop claim.
 - **Authority and recovery.** Task authority lives in a separate strict store, initialized on first dispatch.
   Startup retires abandoned tasks from exact canonical reports or terminal `unknown`, without replaying a prompt,

@@ -41,14 +41,7 @@ export interface HomeTaskRecord {
   operationId: string | null;
   controllerGeneration: number | null;
   stopIntent: { operationId: string; controllerGeneration: number; requestedAt: string } | null;
-  spend: {
-    sourceDigest: string;
-    inputTokens: number;
-    outputTokens: number;
-    knownCostUSD: number | null;
-    pricingProvenance: string | null;
-    unpriced: boolean;
-  } | null;
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
   reportRefs: Array<{ resultId: string; sessionId: string; entryId: string; digest: string }> | null;
   terminalEvidence: {
     outcome: typeof OUTCOMES[number];
@@ -503,12 +496,9 @@ function validateTask(value: unknown): HomeTaskRecord {
     || !identifier(value.stopIntent.operationId) || !positive(value.stopIntent.controllerGeneration)
     || value.stopIntent.operationId !== value.operationId || value.stopIntent.controllerGeneration !== value.controllerGeneration
     || !text(value.stopIntent.requestedAt, 64) || !Number.isFinite(Date.parse(value.stopIntent.requestedAt)))) invalid();
-  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens", "knownCostUSD", "pricingProvenance", "unpriced"])
+  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
-    || !count(value.spend.inputTokens) || !count(value.spend.outputTokens) || typeof value.spend.unpriced !== "boolean"
-    || (value.spend.knownCostUSD !== null && (typeof value.spend.knownCostUSD !== "number" || !Number.isFinite(value.spend.knownCostUSD) || value.spend.knownCostUSD < 0))
-    || (value.spend.pricingProvenance !== null && !text(value.spend.pricingProvenance, 512))
-    || ((value.spend.knownCostUSD === null) !== (value.spend.pricingProvenance === null)))) invalid();
+    || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
   if (value.reportRefs !== null && (!Array.isArray(value.reportRefs) || value.reportRefs.length > 256
     || value.reportRefs.some(ref => !keys(ref, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(ref.resultId) || !identifier(ref.sessionId) || !identifier(ref.entryId) || typeof ref.digest !== "string" || !/^[a-f0-9]{64}$/u.test(ref.digest))
     || new Set(value.reportRefs.map(ref => ref.resultId)).size !== value.reportRefs.length)) invalid();

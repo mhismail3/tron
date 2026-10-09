@@ -250,8 +250,8 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), lifecycle: "terminal" },
       { ...task(), lifecycle: "terminal", terminalEvidence: { outcome: "final", sessionId: "session-1", entryIds: [], reason: "report" } },
       { ...task(), reportRefs: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", surprise: true }] },
-      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } },
-      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, knownCostUSD: 1, pricingProvenance: null, unpriced: false } },
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0 } },
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, unpriced: true } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);
@@ -558,7 +558,7 @@ describe("HomeTaskStore operation cost", () => {
         read: await fileReadsDuring(() => f.store.read("task-1")),
         put: await fileReadsDuring(() => f.store.put({ ...write, revision: current.revision + 1 }, current.revision)),
         update: await fileReadsDuring(() => f.store.update("task-1", record => ({ ...record,
-          spend: { sourceDigest: "a".repeat(64), inputTokens: ++tokens, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } }))),
+          spend: { sourceDigest: "a".repeat(64), inputTokens: ++tokens, outputTokens: 0 } }))),
         updateWake: await fileReadsDuring(() => f.store.updateWake("task-terminal", wake => ({ ...wake, push: "decided" }))),
         authorityLoad: await fileReadsDuring(() => f.store.authorization.load()),
         authoritySave: await fileReadsDuring(() => f.store.authorization.save(state)),

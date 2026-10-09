@@ -1357,18 +1357,17 @@ describe("Home task production dispatch", () => {
       const two = await f.registry.homeOwner().taskResult(run.taskId);
       const canonical = entries().find(value => value.type === "message" && value.message.role === "assistant")!;
       const usage = (canonical as any).message.usage;
-      expect(one.spend).toMatchObject({ inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, knownCostUSD: null, unpriced: true });
+      expect(one.spend).toMatchObject({ inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output });
       expect(two).toEqual(one);
       const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
       const terminal = { request: (_method: string, params: any) => f.registry.homeOwner().taskResult(params.taskId) };
       await runHomeInput(terminal as any, `/home task ${run.taskId}`);
-      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input/cache + ${one.spend!.outputTokens} output tokens; unpriced`));
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input/cache + ${one.spend!.outputTokens} output tokens.`));
       output.mockRestore();
       release();
       const final = await run.completion;
       expect(final.spend!.inputTokens).toBeGreaterThanOrEqual(one.spend!.inputTokens);
       expect(final.spend!.outputTokens).toBeGreaterThanOrEqual(one.spend!.outputTokens);
-      expect(final.spend!.unpriced).toBe(true);
       evidence.push({ case: "live-spend", live: one.spend, final: final.spend });
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
@@ -1531,7 +1530,7 @@ describe("Home task production dispatch", () => {
     expect(await f.registry.homeOwner().taskResult("task-one")).toEqual(result);
     await expect(worker.fork(inputEntry.id)).rejects.toThrow(/task|identity/);
     expect(f.signals.filter(record => record.event === "home.task.transition").map(record => record.transition)).toEqual(["pending", "active", "terminal"]);
-    expect(f.signals.find(record => record.event === "home.task.spend")).toMatchObject({ inputTokens: expect.any(Number), unpriced: true });
+    expect(f.signals.find(record => record.event === "home.task.spend")).toMatchObject({ inputTokens: expect.any(Number) });
     evidence.push({ case: "explicit-report", ref, canonicalReport: canonical.data, outcome: result.terminalEvidence.outcome, postReport });
   }, 20_000);
 
