@@ -1673,12 +1673,12 @@ struct ChatTranscriptPresentationStoreTests {
             content: .queued(ChatQueuedMessageRenderEntry(
                 id: physicalID,
                 index: 0,
-                message: SessionSnapshot.QueuedMessage(
+                queue: [SessionSnapshot.QueuedMessage(
                     id: "submitted",
                     behavior: .steer,
                     text: "hello",
                     attachmentCount: 0
-                )
+                )]
             ))
         )
         #expect(kind(queued) == .promptContent)
@@ -1855,7 +1855,7 @@ struct ChatTranscriptPresentationStoreTests {
                 content: .queued(ChatQueuedMessageRenderEntry(
                     id: submission.presentationID,
                     index: 0,
-                    message: queuedMessage
+                    queue: [queuedMessage]
                 ))
             )
             #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(

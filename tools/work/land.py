@@ -129,7 +129,9 @@ def check_runs_state(contexts: List[dict], names: List[str]) -> Tuple[str, List[
             state, shown = "pending", "not reported"
         elif any(run.get("status") != "COMPLETED" for run in runs):
             state, shown = "pending", "running"
-        elif all(run.get("conclusion") == "SUCCESS" for run in runs):
+        # A required job CI skipped because the change does not touch its inputs
+        # passes, as in GitHub's own required-check rule; cancelled proves nothing.
+        elif all(run.get("conclusion") in ("SUCCESS", "SKIPPED") for run in runs):
             state, shown = "success", "success"
         else:
             state = "failure"
