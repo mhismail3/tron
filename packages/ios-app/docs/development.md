@@ -1369,8 +1369,10 @@ from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTest
 await the exact outcome a race owes instead of ending the test first (`AppModelReconnectTests.falseRestoreRejectsDeadEpochAfterRefresh`
 waits for the replacement attempt its dead epoch starts), and bound display-driven settling in
 finite display-frame phases (`ChatFloatingDisplayLayoutTests.keyboardAndAccessories`). The floating
-layout oracle checks every sampled native frame and each keyboard/accessory/draft/restored milestone;
-it does not assume the host samples a particular intermediate animation instant. The UI-validation
+layout oracle compares the panel and complete composer from their presentation layers at every sampled
+native frame and each keyboard/accessory/draft/restored milestone, so it checks visible geometry on
+one clock rather than comparing a rendered panel with a target composer frame. It does not assume the
+host samples a particular intermediate animation instant. The UI-validation
 `ChatSurfaceMotionConformanceTests` separately measures the floating window's token-driven arrival,
 programmatic settle and dismissal frames, pixels and stable marker identity; gesture-driven moves remain
 user-owned. The same suite samples catch-up affordance appearance and disappearance; the scroll command

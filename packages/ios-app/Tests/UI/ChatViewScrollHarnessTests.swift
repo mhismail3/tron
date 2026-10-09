@@ -2170,9 +2170,12 @@ final class ChatViewScrollHarness {
                 .first(where: { $0.physicalID == ChatHostedNativeRowProbe.composerID }),
               let toolbar = views.compactMap({ $0 as? UINavigationBar }).first else { return nil }
         let presentedMarkerLayer = marker.layer.presentation() ?? marker.layer
+        // Compare the visible surfaces on the same clock; mixing a rendered
+        // panel with the composer's target layer invents transient overlap.
+        let presentedComposerLayer = composer.layer.presentation() ?? composer.layer
         return FloatingLayout(marker: marker,
                               frame: presentedMarkerLayer.convert(presentedMarkerLayer.bounds, to: window.layer).standardized,
-                              composer: composer.convert(composer.bounds, to: window),
+                              composer: presentedComposerLayer.convert(presentedComposerLayer.bounds, to: window.layer).standardized,
                               toolbarBottom: toolbar.convert(toolbar.bounds, to: window).maxY)
     }
 
