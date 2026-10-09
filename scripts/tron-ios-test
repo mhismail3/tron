@@ -643,9 +643,12 @@ for field in fields:
     if not isinstance(count, int) or isinstance(count, bool) or count < 0:
         raise SystemExit(f"invalid XCTest summary: missing or invalid {field}")
     counts[field] = count
+expected_failures = value.get("expectedFailures", 0)
+if not isinstance(expected_failures, int) or isinstance(expected_failures, bool) or expected_failures < 0:
+    raise SystemExit("invalid XCTest summary: missing or invalid expectedFailures")
 if counts["totalTestCount"] <= 0:
     raise SystemExit("invalid XCTest summary: no tests executed")
-if sum(counts[field] for field in fields[:3]) != counts["totalTestCount"]:
+if sum(counts[field] for field in fields[:3]) + expected_failures != counts["totalTestCount"]:
     raise SystemExit("invalid XCTest summary: test counts do not reconcile")
 if counts["passedTests"] <= 0 or counts["failedTests"] != 0:
     raise SystemExit("XCTest summary did not execute and pass at least one test")
