@@ -361,12 +361,12 @@ export class EpisodicMemory {
     return this.sourceCursor ? structuredClone(this.sourceCursor) : null;
   }
 
-  browserEvidence(evidence: HomeMemoryEvidence): EpisodicMessageRecord {
+  /** Refuses evidence that no longer names this catalog's exact message. */
+  assertBrowserEvidence(evidence: HomeMemoryEvidence): void {
     this.assertOpen();
     const message = this.messages.get(evidence.index);
     if (!message || message.sessionId !== evidence.sessionId || message.entryId !== evidence.entryId
       || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
-    return { ...message, omissions: [...message.omissions] };
   }
 
   browserPage(request: HomeMemoryPageRequest): HomeMemoryPage {

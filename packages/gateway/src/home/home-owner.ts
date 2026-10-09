@@ -884,7 +884,7 @@ export class HomeOwner {
   async memoryEvidence(evidence: HomeMemoryEvidence, offset: number, signal?: AbortSignal): Promise<HomeMemoryEvidencePage> {
     return this.browserRead(async (memory, source) => {
       // Refuse arbitrary/cross-chapter references before opening evidence.
-      memory.browserEvidence(evidence);
+      memory.assertBrowserEvidence(evidence);
       const cursor = memory.browserCursor();
       if (!cursor) throw homeMemorySourceUnavailable();
       const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal);
