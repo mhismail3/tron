@@ -220,22 +220,18 @@ export interface EpisodicChapterSourceCursor {
   completeBytes: number;
   leafEntryId: string | null;
   leafLineDigest: string | null;
-  completePrefixDigest?: string | null;
+  completePrefixDigest: string;
 }
 
+/** Home's aggregate cursor. The position is the chapter cursors' concatenation:
+ * file identity and line digests live per chapter, where they are read. */
 export interface EpisodicSourceCursor {
-  dev: number;
-  ino: number;
-  size: number;
   completeBytes: number;
   leafEntryId: string | null;
   /** Ordered canonical chapter cursors for a stable Home namespace. */
-  home?: { version: 2; ledgerRevision: number; chapters: EpisodicChapterSourceCursor[] };
+  home: { version: 2; ledgerRevision: number; chapters: EpisodicChapterSourceCursor[] };
   /** sha256 chain over every complete source line through this cursor. */
-  completePrefixDigest?: string | null;
-  /** sha256 of the last complete line's JSON text, so an in-place rewrite of
-   * the prefix is detected by the window read before the offset. */
-  leafLineDigest: string | null;
+  completePrefixDigest: string;
 }
 
 export interface EpisodicStoreState {

@@ -78,7 +78,10 @@ it the commits the runtime reports, and sends each activation the view it render
   messages. The raw transient bound is per line; retained chapter work is capped
   projection plus ID/parent topology, not aggregate transcript bytes.
 - The strict Home cursor is version 2. Every chapter requires file-change
-  metadata, sealed state and a complete-prefix digest; older Home formats are
+  metadata, sealed state and a complete-prefix digest. The aggregate cursor is
+  exactly `completeBytes`, `leafEntryId`, `completePrefixDigest` and `home`; file
+  identity and line digests live per chapter, where the incremental reader checks
+  them. Older Home formats, and any state with a deleted or missing field, are
   preserved and refused before cleanup.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
@@ -181,7 +184,8 @@ state preserves the last readable file and stops the memory owner with
 per-cursor bound covers the pinned SDK identity fields, two hashes, numeric file
 metadata and JSON syntax; oversized identities refuse rather than producing an
 unreadable cursor. `home-state.e2e.test.ts` proves maximum-count round-trip,
-oversized-write refusal with prior bytes preserved, and ordinary small state.
+oversized-write refusal with prior bytes preserved, refusal of an aggregate cursor with a
+deleted or missing field, and ordinary small state.
 The whole-state rewrite/serialization cost is not claimed constant-time; the
 Home hardening audit (#555) owns its measurement.
 

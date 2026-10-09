@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -10,10 +10,11 @@ import { EPISODIC_STORE_VERSION, EPISODIC_STATE_MAX_BYTES, type EpisodicStoreSta
 // A state with the ledger's full chapter count must write and read back.
 const maxChapters = HOME_MAX_CHAPTERS;
 const maxStateBytes = EPISODIC_STATE_MAX_BYTES;
+const chapterCursor = { dev: 1, ino: 1, size: 1, completeBytes: 1, leafEntryId: "entry", leafLineDigest: "a".repeat(64), completePrefixDigest: "b".repeat(64) };
 function state(chapters: number): EpisodicStoreState {
-  const cursor = { dev: 1, ino: 1, size: 1, completeBytes: 1, leafEntryId: "entry", leafLineDigest: "a".repeat(64), completePrefixDigest: "b".repeat(64) };
   return { version: EPISODIC_STORE_VERSION, generation: 0, spend: 0, blocked: null, cursor: {
-    ...cursor, home: { version: 2, ledgerRevision: 1, chapters: Array.from({ length: chapters }, (_, index) => ({ ...cursor, sessionId: `chapter-${index}`, mtimeMs: 1, ctimeMs: 1, sealed: true })) },
+    completeBytes: 1, leafEntryId: "entry", completePrefixDigest: "b".repeat(64),
+    home: { version: 2, ledgerRevision: 1, chapters: Array.from({ length: chapters }, (_, index) => ({ ...chapterCursor, sessionId: `chapter-${index}`, mtimeMs: 1, ctimeMs: 1, sealed: true })) },
   } };
 }
 async function fixture(run: (store: EpisodicStore, statePath: string) => Promise<void>) {
@@ -47,5 +48,31 @@ it("keeps small ordinary episodic states readable", async () => {
   await fixture(async store => {
     const small: EpisodicStoreState = { version: EPISODIC_STORE_VERSION, generation: 0, cursor: null, spend: 3, blocked: null };
     await store.saveState(small); expect(await store.readState()).toEqual(small);
+  });
+});
+
+// FM3: the aggregate cursor is strict. A deleted field is refused, and each required
+// field is refused when absent. The file is rewritten directly: saveState validates too.
+it("refuses an aggregate cursor that carries a deleted field or omits a required one", async () => {
+  await fixture(async (store, path) => {
+    await store.saveState(state(1));
+    const valid = await readFile(path, "utf8");
+    const current = JSON.parse(valid) as { cursor: Record<string, unknown> };
+    const { home: _home, ...withoutHome } = current.cursor;
+    const { completePrefixDigest: _digest, ...withoutDigest } = current.cursor;
+    const broken: Array<[string, Record<string, unknown>]> = [
+      ["dev", { ...current.cursor, dev: 1 }],
+      ["ino", { ...current.cursor, ino: 1 }],
+      ["size", { ...current.cursor, size: 1 }],
+      ["leafLineDigest", { ...current.cursor, leafLineDigest: "a".repeat(64) }],
+      ["home absent", withoutHome],
+      ["completePrefixDigest absent", withoutDigest],
+    ];
+    for (const [name, cursor] of broken) {
+      await writeFile(path, JSON.stringify({ ...current, cursor }), { mode: 0o600 });
+      await expect(store.readState(), name).rejects.toMatchObject({ kind: "invalid-store" });
+    }
+    await writeFile(path, valid, { mode: 0o600 });
+    expect((await store.readState())?.cursor?.home.chapters).toHaveLength(1);
   });
 });
