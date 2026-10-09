@@ -11,7 +11,7 @@ it("accepts one immutable canonical report, reuses an exact duplicate and refuse
   const root = await mkdtemp(join(tmpdir(), "tron-task-report-"));
   try {
     const manager = SessionManager.create(root, root);
-    const owner = new HomeTaskReportOwner({ taskId: "task", intentRevision: 1, homeId: "home", generation: 1, operationId: "operation" });
+    const owner = new HomeTaskReportOwner({ taskId: "task", intentRevision: 1, homeId: "home", generation: 1, operationId: "operation" }, async () => {});
     const request = { resultId: "result", outcome: "final" as const, text: "verified", evidence: ["acceptance proof"] };
     const append = async (data: any) => manager.appendCustomEntry("tron-home-task-report", data);
     const entryId = await owner.accept(manager.getSessionId(), "operation", request, append);
@@ -28,7 +28,7 @@ it("rejects oversized UTF-8 and malformed reports before any canonical append", 
   const root = await mkdtemp(join(tmpdir(), "tron-task-report-invalid-"));
   try {
     const manager = SessionManager.create(root, root);
-    const owner = new HomeTaskReportOwner({ taskId: "task", intentRevision: 1, homeId: "home", generation: 1, operationId: "operation" });
+    const owner = new HomeTaskReportOwner({ taskId: "task", intentRevision: 1, homeId: "home", generation: 1, operationId: "operation" }, async () => {});
     const request = { resultId: "result", outcome: "final", text: "verified", evidence: [] };
     for (const change of [{ text: "é".repeat(32769) }, { evidence: ["x".repeat(4097)] }, { outcome: "succeeded" }, { unexpected: true }]) {
       await expect(owner.accept(manager.getSessionId(), "operation", { ...request, ...change }, async report => manager.appendCustomEntry("tron-home-task-report", report))).rejects.toThrow();

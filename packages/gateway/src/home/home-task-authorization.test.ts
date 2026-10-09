@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { HomeTaskAuthorization, type HomeTaskAuthorizationState } from "./home-task-authorization.js";
+import { issueGrant } from "../../test-support/home-task-grant.js";
 
 function fixture() {
   let state: HomeTaskAuthorizationState = { revision: 1, scopes: [], requests: [], grants: [], decisions: [] };
@@ -29,16 +29,6 @@ function fixture() {
   return { owner, store, request, diagnostics, advance: (delta: number) => { now += delta; }, revokeTrust: (path: string) => trusted.delete(path) };
 }
 
-async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
-  request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
-  input: { decisionId: string; approved?: boolean; expiresAt: number }) {
-  const { authorizationRequestId, HomeTaskAuthorizationError } = await import("./home-task-authorization.js");
-  let requestId = authorizationRequestId(request);
-  await owner.authorize(request).catch(error => { if (error instanceof HomeTaskAuthorizationError && error.requestId) requestId = error.requestId; });
-  const result = await owner.recordDecisionAndGrant(requestId, { ...input, approved: input.approved ?? true, restoreEpoch: request.restoreEpoch });
-  return result.grant!;
-}
-
 describe("HomeTaskAuthorization", () => {
   it("explicitly reconfirms only active standing scopes, never revoked scopes or restored grants", async () => {
     const { owner, request, store } = fixture();
@@ -63,14 +53,9 @@ describe("HomeTaskAuthorization", () => {
     await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "standing-scope", scopeId: scope.id });
     await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
     diagnostics.length = 0;
-    const confirmed = await owner.enableInitialScope("epoch-2");
-    expect(confirmed.id).not.toBe(scope.id);
-    const hash = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 16);
-    expect(diagnostics).toEqual([
-      { event: "home.task.authorization", outcome: "scope-revoked", referenceHash: hash(scope.id) },
-      { event: "home.task.authorization", outcome: "scope-enabled", referenceHash: hash(confirmed.id) },
-    ]);
-    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).resolves.toMatchObject({ kind: "standing-scope", scopeId: confirmed.id });
+    await owner.reconfirmPermissions("epoch-2");
+    expect(diagnostics).toEqual([{ event: "home.task.authorization", outcome: "permissions-reconfirmed" }]);
+    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).resolves.toMatchObject({ kind: "standing-scope", scopeId: scope.id });
     await expect(owner.authorize(request)).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
   });
 

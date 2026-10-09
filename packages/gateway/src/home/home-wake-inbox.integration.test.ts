@@ -142,17 +142,15 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");
   });
 
-  it("refuses the activation only for the delivery whose proof is unreadable during recovery", async () => {
-    const f = await fixture();
-    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
-    f.receipt();
-    await f.owner.settle(f.route, "activation");
-    expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");
+  it("settles an admitted delivery whose proof is unreadable during recovery as outcome-unknown without refusing the activation", async () => {
     const second = await fixture();
     await second.owner.admit(second.route, "activation", second.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     second.receipt();
     vi.spyOn(second.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
     await expect(second.reopen().recover(second.route)).resolves.toBeUndefined();
+    expect((await second.store.read("task"))?.wake?.state).toBe("outcome-unknown");
+    // An uncertain admitted effect is never retargeted into a pending delivery.
+    await expect(second.reopen().redeliver("task", { ...second.route, routeGeneration: 2 })).rejects.toMatchObject({ code: "conflict" });
     expect((await second.store.read("task"))?.wake?.state).toBe("outcome-unknown");
   });
 

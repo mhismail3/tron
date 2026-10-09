@@ -15,7 +15,7 @@ export interface HomeWakeEvent {
   eventId: string;
   routeGeneration: number;
   createdAt: string;
-  state: "pending" | "claimed" | "admitted" | "terminal" | "acknowledged" | "cancelled-before-admission" | "blocked" | "outcome-unknown";
+  state: "pending" | "claimed" | "admitted" | "terminal" | "acknowledged" | "blocked" | "outcome-unknown";
   push: "pending" | "decided";
   delivery: { sessionId: string; operationId: string; generation: number; routeGeneration: number; messageDigest: string } | null;
   acknowledgedAt: string | null;
@@ -177,11 +177,11 @@ export class WakeInboxOwner {
   async redeliver(taskId: string, route: HomeWakeRoute): Promise<void> {
     await this.mutex.run(async () => {
       const task = await this.store.read(taskId);
-      if (!route.enabled || !task?.wake || task.homeId !== route.homeId || !["pending", "blocked", "outcome-unknown", "cancelled-before-admission"].includes(task.wake.state)) throw new GatewayError("conflict", "Inbox event is not eligible for explicit redelivery");
+      // Only an event that was never admitted is retargetable. The store keeps
+      // `delivery` null for pending and blocked events, so an uncertain admitted
+      // effect (`outcome-unknown`) can never be re-stamped as pending.
+      if (!route.enabled || !task?.wake || task.homeId !== route.homeId || !["pending", "blocked"].includes(task.wake.state)) throw new GatewayError("conflict", "Inbox event is not eligible for explicit redelivery");
       if (task.wake.state === "pending" && task.wake.routeGeneration === route.routeGeneration) return;
-      // Outcome-unknown is not replayable: a maintainer may retarget a blocked
-      // pending event, but cannot turn an uncertain admitted effect into pending.
-      if (task.wake.delivery) throw new GatewayError("conflict", "Uncertain admitted result requires canonical inspection, not replay");
       await this.change(taskId, wake => ({ ...wake, routeGeneration: route.routeGeneration, state: "pending",
         redeliveries: [...wake.redeliveries, { from: wake.routeGeneration, to: route.routeGeneration }] }), "maintainer-redelivery");
     });
