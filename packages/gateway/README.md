@@ -1063,78 +1063,45 @@ future managed-state contract are owned by
 
 ## Tron Home
 
-Tron Home is one opt-in persistent conversation per Gateway installation. It is
-created only by an explicit `home.designate`; until then every session is
-ordinary. `home.status` (a read) returns one bounded projection
-`{ phase, activation, readiness, recovery, taskRecovery?, available, reason?, enabled, homeId?,
-  sessionId?, openSessionId?, generation?, model?, live, sessionPresent, memory }`. Phase,
-readiness and recovery are derived from the existing designation, memory and
-activation owners rather than stored as separate lifecycle state. `memory` is
-`{ configured, open, model?, spentTokens?, episodic?, blocked?,
-  reason? }`, `episodic` is the memory owner's own bounded status and
-`spentTokens` is the persisted spend (present whenever a store exists, open or
-not, because a restart restores it; reported, never a ceiling). `home.designate`,
-`home.disable`, `home.configureMemory` and `home.resumeMemory` are
-command-id-receipted mutations,
-`home.context` (a read) returns the bounded request context of Home's current or
-last activation — its start entry id, whether it is open, its view line and byte
-counts, effective tokens, model window and its own refusal reason (the sizes are
-absent when it was refused before it prepared a request), and never a message
-body — and
-`home.v1` is advertised in `hello`/`system.info`. `home-memory-browser.v1`
-additionally gates `home.memory.page` (bounded summaries/projections with physical
-source references) and `home.memory.evidence` (paged canonical history content,
-not projected text). Both are disposable no-compactor-admission reads; formats,
-revision/continuation semantics and bounds are owned by
-[the memory browser contract](docs/home.md#typed-memory-browser).
-There are no memory defaults:
-Home refuses its activations until `home.configureMemory` records a physical
-model; there is no budget to manage (memory spend is bounded by construction and reported). Home runs in the neutral
-`<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
-curated runtime profile (no agent-directory or project discovery — including the
-agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
-`ask_user`/`display`/`notify`/memory-tools/`delegate`/`task` executable allowlist, per-session compaction
-disabled, a fixed physical model, and zero cache-warming requests), and its
-designation is keyed by session id, so a fork is ordinary. A profile change
-replaces the live runtime in place inside the session's own lane, and a record
-whose session is gone is given a fresh one. Every activation (one admitted input
-and its whole tool loop) sends the model only the system messages that precede
-it, ONE frozen memory view and its own messages: prior activations are never
-re-sent, the view is never persisted, and a request waits for the lines it will
-send (abortably) before it is made. Ordinary sessions are byte-for-byte
-unaffected. The record, the profile, the RPCs, fork and loadout semantics and
-what is not built yet are owned by [`docs/home.md`](docs/home.md).
+Tron Home is one opt-in persistent conversation per Gateway installation. It is created only by an explicit
+`home.designate`; until then every session is ordinary. [`docs/home.md`](docs/home.md) owns its designation
+record, RPC shapes, chapters, runtime profile, memory, task delegation and terminal client.
 
-Home is delegate-only for project work: `delegate` admits finite work once in a
-trusted project through the neutral owned-session boundary. Workers retain normal
-project capabilities plus the explicit `report` tool; v1 refuses subagent
-execution/revival, scheduled work and durable `bg_wait` wake subscriptions because
-these can outlive the operation.
-Reports seal exact canonical evidence, never the latest assistant reply; absent
-report is limited/unknown. A fixed internal 24-hour deadline cancels and joins
-operation-owned work, and terminal usage remains explicitly unpriced. Unknown
-tracked detached work yields unknown, not a clean stop claim. Separate strict
-Home task state is initialized on first dispatch. Startup retires abandoned tasks
-from exact canonical reports or terminal unknown, never replaying a prompt, and
-co-commits the same result outbox. A recovery refusal fences task surfaces until
-the next start, exposed by `home.status.taskRecovery`; ordinary Gateway sessions
-still work. Recreated task directory
-identity requires explicit `home.reconfirmPermissions` (terminal
-`/home reconfirm-permissions`); this renews active standing scopes only, never
-revoked scopes or one-use grants. Maintainer-only `home.taskPermissions`,
-`home.revokeTaskScope`, `home.revokeTaskGrant` and `home.decideTaskGrant` list
-and revoke authority or approve/deny an exact durable request with one-use
-expiry-bound permission. Terminal `/home permissions`, `/home revoke-scope`,
-`/home revoke-grant`, `/home approve-grant` and `/home deny-grant` route through
-command receipts; Home cannot approve its own requests. `home.taskList`, `home.taskStatus`, `home.steerTask` and
-`home.stopTask` expose durable spend and shared control; terminal `/home task`,
-`/home steer` and `/home stop` target one task. Steering shares the session lane;
-Stop persists exact intent and cancels outside blocked admission. Canonical usage
-identities dedupe tokens before display; money is explicitly unpriced without
-authoritative billing provenance. Wake delivery waits for the next user Home activation; terminal tasks co-commit
-a durable inbox event and make one advisory push decision at most. Active-task
-restart reconciliation is required before release; iOS controls are subsequent
-slices, not automatically triggered Home calls.
+- **Memory.** There is no memory default: Home refuses activations until `home.configureMemory` records a
+  physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
+  activation sends the model only the system messages before it, ONE frozen memory view and its own messages.
+  Prior activations are never re-sent, and the view is never persisted.
+- **Runtime.** Home runs in the neutral `<tronHome>/gateway/home/workspace` under an explicit untrusted decision,
+  with a curated profile: no agent-directory or project discovery (including `SYSTEM.md` and `APPEND_SYSTEM.md`),
+  no Pi built-ins, a fixed executable-tool allowlist, per-session compaction disabled, a fixed physical model,
+  and zero cache-warming requests. Designation is keyed by session id. A profile change replaces the live runtime
+  inside the session's lane. Bound Home chapters refuse fork and identity replacement (`home-identity-replacement`),
+  and a separately imported session is ordinary.
+- **Chapters.** Home's history is split into physical chapters at quiescent soft and hard size boundaries.
+  Sealed chapters stay readable and refuse mutation.
+- **Tasks.** Home is delegate-only for project work. `delegate` admits finite work once, in a trusted project,
+  through the neutral owned-session boundary. Workers keep normal project capabilities plus the explicit `report`
+  tool. v1 refuses subagent execution and revival, scheduled work and durable `bg_wait` wake subscriptions.
+  Reports seal exact canonical evidence, never the latest assistant reply; a missing report is `limited` or
+  `unknown`. A fixed internal 24-hour deadline cancels and joins operation-owned work. Usage is explicitly unpriced,
+  and unknown tracked detached work yields `unknown`, never a clean-stop claim.
+- **Authority and recovery.** Task authority lives in a separate strict store, initialized on first dispatch.
+  Startup retires abandoned tasks from exact canonical reports or terminal `unknown`, without replaying a prompt,
+  and co-commits the result outbox. A recovery refusal fences task surfaces until the next start, exposed as
+  `home.status.taskRecovery`; ordinary sessions keep working. A restored or copied Tron home needs an explicit
+  maintainer `home.reconfirmPermissions` (terminal `/home reconfirm-permissions`), which renews active standing
+  scopes only. The maintainer-only `home.taskPermissions`, `home.revokeTaskScope`, `home.revokeTaskGrant` and
+  `home.decideTaskGrant` RPCs list and revoke authority, or approve or deny an exact durable request with a one-use,
+  expiry-bound grant. Home cannot approve its own requests.
+- **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
+  and shared control. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
+  session lane; Stop persists exact intent and cancels outside blocked admission. Canonical usage identities dedupe
+  tokens before display. Task results never trigger an automatic Home call: terminal tasks co-commit a durable inbox
+  event, delivered on the next maintainer Home message, and make one advisory push decision at most.
+- **Protocol.** `home.v1` is advertised in `hello` and `system.info`. `home-memory-browser.v1` additionally gates the
+  typed memory browser, `home.memory.page` and `home.memory.evidence`: disposable reads of projected summaries and
+  canonical history. The RPC table, the `home.status` shape, the memory browser contract and the terminal `/home`
+  command table are in [`docs/home.md`](docs/home.md#rpcs).
 
 ## Runtime and state
 
