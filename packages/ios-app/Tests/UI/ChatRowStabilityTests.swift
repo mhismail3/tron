@@ -2841,9 +2841,13 @@ private func recordMotionPixels(
     let trackedPhysicalID = physicalID ?? initialTarget?.physicalID ?? targetSemanticID
     var previousFrame = initialTarget?.windowFrame
     var previousImage: UIImage? = try ChatMotionPixelSupport.captureWindow(harness: harness)
+    let window = try #require(harness.visibleRootView.window)
+    let previousAnimationClockSpeed = window.layer.speed
+    window.layer.speed = ChatMotionPixelSupport.animationClockSpeed
+    defer { window.layer.speed = previousAnimationClockSpeed }
     harness.replaceAuthoritativeSnapshot(updated)
     var changedFrames = 0
-    for _ in 0..<20 {
+    for _ in 0..<ChatMotionPixelSupport.sampledFrameCount {
         try await harness.driveFrameBoundary()
         let current = try ChatMotionPixelSupport.captureWindow(harness: harness)
         let currentFrame = harness.recorder.samples.last?.nativeRows.first {

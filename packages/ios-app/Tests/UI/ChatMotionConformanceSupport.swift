@@ -65,6 +65,14 @@ func sampledPixel(of image: UIImage, at point: CGPoint) -> (red: Int, green: Int
 
 @MainActor
 enum ChatMotionPixelSupport {
+    /// `drawHierarchy` takes 20–80 ms on the hosted window, longer than a display
+    /// frame. Slow the local clock so real-time animations remain observable
+    /// across captures instead of aliasing differently on each run.
+    static let animationClockSpeed: Float = 0.1
+    /// Sixty 20–80 ms captures span a full slow-clock curve without tying the
+    /// animation oracle to display-link timing.
+    static let sampledFrameCount = 60
+
     /// Pixel sampling is a separate, slower pass; use the orientation fixture's
     /// shared hosted-window capture and sample points only within this row.
     static func captureWindow(harness: ChatViewScrollHarness) throws -> UIImage {
