@@ -45,6 +45,7 @@ import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
   ChatOrigin,
+  ChatSemanticMetadata,
   CommandDetail,
   CommandInfo,
   ExtensionRunActivity,
@@ -111,7 +112,8 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -155,6 +157,9 @@ import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from 
 // attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
+// Disposable exact child subscriptions travel with the admitted read, never
+// with canonical activity data or a separate slot-wide child registry.
+const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
 
 function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
   Object.defineProperty(value, EMBEDDED_LIFECYCLE_ARTIFACT, { configurable: false, enumerable: false, value: true, writable: false });
@@ -239,6 +244,7 @@ type PendingContextMessage = {
   targetEntryId?: string;
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
+  managedMessage?: ManagedMessageCapture;
   /** Live presentation owner bound to the triggered canonical entry at message_end. */
   toolSegmentOwnerId?: string;
 };
@@ -249,6 +255,7 @@ type PendingExtensionCanonicalEffect =
       targetEntryId: string;
       delivery: "stored" | "triggeredTurn";
       origin?: ExtensionToolOrigin;
+      managedMessage?: ManagedMessageCapture;
     }
   | {
       kind: "notification";
@@ -405,7 +412,8 @@ interface RuntimeSlotHooks {
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
-interface PromptOwnership {
+interface AutomationPromptOwnership {
+  kind?: never;
   operationId: string;
   /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
   signal?: AbortSignal;
@@ -413,6 +421,16 @@ interface PromptOwnership {
   onAdmitted?: (invocationId: string) => void;
   onTerminal: (terminal: AutomationOperationTerminal) => Promise<void> | void;
 }
+
+type PromptOwnership = AutomationPromptOwnership | {
+  kind: "subagentWake";
+  expandPromptTemplates: boolean;
+  operationId: string;
+  origin: ChatOrigin;
+  signal?: never;
+  onAdmitted?: never;
+  onTerminal?: never;
+};
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
@@ -677,6 +695,8 @@ export class RuntimeSlot {
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
+    children: Map<string, FSWatcher>;
+    onChange: (eventType: string, filename: string | Buffer | null) => void;
     timer: NodeJS.Timeout | undefined;
     asyncDir: string;
     readRetries: number;
@@ -976,7 +996,7 @@ export class RuntimeSlot {
         }
         await this.persistCanonicalCustomEntry(
           CONTEXT_DELIVERY_RECEIPT_TYPE,
-          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin)),
+          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin, effect.delivery === "stored" ? effect.managedMessage?.wakeOperationId : undefined)),
           candidate.id,
         );
       }
@@ -1580,7 +1600,8 @@ export class RuntimeSlot {
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
-      const managedLoaderOptions = this.dependencies.managedSubagents?.loaderOptions(settingsManager);
+      const managedLoaderOptions = await this.dependencies.managedSubagents?.loaderOptions(settingsManager,
+        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const services = await createAgentSessionServices({
         settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
@@ -1589,6 +1610,7 @@ export class RuntimeSlot {
         resourceLoaderOptions: {
           ...(managedLoaderOptions ?? {}),
           extensionFactories: [
+            ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
               if (!operationId || !this.dependencies.mcpAuth) {
@@ -1637,7 +1659,7 @@ export class RuntimeSlot {
       // Only the loader keeps the read-only package view. Session settings
       // mutations keep their canonical owner, never the filtered projection.
       services.settingsManager = settingsManager;
-      this.dependencies.managedSubagents?.reportIgnoredPackages(settingsManager);
+      await this.dependencies.managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
       // owner handoff is the independent fail-safe when that signal was stale.
@@ -1760,8 +1782,8 @@ export class RuntimeSlot {
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
+    await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
-    this.dependencies.managedSubagents?.reportIgnoredPackages(session.settingsManager);
   }
 
   /** Pi's replacement hooks for each runtime this slot constructs. */
@@ -4137,7 +4159,10 @@ export class RuntimeSlot {
           const storedTarget = latest && (latest.type === "custom_message"
               || (latest.type === "message" && latest.message.role === "custom"))
             ? latest.id : undefined;
-          const origin = this.currentExtensionContextOrigin();
+          const managedMessage = capturedManagedMessage(event.message.content);
+          const origin = isManagedProducerContent(event.message.content)
+            ? managedMessage?.origin
+            : this.currentExtensionContextOrigin();
           const toolSegmentOwnerId = event.message.display
             ? (storedTarget ? (this.presentationIDs.get(storedTarget) ?? storedTarget) : randomUUID())
             : undefined;
@@ -4150,6 +4175,7 @@ export class RuntimeSlot {
             delivery: storedTarget ? "stored" : "triggeredTurn",
             ...(storedTarget ? { targetEntryId: storedTarget } : {}),
             ...(origin ? { origin } : {}),
+            ...(managedMessage ? { managedMessage } : {}),
             ...(toolSegmentOwnerId ? { toolSegmentOwnerId } : {}),
           });
         }
@@ -4421,6 +4447,7 @@ export class RuntimeSlot {
               targetEntryId: pending.targetEntryId,
               delivery: pending.delivery,
               ...(pending.origin ? { origin: pending.origin } : {}),
+              ...(pending.managedMessage ? { managedMessage: pending.managedMessage } : {}),
             });
           } else if (pending) {
             queueMicrotask(() => {
@@ -4441,6 +4468,7 @@ export class RuntimeSlot {
                 targetEntryId: candidate.id,
                 delivery: pending.delivery,
                 ...(pending.origin ? { origin: pending.origin } : {}),
+                ...(pending.managedMessage ? { managedMessage: pending.managedMessage } : {}),
               });
             });
           }
@@ -4627,14 +4655,99 @@ export class RuntimeSlot {
     }
   }
 
-  private async readExtensionStatusArtifact(asyncDir: string): Promise<Record<string, unknown> | undefined> {
+  /** Released workflows keep execution details in their detached children's
+   * status, not the workflow edge. Join only exact reciprocal producer edges;
+   * root identity/order remains authoritative and every read is disposable. */
+  private async readWorkflowChildDetails(asyncDir: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (status.mode !== "workflow" || typeof status.runId !== "string" || !Array.isArray(status.steps)) return status;
+    const directories: string[] = [];
+    let unavailableChildren = 0;
+    const steps: unknown[] = [];
+    for (const value of status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) { steps.push(value); continue; }
+      const edge = value as Record<string, unknown>;
+      steps.push(edge);
+      if (edge.async !== true || typeof edge.runId !== "string" || !edge.runId
+        || Buffer.byteLength(edge.runId) > 256 || /[\\/\0]/u.test(edge.runId)
+        || typeof edge.workflowKey !== "string" || typeof edge.sessionOwnerId !== "string"
+        || typeof edge.sessionFile !== "string") continue;
+      const directory = join(dirname(asyncDir), edge.runId);
+      if (dirname(directory) !== dirname(asyncDir) || directory === asyncDir) continue;
+      // Observation follows the root edge, never the optional read result.
+      // Even an absent directory must remain subscribed for its first status.
+      directories.push(directory);
+      unavailableChildren += 1;
+      const child = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
+      if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
+        || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
+        || child.mode !== "single" || !Array.isArray(child.steps) || child.steps.length !== 1) continue;
+      const detail = child.steps[0];
+      if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
+      const source = detail as Record<string, unknown>;
+      if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
+        || !this.validateChildSessionFile(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
+      unavailableChildren -= 1;
+      // Do not copy child identity, declarations or control authority. Only
+      // provider-authored display facts cross this already verified edge.
+      const projected = { ...edge };
+      for (const key of ["model", "thinking", "currentTool", "currentPath", "lastActivityAt", "currentToolStartedAt",
+        "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
+        if (source[key] !== undefined) projected[key] = source[key];
+      }
+      // The released single-child snapshot omits a zero total until its first
+      // tool event; an explicitly empty recent-tools list proves that zero.
+      if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
+      steps[steps.length - 1] = projected;
+    }
+    const omission = status.lifecycleOmissions as { children?: number; byteLimitExceeded?: boolean } | undefined;
+    const omittedChildren = typeof omission?.children === "number" && Number.isSafeInteger(omission.children) && omission.children >= 0
+      ? omission.children : 0;
+    return Object.assign({ ...status, steps: [...steps, ...status.steps.slice(MAX_EXTENSION_RUN_CHILDREN)],
+      ...(unavailableChildren > 0 ? { lifecycleOmissions: {
+        children: omittedChildren + unavailableChildren,
+        byteLimitExceeded: omission?.byteLimitExceeded === true,
+      } } : {}),
+    }, { [WORKFLOW_CHILD_ARTIFACT_DIRECTORIES]: directories });
+  }
+
+  private syncWorkflowChildArtifactWatchers(toolCallId: string, value: Record<string, unknown>): void {
+    const tracked = this.extensionActivityWatchers.get(toolCallId);
+    if (!tracked) return;
+    const directories = (value as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_ARTIFACT_DIRECTORIES];
+    const next = new Set(Array.isArray(directories) ? directories as string[] : []);
+    for (const [directory, watcher] of tracked.children) if (!next.has(directory)) {
+      watcher.close();
+      tracked.children.delete(directory);
+    }
+    for (const directory of next) if (!tracked.children.has(directory)) {
+      try {
+        // Observe from the admitted parent's tree so a not-yet-created child
+        // directory and later atomic status writes share one edge subscription.
+        const childName = basename(directory);
+        const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
+          const path = filename?.toString();
+          if (path === undefined || path === childName || path === join(childName, "status.json")) {
+            tracked.onChange(eventType, "status.json");
+          }
+        });
+        // Failure stays local to this child's observation. Neither the root
+        // watcher nor its other authoritative edges are retired by that error.
+        watcher.on("error", () => tracked.onChange("change", "status.json"));
+        tracked.children.set(directory, watcher);
+      } catch {
+        // Optional observation cannot refuse otherwise valid root evidence.
+      }
+    }
+  }
+
+  private async readExtensionStatusArtifact(asyncDir: string, includeWorkflowChildren = true): Promise<Record<string, unknown> | undefined> {
     if (!this.extensionArtifactPathAllowed(asyncDir)) return undefined;
     const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
     if (!opened) return undefined;
     try {
-      // Modern status files are admitted from a small first-property read. The
-      // larger legacy read below occurs only after the first key is proven not
-      // to be lifecycleProjection, preserving the old header-less fallback.
+      // The compact header admits parent/run ownership. Native children and
+      // details come from the full bounded status, not the widget's eight-row
+      // summary. Keep the header as bounded lifecycle evidence on overflow.
       const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
       const { bytesRead: headerBytesRead } = await opened.handle.read(headerBuffer, 0, headerBuffer.length, 0);
       const headerBytes = headerBuffer.subarray(0, headerBytesRead);
@@ -4644,11 +4757,21 @@ export class RuntimeSlot {
         if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
         // The producer retains the original parent session identity across resumes.
         // Exact run/tool/path ownership does not authorize a header copied from another session.
-        if (projection.sessionId !== undefined && projection.sessionId !== this.id) {
+        const parentIdentity = this.sessionFile ? resolve(this.sessionFile) : this.id;
+        if (projection.sessionId !== undefined && projection.sessionId !== parentIdentity) {
           throw new ForeignExtensionArtifactSessionError();
         }
-        const projected = lifecycleProjectionArtifact(projection);
-        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
+        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+        const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+        const full: unknown = bytesRead <= MAX_EXTENSION_ARTIFACT_BYTES ? JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")) : undefined;
+        if (full !== undefined && (!full || typeof full !== "object" || Array.isArray(full))) throw new SyntaxError("Invalid full extension status");
+        const status = full as Record<string, unknown> | undefined;
+        if (status && (status.runId !== projection.runId
+          || (projection.toolCallId !== undefined && status.toolCallId !== projection.toolCallId))) throw new ForeignExtensionArtifactSessionError();
+        const projected = status ? { ...status, lifecycleArtifactVersion: EXTENSION_LIFECYCLE_ARTIFACT_VERSION }
+          : lifecycleProjectionArtifact({ ...projection, omitted: { ...projection.omitted, byteLimitExceeded: true } });
+        const detailed = includeWorkflowChildren ? await this.readWorkflowChildDetails(asyncDir, projected) : projected;
+        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, detailed, opened.directory);
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
         return markEmbeddedLifecycleArtifact(withProof);
       }
@@ -5055,6 +5178,10 @@ export class RuntimeSlot {
         return "transient";
       }
       const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
+      if (isEmbeddedLifecycleArtifact(rawValue) && raw.toolCallId !== undefined && raw.toolCallId !== boundToolCallId) {
+        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+        return "rejected";
+      }
       let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
         ? ([boundToolCallId, this.extensionActivities.get(boundToolCallId)] as const)
         : matchingEntries[0];
@@ -5231,6 +5358,7 @@ export class RuntimeSlot {
     if (!tracked) return;
     if (tracked.timer) clearTimeout(tracked.timer);
     tracked.watcher.close();
+    for (const watcher of tracked.children.values()) watcher.close();
     this.extensionActivityWatchers.delete(toolCallId);
   }
 
@@ -5456,6 +5584,7 @@ export class RuntimeSlot {
           return;
         }
       }
+      this.syncWorkflowChildArtifactWatchers(toolCallId, raw);
       const normalized = normalizeExtensionArtifact(raw, {
         now: new Date().toISOString(),
         fallbackStartedAt: previous.startedAt,
@@ -5629,7 +5758,7 @@ export class RuntimeSlot {
     }
     this.stopExtensionActivityWatcher(toolCallId);
     try {
-      const watcher = watch(realAsyncDir, (_eventType, filename) => {
+      const onChange = (_eventType: string, filename: string | Buffer | null) => {
         if (filename !== null && filename.toString() !== "status.json") return;
         const tracked = this.extensionActivityWatchers.get(toolCallId);
         if (!tracked) return;
@@ -5641,10 +5770,13 @@ export class RuntimeSlot {
           void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
         }, 50);
         tracked.timer.unref();
-      });
+      };
+      const watcher = watch(realAsyncDir, onChange);
       watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
       this.extensionActivityWatchers.set(toolCallId, {
         watcher,
+        children: new Map(),
+        onChange,
         timer: undefined,
         asyncDir: realAsyncDir,
         readRetries: 0,
@@ -6374,6 +6506,15 @@ export class RuntimeSlot {
     }
   }
 
+  private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
+    const invocation = this.invocationForOperation(operationId);
+    return invocation?.source === "subagentWake" ? {
+      version: 1, kind: "prompt", direction: "hiddenInternal", contextEffect: "modelInput",
+      delivery: "stored", visibility: "hidden", origin: invocation.origin,
+      invocationId: invocation.invocationId, operationId, sequence: invocation.sequence,
+    } : undefined;
+  }
+
   private projectedQueue(): QueuedMessageState[] {
     this.reconcileQueuedMessages();
     // Held prompts follow Pi's queue: they are delivered after it. An entry
@@ -6384,16 +6525,20 @@ export class RuntimeSlot {
       ...this.heldPrompts.filter((item) => !piQueued.has(item.id)),
     ].map(({
       id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocation,
-    }) => ({
-      id,
-      behavior,
-      text,
-      attachmentCount,
-      ...(photoCount === undefined ? {} : { photoCount }),
-      ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
-      ...(attachments === undefined ? {} : { attachments }),
-      ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
-    }));
+    }) => {
+      const semantic = this.internalWakeSemantic(id);
+      return {
+        id,
+        ...(semantic ? { semantic } : {}),
+        behavior,
+        text,
+        attachmentCount,
+        ...(photoCount === undefined ? {} : { photoCount }),
+        ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
+        ...(attachments === undefined ? {} : { attachments }),
+        ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
+      };
+    });
   }
 
   private static queueText(text: string, attachmentEnvelope: string): string {
@@ -6669,8 +6814,7 @@ export class RuntimeSlot {
       throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
     }
     try {
-      return {
-        ...projectTranscriptPage(
+      const page = projectTranscriptPage(
           this.runtime.session.sessionManager,
           this.dependencies.blobs,
           before,
@@ -6682,7 +6826,16 @@ export class RuntimeSlot {
           this.bashMetadata,
           this.forkBoundary,
           branchCut,
-        ),
+        );
+      return {
+        ...page,
+        // Exact presentation binding precedes receipt I/O. Retain the owning
+        // invocation's semantics in that interval without a second binding map.
+        items: page.items.map(item => {
+          const semantic = item.kind === "message" && item.role === "user" && !item.semantic?.invocationId
+            ? this.internalWakeSemantic(this.presentationIDs.get(item.id) ?? item.id) : undefined;
+          return semantic ? { ...item, semantic } : item;
+        }),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),
       };
@@ -6905,6 +7058,25 @@ export class RuntimeSlot {
       this.hooks.summaryChanged(summary);
     }
   }
+
+  /** The managed provider uses user input to run Pi's normal before-agent-start
+   * lifecycle. Admit it through the prompt owner, never the SDK's unowned wake
+   * path: queued consumption and canonical binding retain this exact invocation. */
+  readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner, messages) => {
+    const operationId = randomUUID();
+    for (const message of messages) message.wakeOperationId = operationId;
+    try {
+      const text = typeof content === "string" ? content : content.filter(part => part.type === "text").map(part => part.text).join("\n");
+      const images = typeof content === "string" ? [] : content.filter((part): part is ImageContent => part.type === "image");
+      await this.prompt(text, images, options?.deliverAs, undefined, undefined, {
+        kind: "subagentWake", operationId, expandPromptTemplates: options?.expandPromptTemplates ?? false,
+        origin: { kind: "subagent", ownerId: owner.id, title: owner.title, confidence: "boundary" },
+      });
+    } catch (error) {
+      this.emit("session.extensionError", safeJson({ code: "subagent-wake-admission-failed",
+        message: error instanceof Error ? error.message : String(error), owner }));
+    }
+  };
 
   async prompt(
     text: string,
@@ -7144,7 +7316,7 @@ export class RuntimeSlot {
       // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const parsedCommand = parsePiLiteralCommand(text);
+      const parsedCommand = ownership?.kind === "subagentWake" ? undefined : parsePiLiteralCommand(text);
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -7168,7 +7340,7 @@ export class RuntimeSlot {
         throw new GatewayError("conflict", "Accepted queued invocation identity is no longer available", true);
       }
       const invocationId = existingInvocation?.invocationId ?? randomUUID();
-      const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (isExactExtensionCommand
+      const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : isExactExtensionCommand
         ? "extension"
         : queueDisplay?.resourceInvocation?.source ?? "plain");
       const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
@@ -7219,7 +7391,7 @@ export class RuntimeSlot {
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
 
-      if (ownership) this.automationTerminalObservers.set(operationId, ownership.onTerminal);
+      if (ownership && ownership.kind !== "subagentWake") this.automationTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -7346,7 +7518,8 @@ export class RuntimeSlot {
         sdkRun = withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
-          source: queueDisplay?.inputSource ?? "rpc",
+          source: ownership?.kind === "subagentWake" ? "extension" : queueDisplay?.inputSource ?? "rpc",
+          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates } : {}),
           preflightResult: (disposition) => {
             // Pi calls back only after it has handled, queued, or started the
             // prompt. Rejections do not call this hook; the SDK promise's
@@ -7739,8 +7912,10 @@ export class RuntimeSlot {
     images: ImageContent[],
     queueDisplay: PromptQueueDisplay | undefined,
   ): PendingPromptState {
+    const semantic = this.internalWakeSemantic(operationId);
     return {
       id: operationId,
+      ...(semantic ? { semantic } : {}),
       createdAt: new Date().toISOString(),
       // Requested queue behavior is advisory until Pi actually enqueues.
       // A prompt admitted after the run settles remains ordinary.

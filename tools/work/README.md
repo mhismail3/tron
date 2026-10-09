@@ -292,7 +292,7 @@ the GitHub side.
 
 ## `verify`
 
-`scripts/tron work verify [--post] [--evidence-manifest <json>]` validates the
+`scripts/tron work verify [--jobs N] [--post] [--evidence-manifest <json>]` validates the
 committed head of the current branch and writes a receipt for that exact commit.
 Before loading or selecting checks, it rejects inherited environment values that
 resolve into a live Tron home; the Gateway's shared path policy also guards its
@@ -313,8 +313,21 @@ Vitest configurations and Node test scripts.
 4. **Placeholders.** `{paths}` expands to the shell-quoted absolute paths of the
    changed files that matched this check and still exist at the head.
    `{merge_base}` expands to the merge-base commit.
-5. **Run.** Each required check runs in its own process group. Its combined
-   output goes to `<git-dir>/work/logs/<head>/<check>.log`, where `<git-dir>` is
+5. **Run.** Required, non-carried checks run concurrently. The default bound is
+   `max(1, min(4, host CPU count, physical RAM / 8 GiB rounded down))`; if RAM
+   cannot be determined, it uses one worker. `--jobs N` overrides this bound
+   with a positive integer; `--jobs 1` runs sequentially. The bound does not
+   replace the native tools' live-memory admission or leases: exit 73 remains
+   a refusal, never an automatic retry, and lease waits count in check time.
+   Checks sharing an optional `exclusiveGroup` name in `.github/work.json`
+   never overlap within one invocation. Optional nonempty `exclusivePaths`
+   restricts membership to diffs matching those globs (and requires a group).
+   Blocked checks do not occupy workers;
+   later independent checks can start. A failed check never cancels siblings.
+   Start lines follow eligible configuration order; the final result lines,
+   receipt and evidence table follow configuration order, not completion order.
+   Each check runs in its own process group, retired on settlement or interruption.
+   Its combined output goes to `<git-dir>/work/logs/<head>/<check>.log`, where `<git-dir>` is
    `git rev-parse --git-dir`, so every worktree keeps its own logs. The receipt
    is `<git-dir>/work/receipts/<head>.json`. It records the head, the base
    branch tip, the merge-base, the changed paths, a hash of the verify
@@ -326,7 +339,10 @@ Vitest configurations and Node test scripts.
    receipt whose commit `P` is an ancestor of the head and whose configuration
    hash is identical. A required check is carried from `P` instead of run when it
    passed there, it is not `always`, and none of the paths changed between `P`
-   and the head match its globs. Those paths include everything an update from
+   and the head match its globs. Workers run `scripts/tron work verify` at
+   their final commit, before handing off to `land`. A merge of the base carries
+   unaffected checks, including already-carried checks with their original
+   provenance; matching incoming paths rerun their checks. Those paths include everything an update from
    the base branch brought in. After a rebase `P` is no longer an ancestor, so
    nothing is carried. A check's globs must therefore cover everything its
    result depends on, including the scripts it calls.
@@ -484,8 +500,24 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   `test-without-building` for `TronMacTests`, as in the Mac development guide.
   Checks call the owning script directly rather than the `scripts/tron`
   dispatcher, so a dispatcher edit does not rebuild the Mac app. The isolated
-  Mac script fixtures that need no staged payload run as their own check.
-  Packaging checks that need a staged Gateway payload stay with the macOS CI job.
+  Mac script fixtures that need no staged payload run as `mac-scripts` on its
+  existing paths. `mac-bundle-rebuild` runs the real bundle rebuild/refusal test
+  only for packaging inputs: bundler/staging/verification helpers, launcher and
+  login-item resources, Node/npm/toolchain pins, dependency manifests, provider
+  artifacts/installers, and protocol/push/deploy/receipt helpers exercised by
+  the build. Ordinary Gateway sources and deployment tests do not select it.
+  Gateway, scale, provider verification, Mac and bundle-rebuild share the
+  `gateway-source-tree` exclusive group: `npm ci` and Xcode's bundle preparation
+  mutate dependencies/payloads, and the rebuild test temporarily changes a
+  provider installer. Native leases alone do not protect those shared inputs.
+  Ordinary iOS owns a separate simulator lane/admission and can run concurrently.
+  Its `exclusivePaths` join that group only for real Gateway fixture inputs:
+  those runners also install/build the in-place Gateway tree. A regression
+  compares the configured paths with the iOS selection owner's trigger list,
+  so adding a fixture trigger cannot silently bypass exclusion. Deploy and fast
+  Mac tests own temporary fixture trees; they do not mutate the source Gateway.
+  These groups serialize shared files, not all host work. Packaging coverage
+  also remains in the macOS CI job.
 - **Scripts** run their owning `scripts/test-*` suite where one exists. Scripts
   without an owner (`scripts/tron`, `scripts/tron-dev`, the hook installer and a
   few one-off tools) get a syntax check only.
@@ -494,7 +526,22 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 - The privacy guard, agent policy, documentation policy and `git diff --check`
   over the branch diff always run.
 
+To measure sequential versus default scheduling without carry-over, use two
+fresh worktrees at the same commit, running `verify --jobs 1` in one and `verify`
+in the other. Each worktree has its own Git-directory receipts, so neither run
+carries results from the other. This forces the checks required by that branch's
+diff, not unrelated checks. Do not delete evidence or alter check inputs just to
+force a measurement. Worker count is an execution choice, not a configuration
+hash input: changing `--jobs` does not invalidate already-passing receipts.
+
 ### Failure modes
+
+`ParallelCheckTests` in `test_verify.py` exercises real sleeping/failed subprocess
+checks and temporary Git histories: independent overlap, sequential override,
+exclusive-pair ordering without idle-worker blocking, aggregated failures
+(including exit 73), interruption disposal, configuration validation, carried
+provenance across a merge, and the Mac bundle/fast-script selection split. These
+protect the scheduling and selection boundaries without starting native builds.
 
 `test_verify.py` checks these against real temporary repositories, local bare
 remotes and a fake `gh` (`WORK_GH`) that records every call. The live E2E

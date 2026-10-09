@@ -22,7 +22,8 @@ struct ExtensionRetainedContentTests {
         kind: ExtensionSurface.Kind,
         lifecycle: ExtensionSurface.Lifecycle = .retained,
         frameLines: [String],
-        source: String? = "npm:@example/extension"
+        source: String? = "npm:@example/extension",
+        providerKind: ExtensionProviderKind? = nil
     ) -> ExtensionSurface {
         ExtensionSurface(
             id: id,
@@ -30,7 +31,7 @@ struct ExtensionRetainedContentTests {
             placement: .fullscreen,
             lifecycle: lifecycle,
             targetId: nil,
-            provenance: .init(source: source, path: nil),
+            provenance: .init(source: source, path: nil, kind: providerKind),
             revision: 1,
             focused: false,
             inputMode: .none,
@@ -72,14 +73,14 @@ struct ExtensionRetainedContentTests {
     func subagentOwnedContentFiltering() {
         let content = ExtensionRetainedContentPolicy.content(
             widgets: [
-                widget(key: "subagent", lines: ["private tracker"], owner: .init(id: "subagents", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0")),
+                widget(key: "subagent", lines: ["private tracker"], owner: .init(id: "subagents", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0", kind: .subagent)),
                 widget(key: "unknown", lines: ["keep this"], owner: nil),
                 widget(key: "different-package", lines: ["keep similarly named producer"], owner: .init(id: "different", title: "Pi Subagents", source: "npm:pi-subagents-helper@1.0"))
             ],
-            surfaces: [surface(id: "subagent-frame", kind: .widget, frameLines: ["private frame"], source: "npm:pi-subagents"),
+            surfaces: [surface(id: "subagent-frame", kind: .widget, frameLines: ["private frame"], source: "npm:pi-subagents", providerKind: .subagent),
                        surface(id: "unknown-frame", kind: .widget, frameLines: ["keep frame"], source: nil)],
             statuses: ["subagent": "private status", "unknown": "keep status"],
-            statusOwners: ["subagent": .init(id: "subagents", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0")]
+            statusOwners: ["subagent": .init(id: "subagents", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0", kind: .subagent)]
         )
         #expect(content.entries.map(\.id) == ["widget:unknown", "widget:different-package", "surface:unknown-frame", "status:unknown"])
         #expect(content.entries.contains { $0.producer == "Pi Subagents" })
