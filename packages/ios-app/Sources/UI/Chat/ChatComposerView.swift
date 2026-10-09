@@ -144,13 +144,9 @@ struct ChatComposerView: View {
             locallyExpiredRecentExpiry = expiryText
         }
         .background(alignment: .bottom) {
-            ChatBottomActivityBlur(
-                isActive: showsAmbientWorkingBlur,
-                keyboardVisible: keyboardVisible
-            )
-            .offset(y: ChatBottomActivityBlurLayout.translation(keyboardVisible: keyboardVisible))
-            .ignoresSafeArea(edges: .bottom)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: keyboardVisible)
+            ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+                .offset(y: ChatBottomActivityBlurLayout.translation)
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 
