@@ -25,7 +25,7 @@ export interface HomeWakeMessage {
   customType: typeof HOME_TASK_RESULT_MESSAGE | typeof HOME_TASK_PENDING_MESSAGE;
   content: string;
   display: true;
-  details: { eventId: string; taskId: string; resultRefs: HomeTaskRecord["reportRefs"]; terminalEvidence: HomeTaskRecord["terminalEvidence"]; operationId: string; routeGeneration: number };
+  details: { eventId: string; taskId: string; resultRef: HomeTaskRecord["reportRef"]; terminalEvidence: HomeTaskRecord["terminalEvidence"]; operationId: string; routeGeneration: number };
 }
 export interface HomeWakeEvidence {
   type: string; id: string; sessionId: string; customType?: string; details?: unknown; data?: unknown; content?: unknown;
@@ -104,7 +104,7 @@ export class WakeInboxOwner {
       if (!pending) return;
       const envelope = await prepareEnvelope();
       const pendingMessage = (count: number): HomeWakeMessage => ({ customType: HOME_TASK_PENDING_MESSAGE, display: true,
-        content: `${count} more task results pending.`, details: { eventId: `pending:${operationId}`, taskId: "inbox", resultRefs: null,
+        content: `${count} more task results pending.`, details: { eventId: `pending:${operationId}`, taskId: "inbox", resultRef: null,
           terminalEvidence: null, operationId, routeGeneration: route.routeGeneration } });
       const cost = (message: HomeWakeMessage) => estimateTokens({ role: "custom", ...message, timestamp: Date.now() });
       // Reserve the attributed count and canonical attribution entries before
@@ -126,12 +126,12 @@ export class WakeInboxOwner {
         envelope.signal.throwIfAborted();
         const task = next; const wake = task.wake!;
         const result = await this.options.result(task.taskId);
-        if (!result.task || JSON.stringify(result.task.reportRefs) !== JSON.stringify(task.reportRefs)
+        if (!result.task || JSON.stringify(result.task.reportRef) !== JSON.stringify(task.reportRef)
           || JSON.stringify(result.task.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) throw new GatewayError("conflict", "Immutable inbox result is unavailable");
         envelope.signal.throwIfAborted();
         let content = `Home task ${task.taskId} (${task.terminalEvidence!.outcome})\n${result.text}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
-          details: { eventId: wake.eventId, taskId: task.taskId, resultRefs: task.reportRefs, terminalEvidence: task.terminalEvidence,
+          details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.
@@ -231,7 +231,7 @@ export class WakeInboxOwner {
       && JSON.stringify(entry.data) === JSON.stringify(attribution));
     return attributed && terminals.length === 1 && typeof message.content === "string" && hash(message.content) === delivery.messageDigest
       && message.sessionId === delivery.sessionId && details.taskId === task.taskId && details.operationId === delivery.operationId
-      && details.routeGeneration === delivery.routeGeneration && JSON.stringify(details.resultRefs) === JSON.stringify(task.reportRefs)
+      && details.routeGeneration === delivery.routeGeneration && JSON.stringify(details.resultRef) === JSON.stringify(task.reportRef)
       && JSON.stringify(details.terminalEvidence) === JSON.stringify(task.terminalEvidence);
   }
   private async change(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent, reason: string): Promise<HomeTaskRecord> {

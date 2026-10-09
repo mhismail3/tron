@@ -39,7 +39,8 @@ export interface HomeTaskRecord {
   operationId: string | null;
   stopIntent: { operationId: string; requestedAt: string } | null;
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
-  reportRefs: Array<{ resultId: string; sessionId: string; entryId: string; digest: string }> | null;
+  /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
+  reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
     outcome: typeof OUTCOMES[number];
     sessionId: string | null;
@@ -478,7 +479,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRefs", "terminalEvidence", "routeGeneration", "wake"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -496,9 +497,9 @@ function validateTask(value: unknown): HomeTaskRecord {
   if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
     || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
-  if (value.reportRefs !== null && (!Array.isArray(value.reportRefs) || value.reportRefs.length > 256
-    || value.reportRefs.some(ref => !keys(ref, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(ref.resultId) || !identifier(ref.sessionId) || !identifier(ref.entryId) || typeof ref.digest !== "string" || !/^[a-f0-9]{64}$/u.test(ref.digest))
-    || new Set(value.reportRefs.map(ref => ref.resultId)).size !== value.reportRefs.length)) invalid();
+  const reportRef = value.reportRef;
+  if (reportRef !== null && (!keys(reportRef, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(reportRef.resultId)
+    || !identifier(reportRef.sessionId) || !identifier(reportRef.entryId) || typeof reportRef.digest !== "string" || !/^[a-f0-9]{64}$/u.test(reportRef.digest))) invalid();
   const evidence = value.terminalEvidence;
   if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"])
     || !OUTCOMES.includes(evidence.outcome as typeof OUTCOMES[number]) || !nullableId(evidence.sessionId)
@@ -507,7 +508,7 @@ function validateTask(value: unknown): HomeTaskRecord {
   if ((value.lifecycle === "terminal") !== (evidence !== null)
     || (value.lifecycle === "active" && (value.sessionId === null || value.operationId === null
       || (value.grantRef === null && value.scopeRef === null)))
-    || (evidence !== null && evidence.outcome === "final" && (value.reportRefs === null || value.reportRefs.length === 0))) invalid();
+    || (evidence !== null && evidence.outcome === "final" && reportRef === null)) invalid();
   const wake = value.wake;
   if ((value.lifecycle === "terminal") !== (wake !== null)) invalid();
   if (wake !== null) {

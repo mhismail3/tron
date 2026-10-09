@@ -381,7 +381,7 @@ describe("Home task bounded backlogs", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const base = await (await dispatch(f)).completion;
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
-    for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, reportRefs: null, terminalEvidence: null, wake: null, spend: null }, null);
+    for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, reportRef: null, terminalEvidence: null, wake: null, spend: null }, null);
     const retained = new Set<string>(); let peak = 0;
     const observe = (task: any) => { if (task.lifecycle !== "terminal") { retained.add(task.taskId); peak = Math.max(peak, retained.size); } };
     const records = HomeTaskStore.prototype.records;
@@ -793,7 +793,7 @@ describe("Home task list RPC", () => {
         intent, intentDigest: taskIntentDigest(intent.text), target: f.cwd,
         grantRef: null, scopeRef: null, lifecycle: "pending",
         sessionId: null, operationId: null, stopIntent: null, spend: null,
-        reportRefs: null, terminalEvidence: null, wake: null }, null);
+        reportRef: null, terminalEvidence: null, wake: null }, null);
       await new Promise(resolve => setTimeout(resolve, 2));
     }
     const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
@@ -848,7 +848,7 @@ describe("Home task production dispatch", () => {
       release();
       const completion = await run.completion.then(() => "published", error => String(error));
       const frozen = await store.read(run.taskId);
-      expect(frozen).toMatchObject({ lifecycle: "active", reportRefs: null, terminalEvidence: null, wake: null });
+      expect(frozen).toMatchObject({ lifecycle: "active", reportRef: null, terminalEvidence: null, wake: null });
       expect(completion).toContain("live canonical sync refused");
       expect(failedSync).toBe(true);
       expect(acknowledge).not.toHaveBeenCalled();
@@ -857,7 +857,7 @@ describe("Home task production dispatch", () => {
       const recovered = await f.restart();
       const task = await recovered.homeOwner().taskResult(run.taskId);
       expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" }, wake: { state: "pending", push: "decided" } });
-      expect(task.reportRefs).toHaveLength(1);
+      expect(task.reportRef).not.toBeNull();
       expect(providers).toBe(1);
       expect(f.notifications).toHaveLength(1);
       evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, frozen, completion, task, providers });
@@ -878,7 +878,7 @@ describe("Home task production dispatch", () => {
     await expect(run.completion).rejects.toThrow("Task canonical evidence is unavailable");
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
     const frozen = await store.read(run.taskId);
-    expect(frozen).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null, reportRefs: null, wake: null });
+    expect(frozen).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null, reportRef: null, wake: null });
     expect(f.notifications).toHaveLength(0);
     vi.restoreAllMocks();
     const recovered = await f.restart();
@@ -1220,7 +1220,7 @@ describe("Home task production dispatch", () => {
       expect(providerCalls).toBe(0);
       expect(result.stopIntent).toMatchObject({ operationId: run.operationId });
       expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "stopped-before-conversation", entryIds: [] });
-      expect(result.reportRefs).toBeNull();
+      expect(result.reportRef).toBeNull();
       expect(result.wake).toMatchObject({ state: "pending", push: "decided" });
       expect(f.notifications).toHaveLength(1);
       await expect(fileSystem.stat(slot.sessionFile!)).rejects.toMatchObject({ code: "ENOENT" });
@@ -1428,7 +1428,7 @@ describe("Home task production dispatch", () => {
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code: `await tools.report({resultId:"nested-result",outcome:"final",text:"Verified",evidence:[]}); await tools.write({path:${JSON.stringify(later)},content:"forbidden"});` })], { stopReason: "toolUse" }), fauxAssistantMessage("must not continue")]);
     const result = await (await dispatch(f)).completion;
     expect(result.terminalEvidence?.outcome).toBe("final");
-    expect(result.reportRefs?.[0]?.resultId).toBe("nested-result");
+    expect(result.reportRef?.resultId).toBe("nested-result");
     expect(existsSync(later)).toBe(false);
     evidence.push({ case: "nested-report-stop", postReportEffect: false });
   }, 20_000);
@@ -1499,9 +1499,9 @@ describe("Home task production dispatch", () => {
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe("final");
-    expect(result.reportRefs).toHaveLength(1);
+    expect(result.reportRef).not.toBeNull();
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
-    const ref = result.reportRefs![0];
+    const ref = result.reportRef!;
     const canonical = entries.find(entry => entry.id === ref.entryId) as any;
     expect(canonical).toMatchObject({ type: "custom", customType: "tron-home-task-report", data: {
       resultId: "report-one", taskId: "task-one",
@@ -1560,7 +1560,7 @@ describe("Home task production dispatch", () => {
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe(stopReason === "length" ? "limited" : "unknown");
-    expect(result.reportRefs).toBeNull();
+    expect(result.reportRef).toBeNull();
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const last = entries.find(entry => entry.id === result.terminalEvidence.entryIds[0]) as any;
     expect(last.message.role).toBe("assistant");

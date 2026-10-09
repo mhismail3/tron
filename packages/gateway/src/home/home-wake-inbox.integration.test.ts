@@ -25,7 +25,7 @@ async function fixture() {
   const task = { version: 1, taskId: "task", revision: 1, homeId: "home", generation: 1, routeGeneration: 1,
     intent, intentDigest: taskIntentDigest(intent.text), target: root,
     grantRef: null, scopeRef: null, lifecycle: "pending",
-    sessionId: null, operationId: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null, wake: null } as HomeTaskRecord;
+    sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null } as HomeTaskRecord;
   await store.put(task, null);
   const { WakeInboxOwner } = await import("./home-wake-inbox.js");
   const pushes: unknown[] = []; const entries: any[] = [];
@@ -111,7 +111,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     if (mode === "missing-attribution") f.entries.splice(1, 1);
     if (mode === "malformed") f.entries.at(-1).data = { receiptKind: "terminal", operationId: "activation" };
     if (mode === "duplicate") f.entries.push({ ...f.entries[0], id: "duplicate-message" });
-    if (mode === "contradictory") f.entries[0].details.resultRefs = [{ resultId: "forged" }];
+    if (mode === "contradictory") f.entries[0].details.resultRef = { resultId: "forged" };
     await f.owner.settle(f.route, "activation");
     expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
   });

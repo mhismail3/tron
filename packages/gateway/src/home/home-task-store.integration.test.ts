@@ -79,7 +79,7 @@ function task(): HomeTaskWrite {
     intent, intentDigest: taskIntentDigest(intent.text),
     target: "/trusted/project",
     grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
-    stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null, wake: null,
+    stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null,
   };
 }
 
@@ -246,12 +246,23 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), lifecycle: "active" },
       { ...task(), lifecycle: "terminal" },
       { ...task(), lifecycle: "terminal", terminalEvidence: { outcome: "final", sessionId: "session-1", entryIds: [], reason: "report" } },
-      { ...task(), reportRefs: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", surprise: true }] },
+      { ...task(), reportRef: { resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64), surprise: true } },
+      { ...task(), reportRef: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64) }] },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0 } },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, unpriced: true } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);
+  });
+
+  // FM7: a final result is only a result with its one report reference; the rest of
+  // the record is valid, so the reference is the only thing refused.
+  it("refuses a final terminal result without its single report reference", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const final = { ...terminalTask("task-final"), terminalEvidence: { outcome: "final" as const, sessionId: "session-1", entryIds: ["entry-1"], reason: "explicit-report" } };
+    await expect(f.store.put(final, null)).rejects.toMatchObject({ code: "invalid-record" });
+    const reportRef = { resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64) };
+    await expect(f.store.put({ ...final, reportRef }, null)).resolves.toMatchObject({ lifecycle: "terminal", reportRef });
   });
 
   it("refuses a wake state the inbox no longer writes, so no record can carry it", async () => {

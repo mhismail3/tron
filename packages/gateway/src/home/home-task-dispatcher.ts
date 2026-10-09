@@ -94,7 +94,7 @@ export class HomeTaskDispatcher {
         }
         const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
           wake: this.inbox.event(current),
-          reportRefs: report && entryId ? [{ resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) }] : null,
+          reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
           terminalEvidence: { outcome: report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds, reason } }));
         this.transition(final, reason);
       }
@@ -147,7 +147,7 @@ export class HomeTaskDispatcher {
       intent: { text: input.intent }, intentDigest: taskIntentDigest(input.intent),
       target: await this.sessions.canonicalTaskTarget(input.target),
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
-      stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
+      stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
     }, null);
     this.transition(task, "created");
     let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
@@ -230,7 +230,7 @@ export class HomeTaskDispatcher {
           throw new GatewayError("conflict", "Task canonical evidence is unavailable");
         }
         const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
-          reportRefs: report && evidence ? [{ resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) }] : null,
+          reportRef: report && evidence ? { resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) } : null,
           terminalEvidence: { outcome: stoppedBeforeConversation ? "interrupted" : detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
             sessionId: slot.id, entryIds: evidence ? [evidence.entryId] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
             reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
@@ -339,12 +339,12 @@ export class HomeTaskDispatcher {
       this.diagnostic?.({ event: "home.task.spend", taskHash: hash(task.taskId), spendReference: `${hash(task.taskId)}:${task.revision}`,
         inputTokens: task.spend?.inputTokens ?? 0, outputTokens: task.spend?.outputTokens ?? 0 });
     }
-    if (task.reportRefs?.length) {
+    if (task.reportRef) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
       const entries = await this.sessions.readTaskEvidence(task.sessionId);
       const evidence = await this.reportEvidence(task, entries);
-      const ref = task.reportRefs[0]!;
-      if (!evidence || task.reportRefs.length !== 1 || evidence.entryId !== ref.entryId || evidence.report.resultId !== ref.resultId
+      const ref = task.reportRef;
+      if (!evidence || evidence.entryId !== ref.entryId || evidence.report.resultId !== ref.resultId
         || evidence.report.sessionId !== ref.sessionId || reportDigest(evidence.report) !== ref.digest) throw new GatewayError("conflict", "Task report reference is missing or contradictory");
     }
     return task;

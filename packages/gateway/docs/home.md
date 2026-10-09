@@ -591,8 +591,8 @@ real directories.
     replaced.
   - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
     safe nonnegative integers. No cost is recorded.
-  - `reportRefs`: null or at most 256 unique `{ resultId, sessionId, entryId, digest
-    }`; the digest pins the canonical report payload.
+  - `reportRef`: null or exact `{ resultId, sessionId, entryId, digest }`, the one
+    canonical report the task sealed; the digest pins its payload.
   - `wake`: null before terminal, then the event (stable identity, route epoch,
     creation time, delivery state, push decision, exact activation binding and
     message digest, acknowledgement and redelivery audit).
