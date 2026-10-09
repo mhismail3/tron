@@ -188,7 +188,7 @@ describe("terminal chat Home commands", () => {
   it("renders the typed status phase, activation, readiness, memory and recovery", async () => {
     const status = {
       available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1,
-      live: true, sessionPresent: true,
+      live: true, sessionPresent: true, taskRecovery: { available: true as const },
       phase: "blocked" as const,
       activation: { available: true as const, activationStartEntryId: "entry-1", activationOpen: false, lastRefusalReason: "memory-blocked" },
       readiness: { ready: false, gaps: ["memory-blocked"] },
@@ -213,7 +213,7 @@ describe("terminal chat Home commands", () => {
     expect(awaiting).not.toContain("refused before it prepared a request");
 
     // Each state is distinguishable from the projection alone.
-    const base = { activation: { available: false } as const, readiness: { ready: false, gaps: [] }, recovery: { action: "none" as const }, memory: { configured: false, open: false } };
+    const base = { activation: { available: false } as const, taskRecovery: { available: true as const }, readiness: { ready: false, gaps: [] }, recovery: { action: "none" as const }, memory: { configured: false, open: false } };
     expect(describeHomeStatus({ ...base, phase: "unavailable", available: false, reason: "unreadable", enabled: false, live: false, sessionPresent: false }))
       .toContain("unreadable");
     expect(describeHomeStatus({ ...base, phase: "undesignated", available: true, enabled: false, live: false, sessionPresent: false }))

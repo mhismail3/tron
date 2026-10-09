@@ -1109,7 +1109,7 @@ export interface HomeOpen {
 export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
-  taskRecovery?: { available: true } | { available: false; reason: string };
+  taskRecovery: { available: true } | { available: false; reason: string };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */

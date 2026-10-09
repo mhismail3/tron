@@ -551,6 +551,8 @@ describe("Tron Home record", () => {
         hasConversation: async () => false,
         serializeSessionMutation: async (_id, commit) => commit(),
         replaceRuntimeForProfile: async (_sessionId, commit) => { await commit(); },
+        beginHomePublicationReconciliation: () => {},
+        retireHomeRuntimes: async () => {},
       },
       workspace: new TronWorkspace(join(h.root, "tron")),
       taskSessions: {} as RuntimeRegistry,
