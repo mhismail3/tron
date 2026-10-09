@@ -7082,6 +7082,11 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
+      if (!ownership && this.stopRecoveryQueueClosed && !held && !redelivery) {
+        const heldAdmission = this.holdPrompt(text, images, behavior, queueDisplay, true);
+        onAdmitted?.(heldAdmission);
+        return heldAdmission;
+      }
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -7748,15 +7753,38 @@ export class RuntimeSlot {
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
     expectedOperationId?: string,
   ): Promise<void> {
-    await this.lane.run(async () => {
-      const recovered = await this.abortSerialized(kind, expectedOperationId);
-      if (recovered.length > 0) await this.redeliverStoppedSteering(recovered, true);
-    });
+    let queuedAtStop: RuntimeQueuedMessage[] | undefined;
+    if ((this.queuedMessages.some((item) => item.behavior === "steer")
+      || this.pendingQueueAdmission?.behavior === "steer")
+      && this.stopSteeringContinuation === undefined) {
+      queuedAtStop = await this.lane.run(() => {
+        this.assertAvailable();
+        if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
+          throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
+        }
+        const accepted = this.queuedMessages.slice();
+        if (!accepted.some((item) => item.behavior === "steer")) return undefined;
+        // Close before clearing: any steer admitted while Stop waits stays in the
+        // Gateway owner and joins the continuation, never Pi's queue.
+        this.stopRecoveryQueueClosed = true;
+        for (const item of accepted) this.stopSteeringRecoveryIDs.add(item.id);
+        this.suppressQueueEvents = true;
+        try { this.runtime.session.clearQueue(); }
+        finally { this.suppressQueueEvents = false; }
+        this.sdkQueuedSteeringIDs.clear();
+        return accepted;
+      });
+    }
+    const recovered = await this.abortSerialized(kind, expectedOperationId, queuedAtStop);
+    if (recovered.length > 0) {
+      await this.lane.run(() => this.redeliverStoppedSteering(recovered, true));
+    }
   }
 
   private async abortSerialized(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash",
     expectedOperationId?: string,
+    queuedAtStop?: RuntimeQueuedMessage[],
   ): Promise<RuntimeQueuedMessage[]> {
     // A persistence blocker must not disable the owner's Stop route. Stop still
     // proves exact operation identity and reports any unresolved receipt after
@@ -7779,18 +7807,9 @@ export class RuntimeSlot {
     if (invocationOperationId) this.abortedOperations.add(invocationOperationId);
     if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
+    const queuedSteerCount = queuedAtStop?.filter((item) => item.behavior === "steer").length ?? 0;
+    const redeliver = queuedAtStop !== undefined && queuedSteerCount > 0;
     const session = this.runtime.session;
-    const queuedAtStop = this.queuedMessages.slice();
-    const queuedSteerCount = queuedAtStop.filter((item) => item.behavior === "steer").length;
-    const redeliver = queuedSteerCount > 0 && this.stopSteeringContinuation === undefined;
-    if (redeliver) {
-      this.stopRecoveryQueueClosed = true;
-      for (const item of queuedAtStop) this.stopSteeringRecoveryIDs.add(item.id);
-      this.suppressQueueEvents = true;
-      try { session.clearQueue(); }
-      finally { this.suppressQueueEvents = false; }
-      this.sdkQueuedSteeringIDs.clear();
-    }
     for (const cancel of [
       () => session.abortCompaction(),
       () => session.abortRetry(),
