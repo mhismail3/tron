@@ -59,15 +59,20 @@ not a log stream. No stream is shipped off the machine.
 
 ## Test and verification environment preflight
 
-The shared `packages/gateway/src/tron-home-environment-policy.mjs` preflight rejects an
-inherited environment that resolves into a Tron home. It has two invocation owners with
-distinct messages on the invoking process's stderr: Vitest (during `setupFiles`, before test
-modules execute) and Node test entry points (before tests start) import
-`test-support/tron-home-environment-preflight.mjs`, which throws `Gateway tests refuse
-inherited Tron-home environment values`; `scripts/tron work verify` runs the policy directly,
-which prints `Tron-home environment preflight failed` and is surfaced as a verification error
-before checks are selected or carried. This is a command-line guard, not a Gateway runtime log event, and
-is not persisted in `gateway.jsonl` or `gateway-stderr.log`.
+The shared `packages/gateway/src/tron-home-environment-policy.mjs` owns the rule for an
+inherited environment that resolves into a Tron home (`~/.tron`, `~/.tron-dev`, or the selected
+home). A path-valued variable that points there (for example `PI_CODING_AGENT_DIR`,
+`PI_SESSION_FILE`, `TRON_GATEWAY_PAYLOAD_ROOT`) is removed, because the owner then derives its
+default. The selectors `TRON_DATA_DIR` and `TRON_HOME_NAME` are refused, because removing one
+would fall back to `~/.tron` or retarget another home. `PATH` is never changed. Two invocation
+owners apply the rule: Vitest (`setupFiles`) and Node test entry points (`node --import`)
+import `test-support/tron-home-environment-preflight.mjs`, which removes the path variables from
+`process.env` before test modules execute and throws `Gateway tests refuse inherited Tron-home
+selectors` for a selector; `scripts/tron work verify` runs the policy script, which lists the
+variables each check environment drops, and prints `Tron-home environment preflight failed` for a
+selector as a verification error before checks are selected or carried. This is a command-line
+guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` or
+`gateway-stderr.log`.
 
 Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-sdk-scripts`;
 reproduce the verification signal with `TRON_HOME_NAME=.tron-dev scripts/tron work verify`.
@@ -335,7 +340,7 @@ Conventions used in the rows:
 | `notification.push.rate-limited` | info | `packages/gateway/src/gateway-main.ts`, raised by `NotificationService` | the relay refused one exact notification request at a device cap | `kind`, `outcome=rate_limited`, relay `reason` (`daily_limit` or `hourly_limit`) | Rate-limited requests are terminal and are not blindly retried; the inbox remains available for diagnosis |
 | `process.uncaught-exception` | error | `packages/gateway/src/gateway-main.ts` | an uncaught exception reaches the process | `error` | The process exits non-zero; the reason has to precede `gateway.stopped` |
 | `process.unhandled-rejection` | error | `packages/gateway/src/gateway-main.ts` | an unhandled rejection reaches the process | `error` | — |
-| `rpc.error` / managed pi-subagents entry refusal | warning | `packages/gateway/src/transport/server.ts`, raised from `packages/gateway/src/sessions/managed-subagents.ts` | session resource loading refuses a receipt-verified provider with absent/empty, escaping, missing or non-regular `pi.extensions` entries | standard RPC correlation, `conflict` and the bounded entry/manifest refusal message; no manifest contents | The predecessor used `index.ts` while the loader assumed `index.js`; manifest-selected entries make admission explicit. `managed-subagents.rollback.test.ts` exercises valid previous/candidate loading and actual verified malformed closures |
+| `rpc.error` / managed pi-subagents entry refusal | warning | `packages/gateway/src/transport/server.ts`, raised from `packages/gateway/src/sessions/managed-subagents.ts` | session resource loading refuses a receipt-verified provider with absent/empty, escaping, missing or non-regular `pi.extensions` entries | standard RPC correlation, `conflict` and the bounded entry/manifest refusal message; no manifest contents | The predecessor used `index.ts` while the loader assumed `index.js`; manifest-selected entries make admission explicit. `managed-subagents.rollback.test.ts` exercises valid previous/candidate loading, and `managed-subagents.invalid-entry.test.ts` exercises actual verified malformed closures |
 | `runtime.diagnostic` | error for a resource reload or extension load failure, warning for a per-provider refresh failure | `packages/gateway/src/gateway-main.ts`, raised from `packages/gateway/src/admin/global-provider-resources.ts` | global provider or extension resources fail to load or refresh | the failure text in the message | Provider and extension load failures used to be unrecorded startup noise |
 | `automation.dispatch-failed` | warning | `packages/gateway/src/gateway-main.ts`, raised from `packages/gateway/src/automations/automation-scheduler.ts` | an automation run could not be dispatched | — | A skipped run is not visible in the session transcript |
 | `automation.recovery-step` | info | `packages/gateway/src/gateway-main.ts`, raised from `packages/gateway/src/automations/automation-service.ts` | each part of automation recovery finishes | `step` (`store`, `reconcile-targets`, `scheduler-recover`), `durationMs`; checked target count and slowest target kind in the message | Automation recovery was 67% of a 23.3 s restart with no reason, and its parts had to sum without double counting the startup steps |

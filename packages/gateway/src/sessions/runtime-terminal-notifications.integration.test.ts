@@ -246,7 +246,6 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       notifications,
       useAgentModels: true,
       managedSubagents: (tronHome) => {
-        delete process.env.PI_SUBAGENT_CHILD;
         delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
         return ManagedSubagents.activateForStartup(tronHome, logger);
       },
@@ -308,10 +307,16 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       }, "the real managed subagent provider status to complete");
       // #616 tracks the tron.4 terminal-artifact identity mismatch: the provider is complete,
       // but the session-owned activity remains live until that projection is fixed.
+      // The parent's completion wake is the one turn that clears that activity, so its
+      // agent_finished is the completion event: wait for its delivery and turn settlement
+      // before snapshotting, because the wake's latency depends on host load.
+      await waitFor(() => received.some(({ envelope }) => envelope.notificationKind === "agent_finished" && envelope.title === "background task"),
+        "the completion wake's agent_finished delivery");
+      await waitFor(() => !value.slot.isBusy, "the completion wake turn to settle");
       expect(received.filter(({ envelope }) => envelope.notificationKind === "waiting")).toHaveLength(1);
-      expect(received.filter(({ envelope }) => envelope.notificationKind === "agent_finished")).toHaveLength(0);
+      expect(received.filter(({ envelope }) => envelope.notificationKind === "agent_finished")).toHaveLength(1);
       expect(received.every(({ signatureValid }) => signatureValid)).toBe(true);
-      expect(received.map(({ envelope }) => envelope.notificationKind)).toEqual(["ask", "waiting"]);
+      expect(received.map(({ envelope }) => envelope.notificationKind)).toEqual(["ask", "waiting", "agent_finished"]);
 
       // The relay is already at its device daily backstop. A routine refusal is terminal,
       // observable, retained in the inbox, and does not prevent the ask exemption.
@@ -325,11 +330,12 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       expect(logger.recent(100).some((row) => row.event === "notification.push.rate-limited" && row.reason === "daily_limit")).toBe(true);
       expect((await notifications.inbox()).notifications).toContainEqual(expect.objectContaining({ kind: "agent_finished", title: "Routine", outcome: "failed" }));
       expect(received.filter(({ envelope }) => envelope.title === "Routine")).toHaveLength(1);
-      expect(received.map(({ envelope }) => envelope.notificationKind)).toEqual(["ask", "waiting", "agent_finished", "ask"]);
+      expect(received.map(({ envelope }) => envelope.notificationKind)).toEqual(["ask", "waiting", "agent_finished", "agent_finished", "ask"]);
       const inbox = (await notifications.inbox()).notifications;
       expect(inbox.map(({ kind, title, message }) => ({ kind, title, message }))).toEqual([
         { kind: "ask", title: "Input needed", message: "Tron needs your input. Open Tron to respond." },
         { kind: "agent_finished", title: "Routine", message: "Finished." },
+        { kind: "agent_finished", title: "background task", message: "The agent finished responding." },
         { kind: "waiting", title: "background task", message: "The agent is waiting on 1 background task." },
         { kind: "ask", title: "Input needed", message: "Tron needs your input. Open Tron to respond." },
       ]);

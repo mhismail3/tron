@@ -21,10 +21,11 @@ function fixture(run, usable = false) {
     for (const path of [target, fork, join(target, "scripts"), join(root, "home"), join(root, "tmp")]) mkdirSync(path, { recursive: true });
     cpSync(join(gateway, "artifacts"), join(target, "artifacts"), { recursive: true });
     copyFileSync(join(gateway, "pi-subagents-pin.json"), join(target, "pi-subagents-pin.json"));
-    for (const path of ["src", "test-support", "vitest.config.ts"]) cpSync(join(gateway, path), join(target, path), { recursive: true });
+    for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts"]) cpSync(join(gateway, path), join(target, path), { recursive: true });
     symlinkSync(join(gateway, "node_modules"), join(target, "node_modules"));
     for (const file of ["check-pi-subagents.mjs", "build-pi-subagents-closure.py"]) copyFileSync(join(gateway, "scripts", file), join(target, "scripts", file));
-    const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: usable ? "https://registry.npmjs.org/" : "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1" };
+    // Ambient-env calls merge onto this base, so npm's compile cache (written under TMPDIR) must be disabled here.
+    const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: usable ? "https://registry.npmjs.org/" : "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1", NODE_DISABLE_COMPILE_CACHE: "1" };
     const git = (cwd, ...args) => command("git", ["-C", cwd, ...args], { env });
     for (const repo of [target, fork]) {
       git(repo, "init", "-q"); git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "fixture@example.invalid");
@@ -78,7 +79,8 @@ test("packs committed objects, builds a closure and retains current as previous"
     const originalPin = readFileSync(join(target, "pi-subagents-pin.json"));
     const executed = [];
     const beforePublication = (bin, args, options) => {
-      if (args.includes("src/sessions/managed-subagents.integration.test.ts") || args.includes("src/sessions/managed-subagents.rollback.test.ts")) {
+      if (args.includes("src/sessions/managed-subagents.integration.test.ts") || args.includes("src/sessions/managed-subagents.rollback.test.ts")
+        || args.includes("src/sessions/managed-subagents.invalid-entry.test.ts")) {
         assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
         assert.deepEqual(snapshot(target), original);
         executed.push(args.find((arg) => arg.endsWith(".test.ts")));
@@ -86,7 +88,7 @@ test("packs committed objects, builds a closure and retains current as previous"
       return spawn(bin, args, options);
     };
     const result = runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: beforePublication });
-    assert.deepEqual(executed, ["src/sessions/managed-subagents.integration.test.ts", "src/sessions/managed-subagents.rollback.test.ts"]);
+    assert.deepEqual(executed, ["src/sessions/managed-subagents.integration.test.ts", "src/sessions/managed-subagents.rollback.test.ts", "src/sessions/managed-subagents.invalid-entry.test.ts"]);
     const candidate = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
     assert.equal(candidate.version, "0.76.1-tron.99");
     assert.deepEqual(candidate.fork, { repository: null, commit });
