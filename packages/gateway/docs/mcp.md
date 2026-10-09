@@ -57,8 +57,10 @@ alias values as Codemode without rewriting them. MCP uses Pi's `mcp.json` and
 Tron does not maintain a second server schema. Runtime fixture coverage for
 stdio/HTTP exposure, resource reads, `list_changed`, lazy reconnect, and process
 group cleanup lives in `src/sessions/runtime-registry.integration.test.ts`.
-The explicit admin status command accepts Pi's valid JSON output for CLI exit
-codes 0 and 1 (the latter reports unhealthy servers) and projects a bounded
+When the bounded admin CLI call times out, Tron kills the CLI and every stdio server group it
+started: groups are listed at the timeout and again before the SIGKILL escalation, so a server a
+SIGTERM-ignoring CLI starts in that grace period is still reaped. The explicit admin status command
+accepts Pi's valid JSON output for CLI exit codes 0 and 1 (the latter reports unhealthy servers) and projects a bounded
 wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
 `exposure`, `transport`, at most 128 tool names, and an optional bounded `error`.
 Each string is capped at 256 characters (except `state`, capped at 64); `error`
