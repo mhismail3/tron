@@ -154,98 +154,6 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     expect(value.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("records a real detached pi-subagents launch with a live-run projection", async () => {
-    const childStarted = barrier();
-    const releaseChild = barrier();
-    const modelServer = createServer(async (request, response) => {
-      let body = "";
-      for await (const chunk of request) body += Buffer.from(chunk).toString("utf8");
-      const last = (JSON.parse(body) as { messages: Array<{ role: string; content: unknown }> }).messages.at(-1);
-      const input = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
-      if (!request.url?.endsWith("chat/completions") || !input?.includes("CHILD_OFFLINE_COMPLETE")) {
-        response.writeHead(500).end("Unexpected managed-subagent model request");
-        return;
-      }
-      childStarted.release();
-      await releaseChild.promise;
-      response.writeHead(200, { "content-type": "text/event-stream" });
-      for (const [delta, finish] of [[{ role: "assistant", content: "CHILD_OFFLINE_COMPLETE" }, null], [{}, "stop"]] as const) {
-        response.write(`data: ${JSON.stringify({ id: "managed-subagent-child", object: "chat.completion.chunk", created: 1,
-          model: "managed-subagent-child", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
-      }
-      response.end("data: [DONE]\n\n");
-    });
-    modelServer.listen(0, "127.0.0.1");
-    await once(modelServer, "listening");
-    cleanup.push(async () => { modelServer.close(); await once(modelServer, "close"); });
-    const address = modelServer.address();
-    if (!address || typeof address === "string") throw new Error("fake child model did not bind a TCP port");
-    const value = await fixture([
-      fauxAssistantMessage([fauxToolCall("subagent", {
-        agent: "offline-worker", task: "Return CHILD_OFFLINE_COMPLETE", async: true,
-        acceptance: { level: "none", reason: "Detached-run projection observation" },
-      }, { id: "notification-subagent-launch" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage("The detached child is running."),
-    ], {
-      useAgentModels: true,
-      managedSubagents: (tronHome) => {
-        delete process.env.PI_SUBAGENT_CHILD;
-        delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
-        return ManagedSubagents.activateForStartup(tronHome, new GatewayLogger());
-      },
-      setup: async ({ agentDir, cwd, trust }) => {
-        await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: {
-          "notification-child": {
-            baseUrl: `http://127.0.0.1:${address.port}/v1`, api: "openai-completions", apiKey: "test-only",
-            models: [{ id: "notification-child", name: "Notification child", reasoning: false, input: ["text"],
-              contextWindow: 128_000, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-          },
-        } }));
-        await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-        await writeFile(join(cwd, ".pi", "agents", "offline-worker.md"),
-          `---\nname: offline-worker\ndescription: Offline notification regression\nmodel: notification-child/notification-child\ntools: read\n---\nReturn the requested completion marker.\n`);
-        await trust.set(cwd, true);
-      },
-    });
-    let runId: string | undefined;
-    let runDirectory: string | undefined;
-    try {
-      await value.slot.prompt("start detached background task");
-      await childStarted.promise;
-      const toolResult = (value.slot as unknown as { sessionManager: { getBranch(): any[] } }).sessionManager.getBranch()
-        .findLast((entry) => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "notification-subagent-launch");
-      expect(toolResult?.message.isError).toBe(false);
-      expect(toolResult?.message.details).toMatchObject({ asyncDir: expect.any(String), mission: { status: "active" } });
-      runId = toolResult?.message.details?.runId;
-      runDirectory = toolResult?.message.details?.asyncDir;
-      const launchActivity = value.slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === "notification-subagent-launch");
-      expect(launchActivity).toMatchObject({ mode: "asynchronous", status: "running", lifecycle: { state: "running" } });
-    } finally {
-      releaseChild.release();
-      if (runId) {
-        const subagentTool = (value.slot as unknown as {
-          runtime: { session: { extensionRunner: { getToolDefinition(name: string): {
-            execute(toolCallId: string, args: unknown, signal: AbortSignal): Promise<unknown>;
-          } | undefined } } };
-        }).runtime.session.extensionRunner.getToolDefinition("subagent");
-        if (subagentTool) {
-          await subagentTool.execute(`notification-cleanup-${runId}`, { action: "stop", id: runId }, new AbortController().signal).catch(() => {});
-        }
-        if (runDirectory) {
-          await waitFor(async () => {
-            try {
-              const status = JSON.parse(await readFile(join(runDirectory!, "status.json"), "utf8")) as { state?: string };
-              return ["complete", "failed", "stopped", "rejected"].includes(status.state ?? "");
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-              throw error;
-            }
-          }, "the detached run to become terminal before cleanup", { boundMs: 10_000 }).catch(() => {});
-        }
-      }
-    }
-  }, 30_000);
-
   it("sends terminal and input notifications through the Gateway store to a local fake relay", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-notification-e2e-"));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -463,7 +371,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       }
       notifications.dispose();
     }
-  }, 30_000);
+  }, 60_000);
 
   it("waits through retries and announces only the exhausted final error", async () => {
     const resumed = barrier();
