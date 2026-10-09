@@ -2194,6 +2194,7 @@ function withInvocationSemantics(
       invocationId: boundInvocation.invocationId,
       operationId: boundInvocation.operationId,
       kind: boundInvocation.source === "subagentWake" ? "subagentWake" : "resourcePrompt",
+      ...(boundInvocation.source === "subagentWake" ? { direction: "hiddenInternal" as const, visibility: "hidden" as const } : {}),
       ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
       ...(boundInvocation.submittedText === undefined ? {} : { submittedText: boundInvocation.submittedText }),
       lifecycle: boundInvocation.lifecycle,

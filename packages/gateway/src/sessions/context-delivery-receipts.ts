@@ -1,6 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../protocol/types.js";
 
+import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
 import { classifyCapturedExtensionOwner } from "./extension-activity-history.js";
 
 export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
@@ -13,6 +14,7 @@ interface ContextDeliveryReceiptData {
   source: "extension";
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
+  wakeOperationId?: string;
 }
 
 function boundedText(value: unknown, maximumBytes: number): value is string {
@@ -45,6 +47,7 @@ export function makeContextDeliveryReceipt(
   targetEntryId: string,
   delivery: ContextDeliveryReceiptData["delivery"],
   origin?: ExtensionToolOrigin,
+  wakeOperationId?: string,
 ): ContextDeliveryReceiptData {
   return {
     writer: "gateway",
@@ -53,6 +56,7 @@ export function makeContextDeliveryReceipt(
     source: "extension",
     delivery,
     ...(origin ? { origin } : {}),
+    ...(wakeOperationId ? { wakeOperationId } : {}),
   };
 }
 
@@ -67,9 +71,11 @@ function parseReceipt(value: unknown, historical: boolean): ContextDeliveryRecei
       || !boundedText(record.targetEntryId, 256)) return undefined;
   const origin = parseOrigin(record.origin);
   if (record.origin !== undefined && !origin) return undefined;
+  if (record.wakeOperationId !== undefined && (historical || record.delivery !== "stored"
+      || !boundedText(record.wakeOperationId, 256))) return undefined;
   const allowed = new Set([
     "writer", "version", "targetEntryId", "source",
-    historical ? "trigger" : "delivery", "origin",
+    historical ? "trigger" : "delivery", "origin", ...(!historical ? ["wakeOperationId"] : []),
   ]);
   if (Object.keys(record).some(key => !allowed.has(key))) return undefined;
   if (!historical && Buffer.byteLength(JSON.stringify(record), "utf8") > 8_192) return undefined;
@@ -79,6 +85,7 @@ function parseReceipt(value: unknown, historical: boolean): ContextDeliveryRecei
     targetEntryId: record.targetEntryId,
     source: "extension",
     delivery: historical ? "triggeredTurn" : record.delivery as ContextDeliveryReceiptData["delivery"],
+    ...(typeof record.wakeOperationId === "string" ? { wakeOperationId: record.wakeOperationId } : {}),
     ...(origin ? { origin } : {}),
   };
 }
@@ -106,6 +113,9 @@ export function contextDeliveryMetadataByEntry(
     return new Map();
   }
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const wakeBindings = new Map(invocationProjection(invocationReceipts(entries))
+    .filter(invocation => invocation.source === "subagentWake" && invocation.canonicalEntryId !== undefined)
+    .map(invocation => [invocation.operationId, invocation]));
   const position = new Map(entries.map((entry, index) => [entry.id, index]));
   const admitted = new Map<string, ContextDeliveryMetadata>();
   const contradicted = new Set<string>();
@@ -119,9 +129,17 @@ export function contextDeliveryMetadataByEntry(
     if (!receipt || !isCustomMessageEntry(byId.get(receipt.targetEntryId))
         || (position.get(receipt.targetEntryId) ?? Number.MAX_SAFE_INTEGER)
           >= (position.get(entry.id) ?? -1)) continue;
+    const wake = receipt.wakeOperationId ? wakeBindings.get(receipt.wakeOperationId) : undefined;
+    const wakeEntry = wake?.canonicalEntryId ? byId.get(wake.canonicalEntryId) : undefined;
+    // Admission alone is not a turn: handled/abandoned inputs have no binding.
+    // Exact canonical binding survives queue consumption and cold reconstruction.
+    const wakeEntryId = wakeEntry?.type === "message" && wakeEntry.message.role === "user"
+      && wake?.origin.kind === "subagent" && wake.origin.ownerId === receipt.origin?.owner?.id
+      ? wakeEntry.id : undefined;
     const metadata: ContextDeliveryMetadata = {
       source: receipt.source,
-      delivery: receipt.delivery,
+      delivery: wakeEntryId ? "triggeredTurn" : receipt.delivery,
+      ...(wakeEntryId ? { wakeEntryId } : {}),
       ...(receipt.origin ? { origin: receipt.origin } : {}),
     };
     const previous = admitted.get(receipt.targetEntryId);

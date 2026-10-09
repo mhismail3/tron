@@ -16,6 +16,7 @@ import { AsyncResource } from "node:async_hooks";
 import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
+import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "./extension-activity-history.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {
@@ -50,7 +51,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
   try {
     await mkdir(agentDir);
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
-    await writeFile(join(agentDir, "capture.mjs"), `export default pi => { globalThis.tronAttributionPi = pi; pi.on("input", async event => { if (event.text === "idle-wake-marker" && globalThis.tronWakeInputGate) { globalThis.tronWakeInputStarted = true; await globalThis.tronWakeInputGate; } return {action:"continue"}; }); pi.on("before_agent_start", () => ({ message: { customType: "wake-hook-proof", content: "NORMAL_PROMPT_HOOK", display: false } })); };`);
+    await writeFile(join(agentDir, "capture.mjs"), `export default pi => { globalThis.tronAttributionPi = pi; pi.on("input", async event => { if (event.text === "idle-wake-marker" && globalThis.tronWakeInputGate) { globalThis.tronWakeInputStarted = true; await globalThis.tronWakeInputGate; } return {action:event.text === "consumed-wake-marker" ? "handled" : "continue"}; }); pi.on("before_agent_start", () => ({ message: { customType: "wake-hook-proof", content: "NORMAL_PROMPT_HOOK", display: false } })); };`);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["capture.mjs"] }));
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
@@ -125,15 +126,18 @@ it("attributes real workflow completion and supervisor delivery to their managed
     ]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    registry = new RuntimeRegistry({
+    let catalogPasses = 0;
+    const createRegistry = () => new RuntimeRegistry({
       agentDir, tronHome, managedSubagents, delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
         runtime.registerNativeProvider(faux.provider);
         return runtime;
       },
+      catalogReconciled: () => { catalogPasses += 1; },
       broadcast: (_sessionId, topic, payload) => { if (topic === "session.extensionError") extensionErrors.push(payload.data); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
+    registry = createRegistry();
     await registry.initialize();
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
@@ -176,7 +180,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     facts.realWakeProjection = realInputs;
     expect.soft(realInputs).toHaveLength(3);
     expect.soft(realInputs[0]).toMatchObject({ semantic: { origin: { kind: "user" } } });
-    for (const input of realInputs.slice(1)) expect.soft(input).toMatchObject({ semantic: { kind: "subagentWake", direction: "inboundContext", origin: { kind: "subagent" } } });
+    for (const input of realInputs.slice(1)) expect.soft(input).toMatchObject({ semantic: { kind: "subagentWake", direction: "hiddenInternal", origin: { kind: "subagent" } } });
     facts.customMessages = entries.filter(entry => entry.type === "custom_message");
     // The released provider's path-first header is ownership, not the compact
     // widget's native detail/coverage contract. Exercise its real four-child file.
@@ -292,7 +296,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     delete globals.tronAttributionPi;
     if (!api) throw new Error("Missing real SDK API fixture");
     const owner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, "fixture-producer", "Subagents");
-    const managed = managedProducerAPI(api, owner, (content, options, producer) => slot.admitSubagentWake(content, options, producer));
+    const managed = managedProducerAPI(api, owner, (content, options, producer, messages) => slot.admitSubagentWake(content, options, producer, messages));
     const send = (type: string, content: Parameters<ExtensionAPI["sendMessage"]>[0]["content"], options?: Parameters<ExtensionAPI["sendMessage"]>[1]) =>
       external.runInAsyncScope(() => managed.sendMessage({ customType: type, content, display: true }, options));
     faux.setResponses(Array.from({ length: 12 }, () => fauxAssistantMessage("BOUNDARY_COMPLETE")));
@@ -408,7 +412,13 @@ it("attributes real workflow completion and supervisor delivery to their managed
     // binding, including a concurrent maintainer prompt and queue consumption.
     faux.setResponses(Array.from({ length: 12 }, () => fauxAssistantMessage("WAKE_COMPLETE")));
     globals.tronWakeInputGate = new Promise<void>(resolve => { release = resolve; });
-    external.runInAsyncScope(() => managed.sendUserMessage("idle-wake-marker", { deliverAs: "steer" }));
+    external.runInAsyncScope(() => {
+      managed.sendMessage({customType: "subagent_supervisor_request", content: "frame idle progress", display: true, details: {expectsReply: false}}, {triggerTurn: false});
+      other.sendMessage({customType: "frame-other", content: "other", display: true}, {triggerTurn: false});
+      managed.sendMessage({customType: "frame-idle-a", content: "idle a", display: true}, {triggerTurn: false});
+      managed.sendMessage({customType: "subagent_supervisor_request", content: "frame idle unknown", display: true, details: {frame: "unknown"}}, {triggerTurn: false});
+      managed.sendUserMessage("idle-wake-marker", { deliverAs: "steer" });
+    });
     await waitFor(() => globals.tronWakeInputStarted === true, "idle wake preflight hook");
     expect.soft(slot.snapshot().pendingPrompt).toMatchObject({ semantic: { kind: "subagentWake", origin: { kind: "subagent", ownerId: owner.id } } });
     release!(); release = undefined;
@@ -420,7 +430,10 @@ it("attributes real workflow completion and supervisor delivery to their managed
       ...Array.from({ length: 12 }, () => fauxAssistantMessage("WAKE_QUEUED_COMPLETE"))]);
     await slot.prompt("maintainer-marker");
     await waitFor(() => wakeLoopStarted, "wake busy parent starts");
-    external.runInAsyncScope(() => managed.sendUserMessage("busy-wake-marker", { deliverAs: "steer" }));
+    external.runInAsyncScope(() => {
+      managed.sendMessage({customType: "frame-busy", content: "busy", display: true}, {triggerTurn: false});
+      managed.sendUserMessage("busy-wake-marker", { deliverAs: "steer" });
+    });
     const racing = slot.prompt("racing-maintainer-marker", [], "steer");
     await racing;
     await waitFor(() => liveSession.getSteeringMessages().length >= 2, "both owners queued");
@@ -431,11 +444,52 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const wakeProjection = slot.snapshot().transcript;
     facts.wakeProjection = wakeProjection;
     for (const marker of ["idle-wake-marker", "busy-wake-marker"]) expect.soft(wakeProjection.find(item => item.kind === "message" && item.role === "user" && JSON.stringify(item.content).includes(marker)))
-      .toMatchObject({ semantic: { kind: "subagentWake", origin: { kind: "subagent", ownerId: owner.id }, direction: "inboundContext" } });
+      .toMatchObject({ semantic: { kind: "subagentWake", origin: { kind: "subagent", ownerId: owner.id }, direction: "hiddenInternal" } });
     for (const marker of ["maintainer-marker", "racing-maintainer-marker"]) expect.soft(wakeProjection.find(item => item.kind === "message" && item.role === "user" && JSON.stringify(item.content).includes(marker)))
       .toMatchObject({ semantic: { origin: { kind: "user" } } });
+    external.runInAsyncScope(() => managed.sendMessage({customType: "frame-expired", content: "expired", display: true}, {triggerTurn: false}));
+    await Promise.resolve();
+    external.runInAsyncScope(() => managed.sendUserMessage("unbound-wake-marker", { deliverAs: "steer" }));
+    await waitFor(() => readEntries().some(entry => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("unbound-wake-marker")) && !slot.isBusy, "unbound wake settles");
+    external.runInAsyncScope(() => {
+      managed.sendMessage({customType: "subagent_supervisor_request", content: "only frame progress", display: true, details: {expectsReply: false}}, {triggerTurn: false});
+      managed.sendUserMessage("only-progress-wake-marker", { deliverAs: "steer" });
+    });
+    await waitFor(() => readEntries().some(entry => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("only-progress-wake-marker")) && !slot.isBusy, "progress-only frame wake settles unbound");
+    const beforeConsumed = readEntries().length;
+    external.runInAsyncScope(() => {
+      managed.sendMessage({customType: "frame-consumed", content: "consumed", display: true}, {triggerTurn: false});
+      managed.sendUserMessage("consumed-wake-marker", { deliverAs: "steer" });
+    });
+    await waitFor(() => invocationProjection(invocationReceipts(readEntries().slice(beforeConsumed))).some(invocation => invocation.source === "subagentWake" && invocation.lifecycle === "completed") && !slot.isBusy, "input handler consumes wake");
+    await waitFor(() => {
+      const canonical = SessionManager.open(slot.sessionFile!).getEntries();
+      const decoded = contextDeliveryMetadataByEntry(canonical);
+      return ["frame-idle-a", "frame-busy", "frame-expired", "frame-consumed", "frame-other"].every(type => canonical.some(entry => entry.type === "custom_message" && entry.customType === type && decoded.has(entry.id)));
+    }, "frame delivery receipts persist");
     const wakeEntries = SessionManager.open(slot.sessionFile!).getEntries();
+    const coldDeliveries = contextDeliveryMetadataByEntry(wakeEntries);
+    const onlyProgress = wakeEntries.find(entry => entry.type === "custom_message" && entry.content === "only frame progress")!;
+    expect.soft(coldDeliveries.get(onlyProgress.id)).toMatchObject({delivery: "stored"});
+    expect.soft(coldDeliveries.get(onlyProgress.id)?.wakeEntryId).toBeUndefined();
+    expect.soft([...coldDeliveries]).toEqual([...contextDeliveryMetadataByEntry(runtimeManager.getEntries())]);
+    for (const type of ["frame-idle-a", "frame-busy"]) {
+      const entry = wakeEntries.find(entry => entry.type === "custom_message" && entry.customType === type)!;
+      const delivery = coldDeliveries.get(entry.id);
+      expect.soft(delivery, type).toMatchObject({delivery: "triggeredTurn", wakeEntryId: expect.any(String)});
+      const wake = wakeEntries.find(entry => entry.id === delivery?.wakeEntryId);
+      expect.soft(wake, type).toMatchObject({type: "message", message: {role: "user"}});
+    }
+    for (const type of ["frame-expired", "frame-consumed", "frame-other"]) {
+      const entry = wakeEntries.find(entry => entry.type === "custom_message" && entry.customType === type)!;
+      expect.soft(coldDeliveries.get(entry.id), type).toMatchObject({delivery: "stored"});
+      expect.soft(coldDeliveries.get(entry.id)?.wakeEntryId, type).toBeUndefined();
+    }
     facts.wakeEntries = wakeEntries;
+    for (const entry of wakeEntries.filter(entry => entry.type === "custom_message" && entry.customType === "subagent_supervisor_request" && typeof entry.content === "string" && entry.content.startsWith("frame idle"))) {
+      if (entry.type !== "custom_message") continue;
+      expect.soft(coldDeliveries.get(entry.id), String(entry.content)).toMatchObject({delivery: (entry.details as {expectsReply?: boolean})?.expectsReply === false ? "stored" : "triggeredTurn"});
+    }
     expect.soft(wakeEntries.filter(entry => entry.type === "custom_message" && entry.customType === "wake-hook-proof").length).toBeGreaterThanOrEqual(2);
     for (const source of ["npm:pi-subagents", "npm:pi-subagents@0.59.0", "tron:pi-subagents@0.76.1-tron.4#" + "a".repeat(128)]) {
       const historicalOwner = { id: `historic-${source.slice(0, 35)}`, title: "Pi Subagents", source };
@@ -456,6 +510,19 @@ it("attributes real workflow completion and supervisor delivery to their managed
     await waitFor(() => extensionErrors.some(error => { const event = error as { code?: string; owner?: { id?: string } };
       return event.code === "subagent-wake-admission-failed" && event.owner?.id === owner.id; }), "disposed wake admission reported for exact owner");
     expect.soft(SessionManager.open(slot.sessionFile!).getEntries().length).toBe(beforeDispose);
+    const beforeRestartPasses = catalogPasses;
+    registry = createRegistry();
+    await registry.initialize();
+    await waitFor(() => catalogPasses > beforeRestartPasses, "restarted catalog reconciliation");
+    const restarted = await registry.acquire(slot.id);
+    const restartedDeliveries = contextDeliveryMetadataByEntry(SessionManager.open(restarted.sessionFile!).getEntries());
+    for (const entry of wakeEntries.filter(entry => entry.type === "custom_message")) {
+      expect.soft(restartedDeliveries.get(entry.id), `restart ${entry.id}`).toEqual(coldDeliveries.get(entry.id));
+    }
+    for (const input of restarted.snapshot().transcript.filter(item => item.semantic?.kind === "subagentWake")) {
+      expect.soft(input.semantic).toMatchObject({direction: "hiddenInternal", visibility: "hidden"});
+    }
+    facts.restartDeliveries = [...restartedDeliveries];
     facts.extensionErrors = extensionErrors;
     facts.assertionFailures = task.result?.errors?.map(error => error.message) ?? [];
     facts.passed = !task.result?.errors?.length;

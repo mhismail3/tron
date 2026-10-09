@@ -288,6 +288,8 @@ export interface ChatSemanticMetadata {
 }
 
 export interface ContextDeliveryMetadata {
+  /** Exact canonical user entry of a receipt-bound internal wake, when present. */
+  wakeEntryId?: string;
   source: "extension";
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;

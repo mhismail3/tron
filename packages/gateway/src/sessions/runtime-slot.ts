@@ -112,7 +112,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { capturedMessageProducer, isManagedProducerContent, type ManagedInternalWake } from "../extensions/managed-producer.js";
+import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
@@ -239,6 +239,7 @@ type PendingContextMessage = {
   targetEntryId?: string;
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
+  managedMessage?: ManagedMessageCapture;
   /** Live presentation owner bound to the triggered canonical entry at message_end. */
   toolSegmentOwnerId?: string;
 };
@@ -249,6 +250,7 @@ type PendingExtensionCanonicalEffect =
       targetEntryId: string;
       delivery: "stored" | "triggeredTurn";
       origin?: ExtensionToolOrigin;
+      managedMessage?: ManagedMessageCapture;
     }
   | {
       kind: "notification";
@@ -982,7 +984,7 @@ export class RuntimeSlot {
         }
         await this.persistCanonicalCustomEntry(
           CONTEXT_DELIVERY_RECEIPT_TYPE,
-          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin)),
+          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin, effect.delivery === "stored" ? effect.managedMessage?.wakeOperationId : undefined)),
           candidate.id,
         );
       }
@@ -1587,7 +1589,7 @@ export class RuntimeSlot {
       };
       const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
       const managedLoaderOptions = await this.dependencies.managedSubagents?.loaderOptions(settingsManager,
-        (content, options, owner) => this.admitSubagentWake(content, options, owner));
+        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const services = await createAgentSessionServices({
         settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
         cwd: trust.cwd,
@@ -4118,8 +4120,9 @@ export class RuntimeSlot {
           const storedTarget = latest && (latest.type === "custom_message"
               || (latest.type === "message" && latest.message.role === "custom"))
             ? latest.id : undefined;
+          const managedMessage = capturedManagedMessage(event.message.content);
           const origin = isManagedProducerContent(event.message.content)
-            ? capturedMessageProducer(event.message.content)
+            ? managedMessage?.origin
             : this.currentExtensionContextOrigin();
           const toolSegmentOwnerId = event.message.display
             ? (storedTarget ? (this.presentationIDs.get(storedTarget) ?? storedTarget) : randomUUID())
@@ -4133,6 +4136,7 @@ export class RuntimeSlot {
             delivery: storedTarget ? "stored" : "triggeredTurn",
             ...(storedTarget ? { targetEntryId: storedTarget } : {}),
             ...(origin ? { origin } : {}),
+            ...(managedMessage ? { managedMessage } : {}),
             ...(toolSegmentOwnerId ? { toolSegmentOwnerId } : {}),
           });
         }
@@ -4404,6 +4408,7 @@ export class RuntimeSlot {
               targetEntryId: pending.targetEntryId,
               delivery: pending.delivery,
               ...(pending.origin ? { origin: pending.origin } : {}),
+              ...(pending.managedMessage ? { managedMessage: pending.managedMessage } : {}),
             });
           } else if (pending) {
             queueMicrotask(() => {
@@ -4424,6 +4429,7 @@ export class RuntimeSlot {
                 targetEntryId: candidate.id,
                 delivery: pending.delivery,
                 ...(pending.origin ? { origin: pending.origin } : {}),
+                ...(pending.managedMessage ? { managedMessage: pending.managedMessage } : {}),
               });
             });
           }
@@ -6406,8 +6412,8 @@ export class RuntimeSlot {
   private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
     const invocation = this.invocationForOperation(operationId);
     return invocation?.source === "subagentWake" ? {
-      version: 1, kind: "subagentWake", direction: "inboundContext", contextEffect: "modelInput",
-      delivery: "stored", visibility: "visible", origin: invocation.origin,
+      version: 1, kind: "subagentWake", direction: "hiddenInternal", contextEffect: "modelInput",
+      delivery: "stored", visibility: "hidden", origin: invocation.origin,
       invocationId: invocation.invocationId, operationId, sequence: invocation.sequence,
     } : undefined;
   }
@@ -6959,12 +6965,14 @@ export class RuntimeSlot {
   /** The managed provider uses user input to run Pi's normal before-agent-start
    * lifecycle. Admit it through the prompt owner, never the SDK's unowned wake
    * path: queued consumption and canonical binding retain this exact invocation. */
-  readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner) => {
+  readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner, messages) => {
+    const operationId = randomUUID();
+    for (const message of messages) message.wakeOperationId = operationId;
     try {
       const text = typeof content === "string" ? content : content.filter(part => part.type === "text").map(part => part.text).join("\n");
       const images = typeof content === "string" ? [] : content.filter((part): part is ImageContent => part.type === "image");
       await this.prompt(text, images, options?.deliverAs, undefined, undefined, {
-        kind: "subagentWake", operationId: randomUUID(), expandPromptTemplates: options?.expandPromptTemplates ?? false,
+        kind: "subagentWake", operationId, expandPromptTemplates: options?.expandPromptTemplates ?? false,
         origin: { kind: "subagent", ownerId: owner.id, title: owner.title, confidence: "boundary" },
       });
     } catch (error) {

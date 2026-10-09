@@ -121,9 +121,7 @@ struct TranscriptRow: View, Equatable {
         VStack(alignment: isTrailingSessionMessage ? .trailing : .leading, spacing: 4) {
             switch item.kind {
             case .message:
-                if item.semantic?.kind == .subagentWake {
-                    InboundProducerMessageView(item: item)
-                } else if item.role == .assistant {
+                if item.role == .assistant {
                     ChatIncrementalContentGrowthHost(
                         identity: ChatMessageGrowthIdentity(
                             parts: displayedMessageParts,

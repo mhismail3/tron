@@ -44,7 +44,7 @@ struct HostedSubagentParityFixture: View {
             stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
                 tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
             queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: 0,
-            transcriptTotal: 3, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
+            transcriptTotal: 4, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
             processActivities: historic ? [] : [process],
             extensionPresentation: .init(version: 3, hostEpoch: "fixture-host", revision: 1, capabilities: [], diagnostics: [],
                 semanticState: semantic, surfaces: [], pendingInteractions: []), diagnostics: [])
@@ -56,7 +56,8 @@ struct HostedSubagentParityFixture: View {
     [
       {"id":"progress","parentId":null,"presentationId":"progress","timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"subagent_supervisor_request","display":true,"details":{"reason":"progress_update"},"content":[{"id":"p","ordinal":0,"type":"text","text":"Worker has finished discovery."}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":1}},
       {"id":"note","parentId":"progress","presentationId":"note","timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"subagent-incremental-child-notify","display":true,"content":[{"id":"n","ordinal":0,"type":"text","text":"Reviewer child result: no blockers."}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":2}},
-      {"id":"wake","parentId":"note","presentationId":"wake","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"w","ordinal":0,"type":"text","text":"Subagent updates above."}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"subagentWake","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":3}}
+      {"id":"decision","parentId":"note","presentationId":"decision","timestamp":"2026-01-01T00:00:02Z","kind":"customMessage","customType":"subagent_supervisor_request","display":true,"details":{"reason":"need_decision"},"content":[{"id":"d","ordinal":0,"type":"text","text":"May the worker proceed?"}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"triggeredTurn","visibility":"visible","kind":"message","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":3}},
+      {"id":"wake","parentId":"decision","presentationId":"wake","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"w","ordinal":0,"type":"text","text":"Subagent updates above."}],"semantic":{"version":1,"direction":"hiddenInternal","contextEffect":"modelInput","delivery":"stored","visibility":"hidden","kind":"subagentWake","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":4}}
     ]
     """#.utf8)
 

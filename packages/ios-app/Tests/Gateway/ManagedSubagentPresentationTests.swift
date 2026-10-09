@@ -48,7 +48,7 @@ struct ManagedSubagentPresentationTests {
         try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
         {"id":"wake","parentId":null,"timestamp":"2026-01-01T00:00:00Z","presentationId":"wake","kind":"message","role":"user",
          "content":[{"id":"text","ordinal":0,"type":"text","text":"Subagent updates above."}],
-         "semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible",
+         "semantic":{"version":1,"direction":"hiddenInternal","contextEffect":"modelInput","delivery":"stored","visibility":"hidden",
          "kind":"\(kind)","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":1}}
         """.utf8))
     }
@@ -58,7 +58,7 @@ struct ManagedSubagentPresentationTests {
         let item = try wake()
         #expect(item.semantic?.kind.rawValue == "subagentWake")
         #expect(try wake(kind: "future-input").semantic?.kind.rawValue == "unknown")
-        let ordinary = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data(#"{"id":"ordinary","parentId":null,"timestamp":"2026-01-01T00:00:00Z","presentationId":"ordinary","kind":"message","role":"user","content":[]}"#.utf8))
+        let ordinary = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data(#"{"id":"ordinary","parentId":null,"timestamp":"2026-01-01T00:00:00Z","presentationId":"ordinary","kind":"message","role":"user","content":[{"id":"ordinary-text","ordinal":0,"type":"text","text":"Ordinary prompt"}]}"#.utf8))
         #expect(ordinary.semantic == nil)
         var snapshot = try SessionScenarioBuilder(seed: 611).openingTail(targetEncodedBytes: 4096)
         snapshot.transcript = [item, ordinary]
@@ -80,7 +80,7 @@ struct ManagedSubagentPresentationTests {
             default: nil
             }
         }
-        #expect(reconstructed.first?.semantic == item.semantic)
+        #expect(reconstructed.map(\.id) == [ordinary.id])
         #expect(sessions.authoritativeSnapshot(for: snapshot.sessionId)?.transcript.first?.semantic?.origin.kind == .subagent)
     }
 

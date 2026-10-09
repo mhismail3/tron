@@ -1467,10 +1467,12 @@ immediate revocation; revoking this iPhone also removes its local profile.
 Subagent context uses the shared seafoam compact inbound pill: supervisor progress
 keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent ·
 Child Update**, and other admitted subagent messages use **Subagent · Update**.
-The canonical user-role `subagentWake` is an internal provider input: the single
-`TranscriptRow` owner renders it through that same pill and details sheet, never
-as a person-authored prompt or by matching its text. Live and cold/historical
-transcript assembly retain its typed semantics without a second grouping path.
+The canonical user-role `subagentWake` is an internal provider input with
+`direction=hiddenInternal` and hidden visibility. The existing transcript kernel
+excludes it: it has no row, pill or user bubble. Its model input and raw canonical
+identity remain intact; the delivering custom message alone owns the visible pill
+and triggered-turn details. Live and cold/historical assembly retain its typed
+semantics without a separate wake renderer or grouping path.
 Unknown future input kinds decode as unknown; messages without semantic metadata
 retain ordinary prompt behavior. The existing composer orb is driven solely by
 admitted active/recent process rows, and Activity shows **Running subagents** and

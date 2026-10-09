@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -158,7 +158,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         model: row.model?.split("/").at(-1) ?? null, thinking: row.thinking ?? null, started: Boolean(row.startedAt && Number.isFinite(Date.parse(row.startedAt))),
         toolCount: row.toolCount ?? null, turnCount: row.turnCount ?? null, childCount: row.childCount ?? null,
       })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-      const transcript = snapshot.transcript.filter(row => row.kind === "customMessage" && ["subagent-notify", "subagent_supervisor_request", "subagent-incremental-child-notify"].includes(row.customType)
+      const transcript = snapshot.transcript.filter(row => row.semantic?.direction !== "hiddenInternal").filter(row => row.kind === "customMessage" && ["subagent-notify", "subagent_supervisor_request", "subagent-incremental-child-notify"].includes(row.customType)
         || row.kind === "message" && row.role === "user").map(row => {
           const details = row.kind === "customMessage" ? row.details as { reason?: string } : undefined;
           const category = row.kind === "customMessage" ? details?.reason ?? row.customType : row.semantic?.kind === "subagentWake" ? "wake" : "prompt";
@@ -214,17 +214,22 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       const path = join(dirname(directory), question.runId, "status.json");
       const original = await readFile(path, "utf8");
       const refused: string[] = [];
+      const replacement = `${path}.parity-fixture`;
+      const replaceStatus = async (bytes: string) => {
+        await writeFile(replacement, bytes);
+        await rename(replacement, path);
+      };
       try {
         for (const key of ["parentWorkflowRunId", "workflowKey", "sessionOwnerId"] as const) {
           const candidate = JSON.parse(original);
           candidate[key] = "foreign-owner";
           candidate.steps[0].model = "FORGED_MODEL";
-          await writeFile(path, JSON.stringify(candidate));
+          await replaceStatus(JSON.stringify(candidate));
           await slot.discoverExtensionArtifact(directory);
           expect((slot.snapshot().processActivities ?? []).map(row => row.model), `${key} cannot attach foreign child detail`).not.toContain("FORGED_MODEL");
           refused.push(key);
         }
-      } finally { await writeFile(path, original); }
+      } finally { await replaceStatus(original); await rm(replacement, { force: true }); }
       report.refusedChildEdges = refused;
       await slot.discoverExtensionArtifact(directory);
     }
@@ -280,7 +285,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
 }, 60_000);
 
 // Finite allowances from #611's binding decisions. No native process field is
-// ignored; additions must be exact typed notes/wakes at the expected checkpoint.
+// ignored; additions must be exact typed notes at the expected checkpoint.
 function compareParity(before: Record<string, unknown>, after: Record<string, unknown>, managedSource: string) {
   const differences: Array<{ path: string; old: unknown; new: unknown; approved: string | null }> = [];
   const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -290,11 +295,8 @@ function compareParity(before: Record<string, unknown>, after: Record<string, un
     if (/\.retained\.\d+\.kind$/.test(path) && a === null && b === "subagent") return "source and title label change (typed retained provider classification)";
     if (/\.transcript\.(need_decision|progress_update|subagent-notify)\.\d+\.origin$/.test(path) && a === "extension" && b === "subagent") return "source and title label change (typed producer classification)";
     if (/\.(transcript|deliveries)\.progress_update\.\d+\.delivery$/.test(path) && a === "triggeredTurn" && b === "stored") return "progress stored with no turn";
-    if (/\.(transcript|deliveries)\.(need_decision|subagent-notify)\.\d+\.delivery$/.test(path) && a === "triggeredTurn" && b === "stored") return "wake as an internal subagent input (custom context stored before wake)";
     if (a === undefined && Array.isArray(b)) {
       const checkpoint = path.split(".")[1];
-      const wakes: Record<string, number> = { "single-completed": 1, "workflow-running": 1, "workflow-question": 2, "workflow-completed": 3 };
-      if (path.endsWith(".transcript.wake") && b.length === wakes[checkpoint!] && b.every(row => record(row) && JSON.stringify(row) === JSON.stringify({ category: "wake", origin: "subagent", title: "Subagents", classification: "subagentWake", direction: "inboundContext", delivery: "stored", visibility: "visible", pill: "Update" }))) return "wake as an internal subagent input";
       if (path.endsWith(".transcript.subagent-incremental-child-notify") && checkpoint === "workflow-completed" && b.length === 1 && b.every(row => record(row) && JSON.stringify(row) === JSON.stringify({ category: "subagent-incremental-child-notify", origin: "subagent", title: "Subagents", classification: "message", direction: "inboundContext", delivery: "stored", visibility: "visible", pill: "Child Update" }))) return "per-child notes stored; independent question/barrier owns turns";
       if (path.endsWith(".deliveries.subagent-incremental-child-notify") && ["workflow-question", "workflow-completed"].includes(checkpoint!) && b.length === (checkpoint === "workflow-question" ? 1 : 3) && b.every(row => record(row) && row.delivery === "stored" && row.source === managedSource && row.title === "Subagents" && typeof row.display === "boolean")) return "per-child notes stored; independent question/barrier owns turns";
     }

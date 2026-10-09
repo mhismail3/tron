@@ -38,13 +38,15 @@ final class TronSubagentParityUITests: XCTestCase {
 
     @MainActor
     private func verifyPills(_ app: XCUIApplication, scheme: String) throws {
+        XCTAssertFalse(app.buttons["Subagent, Update"].exists, "Internal wake must not add a pill")
         for (label, body, name) in [
             ("Subagent, Progress Update", "Worker has finished discovery.", "progress"),
             ("Subagent, Child Update", "Reviewer child result: no blockers.", "child-note"),
-            ("Subagent, Update", "Subagent updates above.", "wake")
+            ("Subagent, Needs Attention", "May the worker proceed?", "decision")
         ] {
             let pill = app.buttons[label]
             XCTAssertTrue(pill.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertEqual(app.buttons.matching(identifier: label).count, 1, "One pill per subagent message")
             XCTAssertFalse(app.staticTexts["Subagent updates above."].exists, "Wake must not be a user bubble")
             try capture("\(name)-pill-\(scheme)")
             pill.tap()
