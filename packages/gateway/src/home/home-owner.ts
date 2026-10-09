@@ -15,8 +15,8 @@ import type { EpisodicMemory } from "../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryPageRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
-import { EPISODIC_DEFAULTS, EpisodicMemoryError, type EpisodicDiagnostic } from "../episodic/episodic-contract.js";
-import { EpisodicSourceChangedError, type EpisodicCanonicalEntry } from "../episodic/episodic-source.js";
+import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-contract.js";
+import { EpisodicSourceChangedError } from "../episodic/episodic-source.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -68,9 +68,8 @@ export interface HomeRecord {
   model: ModelRef;
   createdAt: string;
   updatedAt: string;
-  /** Home's memory model. Absent on a record written before
-   * Home's memory existed, and absent until `home.configureMemory` records one:
-   * there are no defaults (decision D4), so an unconfigured memory refuses. */
+  /** Home's memory model. Absent until `home.configureMemory` records one: there
+   * are no defaults (decision D4), so an unconfigured memory refuses. */
   memory?: { model: ModelRef; paused?: true };
 }
 
@@ -100,9 +99,9 @@ export interface HomeSessionPort {
    * Home recordMutex, so admitted attention/archive/delete work settles first. */
   serializeSessionMutation<T>(sessionId: string, commit: () => Promise<T>): Promise<T>;
   /** Quiescent canonical size used to seal a chapter at its soft boundary. */
-  chapterMetrics?(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }>;
+  chapterMetrics(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }>;
   /** Whether the exact current SDK file has a complete durable conversation message. */
-  hasConversation?(sessionId: string, expectedPath: string): Promise<boolean>;
+  hasConversation(sessionId: string, expectedPath: string): Promise<boolean>;
   /** Replace the session's live runtime in place after `commit` changes the
    * profile decision for it, so the next prompt uses the new profile. A busy
    * session refuses retryably before `commit` runs. */
@@ -138,7 +137,7 @@ export interface HomeOwnerOptions {
   /** Where Home's request seam reports one record per activation and per
    * refusal: the effective size of a turn and the readiness wait it took. */
   requestDiagnostic?: (record: HomeRequestRecord) => void;
-  taskSessions?: RuntimeRegistry;
+  taskSessions: RuntimeRegistry;
   notifications?: NotificationService;
   machineId?: string;
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
@@ -176,30 +175,28 @@ export class HomeOwner {
   private designating = false;
   private record: HomeRecord | undefined;
   private unavailable: string | undefined;
-  private readonly tasks: HomeTaskDispatcher | undefined;
-  private readonly inbox: WakeInboxOwner | undefined;
+  private readonly tasks: HomeTaskDispatcher;
+  private readonly inbox: WakeInboxOwner;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
     this.recordPath = join(this.directory, "home.json");
     this.workspacePath = join(this.directory, "workspace");
-    if (options.taskSessions) {
-      const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
-      const authorization = new HomeTaskAuthorization({ store: store.authorization,
-        ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
-        resolveTrustedTarget: async target => {
-          const inspection = await options.trust.inspect(target);
-          return inspection.effectiveDecision === true ? inspection.cwd : undefined;
-        } });
-      this.inbox = new WakeInboxOwner(store, {
-        notify: input => options.notifications?.enqueue(input) ?? Promise.resolve("unavailable"),
-        ...(options.machineId ? { machineId: options.machineId } : {}),
-        ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
-        result: taskId => this.immutableTaskReport(taskId),
-        evidence: scope => this.inboxEvidence(scope),
-      });
-      this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
-    }
+    const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
+    const authorization = new HomeTaskAuthorization({ store: store.authorization,
+      ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
+      resolveTrustedTarget: async target => {
+        const inspection = await options.trust.inspect(target);
+        return inspection.effectiveDecision === true ? inspection.cwd : undefined;
+      } });
+    this.inbox = new WakeInboxOwner(store, {
+      notify: input => options.notifications?.enqueue(input) ?? Promise.resolve("unavailable"),
+      ...(options.machineId ? { machineId: options.machineId } : {}),
+      ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
+      result: taskId => this.immutableTaskReport(taskId),
+      evidence: scope => this.inboxEvidence(scope),
+    });
+    this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
   }
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or
@@ -207,7 +204,7 @@ export class HomeOwner {
   async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest) {
     await this.taskOwner();
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) {
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
       throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
     }
     return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
@@ -215,10 +212,9 @@ export class HomeOwner {
 
   /** Post-listen startup only (see `RuntimeRegistry.recoverHomeTasks`). Recovery
    * has no executable session lifetime to resurrect. */
-  async recoverTasks(): Promise<void> { await this.tasks?.recover(); }
+  async recoverTasks(): Promise<void> { await this.tasks.recover(); }
 
   private async taskOwner(): Promise<HomeTaskDispatcher> {
-    if (!this.tasks) throw new GatewayError("conflict", "Task owner is unavailable");
     await this.tasks.assertAvailable();
     return this.tasks;
   }
@@ -242,7 +238,7 @@ export class HomeOwner {
   async steerTask(sessionId: string, control: HomeTaskControlRequest & { text: string }): Promise<void> {
     await this.taskOwner();
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task steering is unavailable");
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task steering is unavailable");
     const task = await this.tasks.store.read(control.taskId);
     if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
     await this.tasks.steer(control);
@@ -251,7 +247,7 @@ export class HomeOwner {
   async taskTool(sessionId: string, request: import("./tron-home-extension.js").HomeTaskToolRequest): Promise<unknown> {
     await this.taskOwner();
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId || !this.tasks) throw new GatewayError("conflict", "Home task control is unavailable");
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task control is unavailable");
     const task = await this.tasks.store.read(request.taskId);
     if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
     if (request.action === "status") return this.taskResult(request.taskId);
@@ -285,9 +281,9 @@ export class HomeOwner {
   }
 
   private async immutableTaskReport(taskId: string): Promise<{ task: import("./home-task-store.js").HomeTaskRecord; text: string }> {
-    const task = await this.tasks!.result(taskId);
+    const task = await this.tasks.result(taskId);
     const report = task.reportRefs?.[0];
-    const entries = report && task.sessionId ? await this.options.taskSessions!.readTaskEvidence(task.sessionId) : [];
+    const entries = report && task.sessionId ? await this.options.taskSessions.readTaskEvidence(task.sessionId) : [];
     const entry = report && entries.find(entry => entry.id === report.entryId);
     return { task, text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
   }
@@ -317,26 +313,26 @@ export class HomeOwner {
    * refused, nothing is delivered (and nothing this process admitted needs
    * settling), so the Home conversation itself stays usable. */
   private async inboxAvailable(): Promise<boolean> {
-    return this.tasks !== undefined && (await this.tasks.recoveryStatus()).available;
+    return (await this.tasks.recoveryStatus()).available;
   }
 
   async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<void> {
     const route = this.wakeRoute(sessionId);
-    if (!route?.enabled || !this.inbox || !(await this.inboxAvailable())) return;
+    if (!route?.enabled || !(await this.inboxAvailable())) return;
     await this.inbox.recover(route);
     await this.inbox.admit(route, operationId, append, envelope);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
     const route = this.wakeRoute(sessionId);
-    if (route && this.inbox && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
+    if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {
     await this.taskOwner();
     return this.recordMutex.run(async () => {
       const route = this.wakeRoute();
-      if (!route || !this.inbox || expected.homeId !== route.homeId || expected.routeGeneration !== route.routeGeneration) throw new GatewayError("conflict", "Home inbox route is unavailable or stale");
+      if (!route || expected.homeId !== route.homeId || expected.routeGeneration !== route.routeGeneration) throw new GatewayError("conflict", "Home inbox route is unavailable or stale");
       await this.inbox.redeliver(taskId, route);
       return { accepted: true };
     });
@@ -377,19 +373,19 @@ export class HomeOwner {
   }
 
   async status(): Promise<HomeStatus> {
-    const taskRecovery = this.tasks ? { taskRecovery: await this.tasks.recoveryStatus() } : {};
+    const taskRecovery = await this.tasks.recoveryStatus();
     const memory = await this.memoryStatus();
     const activation = this.contextStatus();
     if (this.unavailable) {
       return {
-        ...taskRecovery, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
+        taskRecovery, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
         recovery: { action: "inspect-record", reason: this.unavailable },
         available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false, memory,
       };
     }
     const record = this.record;
     if (!record) return {
-      ...taskRecovery, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
+      taskRecovery, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
       recovery: { action: "designate" },
       available: true, enabled: false, live: false, sessionPresent: false, memory,
     };
@@ -406,7 +402,7 @@ export class HomeOwner {
       : openable === currentChapter ? sessionPresent : await this.options.sessions.sessionPresent(openable.sessionId);
     const openSessionId = openable !== undefined && openSessionPresent ? openable.sessionId : undefined;
     // Missing-session recovery is a status, never zero-valued admission metrics.
-    const activeMetrics = sessionPresent && currentChapter.state === "active" && this.options.sessions.chapterMetrics
+    const activeMetrics = sessionPresent && currentChapter.state === "active"
       ? await this.options.sessions.chapterMetrics(currentChapter.sessionId)
       : undefined;
     const gaps: string[] = [];
@@ -427,7 +423,7 @@ export class HomeOwner {
           : memory.blocked || !memory.configured ? "blocked"
           : activation.available && activation.activationOpen ? "active" : memory.paused ? "paused" : "ready";
     return {
-      ...taskRecovery, phase, activation, readiness: { ready, gaps }, recovery,
+      taskRecovery, phase, activation, readiness: { ready, gaps }, recovery,
       available: true,
       enabled: record.enabled,
       homeId: record.homeId,
@@ -475,10 +471,6 @@ export class HomeOwner {
       : unsealedHomeChapterState(sessionId);
   }
 
-  /** Claim a durable reserved successor for the Registry's single-flight owner.
-   * Replacing an older attempt is recovery after the prior Gateway process exited. */
-  /** Stable logical route target. A reserved successor's next binding revision
-   * is fixed before it can receive a command. */
   noteRouteBound(category: Extract<HomeDiagnosticRecord, { outcome: "route-bound" }>["category"]): void {
     this.options.diagnostic?.({ outcome: "route-bound", category });
   }
@@ -498,7 +490,7 @@ export class HomeOwner {
   /** Hard admission is a durable chapter transition before the command receipt binds a target. */
   async ensureChapterBelowHardLimit(): Promise<void> {
     const chapter = this.record?.chapters.at(-1);
-    if (!chapter || chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
+    if (!chapter || chapter.state !== "active") return;
     const metrics = await this.options.sessions.chapterMetrics(chapter.sessionId);
     try { this.assertChapterAdmission(chapter.sessionId, metrics); }
     catch (error) {
@@ -523,6 +515,8 @@ export class HomeOwner {
     };
   }
 
+  /** Stable logical route target. A reserved successor's next binding revision
+   * is fixed before it can receive a command. */
   routeBinding(): { homeId: string; bindingRevision: number; physicalSessionId: string } {
     this.assertAvailable();
     const record = this.record;
@@ -554,7 +548,7 @@ export class HomeOwner {
         this.options.diagnostic?.({ outcome: "chapter-refused", reason: "ownership-changed" });
         throw new GatewayError("conflict", "Home materialization attempt no longer owns its reservation", true);
       }
-      if (chapter.state === "active" && !(await this.options.sessions.hasConversation?.(sessionId, expectedPath))) {
+      if (chapter.state === "active" && !(await this.options.sessions.hasConversation(sessionId, expectedPath))) {
         this.options.diagnostic?.({ outcome: "chapter-refused", reason: "missing-conversation-evidence" });
         throw new GatewayError("conflict", "Published Home chapter lacks durable conversation evidence", true);
       }
@@ -564,13 +558,15 @@ export class HomeOwner {
   async assertPublishedHomeChapter(sessionId: string, expectedPath: string): Promise<void> {
     await this.recordMutex.run(async () => {
       const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
-      if (chapter?.state !== "active" || !(await this.options.sessions.hasConversation?.(sessionId, expectedPath))) {
+      if (chapter?.state !== "active" || !(await this.options.sessions.hasConversation(sessionId, expectedPath))) {
         this.options.diagnostic?.({ outcome: "chapter-refused", reason: "published-evidence-missing" });
         throw new GatewayError("conflict", "Active Home chapter lacks durable conversation evidence", true);
       }
     });
   }
 
+  /** Claim a durable reserved successor for the Registry's single-flight owner.
+   * Replacing an older attempt is recovery after the prior Gateway process exited. */
   async claimReservedChapter(sessionId: string, attemptId: string): Promise<HomeChapter> {
     return this.recordMutex.run(async () => {
       const current = this.record;
@@ -683,11 +679,11 @@ export class HomeOwner {
       if (!published) this.options.diagnostic?.({ outcome: "chapter-refused", reason: "conversation-not-durable" });
       return;
     }
-    if (chapter.state !== "active" || !this.options.sessions.chapterMetrics) return;
+    if (chapter.state !== "active") return;
     // Registry session ordering is outermost; remeasure after admitted
     // mutations settle, then take recordMutex only for the final ledger write.
     const rolled = await this.options.sessions.serializeSessionMutation(sessionId, async () => {
-      const metrics = await this.options.sessions.chapterMetrics!(sessionId);
+      const metrics = await this.options.sessions.chapterMetrics(sessionId);
       if (!metrics.quiescent || (metrics.bytes < HOME_SOFT_BYTES && metrics.entries < HOME_SOFT_ENTRIES
         && metrics.bytes < HOME_HARD_BYTES && metrics.entries < HOME_HARD_ENTRIES)) return undefined;
       const sealed = await this.recordMutex.run(async () => {
@@ -724,7 +720,7 @@ export class HomeOwner {
       if (!current || !current.enabled || chapter?.state !== "materializing"
         || chapter.attemptId !== attemptId || chapter.expectedPath !== expectedPath) return false;
       const currentPath = await this.options.sessions.sessionFile(sessionId);
-      const observed = currentPath === expectedPath && await this.options.sessions.hasConversation?.(sessionId, expectedPath);
+      const observed = currentPath === expectedPath && await this.options.sessions.hasConversation(sessionId, expectedPath);
       if (!currentPath || currentPath !== expectedPath || !observed) return false;
       const now = new Date().toISOString();
       await this.writeLocked({
@@ -1385,8 +1381,8 @@ function admitRecord(value: unknown): HomeRecord | undefined {
     || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)) return undefined;
   const chapters = admitChapters(root.chapters);
   if (!chapters) return undefined;
-  // A pre-memory chapter record has no `memory` field; malformed memory is
-  // preserved and refused instead of silently dropping the user's projection.
+  // An absent `memory` is the unconfigured state; malformed memory is preserved
+  // and refused instead of silently dropping the user's projection.
   const memory = admitMemory(root.memory);
   if (memory === null) return undefined;
   return {

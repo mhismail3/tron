@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "@earendil-works/pi-agent-core";
 import {
-  convertToLlm,
   estimateTokens,
   type AgentSession,
   type ModelRuntime,
@@ -46,9 +45,11 @@ import { markAnthropicBlocks } from "../episodic/cache-layout.js";
  */
 
 /** Custom-message type of the in-request memory view. It is never persisted. */
-export const HOME_MEMORY_CUSTOM_TYPE = "tron.home-memory.v1";
+const HOME_MEMORY_CUSTOM_TYPE = "tron.home-memory.v1";
 /** Marker prefix that makes the activation nonce greppable in one request. */
 export const HOME_NONCE_MARKER = "tron.home-nonce:";
+/** Head-room kept below the model's context window by every Home request. */
+const HOME_RESERVE_TOKENS = 1_024;
 
 /** Why a Home request was refused. Bounded and reported; observable. */
 export type HomeRefusalReason =
@@ -95,28 +96,16 @@ export interface HomeRefusal {
   nonce?: string;
 }
 
-/** One `prepareRequest` the policy rewrote, recorded for evidence. */
+/** The sizes of the last request one activation prepared, as `home.context` reports them. */
 export interface HomeRequestStep {
-  operationId: string;
-  nonce: string;
-  /** The activation's start entry, exactly as `admit` captured it. */
-  boundaryEntryId: string | null;
-  /** Agent-message roles of the rewritten context, in order. */
-  roles: string[];
   /** Effective-size estimate of the rewritten context, in tokens. */
   effectiveTokens: number;
   /** UTF-8 bytes and lines of the frozen memory view this request carried. */
   viewBytes: number;
   viewLines: number;
-  /** Canonical messages at or before the activation start that were NOT sent. */
-  excludedMessages: number;
   /** The model's context window this activation was measured against, 0 when the
    * model declares none. */
   contextWindow: number;
-  /** sha256 of the bare `convertToLlm` projection before Pi's settings-aware conversion. */
-  digest: string;
-  /** True when the SDK's projection messages were the identical objects compared against. */
-  identityEqual: boolean;
 }
 
 /** One `transformContext` pass, recorded so the comparison mode stays visible. */
@@ -183,8 +172,6 @@ export interface HomeRequestPolicyOptions {
    * cover the activation start is abortable through the request's signal.
    */
   prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => Promise<HomeActivationView>;
-  /** Head-room kept below the model's context window. */
-  reserveTokens?: number;
   /** Where the seam reports its bounded per-activation and refusal records. */
   onRecord?: (record: HomeRequestRecord) => void;
 }
@@ -226,13 +213,10 @@ interface RewrittenContext {
   messages: AgentMessage[];
   /** The memory message plus the activation's native messages, in request order. */
   nonSystem: AgentMessage[];
-  roles: string[];
   excludedMessages: number;
-  identityEqual: boolean;
 }
 
 const MAXIMUM_RECORDED_REFUSALS = 64;
-const MAXIMUM_RECORDED_STEPS = 64;
 const MAXIMUM_RECORDED_TRANSFORMS = 64;
 
 export class HomeRequestPolicy {
@@ -243,24 +227,14 @@ export class HomeRequestPolicy {
   private expectedDigest: string | undefined;
   /** The exact non-system request messages `prepareRequest` returned for the current request. */
   private expectedNonSystemMessages: AgentMessage[] | undefined;
-  private lastTransformIdentity: boolean | undefined;
-  private readonly reserveTokens: number;
   private readonly refusals: HomeRefusal[] = [];
-  private readonly steps: HomeRequestStep[] = [];
   private readonly transforms: HomeTransformObservation[] = [];
 
-  constructor(private readonly options: HomeRequestPolicyOptions) {
-    this.reserveTokens = options.reserveTokens ?? 1_024;
-  }
+  constructor(private readonly options: HomeRequestPolicyOptions) {}
 
   /** Every refusal, oldest first (bounded). */
   refusalLog(): readonly HomeRefusal[] {
     return this.refusals;
-  }
-
-  /** Every rewritten request, oldest first (bounded). */
-  requestLog(): readonly HomeRequestStep[] {
-    return this.steps;
   }
 
   /** Every `transformContext` pass, oldest first (bounded), surviving settlement. */
@@ -268,17 +242,8 @@ export class HomeRequestPolicy {
     return this.transforms;
   }
 
-  currentNonce(): string | undefined {
-    return this.activation?.nonce;
-  }
-
   currentOperationId(): string | undefined {
     return this.activation?.operationId;
-  }
-
-  /** The boundary entry of the open activation, or undefined when none is open. */
-  currentBoundaryEntryId(): string | null | undefined {
-    return this.activation?.boundaryEntryId;
   }
 
   /**
@@ -297,15 +262,6 @@ export class HomeRequestPolicy {
       };
     }
     return this.lastClosed;
-  }
-
-  /**
-   * Fidelity of the last `transformContext` pass: `true` when the activation's
-   * non-system messages survived by object identity, `false` when the SDK's
-   * context stage replaced them with equal clones. Undefined before the first.
-   */
-  lastTransformObservedIdentity(): boolean | undefined {
-    return this.lastTransformIdentity;
   }
 
   /**
@@ -340,7 +296,6 @@ export class HomeRequestPolicy {
     };
     this.expectedDigest = undefined;
     this.expectedNonSystemMessages = undefined;
-    this.lastTransformIdentity = undefined;
   }
 
   /** Closes the activation when Tron settles that exact operation. */
@@ -360,7 +315,6 @@ export class HomeRequestPolicy {
     this.activation = undefined;
     this.expectedDigest = undefined;
     this.expectedNonSystemMessages = undefined;
-    this.lastTransformIdentity = undefined;
   }
 
   /**
@@ -371,7 +325,7 @@ export class HomeRequestPolicy {
    * reclassified as an ordinary prompt. The run, its boundary entry and its
    * frozen memory view are unchanged — only the operation identity Tron reports
    * is — so the activation is renamed, or its later `settle` would never match
-   * and it would outlive the run (#412 R1, verified failing before the fix).
+   * and it would outlive the run.
    */
   transferOperation(from: string | undefined, to: string): void {
     if (!from || from === to) return;
@@ -392,13 +346,13 @@ export class HomeRequestPolicy {
     activation.cancellation.signal.throwIfAborted();
     signal?.throwIfAborted();
     const projection = session.sessionManager.buildSessionProjection();
-    const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view, true);
+    const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view);
     const window = session.model?.contextWindow ?? 0;
     const nonSystem = cut.messages.filter(message => message.role !== "system").reduce((total, message) => total + estimateTokens(message), 0);
     const recordedSystem = cut.messages.filter(message => message.role === "system").reduce((total, message) => total + estimateTokens(message), 0);
     const incomingSystem = estimateTokens({ role: "system", content: systemPrompt, timestamp: Date.now() });
     const prefix = nonSystem + Math.max(recordedSystem, incomingSystem);
-    const freshTokens = Math.max(0, window - this.reserveTokens - prefix);
+    const freshTokens = Math.max(0, window - HOME_RESERVE_TOKENS - prefix);
     return { tokens: Math.max(0, freshTokens - estimateTokens(input)), freshTokens, signal: activation.cancellation.signal };
   }
 
@@ -412,7 +366,7 @@ export class HomeRequestPolicy {
       // a request some other `prepareRequest` rewrite changed is a refusal, not
       // something to spend a multi-second memory wait on.
       const projectionBefore = session.sessionManager.buildSessionProjection();
-      const identityEqual = this.assertProjectionFidelity(context.messages, projectionBefore, activation);
+      this.assertProjectionFidelity(context.messages, projectionBefore, activation);
       const boundaryBefore = this.boundaryIndex(projectionBefore, activation);
       const excludedBefore = excludedMessages(projectionBefore, boundaryBefore);
       const memoryView = await this.memoryView(activation, signal);
@@ -433,14 +387,14 @@ export class HomeRequestPolicy {
           activation,
         );
       }
-      const rewritten = this.cut(projection, boundaryIndex, activation, memoryView, identityEqual);
+      const rewritten = this.cut(projection, boundaryIndex, activation, memoryView);
       const model = update?.model ?? request.model;
       const effectiveTokens = rewritten.messages.reduce(
         (total, message) => total + estimateTokens(message),
         0,
       );
       const contextWindow = model?.contextWindow ?? 0;
-      if (contextWindow > 0 && effectiveTokens > contextWindow - this.reserveTokens) {
+      if (contextWindow > 0 && effectiveTokens > contextWindow - HOME_RESERVE_TOKENS) {
         throw this.refuse(
           "context-overflow",
           `effective ${effectiveTokens} tokens leave no head-room below the ${contextWindow}-token window`,
@@ -448,25 +402,11 @@ export class HomeRequestPolicy {
           { effectiveTokens, contextWindow },
         );
       }
-      const digest = digestLlmMessages(convertToLlm(rewritten.messages));
       this.expectedNonSystemMessages = rewritten.nonSystem;
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
-      activation.step = {
-        operationId: activation.operationId,
-        nonce: activation.nonce,
-        boundaryEntryId: activation.boundaryEntryId,
-        roles: rewritten.roles,
-        effectiveTokens,
-        viewBytes,
-        viewLines,
-        excludedMessages: rewritten.excludedMessages,
-        contextWindow,
-        digest,
-        identityEqual: rewritten.identityEqual,
-      };
+      activation.step = { effectiveTokens, viewBytes, viewLines, contextWindow };
       memoryView.commit();
-      this.recordStep(activation.step);
       // Once per activation, not once per request: a tool loop or a retry is the
       // same activation and its effective size and wait are already reported.
       if (activation.unrecorded) {
@@ -605,7 +545,7 @@ export class HomeRequestPolicy {
     expected: readonly AgentMessage[],
     projection: SessionProjection,
     activation: ActivationState,
-  ): boolean {
+  ): void {
     const canonical = projection.messages;
     if (expected.length !== canonical.length) {
       throw this.refuse(
@@ -614,12 +554,10 @@ export class HomeRequestPolicy {
         activation,
       );
     }
-    let identical = true;
     for (let index = 0; index < canonical.length; index++) {
       const candidate = expected[index];
       const current = canonical[index];
       if (candidate === current) continue;
-      identical = false;
       if (JSON.stringify(candidate) !== JSON.stringify(current)) {
         throw this.refuse(
           "projection-mismatch",
@@ -628,7 +566,6 @@ export class HomeRequestPolicy {
         );
       }
     }
-    return identical;
   }
 
   /**
@@ -679,7 +616,6 @@ export class HomeRequestPolicy {
         );
       }
     }
-    this.lastTransformIdentity = identical;
     this.transforms.push({
       operationId: activation.operationId,
       nonce: activation.nonce,
@@ -694,7 +630,6 @@ export class HomeRequestPolicy {
     boundaryIndex: number,
     activation: ActivationState,
     memoryView: HomeActivationView,
-    identityEqual: boolean,
   ): RewrittenContext {
     const systems: AgentMessage[] = [];
     const tail: AgentMessage[] = [];
@@ -727,19 +662,11 @@ export class HomeRequestPolicy {
       details: undefined,
       timestamp: Date.now(),
     } as unknown as AgentMessage;
-    const messages = [...systems, memory, ...tail];
     return {
-      messages,
+      messages: [...systems, memory, ...tail],
       nonSystem: [memory, ...tail],
-      roles: messages.map((message) => message.role),
       excludedMessages,
-      identityEqual,
     };
-  }
-
-  private recordStep(step: HomeRequestStep): void {
-    this.steps.push(step);
-    if (this.steps.length > MAXIMUM_RECORDED_STEPS) this.steps.shift();
   }
 
   private recordRefusal(refusal: HomeRefusal): void {
@@ -796,11 +723,10 @@ function activationIdentity(activation: ActivationState): HomeActivationIdentity
 }
 
 /** Stable digest of the LLM messages one provider request would carry. */
-export function digestLlmMessages(messages: unknown): string {
+function digestLlmMessages(messages: unknown): string {
   return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
 }
 
-/** Occurrences of the activation nonce anywhere in one request's messages. */
 /**
  * Place Home's cache breakpoints on the memory message of an Anthropic Messages
  * payload (#491): one on the view's base block, which is unchanged between
@@ -856,6 +782,7 @@ export function applyHomeCacheRetention(runtime: ModelRuntime): ModelRuntime {
   return runtime;
 }
 
+/** Occurrences of the activation nonce anywhere in one request's messages. */
 function countNonce(messages: readonly unknown[], nonce: string): number {
   return JSON.stringify(messages).split(nonce).length - 1;
 }

@@ -38,7 +38,6 @@ function initialRecord() {
 }
 
 async function runCrashCut() {
-  const mode = "after" as const;
   const root = await mkdtemp(join(tmpdir(), "tron-home-ledger-crash-"));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -48,7 +47,7 @@ async function runCrashCut() {
   await writeFile(recordPath, `${JSON.stringify(initialRecord(), null, 2)}\n`, { mode: 0o600 });
   const child = spawn(process.execPath, [
     "--experimental-transform-types", "--import", pathToFileURL(preload).href,
-    childProgram, tronHome, sessionId, mode, marker,
+    childProgram, tronHome, sessionId, marker,
   ], { stdio: ["pipe", "pipe", "pipe"] });
   children.push(child);
   let output = "";
@@ -62,7 +61,7 @@ async function runCrashCut() {
           if (child.exitCode !== null || child.signalCode !== null) throw new Error(`crash child exited before barrier (code=${child.exitCode}, signal=${child.signalCode}): ${output}`);
           return undefined;
         }
-      }, `child reached ${mode} ledger barrier`, { boundMs: 15_000 });
+      }, "child reached the visible-commit ledger barrier", { boundMs: 15_000 });
     } catch (error) {
       throw new Error(`${error instanceof Error ? error.message : String(error)}; child output: ${output}`);
     }
@@ -74,13 +73,11 @@ async function runCrashCut() {
       chapters: Array<{ state: string; ordinal: number }>;
       bindingRevision: number;
     };
-    {
-      expect(recovered.chapters).toHaveLength(2);
-      expect(recovered.chapters[0]).toMatchObject({ state: "sealed", ordinal: 1 });
-      expect(recovered.chapters[1]).toMatchObject({ state: "reserved", ordinal: 2 });
-      expect(recovered.bindingRevision).toBe(1);
-    }
-    report.push({ barrier: mode, observed: recovered.chapters.map(chapter => chapter.state).join(","), signal: "SIGKILL" });
+    expect(recovered.chapters).toHaveLength(2);
+    expect(recovered.chapters[0]).toMatchObject({ state: "sealed", ordinal: 1 });
+    expect(recovered.chapters[1]).toMatchObject({ state: "reserved", ordinal: 2 });
+    expect(recovered.bindingRevision).toBe(1);
+    report.push({ barrier: "after", observed: recovered.chapters.map(chapter => chapter.state).join(","), signal: "SIGKILL" });
   } finally {
     await killChild(child);
   }

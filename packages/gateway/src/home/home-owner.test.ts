@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeOwner, type HomeRecord, type HomeSessionPort } from "./home-owner.js";
+import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -59,6 +60,9 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
     sessionFile: async (sessionId) => (present.has(sessionId) ? join(root, "sessions", `${sessionId}.jsonl`) : undefined),
     sessionPresent: async (sessionId) => present.has(sessionId),
     hasLiveRuntime: (sessionId) => live.has(sessionId),
+    // A small quiescent chapter never reaches a limit, and no conversation is durable yet.
+    chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
+    hasConversation: async () => false,
     serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (sessionId, commit) => {
       replaced.push(sessionId);
@@ -76,6 +80,8 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
     trust: new TrustService(agentDir),
     sessions,
     workspace,
+    // These record tests never dispatch a task, so the task namespace is never read.
+    taskSessions: {} as RuntimeRegistry,
     // This deterministic summarizer lets record tests configure memory without
     // reaching an external provider.
     memorySummarizer: () => ({ summarizer: async () => "summary" }),
@@ -148,16 +154,23 @@ describe("Tron Home record", () => {
     expect(f.owner.chapterStateFor("session-1")).toMatchObject({ sessionId: "session-1", sealed: false, ordinal: 1 });
   });
 
-  it("preserves and refuses the pre-chapter v1 record without rewriting it", async () => {
+  it.each([
+    { label: "a v1 record", bytes: () => legacyRecordBytes() },
+    { label: "an unknown-version (v3) record", bytes: () => recordBytes({ version: 3 }) },
+  ])("preserves and refuses $label without rewriting it", async ({ bytes }) => {
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
-    const previous = legacyRecordBytes();
-    await writeFile(f.recordPath, previous, { mode: 0o600 });
+    const preserved = bytes();
+    await writeFile(f.recordPath, preserved, { mode: 0o600 });
     await f.owner.initialize();
 
-    expect(await f.owner.status()).toMatchObject({ available: false, phase: "unavailable" });
+    expect(await f.owner.status()).toMatchObject({
+      available: false, enabled: false, phase: "unavailable",
+      readiness: { ready: false, gaps: ["record-unavailable"] }, recovery: { action: "inspect-record" },
+    });
     await expect(f.owner.designate({}, defaultModel)).rejects.toMatchObject({ code: "conflict" });
-    expect(await readFile(f.recordPath, "utf8")).toBe(previous);
+    await expect(f.owner.disable()).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(f.recordPath, "utf8")).toBe(preserved);
     expect(f.created).toEqual([]);
   });
 
@@ -223,7 +236,7 @@ describe("Tron Home record", () => {
   });
 
   it("preserves a corrupt record and refuses to designate over it", async () => {
-    // Failure modes 1 and 3: a corrupt record must not be silently replaced,
+    // A corrupt record must not be silently replaced,
     // and a refused designate must not touch the file.
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
@@ -280,24 +293,8 @@ describe("Tron Home record", () => {
     expect(f.owner.profileFor("ordinary-session", f.root)).toBe("unnamed");
   });
 
-  it("preserves an unknown-version record instead of migrating it", async () => {
-    // Failure mode 2: a future record shape is not this build's to rewrite.
-    const f = await harness();
-    await mkdir(f.directory, { recursive: true });
-    const future = recordBytes({ version: 3 });
-    await writeFile(f.recordPath, future, { mode: 0o600 });
-    await f.owner.initialize();
-
-    expect(await f.owner.status()).toMatchObject({
-      available: false, enabled: false, phase: "unavailable",
-      readiness: { ready: false, gaps: ["record-unavailable"] }, recovery: { action: "inspect-record" },
-    });
-    await expect(f.owner.disable()).rejects.toMatchObject({ code: "conflict" });
-    expect(await readFile(f.recordPath, "utf8")).toBe(future);
-  });
-
   it("admits a record written against a newer policy revision", async () => {
-    // P3-1: only the format version gates admission. A newer curated-profile
+    // Only the format version gates admission. A newer curated-profile
     // revision is still this build's record to read and preserve.
     const f = await harness();
     await mkdir(f.directory, { recursive: true });
@@ -312,7 +309,7 @@ describe("Tron Home record", () => {
   });
 
   it("treats an empty or permissively-readable record as unavailable and preserves it", async () => {
-    // P2-3: the record is read with the owner-only boundary, so an empty file
+    // The record is read with the owner-only boundary, so an empty file
     // and a group/world-readable file are unavailable rather than absent.
     const empty = await harness();
     await mkdir(empty.directory, { recursive: true });
@@ -361,7 +358,7 @@ describe("Tron Home record", () => {
   }, 30_000);
 
   it("writes the record owner-only with no temporary file left, and an owner-only workspace", async () => {
-    // Failure modes 4, 5 and 10: one durable replacement, owner-only bytes, and
+    // One durable replacement, owner-only bytes, and
     // an owner-only neutral working directory.
     const f = await harness();
     const designation = await f.owner.designate({ model: MODEL }, defaultModel);
@@ -380,7 +377,7 @@ describe("Tron Home record", () => {
   });
 
   it("records the neutral working directory as untrusted before the session exists", async () => {
-    // Failure mode 11: without an explicit decision `requireResolved` would
+    // Without an explicit decision `requireResolved` would
     // block the Home cwd.
     const f = await harness();
     await f.owner.designate({ model: MODEL }, defaultModel);
@@ -391,7 +388,6 @@ describe("Tron Home record", () => {
   });
 
   it("is idempotent while enabled and advances the generation on re-enable", async () => {
-    // Failure modes 6 and 7.
     const f = await harness();
     const first = await f.owner.designate({ model: MODEL }, defaultModel);
     expect(await f.owner.designate({ model: MODEL }, defaultModel)).toEqual(first);
@@ -412,7 +408,7 @@ describe("Tron Home record", () => {
   });
 
   it("designates a fresh session when the recorded session is gone", async () => {
-    // P1: a dangling record must not be re-enabled on a session that no longer
+    // A dangling record must not be re-enabled on a session that no longer
     // exists, and must not be discarded either.
     const f = await harness();
     const first = await f.owner.designate({ model: MODEL }, defaultModel);
@@ -443,7 +439,7 @@ describe("Tron Home record", () => {
   });
 
   it("marks the record disabled when its session is gone, without touching a runtime", async () => {
-    // P1: disable with a missing session is only a record change.
+    // Disable with a missing session is only a record change.
     const f = await harness();
     const first = await f.owner.designate({ model: MODEL }, defaultModel);
     f.present.delete(first.sessionId);
@@ -459,7 +455,7 @@ describe("Tron Home record", () => {
   });
 
   it("re-enables on the recorded model when the request names none", async () => {
-    // P2-2: the record's model is the fallback, and the default resolver is
+    // The record's model is the fallback, and the default resolver is
     // only consulted for a fresh session.
     const f = await harness();
     const first = await f.owner.designate({ model: MODEL }, defaultModel);
@@ -502,7 +498,7 @@ describe("Tron Home record", () => {
   });
 
   it("tracks a model applied to the enabled Home session, and ignores other sessions", async () => {
-    // P2-2: the record is the single source of truth for Home's model.
+    // The record is the single source of truth for Home's model.
     const f = await harness();
     const first = await f.owner.designate({ model: MODEL }, defaultModel);
     const other = { provider: "openai", id: "gpt-6-astra" };
@@ -521,7 +517,6 @@ describe("Tron Home record", () => {
   });
 
   it("refuses disable without a record instead of creating one", async () => {
-    // Failure mode 9.
     const f = await harness();
     expect(await f.owner.status()).toMatchObject({
       phase: "undesignated", readiness: { ready: false, gaps: ["not-designated"] },
@@ -532,13 +527,10 @@ describe("Tron Home record", () => {
     expect(f.created).toEqual([]);
   });
 
-  it("admits a record written before Home's memory existed, and leaves it alone", async () => {
-    // The record keeps version 1 with an optional `memory`: a record without one
-    // is this build's record, and it refuses its activations rather than inventing
-    // a model or a budget (decision D4).
+  it("reads a record without a memory field as unconfigured and never rewrites it", async () => {
+    // An absent `memory` is the unconfigured state: Home refuses its activations
+    // rather than inventing a model or a budget (decision D4).
     const h = await harness();
-    // The record is written first: `initialize` is the only reader that matters.
-    const previous = await harness();
     await rm(h.recordPath, { force: true });
     await mkdir(h.directory, { recursive: true });
     const bytes = recordBytes({ sessionId: "session-1" });
@@ -553,10 +545,13 @@ describe("Tron Home record", () => {
         sessionFile: async () => undefined,
         sessionPresent: async () => true,
         hasLiveRuntime: () => false,
+        chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
+        hasConversation: async () => false,
         serializeSessionMutation: async (_id, commit) => commit(),
         replaceRuntimeForProfile: async (_sessionId, commit) => { await commit(); },
       },
       workspace: new TronWorkspace(join(h.root, "tron")),
+      taskSessions: {} as RuntimeRegistry,
       memorySummarizer: () => ({ refusal: "unavailable" }),
     });
     await owner.initialize();
@@ -571,7 +566,6 @@ describe("Tron Home record", () => {
     // The preserved record is never rewritten by a read: only the lifecycle
     // mutations do that.
     expect(await readFile(h.recordPath, "utf8")).toBe(bytes);
-    await previous.owner.dispose();
     await owner.dispose();
   });
 
