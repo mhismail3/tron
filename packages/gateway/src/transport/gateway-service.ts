@@ -1506,6 +1506,8 @@ export class GatewayService {
           });
           const execution = slot.prompt(prompt, attachments.images, behavior, {
             text,
+            inputSource: "rpc",
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(resourceSource === undefined ? {} : {
               resourceInvocation: {
                 source: resourceSource,

@@ -284,6 +284,11 @@ const sessions = new RuntimeRegistry({
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
   ),
+  stopSteeringDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "failed" ? "warning" : "info",
+    `Stop continuation ${diagnostic.outcome}`,
+    { event: "session.stop-steering-continuation", source: "session", ...diagnostic },
+  ),
   manualCompactionAdopted: (diagnostic) => logger.log(
     "info",
     "Queued manual compaction adopted by an active compaction",
