@@ -2,11 +2,37 @@ import { createHash } from "node:crypto";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile, open, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { WakeInboxOwner } from "./home-wake-inbox.js";
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
+
+/** Seams over the directory scan and birth-time identity; the real filesystem
+ * answers everything else. */
+const fsSeam = vi.hoisted(() => ({ entriesVisited: 0, zeroBirthtimePaths: new Set<string>() }));
+vi.mock("node:fs/promises", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    opendir: async (...args: Parameters<typeof actual.opendir>) => {
+      const directory = await actual.opendir(...args);
+      return {
+        async *[Symbol.asyncIterator]() {
+          for await (const entry of directory) {
+            fsSeam.entriesVisited++;
+            yield entry;
+          }
+        },
+      };
+    },
+    lstat: (async (path: string, options?: object) => {
+      const info = await actual.lstat(path, options as never);
+      if (!fsSeam.zeroBirthtimePaths.has(path)) return info;
+      return Object.assign(Object.create(Object.getPrototypeOf(info)), info, { birthtimeNs: 0n });
+    }) as typeof actual.lstat,
+  };
+});
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -59,6 +85,12 @@ async function bytes(directory: string): Promise<Record<string, string>> {
 async function listed(store: HomeTaskStore): Promise<HomeTaskRecord[]> {
   const records: HomeTaskRecord[] = [];
   await store.list(record => { records.push(record); });
+  return records;
+}
+
+async function collectRecords(store: HomeTaskStore): Promise<HomeTaskRecord[]> {
+  const records: HomeTaskRecord[] = [];
+  for await (const record of store.records()) records.push(record);
   return records;
 }
 
@@ -383,6 +415,56 @@ describe("Home task recency pages", () => {
     await expect(reopened.page({ cursor: first.nextCursor })).rejects.toMatchObject({ code: "invalid-record" });
   });
 
+  it("reads each directory entry once per operation, not one directory scan per task", async () => {
+    const f = await fixture(); await f.store.initialize(); await f.store.put(task(), null);
+    const template = (await f.store.read("task-1"))!;
+    for (let index = 0; index < 300; index++) {
+      const createdAt = template.createdAt + 1 + index;
+      const record = { ...template, taskId: `bulk-${index}`, createdAt, updatedAt: createdAt };
+      await writeFile(join(f.directory, `${String(createdAt).padStart(13, "0")}-bulk-${index}.json`), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+    }
+    const entries = (await readdir(f.directory)).length;
+    const visitsOf = async (operation: () => Promise<unknown>): Promise<number> => {
+      fsSeam.entriesVisited = 0;
+      await operation();
+      return fsSeam.entriesVisited;
+    };
+    // A single pass visits every entry; two passes (validation plus enumeration) is the ceiling.
+    for (const [name, operation] of [
+      ["list", () => listed(f.store)],
+      ["records", () => collectRecords(f.store)],
+      ["page", () => f.store.page({ limit: 50 })],
+      ["read", () => f.store.read("bulk-150")],
+    ] as const) {
+      const visits = await visitsOf(operation);
+      expect(visits, name).toBeGreaterThanOrEqual(entries);
+      expect(visits, name).toBeLessThanOrEqual(2 * entries);
+    }
+  });
+
+  it("refuses a task directory without birth time in page, as restoreEpoch does", async () => {
+    const f = await fixture(); await f.store.initialize(); await f.store.put(task(), null);
+    fsSeam.zeroBirthtimePaths.add(f.directory);
+    try {
+      await expect(f.store.restoreEpoch()).rejects.toMatchObject({ code: "unsafe-state" });
+      await expect(f.store.page({})).rejects.toMatchObject({ code: "unsafe-state" });
+    } finally { fsSeam.zeroBirthtimePaths.delete(f.directory); }
+    expect((await f.store.page({})).items.map(row => row.taskId)).toEqual(["task-1"]);
+  });
+
+  it("refuses two individually valid files for one task identity in every enumeration", async () => {
+    const f = await fixture(); await f.store.initialize(); await f.store.put(task(), null);
+    const record = (await f.store.read("task-1"))!;
+    const createdAt = record.createdAt + 1;
+    const second = { ...record, createdAt, updatedAt: createdAt };
+    await writeFile(join(f.directory, `${String(createdAt).padStart(13, "0")}-task-1.json`), JSON.stringify(second, null, 2), { mode: 0o600 });
+    await expect(f.store.read("task-1")).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(f.store.put({ ...record, revision: 2 }, 1)).rejects.toMatchObject({ code: "invalid-record" });
+  });
+
   it("refuses duplicate suffixes and old layouts without changing evidence", async () => {
     const f = await fixture(); await f.store.initialize(); await f.store.put(task(), null);
     const record = (await f.store.read("task-1"))!;
@@ -393,6 +475,8 @@ describe("Home task recency pages", () => {
     await writeFile(duplicate, original, { mode: 0o600 });
     await expect(f.store.read("task-1")).rejects.toMatchObject({ code: "invalid-record" });
     await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await rm(duplicate); const oldPath = join(f.directory, "task-1.json"); await rename(join(f.directory, name), oldPath);
     await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
     expect(await readFile(oldPath)).toEqual(original);
