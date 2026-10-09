@@ -157,7 +157,7 @@ struct ChatView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let profileID = composerScope?.profileID,
                    profileID == model.profiles.selected?.id,
-                   model.homeStatus.isCapabilityEnabled,
+                   model.homeStatus.capabilityEnabled,
                    let status = model.homeStatus.status,
                    HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
                    status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {

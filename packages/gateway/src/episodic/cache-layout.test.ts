@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, CACHE_MARKS, cachePieces, markAnthropicBlocks } from "./cache-layout.js";
 
-// Isolated checks for the failure modes the Home cache E2E cannot enumerate
-// (progress.md C2-C6, C8): every cut-point case of the splitter, and payload
-// shapes the E2E's endpoint never produces (OAuth system blocks, retention
-// "none", non-Anthropic payloads). The E2E (home-cache-layout.e2e.test.ts) proves
-// the layout on real pi-ai payloads.
+// Isolated checks for the failure modes the Home cache E2E cannot enumerate:
+// every cut-point case of the splitter, and payload shapes the E2E's endpoint
+// never produces (OAuth system blocks, retention "none", non-Anthropic payloads).
+// The E2E (home-cache-layout.e2e.test.ts) proves the layout on real pi-ai payloads.
 
 const EPHEMERAL = { type: "ephemeral" };
 
@@ -51,7 +50,7 @@ function anthropicPayload(options: { oauth?: boolean; memoryBlocks: string[] }):
 }
 
 describe("cachePieces", () => {
-  // C3: the pieces are the text, cut only at line ends.
+  // The pieces are the text, cut only at line ends.
   it("rejoins to the exact text and cuts only after a line end", () => {
     for (const text of [lines(1_200), lines(400), lines(10), "", "no newline at all", lines(900, 37) + "tail without newline"]) {
       const pieces = cachePieces(text);
@@ -76,7 +75,7 @@ describe("cachePieces", () => {
     expect(cachePieces(lines(100))).toHaveLength(1);
   });
 
-  // C2: an unchanged start keeps its cuts when the text after it changes.
+  // An unchanged start keeps its cuts when the text after it changes.
   it("keeps every cut whose text before it is unchanged", () => {
     const head = lines(900);
     const first = cachePieces(head + "tail one\n");
@@ -89,7 +88,7 @@ describe("cachePieces", () => {
 describe("markAnthropicBlocks", () => {
   const memory = ["piece one\n", "piece two\n", "piece three\n", "last piece\n", "nonce"];
 
-  // C4 and C6: within the budget, with view marks and the request end kept.
+  // Within the budget, with view marks and the request end kept.
   it("marks the cut pieces, keeps the request end, and never exceeds the budget", () => {
     for (const oauth of [false, true]) {
       const payload = anthropicPayload({ oauth, memoryBlocks: memory });
@@ -110,13 +109,13 @@ describe("markAnthropicBlocks", () => {
     expect(found).toEqual([".system[0]", ".tools[1]", ".messages[0].content[0]", ".messages[1].content[0]"]);
   });
 
-  // C5: no marks at all means caching is off; the layout adds none.
+  // No marks at all means caching is off; the layout adds none.
   it("adds nothing when the request carries no cache marks", () => {
     const payload = withoutCacheControl(anthropicPayload({ memoryBlocks: memory })) as Record<string, unknown>;
     expect(markAnthropicBlocks(payload, 0, [0, 1, 2])).toEqual(payload);
   });
 
-  // C8 and a malformed target: anything that is not the expected shape is left as it is.
+  // A malformed target: anything that is not the expected shape is left as it is.
   it("leaves other payload shapes and out-of-range targets unchanged", () => {
     const openai = { model: "m", messages: [{ role: "user", content: "text" }], prompt_cache_key: "k" };
     expect(markAnthropicBlocks(openai, 0, [0, 1, 2])).toEqual(openai);

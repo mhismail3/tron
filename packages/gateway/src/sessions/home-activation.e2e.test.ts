@@ -18,7 +18,6 @@ import { statSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
 import { once } from "node:events";
 import WebSocket from "ws";
-import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -346,6 +345,14 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
 
 /** Dispose the Gateway and open a new one over the same installation: the same
  * thing a Gateway restart does. */
+/** The refusals the seam reported for this fixture's Home, oldest first. */
+function refusalRecords(f: Fixture): Array<Extract<HomeRequestRecord, { event: "refused" }>> {
+  return f.requestRecords.filter((record): record is Extract<HomeRequestRecord, { event: "refused" }> => record.event === "refused");
+}
+const refusedReasons = (f: Fixture): string[] => refusalRecords(f).map(record => record.reason);
+/** Whether Home's activation is open, as `home.context` reports it. */
+const activationOpen = (f: Fixture): boolean => { const context = f.registry.homeOwner().contextStatus(); return context.available && context.activationOpen; };
+
 async function restart(f: Fixture): Promise<void> {
   f.service.dispose();
   await f.receipts.dispose();
@@ -1743,7 +1750,7 @@ describe("Tron Home activations end to end", () => {
     });
   });
 
-  // progress.md C12 (#466), the property Home exists for: the full history grows
+  // The property Home exists for (#466): the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.
   it("keeps every request bounded while the full history grows to several model windows", async () => {
@@ -2022,7 +2029,7 @@ describe("Tron Home activations end to end", () => {
     expect(requests.length).toBe(1);
     f.faux.setResponses([responsesOf(f, requests)("wait activation two reply")]);
     const second = slot.prompt(longInput("wait activation two"));
-    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    await waitUntil(() => activationOpen(f));
     const waiting = requests.length;
     expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
       phase: "active", readiness: { ready: true, gaps: [] }, recovery: { action: "none" },
@@ -2040,7 +2047,7 @@ describe("Tron Home activations end to end", () => {
       viewSummarized: requests[1]?.blob.includes(SUMMARY_MARKER) ?? false,
       viewExcludesPriorText: !(requests[1]?.blob.includes("wait activation one") ?? true),
       activationWaitedMs: activations.map((record) => record.event === "activation" ? record.waitedMs : -1),
-      refusalReasons: f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [],
+      refusalReasons: refusedReasons(f),
     };
     report.cases.push({ case: "wait", ...row });
     expect(row.requestsWhileWaiting).toBe(1);
@@ -2085,7 +2092,7 @@ describe("Tron Home activations end to end", () => {
       answeredAfterInput: messages.some((message, index) => message.role === "assistant"
         && message.stopReason === "stop"
         && messages.slice(0, index).some((earlier) => JSON.stringify(earlier).includes("stop activation two"))),
-      refusalReasons: f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [],
+      refusalReasons: refusedReasons(f),
       canonicalRoles: messages.map((message) => message.role),
       slotPhase: slot.snapshot().phase,
     };
@@ -2117,7 +2124,7 @@ describe("Tron Home activations end to end", () => {
     try {
       const outcome = slot.prompt(longInput("stop before append")).then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
       await waitUntil(() => entered);
-      expect(f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId()).toBeDefined();
+      expect(activationOpen(f)).toBe(true);
       const stopped = slot.abort("agent");
       release();
       await stopped;
@@ -2228,7 +2235,7 @@ describe("Tron Home activations end to end", () => {
     await slot.prompt(longInput("unconfigured activation input"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const refused = await canonicalMessages(slot);
-    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
+    const refusals = refusedReasons(f);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as HomeContextProjection;
 
     await f.service.invoke(client, "home.configureMemory", {
@@ -2627,16 +2634,9 @@ describe("Tron Home activations end to end", () => {
     };
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
-    const testRoot = join(f.root, "terminal-client");
-    await mkdir(testRoot, { recursive: true });
-    const typescript = createRequire(import.meta.url).resolve("typescript");
-    const loaderPath = join(testRoot, "typescript-loader.mjs");
-    await writeFile(loaderPath, `import ts from ${JSON.stringify(pathToFileURL(typescript).href)};\nimport { readFile } from "node:fs/promises";\nexport async function resolve(specifier, context, nextResolve) {\n  try { return await nextResolve(specifier, context); } catch (error) {\n    if (specifier.endsWith(".js") && (error?.code === "ERR_MODULE_NOT_FOUND" || error?.code === "ERR_UNSUPPORTED_DIR_IMPORT")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n    throw error;\n  }\n}\nexport async function load(url, context, nextLoad) {\n  if (url.endsWith(".ts")) { const source = await readFile(new URL(url), "utf8"); return { format: "module", shortCircuit: true, source: ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText }; }\n  return nextLoad(url, context);\n}\n`);
-
-    const terminal = spawn(process.execPath, [
-      "--experimental-loader", loaderPath, join(process.cwd(), "src/client/terminal-chat.ts"),
-      "--session", slot.id,
-    ], {
+    const preload = pathToFileURL(join(process.cwd(), "test-support/home-ledger-crash-preload.mjs")).href;
+    const terminal = spawn(process.execPath, ["--experimental-transform-types", "--import", preload,
+      join(process.cwd(), "src/client/terminal-chat.ts"), "--session", slot.id], {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -2761,7 +2761,7 @@ describe("Tron Home activations end to end", () => {
     await reopened.prompt(longInput("transient activation two"));
     await waitUntil(() => reopened.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
+    const refusals = refusedReasons(f);
     const row = {
       providerRequests: requests.filter((request) => request.blob.includes("transient activation two")).length,
       viewSummarized: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
@@ -2797,7 +2797,7 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     await slot.prompt(longInput("resume activation two"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
-    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
+    const refusals = refusedReasons(f);
 
     // The cause is gone; the operator says so.
     f.compactor.failing = false;
@@ -2940,7 +2940,7 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => f.compactor.entered > 0);
     f.faux.setResponses([responsesOf(f, requests)("disable wait reply two")]);
     const second = slot.prompt(longInput("disable wait activation two"));
-    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    await waitUntil(() => activationOpen(f));
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "e2e-disable-busy" })
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     f.compactor.release?.();
@@ -2953,7 +2953,7 @@ describe("Tron Home activations end to end", () => {
       providerRequests: requests.length,
       waitingActivationServed: requests.some((request) => request.blob.includes("disable wait activation two")),
       waitingViewSummarized: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
-      refusals: f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [],
+      refusals: refusedReasons(f),
     };
     report.cases.push({ case: "disable-wait", ...row });
     expect(row.disableOutcome).toBe("busy");
@@ -2975,7 +2975,7 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => f.compactor.entered > 0);
     f.faux.setResponses([responsesOf(f, requests)("race reply two")]);
     const second = slot.prompt(longInput("race activation two"));
-    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    await waitUntil(() => activationOpen(f));
     // The operator's change lands while the activation is inside its first step.
     const configured = await f.service.invoke(client, "home.configureMemory", {
       commandId: "e2e-configure-race", model: OTHER_MEMORY_MODEL,
@@ -2989,7 +2989,7 @@ describe("Tron Home activations end to end", () => {
     await slot.prompt(longInput("race activation three"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog() ?? [];
+    const refusals = refusalRecords(f);
     const row = {
       configured,
       open: status.memory.open,
@@ -3113,7 +3113,7 @@ describe("Tron Home activations end to end", () => {
     await slot.prompt(longInput("blocked activation two"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    const refusals = f.registry.homeOwner().requestPolicyFor(slot.id)?.refusalLog().map((entry) => entry.reason) ?? [];
+    const refusals = refusedReasons(f);
     const row = {
       providerRequestsOfRefusedActivation: requests.length - requestsBefore,
       refusalReasons: refusals,

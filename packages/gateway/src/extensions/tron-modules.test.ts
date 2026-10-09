@@ -47,6 +47,9 @@ function tronModuleHost(options: { optionalOwners?: boolean } = {}): TronModuleH
       machineId: "machine-a",
     } : {}),
     homeMemoryTools: () => undefined,
+    // Registration never executes a Home tool, so the dispatch owners are inert here.
+    homeTask: async () => undefined,
+    homeDelegate: async () => { throw new Error("Home dispatch is not executed by registration tests"); },
   };
 }
 

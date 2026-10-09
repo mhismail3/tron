@@ -8,7 +8,7 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeTaskListStopSteerAndRedelivery() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-tasks"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap(); app.buttons["home-controls"].tap()
@@ -37,7 +37,7 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeTaskPermissionsRevokeDecideAndReconfirm() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-tasks"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap(); app.buttons["home-controls"].tap()
@@ -219,8 +219,8 @@ final class TronSmokeUITests: XCTestCase {
         continueAfterFailure = false
         for state in ["loading", "empty", "error", "blocked"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-browser-\(state)"]
-            if state == "blocked" { app.launchArguments.append("-home-header-state-blocked") }
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            if state == "blocked" { app.launchArguments.append("-home-header-state-blocked") } else { app.launchArguments.append("-home-browser-\(state)") }
             app.launch()
             defer { app.terminate() }
             XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
@@ -339,33 +339,10 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-header-background-accepted-paused")
     }
 
-    @MainActor
-    func testHomeHeaderLightDarkAndAccessibilityCaptures() {
-        continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            for type in ["normal", "accessibility"] {
-                let app = XCUIApplication()
-                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-header-state-paused"]
-                if appearance == "dark" { app.launchArguments.append("-home-dark") }
-                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
-                app.launch()
-                defer { app.terminate() }
-                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-                app.buttons["home-pinned-row"].tap()
-                XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
-                XCTAssertTrue(app.staticTexts["home-header-state"].label.contains("Paused"))
-                XCTAssertTrue(app.staticTexts["home-header-memory"].label.contains("New responses are blocked"))
-                XCTAssertTrue(app.buttons["home-controls"].isHittable)
-                XCTAssertTrue(app.textViews.firstMatch.isHittable)
-                keepScreenshot(named: "home-header-\(appearance)-\(type)")
-            }
-        }
-    }
-
-    /// Step 8 cross-surface proof, one hosted run: the header control menu and all four
-    /// Home sheets in light/dark at normal and accessibility Dynamic Type; background and
-    /// a hosted reconnect on the tasks sheet, each requiring a fresh authoritative read;
-    /// and the capability-off ordinary-session baseline. Captures are private xcresult attachments.
+    /// Cross-surface proof, one hosted run: the chat header in light/dark at normal and
+    /// accessibility Dynamic Type (each combination is captured once), its control menu,
+    /// and all four Home sheets; then background and a hosted reconnect on the tasks sheet,
+    /// each requiring a fresh authoritative read. Captures are private xcresult attachments.
     @MainActor
     func testHomeCrossSurfaceProofMatrix() {
         continueAfterFailure = false
@@ -386,6 +363,10 @@ final class TronSmokeUITests: XCTestCase {
                 app.buttons["home-pinned-row"].tap()
                 XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
                 XCTAssertTrue(app.staticTexts["home-header-state"].label.contains("Paused"))
+                XCTAssertTrue(app.staticTexts["home-header-memory"].label.contains("New responses are blocked"))
+                XCTAssertTrue(app.buttons["home-controls"].isHittable)
+                XCTAssertTrue(app.textViews.firstMatch.isHittable)
+                keepScreenshot(named: "home-header-\(appearance)-\(type)")
                 for (index, sheet) in sheets.enumerated() {
                     app.buttons["home-controls"].tap()
                     XCTAssertTrue(app.buttons[sheet.menu].waitForExistence(timeout: 3), app.debugDescription)
@@ -425,19 +406,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "proof-background-foreground-tasks")
         app.buttons["home-sheet-done-tasks"].tap()
         app.terminate()
-
-        // Capability-off baseline: no pinned row or Home header; the ordinary session opens unchanged.
-        let baseline = XCUIApplication()
-        baseline.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
-        baseline.launch()
-        let ordinary = baseline.buttons["session-row-home-shell-fixture:ordinary-session"]
-        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), baseline.debugDescription)
-        XCTAssertFalse(baseline.buttons["home-pinned-row"].exists)
-        ordinary.tap()
-        XCTAssertTrue(baseline.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
-        XCTAssertFalse(baseline.buttons["home-controls"].exists)
-        keepScreenshot(named: "proof-capability-off-ordinary-chat")
-        baseline.terminate()
     }
 
     /// A Home sheet belongs to the profile that opened it: once the selected profile
@@ -570,9 +538,26 @@ final class TronSmokeUITests: XCTestCase {
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 
+    /// A running Home change is shown on the row as an update: the row is not a
+    /// set-up or a completion check while the designation is still in flight.
+    @MainActor
+    func testHomePinnedRowNamesRunningDesignationAsUpdate() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-undesignated", "-home-control-delayed"]
+        app.launch()
+        defer { app.terminate() }
+        let row = app.buttons["home-pinned-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(waitForLabel(row, containing: "Updating Home", timeout: 3), row.label)
+        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 15), app.debugDescription)
+    }
+
     @MainActor
     func testHomePinnedRowCapabilityDesignationAndExactProfileRoute() {
         continueAfterFailure = false
+        // Capability-off baseline: no pinned row or Home header; the ordinary session opens unchanged.
         let unsupported = XCUIApplication()
         unsupported.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
         unsupported.launch()
@@ -581,6 +566,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(ordinary.waitForExistence(timeout: 10), unsupported.debugDescription)
         ordinary.tap()
         XCTAssertTrue(unsupported.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
+        XCTAssertFalse(unsupported.buttons["home-controls"].exists)
+        keepScreenshot(named: "proof-capability-off-ordinary-chat")
         unsupported.terminate()
 
         let ready = XCUIApplication()
@@ -659,7 +646,7 @@ final class TronSmokeUITests: XCTestCase {
     func testBlockedHomeRowDoesNotClaimReadiness() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-row-appearance-fixture", "-home-blocked"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-header-state-blocked"]
         app.launch()
         let row = app.buttons["home-pinned-row"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
@@ -674,12 +661,12 @@ final class TronSmokeUITests: XCTestCase {
         for appearance in ["light", "dark"] {
             for type in ["normal", "accessibility"] {
                 let app = XCUIApplication()
-                app.launchArguments = ["-tron-home-row-appearance-fixture"]
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
                 if appearance == "dark" { app.launchArguments.append("-home-dark") }
                 if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
                 app.launch()
-                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 5))
-                XCTAssertTrue(app.staticTexts["ordinary-session-row"].exists)
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].exists)
                 keepScreenshot(named: "home-pinned-\(appearance)-\(type)")
                 app.terminate()
             }

@@ -92,22 +92,15 @@ export class HomeTaskAuthorization {
     this.now = options.now ?? Date.now;
   }
 
+  /** Appends the first standing scope of a freshly initialized namespace. The
+   * store refuses a second active scope, so no earlier scope is retired here. */
   async enableInitialScope(restoreEpoch: string): Promise<HomeTaskAuthorizationScope> {
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
-      const existing = state.scopes.find((scope) => scope.kind === "all-trusted-projects"
-        && scope.active && scope.restoreEpoch === restoreEpoch);
-      if (existing) return existing;
-      const createdAt = this.now();
       const scope: HomeTaskAuthorizationScope = {
-        id: randomUUID(), kind: "all-trusted-projects", active: true, restoreEpoch, createdAt,
+        id: randomUUID(), kind: "all-trusted-projects", active: true, restoreEpoch, createdAt: this.now(),
       };
-      const retiredScopes = state.scopes.filter((scope) => scope.kind === "all-trusted-projects" && scope.active);
-      const scopes = state.scopes.map((scope) => scope.kind === "all-trusted-projects" && scope.active
-        ? { ...scope, active: false, revokedAt: createdAt }
-        : scope);
-      await this.options.store.save({ ...state, scopes: [...scopes, scope] });
-      for (const retired of retiredScopes) this.diagnostic("scope-revoked", retired.id);
+      await this.options.store.save({ ...state, scopes: [...state.scopes, scope] });
       this.diagnostic("scope-enabled", scope.id);
       return scope;
     });

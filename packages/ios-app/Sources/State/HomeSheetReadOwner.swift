@@ -97,7 +97,6 @@ struct HomeMemoryEvidencePageDTO: Decodable, Equatable, Sendable {
     let nextOffset: Int?
     let previousOffset: Int?
     let totalCharacters: Int
-    let metadata: [String: JSONValue]
 
     static func decode(_ value: JSONValue, evidence identity: HomeMemoryEvidenceDTO, offset requestedOffset: Int) throws -> Self {
         let page = try value.decode(Self.self)

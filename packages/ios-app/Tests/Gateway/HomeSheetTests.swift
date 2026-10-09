@@ -2,8 +2,8 @@ import XCTest
 @testable import TronMobile
 import TronMobileCore
 
-/// Failure modes written in the step-6 handoff: wrong physical identity, oversized
-/// or mixed pages, projection mistaken for canonical evidence, stale publication.
+/// Failure modes: wrong physical identity, oversized or mixed pages, projection
+/// mistaken for canonical evidence, and stale publication.
 @MainActor
 final class HomeSheetTests: XCTestCase {
     private let digest = String(repeating: "a", count: 64)
@@ -59,8 +59,9 @@ final class HomeSheetTests: XCTestCase {
 
     func testEvidenceRequiresCanonicalFormatExactIdentityAndProgressingOffsets() throws {
         let identity = try evidence().decode(HomeMemoryEvidenceDTO.self)
+        // `metadata` is not read by the app, so a Gateway value of any shape must still decode.
         var response: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": evidence(),
-            "text": .string("canonical original"), "offset": .number(0), "totalCharacters": .number(18), "metadata": .object([:])]
+            "text": .string("canonical original"), "offset": .number(0), "totalCharacters": .number(18), "metadata": .string("future shape")]
         XCTAssertEqual(try HomeMemoryEvidencePageDTO.decode(.object(response), evidence: identity, offset: 0).text, "canonical original")
         for change in [("format", JSONValue.string("memory-projection")), ("evidence", evidence(index: 1)),
                        ("offset", .number(1)), ("nextOffset", .number(0)), ("text", .string(String(repeating: "x", count: 24_001)))] {
@@ -149,8 +150,10 @@ final class HomeSheetTests: XCTestCase {
         coordinator.retire(token)
     }
 
+    /// A late answer must not publish once its sheet is dismissed, covered, or its
+    /// profile/connection is no longer current; a late failure is held to the same rule.
     func testRetiredOrChangedAuthorityRejectsLateSuccessAndFailure() async throws {
-        for transition in ["dismiss", "cover", "profile", "connection", "background"] {
+        for transition in ["dismiss", "cover", "not-current", "not-current-failure"] {
             let coordinator = PresentationActivityCoordinator()
             let token = PresentationSurfaceToken(id: "memory", generation: UUID())
             coordinator.register(token, parent: nil)
@@ -170,7 +173,7 @@ final class HomeSheetTests: XCTestCase {
             case "cover": coordinator.register(.init(id: "child", generation: UUID()), parent: token)
             default: current = false
             }
-            if transition == "background" { resume?.resume(throwing: NSError(domain: "late error", code: 1)) }
+            if transition == "not-current-failure" { resume?.resume(throwing: NSError(domain: "late error", code: 1)) }
             else { resume?.resume(returning: .memory(try HomeMemoryPageDTO.decode(page(), revision: nil))) }
             await task.value
             guard case .idle = owner.state else { return XCTFail("\(transition) published a retired read") }

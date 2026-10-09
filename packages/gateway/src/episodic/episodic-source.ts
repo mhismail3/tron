@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { redactCredentials } from "../util/credential-redaction.js";
 import {
-  EpisodicMemoryError, EPISODIC_OMITTED_TEXT,
+  EpisodicMemoryError, EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_OMITTED_TEXT,
   type EpisodicLimits, type EpisodicMessageKind, type EpisodicSourceCursor,
 } from "./episodic-contract.js";
 import { capText } from "./episodic-tree.js";
@@ -32,7 +32,9 @@ export class EpisodicSourceChangedError extends Error {
   }
 }
 
-function sameSnapshot(start: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>, end: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>): boolean {
+/** Whether the file a handle reads is unchanged between two stats: identity, size
+ * and times, which a rewrite or an append changes. */
+export function sameSnapshot(start: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>, end: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>): boolean {
   return start.dev === end.dev && start.ino === end.ino && start.size === end.size
     && start.mtimeMs === end.mtimeMs && start.ctimeMs === end.ctimeMs;
 }
@@ -43,14 +45,12 @@ export interface EpisodicCanonicalEntry {
   timestamp: string;
   type: string;
   raw: Record<string, unknown>;
-  /** Physical provenance when a stable Home source spans chapters. */
-  sourceSessionId?: string;
   /** The exact JSON text of the entry's line, without its newline. */
   line: string;
 }
 
 /** One read of a canonical session file: its current branch, root first. */
-export interface EpisodicCanonicalBranch {
+interface EpisodicCanonicalBranch {
   branch: EpisodicCanonicalEntry[];
   /** Bytes of a trailing partial line that were ignored. */
   tornBytes: number;
@@ -62,9 +62,8 @@ export interface EpisodicCanonicalBranch {
 export interface EpisodicSourceDelta {
   sessionId: string;
   projected: EpisodicProjectedMessage[];
-  /** Bytes of complete lines; a trailing partial line is not counted. */
-  completeBytes: number;
-  leafEntryId: string | null;
+  /** The cursor after this delta; its `completeBytes` and `leafEntryId` are the
+   * position the memory has read through. */
   cursor: EpisodicSourceCursor;
   /** True when this delta continued from the previous cursor. */
   incremental: boolean;
@@ -316,7 +315,8 @@ export async function readCanonicalSessionFile(options: {
 
 export interface EpisodicProjectedMessage {
   entryId: string;
-  sourceSessionId?: string;
+  /** The physical chapter the entry was read from. */
+  sourceSessionId: string;
   kind: EpisodicMessageKind;
   text: string;
   /** The canonical entry's instant, carried so the catalog can answer a
@@ -359,14 +359,14 @@ function projectContent(content: unknown, omissions: string[]): string {
 
 /** Assistant content: text and tool calls; thinking is excluded and recorded
  * (gist §2 logs no thoughts, and the compactor refused them). */
-function projectAssistantContent(content: unknown, omissions: string[], limits: EpisodicLimits): string {
+function projectAssistantContent(content: unknown, omissions: string[]): string {
   const lines: string[] = [];
   for (const part of parts(content)) {
     if (part.type === "text" && typeof part.text === "string") lines.push(part.text);
     else if (part.type === "thinking") omissions.push("thinking");
     else if (part.type === "toolCall" && typeof part.name === "string") {
       const args = JSON.stringify(part.arguments ?? {});
-      const capped = capText(args, limits.capChars, limits.capTailChars);
+      const capped = capText(args, EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS);
       if (capped.capped) omissions.push("capped");
       lines.push(`[call ${part.name} ${capped.text}]`);
     } else if (part.type === "image") {
@@ -383,7 +383,7 @@ interface ProjectedContent {
   omissions: string[];
 }
 
-function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknown> | undefined, limits: EpisodicLimits): ProjectedContent | undefined {
+function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknown> | undefined): ProjectedContent | undefined {
   if (entry.type === "message") {
     const message = asRecord(entry.raw.message);
     if (!message) return undefined;
@@ -391,10 +391,10 @@ function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknow
     const content = edit === undefined ? message.content : asRecord(edit.replacement)?.content;
     const omissions: string[] = [];
     if (role === "user") return { kind: "user", text: projectContent(content, omissions), omissions };
-    if (role === "assistant") return { kind: "talk", text: projectAssistantContent(content, omissions, limits), omissions };
+    if (role === "assistant") return { kind: "talk", text: projectAssistantContent(content, omissions), omissions };
     if (role === "toolResult") {
       const name = typeof message.toolName === "string" ? message.toolName : "unknown";
-      const capped = capText(projectContent(content, omissions), limits.capChars, limits.capTailChars);
+      const capped = capText(projectContent(content, omissions), EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS);
       if (capped.capped) omissions.push("capped");
       return { kind: "echo", text: `tool ${name}: ${capped.text}`, omissions };
     }
@@ -411,14 +411,15 @@ function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknow
 
 /**
  * Project every projectable entry of the branch, in branch order, at most one
- * message each. Context edits replace their target's content without
- * renumbering anything; a null replacement makes the message `[omitted]`.
+ * message each, stamped with the physical chapter they were read from. Context
+ * edits replace their target's content without renumbering anything; a null
+ * replacement makes the message `[omitted]`.
  *
  * Credentials are the one shared credential-only rule set
  * (`redactCredentials`), never the process preview's rule set: the memory must
  * keep file paths and ordinary identifiers readable.
  */
-export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits: EpisodicLimits): EpisodicProjectedMessage[] {
+export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits: EpisodicLimits, sourceSessionId: string): EpisodicProjectedMessage[] {
   const edits = new Map<string, Record<string, unknown>>();
   for (const entry of branch) {
     if (entry.type !== "context_edit" || typeof entry.raw.targetId !== "string") continue;
@@ -436,14 +437,14 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
     if (edit !== undefined && (edit.replacement === null || replacement === undefined)) {
       // A null edit only omits an entry that is a message in its own right: a
       // hidden custom message or a state entry never held a slot to begin with.
-      const base = projectEntry(entry, undefined, limits);
+      const base = projectEntry(entry, undefined);
       if (!base) continue;
       kind = base.kind;
       text = EPISODIC_OMITTED_TEXT;
       omissions.push("context-edit");
       omitted = true;
     } else {
-      const content = projectEntry(entry, edit, limits);
+      const content = projectEntry(entry, edit);
       if (!content) continue;
       kind = content.kind;
       omissions.push(...content.omissions);
@@ -462,7 +463,7 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
     if (!omitted) {
       // The recipe sends user and assistant text whole; a memory record must
       // still fit its store's line, so an oversized paste is capped head+tail.
-      const capped = capText(text, limits.recordCapChars, limits.capTailChars);
+      const capped = capText(text, limits.recordCapChars, EPISODIC_CAP_TAIL_CHARS);
       if (capped.capped) omissions.push("capped");
       text = capped.text;
     }
@@ -470,7 +471,7 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
     if (credentials !== text) omissions.push("credentials");
     projected.push({
       entryId: entry.id,
-      ...(entry.sourceSessionId === undefined ? {} : { sourceSessionId: entry.sourceSessionId }),
+      sourceSessionId,
       kind,
       text: credentials,
       timestamp: entry.timestamp,

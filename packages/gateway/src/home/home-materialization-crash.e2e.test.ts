@@ -115,13 +115,14 @@ async function fixture() {
     sessionPresent: async () => true,
     sessionFile: async () => expectedPath,
     hasLiveRuntime: () => false,
+    chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
     hasConversation: async () => manager.getEntries().some(entry => entry.type === "message"),
     serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (_id, commit) => commit(),
     beginHomePublicationReconciliation: () => {},
     retireHomeRuntimes: async () => {},
   };
-  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, memorySummarizer: () => ({ summarizer: async () => "summary" }) });
+  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, memorySummarizer: () => ({ summarizer: async () => "summary" }) });
   await owner.initialize();
   const flushConversation = () => {
     manager.appendThinkingLevelChange("off");

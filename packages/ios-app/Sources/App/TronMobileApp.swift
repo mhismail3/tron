@@ -33,8 +33,6 @@ struct TronMobileApp: App {
         WindowGroup {
             if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
-            } else if ProcessInfo.processInfo.arguments.contains("-tron-home-row-appearance-fixture") {
-                HostedHomeRowAppearanceFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-configuration-fixture") {
                 HostedSessionConfigurationFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-diagnostics-export-fixture") {

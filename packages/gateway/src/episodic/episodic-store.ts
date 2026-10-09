@@ -12,11 +12,10 @@ import {
 import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
 
 /*
- * Departure 4 of the brief: the memory persists under the Tron internal
- * workspace's capability state, `state/episodic/<sourceSessionId>/`, owned and
- * secured the way KnowledgeStore owns `state/knowledge/` (owner-only 0700
- * directory, created lazily, owner-only files, secure bounded reads, no-follow
- * opens with a dev/ino identity check).
+ * The memory persists under the Tron internal workspace's capability state,
+ * `state/episodic/<sourceSessionId>/`, owned and secured the way KnowledgeStore
+ * owns `state/knowledge/` (owner-only 0700 directory, created lazily, owner-only
+ * files, secure bounded reads, no-follow opens with a dev/ino identity check).
  *
  * The catalog and the node log are append-only JSONL, and every record is
  * fsynced before it is used. A trailing partial line is a torn, unacknowledged
@@ -34,7 +33,7 @@ import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
 const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "source-unavailable"]);
 
-export interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
+interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
   lstat: typeof lstat;
   readdir: typeof readdir;
   writeFile: typeof writeFile;
@@ -90,48 +89,16 @@ export class EpisodicStore {
 
   async readState(): Promise<EpisodicStoreState | undefined> {
     const paths = await this.paths();
-    const initialized = await this.featureInitialized();
-    if (!(await directoryExists(paths.root))) {
-      if (initialized && !(await directoryExists(dirname(paths.root)))) {
-        throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
-      }
-      return undefined;
-    }
-    await assertOwnerDirectory(paths.root);
-    const marker = await readSecureJson<unknown>(paths.initialized, 256);
-    if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
-    if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
-      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
-      || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
-      throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
-    }
+    if (!(await this.namespaceExists(paths))) return undefined;
     const stateRead = await readSecureJson<unknown>(paths.state, EPISODIC_STATE_MAX_BYTES);
     return stateRead.present ? validateState(stateRead.value) : undefined;
   }
 
   async read(): Promise<EpisodicStoreSnapshot> {
     const paths = await this.paths();
-    const initialized = await this.featureInitialized();
-    if (!(await directoryExists(paths.root))) {
-      // The feature record describes the shared container, never one session:
-      // reading it per session refused every Home after the first (#483).
-      // Marker first: `ensureRoot` creates the container before it sets the
-      // marker, so a set marker proves the container existed, and a container
-      // created concurrently after a missing-container read cannot look lost.
-      if (initialized && !(await directoryExists(dirname(paths.root)))) {
-        throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
-      }
+    if (!(await this.namespaceExists(paths))) {
       return { present: false, messages: new Map(), nodes: new Map(), state: null, recoveredTornBytes: 0, highestGeneration: 0, highestRevision: 0 };
     }
-    await assertOwnerDirectory(paths.root);
-    const marker = await readSecureJson<unknown>(paths.initialized, 256);
-    if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
-    if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
-      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
-      || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
-      throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
-    }
-
     const stateRead = await readSecureJson<unknown>(paths.state, EPISODIC_STATE_MAX_BYTES);
     let state: EpisodicStoreState | null = null;
     if (stateRead.present) state = validateState(stateRead.value);
@@ -166,17 +133,8 @@ export class EpisodicStore {
     const paths = await this.paths();
     if (!(await directoryExists(paths.root))) return;
     await assertOwnerDirectory(paths.root);
-    const pointer = await readSecureJson<unknown>(paths.checkpointPointer, 4_096);
-    let active: string | null = null;
-    if (pointer.present) {
-      const value = pointer.value as { version?: unknown; directory?: unknown; watermark?: unknown };
-      if (!value || value.version !== 1 || typeof value.directory !== "string" || !/^checkpoint-[A-Za-z0-9.-]+$/u.test(value.directory)
-        || typeof value.watermark !== "number" || !Number.isSafeInteger(value.watermark) || value.watermark < 0) {
-        throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint pointer is malformed");
-      }
-      active = value.directory;
-    }
-    await cleanupCheckpoints(paths, active, this.fileSystem);
+    const pointer = await readCheckpointPointer(paths);
+    await cleanupCheckpoints(paths, pointer?.directory ?? null, this.fileSystem);
   }
 
   async appendCatalog(record: EpisodicMessageRecord): Promise<void> {
@@ -216,7 +174,6 @@ export class EpisodicStore {
       await removeOwnedTree(staging, this.fileSystem);
     }
     await this.fileSystem.mkdir(staging, { mode: 0o700 });
-    let pointerPublished = false;
     try {
       await writeCheckpointLines(join(staging, "catalog.jsonl"), options.messages, this.maxLineBytes, this.fileSystem);
       await writeCheckpointLines(join(staging, "nodes.jsonl"), options.nodes, this.maxLineBytes, this.fileSystem);
@@ -228,14 +185,11 @@ export class EpisodicStore {
       await this.fileSystem.rename(staging, checkpoint);
       await syncDirectory(paths.root, this.fileSystem);
       await durableAtomicWriteJson(paths.checkpointPointer, { version: 1, directory: name, watermark: options.watermark }, 0o600, this.fileSystem);
-      pointerPublished = true;
       await truncateLog(paths.catalog, paths.root, this.fileSystem);
       await truncateLog(paths.nodes, paths.root, this.fileSystem);
       await cleanupCheckpoints(paths, name, this.fileSystem);
     } catch (error) {
-      const failure = new EpisodicMemoryError("invalid-store", `Episodic checkpoint could not be committed: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`) as EpisodicMemoryError & { publicationUncertain: boolean };
-      failure.publicationUncertain = pointerPublished || (typeof error === "object" && error !== null && (error as { publicationVisible?: unknown }).publicationVisible === true);
-      throw failure;
+      throw new EpisodicMemoryError("invalid-store", `Episodic checkpoint could not be committed: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
     }
   }
 
@@ -264,6 +218,34 @@ export class EpisodicStore {
     catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record is invalid"); }
   }
 
+  /** Whether this session's namespace exists. An existing namespace must be an
+   * owner-only directory with this format's initialization record. A namespace
+   * that is missing after the shared container was initialized is lost state,
+   * not a new session. */
+  private async namespaceExists(paths: StorePaths): Promise<boolean> {
+    const initialized = await this.featureInitialized();
+    if (!(await directoryExists(paths.root))) {
+      // The feature record describes the shared container, never one session:
+      // reading it per session refused every Home after the first (#483).
+      // Marker first: `ensureRoot` creates the container before it sets the
+      // marker, so a set marker proves the container existed, and a container
+      // created concurrently after a missing-container read cannot look lost.
+      if (initialized && !(await directoryExists(dirname(paths.root)))) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
+      }
+      return false;
+    }
+    await assertOwnerDirectory(paths.root);
+    const marker = await readSecureJson<unknown>(paths.initialized, 256);
+    if (!marker.present) throw new EpisodicMemoryError("invalid-store", "Episodic memory directory exists without initialization evidence");
+    if (!marker.value || typeof marker.value !== "object" || Array.isArray(marker.value)
+      || !hasOnlyKeys(marker.value as Record<string, unknown>, ["version"])
+      || (marker.value as { version?: unknown }).version !== EPISODIC_STORE_VERSION) {
+      throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record has an unknown version");
+    }
+    return true;
+  }
+
   private async ensureRoot(): Promise<StorePaths> {
     await this.featureInitialized();
     const paths = await this.paths();
@@ -288,16 +270,24 @@ export class EpisodicStore {
   }
 }
 
-async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<{ messages: Map<number, EpisodicMessageRecord>; nodes: Map<string, EpisodicNodeRecord>; watermark: number; directory: string | null }> {
+/** The published checkpoint, when one exists: the directory of its immutable files
+ * and the watermark those files cover. */
+async function readCheckpointPointer(paths: StorePaths): Promise<{ directory: string; watermark: number } | undefined> {
   const pointer = await readSecureJson<unknown>(paths.checkpointPointer, 4_096);
-  if (!pointer.present) return { messages: new Map(), nodes: new Map(), watermark: 0, directory: null };
+  if (!pointer.present) return undefined;
   const value = pointer.value as { version?: unknown; directory?: unknown; watermark?: unknown };
   if (!value || value.version !== 1 || typeof value.directory !== "string" || !/^checkpoint-[A-Za-z0-9.-]+$/u.test(value.directory)
     || typeof value.watermark !== "number" || !Number.isSafeInteger(value.watermark) || value.watermark < 0) {
     throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint pointer is malformed");
   }
-  const watermark = value.watermark as number;
-  const directory = join(paths.root, value.directory);
+  return { directory: value.directory, watermark: value.watermark };
+}
+
+async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<{ messages: Map<number, EpisodicMessageRecord>; nodes: Map<string, EpisodicNodeRecord>; watermark: number }> {
+  const pointer = await readCheckpointPointer(paths);
+  if (!pointer) return { messages: new Map(), nodes: new Map(), watermark: 0 };
+  const { watermark } = pointer;
+  const directory = join(paths.root, pointer.directory);
   await assertOwnerDirectory(directory);
   const checkpointState = await readSecureJson<unknown>(join(directory, "state.json"), EPISODIC_STATE_MAX_BYTES);
   if (!checkpointState.present) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint state is missing");
@@ -320,7 +310,7 @@ async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<
     if (record.revision > watermark || nodes.has(address)) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint nodes are inconsistent with their watermark");
     nodes.set(address, record);
   }, true);
-  return { messages, nodes, watermark, directory: value.directory };
+  return { messages, nodes, watermark };
 }
 
 async function writeCheckpointLines<T>(path: string, records: Iterable<T>, maxLineBytes: number, fileSystem: EpisodicStoreFileSystem): Promise<void> {
@@ -453,9 +443,6 @@ function validateState(value: unknown): EpisodicStoreState {
     generation: state.generation,
     cursor: cursor ? { ...cursor } : null,
     blocked: blocked ? { ...blocked } : null,
-    // A state written before spend was recorded reads as zero spend: the tokens
-    // already spent are unknown, and inventing a number would be worse than
-    // starting the ceiling again from a known point.
     spend,
   };
 }

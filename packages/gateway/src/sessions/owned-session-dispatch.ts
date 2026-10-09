@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import type { HomeTaskReportOwner } from "../home/home-task-report.js";
@@ -11,37 +10,12 @@ type OperationHandle<T> = {
   operationId: string;
   completion: Promise<T>;
   cancel: (reason?: string) => Promise<void>;
-  acknowledgeTerminal?: () => Promise<void>;
 };
-
-export type OwnedOperationDeadlineDiagnostic = {
-  event: "owned-operation.deadline-stop";
-  level: "warning";
-  operationHash: string;
-  elapsedMs: number;
-  cancelAndJoin: "joined" | "failed";
-};
-
-export interface OwnedSessionDispatchOptions {
-  diagnostic?: (record: OwnedOperationDeadlineDiagnostic) => void;
-}
-
-function opaqueHash(value: string): string {
-  return createHash("sha256").update(value).digest("hex").slice(0, 16);
-}
 
 /** The shared owned-session boundary: session lease, exact operation evidence,
  * and settlement acknowledgement remain with RuntimeRegistry / RuntimeSlot. */
 export class OwnedSessionDispatch {
-  private readonly now: () => number;
-
-  constructor(
-    private readonly sessions: RuntimeRegistry,
-    private readonly options: OwnedSessionDispatchOptions = {},
-    now: () => number = Date.now,
-  ) {
-    this.now = now;
-  }
+  constructor(private readonly sessions: RuntimeRegistry) {}
 
   async createWorker(cwd: string, report: HomeTaskReportOwner): Promise<OwnedLease> {
     const slot = await this.sessions.create(cwd, "ordinary", report);
@@ -70,13 +44,15 @@ export class OwnedSessionDispatch {
   }
 
   /** Apply only to the opted-in task operation. The deadline is intentionally
-   * not configurable in production; tests advance the timer by the fixed value. */
+   * not configurable in production; tests advance the timer by the fixed value.
+   * `elapsedMs` is the wall time from arming to the stop's join or failure, so the
+   * caller reports the stop with the outcome it already holds. */
   async enforceDeadline<T>(handle: OperationHandle<T>): Promise<
     | { state: "terminal"; terminal: T }
-    | { state: "deadline-stopped"; terminal: T }
-    | { state: "deadline-stop-failed" }
+    | { state: "deadline-stopped"; terminal: T; elapsedMs: number }
+    | { state: "deadline-stop-failed"; elapsedMs: number }
   > {
-    const startedAt = this.now();
+    const startedAt = Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<"deadline">((resolve) => {
       timer = setTimeout(() => resolve("deadline"), OWNED_OPERATION_DEADLINE_MS);
@@ -87,26 +63,15 @@ export class OwnedSessionDispatch {
         deadline,
       ]);
       if (first !== "deadline") return { state: "terminal", terminal: first.terminal };
-      let joined = false;
       try {
         await handle.cancel("deadline");
         const terminal = await handle.completion;
-        await handle.acknowledgeTerminal?.();
-        joined = true;
-        return { state: "deadline-stopped", terminal };
+        return { state: "deadline-stopped", terminal, elapsedMs: Math.max(0, Date.now() - startedAt) };
       } catch {
-        return { state: "deadline-stop-failed" };
-      } finally {
-        this.options.diagnostic?.({
-          event: "owned-operation.deadline-stop", level: "warning",
-          operationHash: opaqueHash(handle.operationId),
-          elapsedMs: Math.max(0, this.now() - startedAt),
-          cancelAndJoin: joined ? "joined" : "failed",
-        });
+        return { state: "deadline-stop-failed", elapsedMs: Math.max(0, Date.now() - startedAt) };
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);
-
     }
   }
 }

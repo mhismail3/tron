@@ -16,7 +16,7 @@ export interface EpisodicViewPart {
 
 /** Byte size of one part and whether its node is built; an unbuilt part counts
  * the placeholder the view would render (gist §5.2 `fit`). */
-export type EpisodicViewBytes = (part: EpisodicViewPart) => { built: boolean; bytes: number };
+type EpisodicViewBytes = (part: EpisodicViewPart) => { built: boolean; bytes: number };
 
 /** A node level above this cannot be addressed by one base-36 code. No real
  * session reaches it: level 31 covers 2^31 messages. */
@@ -25,14 +25,6 @@ export const EPISODIC_MAX_LEVEL = 31;
 export function nodeAddress(level: number, index: number): string {
   const span = 2 ** level;
   return `${index * span}+${span}`;
-}
-
-export function nodeStart(level: number, index: number): number {
-  return index * 2 ** level;
-}
-
-export function nodeSpan(level: number): number {
-  return 2 ** level;
 }
 
 /** Parse `start+n`; the level is `log2(n)` and the index `start/n`. */
@@ -151,7 +143,7 @@ export function placeholderBytes(): number {
   return utf8Bytes(EPISODIC_PLACEHOLDER);
 }
 
-export function viewBytes(parts: readonly EpisodicViewPart[], bytesOf: EpisodicViewBytes): number {
+function viewBytes(parts: readonly EpisodicViewPart[], bytesOf: EpisodicViewBytes): number {
   let total = 0;
   for (const part of parts) total += bytesOf(part).bytes;
   return total;
@@ -165,7 +157,7 @@ export function viewBytes(parts: readonly EpisodicViewPart[], bytesOf: EpisodicV
  * merged view now has, so a caller that appends or merges can keep it running
  * instead of re-summing the whole view.
  */
-export function fitView(
+function fitView(
   parts: EpisodicViewPart[],
   count: number,
   viewBudget: number,
@@ -194,7 +186,7 @@ export function fitView(
 }
 
 /** Where a rebalance fits the view down to: an eighth of the budget below it. */
-export function viewLowWater(viewBudget: number): number {
+function viewLowWater(viewBudget: number): number {
   return viewBudget - Math.floor(viewBudget / 8);
 }
 
@@ -217,35 +209,18 @@ export function rebalanceView(
   return total <= viewBudget ? total : fitView(parts, count, viewLowWater(viewBudget), bytesOf, isBuilt, total);
 }
 
-/** Fold the view again from message 0 (gist §5.2 "At load"): append each
- * message's part, then rebalance, exactly as the live view does. */
-export function foldView(count: number, viewBudget: number, bytesOf: EpisodicViewBytes, isBuilt: (address: string) => boolean): EpisodicViewPart[] {
-  const parts: EpisodicViewPart[] = [];
-  let total = 0;
-  for (let index = 0; index < count; index += 1) {
-    const part: EpisodicViewPart = { level: 0, index, start: index, span: 1 };
-    parts.push(part);
-    total += bytesOf(part).bytes;
-    total = rebalanceView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
-  }
-  return parts;
-}
+/** A bounded synchronous stretch of the fold, not a deadline. */
+const EPISODIC_FOLD_SLICE_MESSAGES = 2_000;
 
-/** How many messages one fold slice covers before the fold hands the loop back.
- * A slice is a bounded synchronous stretch, not a deadline. */
-export const EPISODIC_FOLD_SLICE_MESSAGES = 2_000;
-
-/**
- * The same fold, sliced: it yields to the event loop every
- * `EPISODIC_FOLD_SLICE_MESSAGES` messages so opening a long memory never blocks
- * an in-flight request for the whole fold.
- */
+/** The fold of the view from message 0 (gist §5.2 "At load"): append each
+ * message's part, then rebalance, exactly as the live view does. It yields to the
+ * event loop every `EPISODIC_FOLD_SLICE_MESSAGES` messages, so opening a long
+ * memory never blocks an in-flight request for the whole fold. */
 export async function foldViewSliced(
   count: number,
   viewBudget: number,
   bytesOf: EpisodicViewBytes,
   isBuilt: (address: string) => boolean,
-  sliceMessages = EPISODIC_FOLD_SLICE_MESSAGES,
 ): Promise<EpisodicViewPart[]> {
   const parts: EpisodicViewPart[] = [];
   let total = 0;
@@ -254,12 +229,12 @@ export async function foldViewSliced(
     parts.push(part);
     total += bytesOf(part).bytes;
     total = rebalanceView(parts, index + 1, viewBudget, bytesOf, isBuilt, total);
-    if (sliceMessages > 0 && (index + 1) % sliceMessages === 0) await yieldToEventLoop();
+    if ((index + 1) % EPISODIC_FOLD_SLICE_MESSAGES === 0) await yieldToEventLoop();
   }
   return parts;
 }
 
-export interface EpisodicViewContext {
+interface EpisodicViewContext {
   /** One line per part, newlines flattened: the view is one line per part, so a
    * multi-line summary must not become several lines in the prompt. */
   lines: string[];

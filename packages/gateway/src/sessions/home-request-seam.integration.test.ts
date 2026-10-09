@@ -26,8 +26,7 @@
  * Every case writes a row into `test-results/home-activation/seam-report.json`
  * and prints a one-line summary.
  *
- * Failure modes these cases exist for (written down before the code, in
- * progress.md): F1 a prior activation leaks into a request, F2 the memory view is
+ * Failure modes these cases exist for: F1 a prior activation leaks into a request, F2 the memory view is
  * persisted, F3 the cut is taken at the last user message and loses the tool
  * loop, F4 a queued follow-up is dropped or split off, F5 an SDK retry re-expands
  * the request, F6 SDK compaction re-sends canonical history, F7 a policy refusal
@@ -55,7 +54,7 @@ import type { SessionSnapshot } from "../protocol/types.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import type { HomeRecord } from "../home/home-owner.js";
-import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason } from "../home/home-request-policy.js";
+import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../home/home-request-policy.js";
 import * as tronModules from "../extensions/tron-modules.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
@@ -185,6 +184,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   await trust.set(cwd, true);
   const diagnostics: CapturedDiagnostic[] = [];
   const snapshots: SessionSnapshot[] = [];
+  const requestRecords: HomeRequestRecord[] = [];
   const registry = new RuntimeRegistry({
     agentDir,
     tronHome,
@@ -197,6 +197,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
     compactionDiagnostic: (diagnostic) => diagnostics.push(diagnostic as unknown as CapturedDiagnostic),
+    homeRequestDiagnostic: (record) => { requestRecords.push(record); },
     // The compactor model is resolved the way Knowledge resolves its own: from
     // the Gateway's ModelRuntime. These cases inject a deterministic summarizer
     // so no provider call is ever made for the memory.
@@ -225,6 +226,8 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     root, agentDir, cwd, tronHome, registry, slot, session, faux, requests, snapshots, diagnostics, compactor,
     homeSessionId,
     policy: () => homeSessionId === undefined ? undefined : registry.homeOwner().requestPolicyFor(homeSessionId),
+    /** The refusals the seam reported through this registry, oldest first. */
+    refusals: () => requestRecords.flatMap(record => record.event === "refused" ? [record] : []),
     memoryStatus: async () => await registry.homeOwner().memoryStatus(),
     response,
     /** One more session in this registry, in its own directory under the
@@ -264,6 +267,12 @@ afterAll(async () => {
   await writeFile(join(process.cwd(), REPORT_PATH), `${JSON.stringify({ generatedAt: new Date().toISOString(), cases }, null, 2)}\n`);
   process.stdout.write(`home-activation seam: ${cases.length} cases -> ${REPORT_PATH}\n`);
 });
+
+/** Whether the Home's activation is open, as `home.context` reports it. */
+function activationOpen(registry: RuntimeRegistry): boolean {
+  const context = registry.homeOwner().contextStatus();
+  return context.available && context.activationOpen;
+}
 
 async function open(label: string, options: FixtureOptions = {}) {
   const item = await homeFixture(label, options);
@@ -624,7 +633,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       await item.slot.prompt(text, [image]);
       await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
       const requests = item.requests.slice(before);
-      item.record("C21", { autoResize: false, blocked, requests, refusals: item.policy()!.refusalLog() });
+      item.record("C21", { autoResize: false, blocked, requests, refusals: item.refusals() });
       expect(requests).toHaveLength(1);
       const messages = JSON.parse(requests[0]!.blob) as Array<{ role: string; content: unknown }>;
       const input = messages.find((message) => message.role === "user" && JSON.stringify(message.content).includes(text));
@@ -662,7 +671,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     } catch (error) {
       outcome = error instanceof Error ? error.message : String(error);
     }
-    const row = { outcome, refusal: policy.refusalLog().at(-1)?.reason, innerCalls };
+    const row = { outcome, refusal: item.refusals().at(-1)?.reason, innerCalls };
     item.record("C22", row);
     expect(row.refusal).toBe("stream-digest");
     expect(row.innerCalls).toBe(0);
@@ -749,7 +758,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     ]);
     await item.slot.prompt(longInput("C2 second activation input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    const transformObservations = item.policy()?.transformLog() ?? [];
+    const transformIdentities = item.policy()?.recentTransformIdentities() ?? [];
     const activationRequest = item.requests[1]!;
     const toolStepRequest = item.requests[2]!;
     const jsonl = await item.jsonl();
@@ -769,7 +778,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       viewAbsentFromJsonl: !jsonl.includes(HOME_MEMORY_VIEW_MARKER) && !jsonl.includes(SUMMARY_MARKER),
       canonicalEntryCount: entries.length,
       memory: { configured: memoryStatus.configured, open: memoryStatus.open, messages: memoryStatus.episodic?.messages ?? 0, blocked: memoryStatus.blocked ?? null },
-      transformObservations,
+      transformIdentities,
     };
     item.record("C2", row);
     expect(row.activationExcludesPriorText).toBe(true);
@@ -784,8 +793,8 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     // The SDK's context stage clones every message, so the fidelity check's
     // identity comparison is a fallback in practice: the header says so, and this
     // is where the claim is observed rather than inferred.
-    expect(transformObservations.length).toBeGreaterThan(0);
-    expect(transformObservations.every((observation) => observation.identity === false)).toBe(true);
+    expect(transformIdentities.length).toBeGreaterThan(0);
+    expect(transformIdentities.every((identity) => identity === false)).toBe(true);
     // The memory covers the whole first activation by the time the second one runs.
     expect(row.memory.messages).toBeGreaterThanOrEqual(2);
   }, 30_000);
@@ -878,7 +887,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       earlierToolExchangePresent: finalRequest.roles.includes("toolResult") && finalRequest.blob.includes("\"toolCall\""),
       activationInputStillPresent: finalRequest.blob.includes("C3 second activation input"),
       previousActivationExcluded: !finalRequest.blob.includes("C3 first activation input"),
-      refusals: item.policy()?.refusalLog().map((entry) => `${entry.reason}: ${entry.detail}`) ?? [],
+      refusals: item.refusals().map((entry) => `${entry.reason}: ${entry.detail}`) ?? [],
     };
     item.record("C3", row);
     expect(row.steeringIncluded).toBe(true);
@@ -951,8 +960,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     release();
     await prompting;
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    const policy = item.policy()!;
-    const openAfterFollowUp = policy.currentOperationId() ?? null;
+    const activationOpenAfterFollowUp = activationOpen(item.registry);
     const idleAfterFollowUp = item.slot.snapshot().phase === "idle";
     const callsBefore = item.faux.state.callCount;
     // The un-admitted run: the SDK path an extension uses, never Tron's admission.
@@ -962,16 +970,16 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     ).catch(() => undefined);
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = {
-      openActivationAfterFollowUp: openAfterFollowUp,
+      activationOpenAfterFollowUp,
       idleAfterFollowUp,
       providerRequestsAfterUnadmittedTurn: item.faux.state.callCount - callsBefore,
-      refusalReasons: policy.refusalLog().map((entry) => entry.reason),
-      lastRefusal: policy.refusalLog().at(-1)?.reason ?? null,
+      refusalReasons: item.refusals().map((entry) => entry.reason),
+      lastRefusal: item.refusals().at(-1)?.reason ?? null,
       slotPhase: item.slot.snapshot().phase,
     };
     item.record("C14", row);
     expect(row.idleAfterFollowUp).toBe(true);
-    expect(row.openActivationAfterFollowUp).toBeNull();
+    expect(row.activationOpenAfterFollowUp).toBe(false);
     expect(row.providerRequestsAfterUnadmittedTurn).toBe(0);
     expect(row.lastRefusal).toBe("no-activation");
   }, 30_000);
@@ -1043,7 +1051,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       rejectionIsPolicyError: outcome.message.includes("Home request refused"),
       canonicalRoles: messages.map((message) => message.role),
       canonicalErrorEntry: errorEntry ? { role: errorEntry.role, stopReason: errorEntry.stopReason, errorMessage: errorEntry.errorMessage } : null,
-      policyRefusals: item.policy()?.refusalLog().map((entry) => entry.reason) ?? [],
+      policyRefusals: item.refusals().map((entry) => entry.reason) ?? [],
       memoryBlocked: memoryStatus.blocked ?? null,
       slotPhase: item.slot.snapshot().phase,
       slotOperation: item.slot.snapshot().operation?.id ?? null,
@@ -1071,8 +1079,8 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = {
       providerRequests: item.faux.state.callCount,
-      refusalReason: item.policy()?.refusalLog().at(-1)?.reason ?? null,
-      refusalDetail: item.policy()?.refusalLog().at(-1)?.detail ?? null,
+      refusalReason: item.refusals().at(-1)?.reason ?? null,
+      refusalDetail: item.refusals().at(-1)?.detail ?? null,
       canonicalErrorMessages: (await item.entries())
         .filter((entry) => (entry as { type?: string }).type === "message")
         .map((entry) => (entry as { message?: { stopReason?: string; errorMessage?: string } }).message?.errorMessage)
@@ -1131,9 +1139,9 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const row = {
       guardOutcome,
       guardInnerStreamCalls: innerStreamCalls,
-      guardRefusal: policy.refusalLog().at(-1)?.reason ?? null,
+      guardRefusal: guarded.refusals().at(-1)?.reason ?? null,
       wrapperOutcome,
-      wrapperRefusal: unconfiguredPolicy.refusalLog().at(-1)?.reason ?? null,
+      wrapperRefusal: unconfigured.refusals().at(-1)?.reason ?? null,
       providerRequests: guarded.faux.state.callCount + unconfigured.faux.state.callCount,
     };
     guarded.record("C8", row);
@@ -1160,7 +1168,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const messages = entries.filter((entry) => (entry as { type?: string }).type === "message").map((entry) => (entry as { message?: Record<string, unknown> }).message!);
     const row = {
       providerRequestsAfterTrigger: item.faux.state.callCount - callsBefore,
-      policyRefusals: item.policy()?.refusalLog().map((entry) => entry.reason) ?? [],
+      policyRefusals: item.refusals().map((entry) => entry.reason) ?? [],
       canonicalRoles: messages.map((message) => message.role),
       errorEntry: messages.findLast((message) => message.stopReason === "error")?.errorMessage ?? null,
       slotPhase: item.slot.snapshot().phase,
@@ -1202,8 +1210,8 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const row = {
       providerRequests: item.faux.state.callCount,
       outcome,
-      policyRefusals: item.policy()?.refusalLog().map((entry) => entry.reason) ?? [],
-      lastRefusalDetail: item.policy()?.refusalLog().at(-1)?.detail ?? null,
+      policyRefusals: item.refusals().map((entry) => entry.reason) ?? [],
+      lastRefusalDetail: item.refusals().at(-1)?.detail ?? null,
     };
     item.record("C12", row);
     expect(row.providerRequests).toBe(0);
@@ -1247,7 +1255,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.faux.setResponses([item.response("must not reach provider")]);
     await item.slot.prompt("C16 input");
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    const row = { contextCalls, providerCalls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
+    const row = { contextCalls, providerCalls: item.faux.state.callCount, refusal: item.refusals().at(-1)?.reason };
     item.record("C16", row);
     expect(contextCalls).toBe(1);
     expect(row.refusal).toBe("context-mutated");
@@ -1283,7 +1291,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     }]);
     await item.slot.prompt("C17 input");
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    const row = { contextCalls, replay: await replay, calls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
+    const row = { contextCalls, replay: await replay, calls: item.faux.state.callCount, refusal: item.refusals().at(-1)?.reason };
     item.record("C17", row);
     expect(contextCalls).toBe(1);
     expect(row.refusal).toBe("stream-replayed");
@@ -1367,7 +1375,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const second = item.slot.prompt(longInput("C18 second activation input"));
     // The activation is admitted, and Pi is running it, but no request may be
     // sent while the lines it would carry are unbuilt.
-    await waitUntil(() => item.policy()?.currentOperationId() !== undefined);
+    await waitUntil(() => activationOpen(item.registry));
     await waitUntil(async () => ((await item.memoryStatus()).episodic?.coverage.summarized ?? 0) === 0);
     const requestsWhileWaiting = item.requests.length;
     item.compactor.release?.();
@@ -1411,7 +1419,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     ).then(() => "accepted", (error: unknown) => `refused: ${error instanceof Error ? error.message : String(error)}`);
     const row = {
       outcome,
-      refusalReason: policy.refusalLog().at(-1)?.reason ?? null,
+      refusalReason: item.refusals().at(-1)?.reason ?? null,
       enteredDuringRefusal: item.compactor.entered - enteredBefore,
     };
     policy.settle("c19");
@@ -1522,7 +1530,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       homeCompactionPolicyBudgets: item.slot.snapshot().compactionPolicy?.currentBudgets?.enabled ?? null,
       ordinaryCompactionPolicyBudgets: ordinary.slot.snapshot().compactionPolicy?.currentBudgets?.enabled ?? null,
       homeCompactionDiagnostics: item.diagnostics.filter((diagnostic) => diagnostic.sessionId === item.slot.id).length,
-      homePolicyRefusals: item.policy()?.refusalLog().map((entry) => entry.reason) ?? [],
+      homePolicyRefusals: item.refusals().map((entry) => entry.reason) ?? [],
     };
     item.record("C10", row);
     expect(row.homeCompactions).toBe(0);
@@ -1553,7 +1561,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       providerRequests: item.faux.state.callCount - callsBefore,
       compactionEntries: entries.filter((entry) => (entry as { type?: string }).type === "compaction").length,
       compactionDiagnostics: item.diagnostics.length,
-      policyRefusals: item.policy()?.refusalLog().map((entry) => entry.reason) as HomeRefusalReason[] | undefined ?? [],
+      policyRefusals: item.refusals().map((entry) => entry.reason) as HomeRefusalReason[] | undefined ?? [],
       slotPhase: item.slot.snapshot().phase,
       operation: item.slot.snapshot().operation?.kind ?? null,
     };

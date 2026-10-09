@@ -7,6 +7,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { WakeInboxOwner } from "./home-wake-inbox.js";
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
+import { issueGrant } from "../../test-support/home-task-grant.js";
 
 // Counts the task-directory files the store reads. The wrapper is transparent;
 // only the cost cases below switch the counter on.
@@ -99,26 +100,10 @@ async function bytes(directory: string): Promise<Record<string, string>> {
   return result;
 }
 
-async function listed(store: HomeTaskStore): Promise<HomeTaskRecord[]> {
-  const records: HomeTaskRecord[] = [];
-  await store.list(record => { records.push(record); });
-  return records;
-}
-
 async function collectRecords(store: HomeTaskStore): Promise<HomeTaskRecord[]> {
   const records: HomeTaskRecord[] = [];
   for await (const record of store.records()) records.push(record);
   return records;
-}
-
-async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
-  request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
-  input: { decisionId: string; approved?: boolean; expiresAt: number }) {
-  const { authorizationRequestId, HomeTaskAuthorizationError } = await import("./home-task-authorization.js");
-  let requestId = authorizationRequestId(request);
-  await owner.authorize(request).catch(error => { if (error instanceof HomeTaskAuthorizationError && error.requestId) requestId = error.requestId; });
-  const result = await owner.recordDecisionAndGrant(requestId, { ...input, approved: input.approved ?? true, restoreEpoch: request.restoreEpoch });
-  return result.grant!;
 }
 
 describe("HomeTaskStore durable namespace", () => {
@@ -180,7 +165,7 @@ describe("HomeTaskStore durable namespace", () => {
     await f.store.put(task(), null);
     expect((await lstat(f.directory)).mode & 0o777).toBe(0o700);
     for (const path of [f.marker, f.authPath, await f.taskPath()]) expect((await lstat(path)).mode & 0o777).toBe(0o600);
-    expect(await listed(f.store)).toMatchObject([task()]);
+    expect(await collectRecords(f.store)).toMatchObject([task()]);
     const before = await bytes(f.directory);
     await f.store.initialize();
     expect(await bytes(f.directory)).toEqual(before);
@@ -195,7 +180,7 @@ describe("HomeTaskStore durable namespace", () => {
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
     const restarted = new HomeTaskStore(f.root, f.workspace);
-    expect(await listed(restarted)).toMatchObject([next]);
+    expect(await collectRecords(restarted)).toMatchObject([next]);
     const before = await readFile(await f.taskPath(), "utf8");
     const changedIntent = { revision: 2, text: "Changed intent" };
     await expect(restarted.put({ ...next, revision: 3, intent: changedIntent,
@@ -209,6 +194,8 @@ describe("HomeTaskStore durable namespace", () => {
     await f.store.initialize();
     const owner = authorization(f.store);
     const scope = await owner.enableInitialScope("epoch-1");
+    // Only reconfirmation renews a standing scope: a second initial scope is refused by the store, never swapped in.
+    await expect(owner.enableInitialScope("epoch-2")).rejects.toMatchObject({ code: "invalid-record" });
     const restarted = new HomeTaskStore(f.root, f.workspace);
     await expect(authorization(restarted).authorize(request)).resolves.toEqual({ kind: "standing-scope", scopeId: scope.id });
     await expect(authorization(restarted).authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
@@ -238,7 +225,7 @@ describe("HomeTaskStore durable namespace", () => {
     await expect(f.store.put({ ...task(), scopeRef: "missing-scope" }, null)).rejects.toMatchObject({ code: "invalid-record" });
     await expect(f.store.put({ ...task(), grantRef: "missing-grant" }, null)).rejects.toMatchObject({ code: "invalid-record" });
     await f.store.put({ ...task(), scopeRef: "scope-1" }, null);
-    expect((await listed(f.store))[0].scopeRef).toBe("scope-1");
+    expect((await collectRecords(f.store))[0].scopeRef).toBe("scope-1");
   });
 
   it("fills initially null task authority once without allowing a later reference swap", async () => {
@@ -270,6 +257,14 @@ describe("HomeTaskStore durable namespace", () => {
     expect(await bytes(f.directory)).toEqual(before);
   });
 
+  it("refuses a wake state the inbox no longer writes, so no record can carry it", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const terminal = terminalTask("task-terminal");
+    await expect(f.store.put({ ...terminal, wake: { ...terminal.wake!, state: "cancelled-before-admission" as never } }, null))
+      .rejects.toMatchObject({ code: "invalid-record" });
+    expect(await f.store.read("task-terminal")).toBeUndefined();
+  });
+
   const corruptions = [
     ["unknown-version", (value: Record<string, unknown>) => ({ ...value, version: 99 })],
     ["unknown-key", (value: Record<string, unknown>) => ({ ...value, surprise: true })],
@@ -289,7 +284,7 @@ describe("HomeTaskStore durable namespace", () => {
           await writeFile(path, typeof value === "string" ? value : JSON.stringify(value), { mode: 0o600 });
         } else await chmod(path, 0o644);
         const before = await readFile(path, "utf8");
-        await expect(listed(f.store)).rejects.toBeDefined();
+        await expect(collectRecords(f.store)).rejects.toBeDefined();
         await expect(f.store.initialize()).rejects.toBeDefined();
         await expect(f.store.put({ ...task(), revision: 2 }, 1)).rejects.toBeDefined();
         expect(await readFile(path, "utf8")).toBe(before);
@@ -320,18 +315,18 @@ describe("HomeTaskStore durable namespace", () => {
     await rename(taskPath, target);
     await symlink(target, taskPath);
     const before = await readFile(target, "utf8");
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "unsafe-state" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "unsafe-state" });
     expect(await readFile(target, "utf8")).toBe(before);
     await rm(taskPath);
     await rename(target, taskPath);
     const unknown = join(f.directory, "unexpected.json");
     await writeFile(unknown, "{}", { mode: 0o600 });
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await rm(unknown);
     const saved = join(f.root, "saved-tasks");
     await rename(f.directory, saved);
     await symlink(saved, f.directory);
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "unsafe-state" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "unsafe-state" });
     expect(await readFile(join(saved, basename(taskPath)), "utf8")).toBe(before);
   });
 
@@ -341,9 +336,9 @@ describe("HomeTaskStore durable namespace", () => {
     await f.store.put(task(), null);
     const before = await readFile(await f.taskPath(), "utf8");
     await writeFile(await f.taskPath(), JSON.stringify({ ...task(), taskId: "different-id" }));
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await writeFile(await f.taskPath(), JSON.stringify({ ...task(), intentDigest: "0".repeat(64) }));
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await writeFile(await f.taskPath(), before);
     await issueGrant(authorization(f.store), request, { decisionId: "decision-1", expiresAt: 2_000 });
     const valid = JSON.parse(await readFile(f.authPath, "utf8"));
@@ -354,7 +349,7 @@ describe("HomeTaskStore durable namespace", () => {
     ]) {
       const raw = JSON.stringify(broken);
       await writeFile(f.authPath, raw);
-      await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+      await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
       expect(await readFile(f.authPath, "utf8")).toBe(raw);
     }
   });
@@ -363,9 +358,9 @@ describe("HomeTaskStore durable namespace", () => {
     const f = await fixture();
     await f.store.initialize();
     for (let index = 1; index <= 3; index++) await f.store.put({ ...task(), taskId: `task-${index}` }, null);
-    expect((await listed(f.store)).map(record => record.taskId).sort()).toEqual(["task-1", "task-2", "task-3"]);
+    expect((await collectRecords(f.store)).map(record => record.taskId).sort()).toEqual(["task-1", "task-2", "task-3"]);
     await writeFile(join(f.directory, (await readdir(f.directory)).find(name => name.endsWith("-task-3.json"))!), "{}", { mode: 0o600 });
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
   });
 
   it("fences uncertainty from the setup marker at the same publication owner", async () => {
@@ -398,7 +393,7 @@ describe("HomeTaskStore durable namespace", () => {
     } });
     await expect(uncertain.put({ ...task(), revision: 2 }, 1)).rejects.toMatchObject({ code: "publication-uncertain" });
     await expect(uncertain.put({ ...task(), revision: 3 }, 2)).rejects.toMatchObject({ code: "publication-uncertain" });
-    expect((await listed(new HomeTaskStore(f.root, f.workspace)))[0].revision).toBe(2);
+    expect((await collectRecords(new HomeTaskStore(f.root, f.workspace)))[0].revision).toBe(2);
   });
 });
 
@@ -448,7 +443,6 @@ describe("Home task recency pages", () => {
     };
     // A single pass visits every entry; two passes (validation plus enumeration) is the ceiling.
     for (const [name, operation] of [
-      ["list", () => listed(f.store)],
       ["records", () => collectRecords(f.store)],
       ["page", () => f.store.page({ limit: 50 })],
       ["read", () => f.store.read("bulk-150")],
@@ -477,7 +471,7 @@ describe("Home task recency pages", () => {
     await writeFile(join(f.directory, `${String(createdAt).padStart(13, "0")}-task-1.json`), JSON.stringify(second, null, 2), { mode: 0o600 });
     await expect(f.store.read("task-1")).rejects.toMatchObject({ code: "invalid-record" });
     await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await expect(f.store.put({ ...record, revision: 2 }, 1)).rejects.toMatchObject({ code: "invalid-record" });
   });
@@ -492,7 +486,7 @@ describe("Home task recency pages", () => {
     await writeFile(duplicate, original, { mode: 0o600 });
     await expect(f.store.read("task-1")).rejects.toMatchObject({ code: "invalid-record" });
     await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
-    await expect(listed(f.store)).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await expect(collectRecords(f.store)).rejects.toMatchObject({ code: "invalid-record" });
     await rm(duplicate); const oldPath = join(f.directory, "task-1.json"); await rename(join(f.directory, name), oldPath);
     await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
@@ -512,7 +506,7 @@ describe("HomeTaskStore staged publications", () => {
     const authorizationTemporary = join(f.directory, leftover("authorization.json"));
     await writeFile(taskTemporary, "{\"partial\":", { mode: 0o600 });
     await writeFile(authorizationTemporary, "{", { mode: 0o600 });
-    expect((await listed(f.store)).map(row => row.taskId)).toEqual(["task-1"]);
+    expect((await collectRecords(f.store)).map(row => row.taskId)).toEqual(["task-1"]);
     expect((await f.store.page({})).items.map(row => row.taskId)).toEqual(["task-1"]);
     expect(await f.store.read("task-1")).toMatchObject({ taskId: "task-1" });
     const streamed: string[] = [];
@@ -522,7 +516,7 @@ describe("HomeTaskStore staged publications", () => {
     expect(await readFile(taskTemporary, "utf8")).toBe("{\"partial\":");
     await f.store.removeAbandonedTemporaries();
     expect((await readdir(f.directory)).filter(name => name.endsWith(".tmp"))).toEqual([]);
-    expect((await listed(f.store)).map(row => row.taskId).sort()).toEqual(["task-1", "task-3"]);
+    expect((await collectRecords(f.store)).map(row => row.taskId).sort()).toEqual(["task-1", "task-3"]);
   });
 
   it("refuses recovery for a staged name that is not this user's regular file, and removes nothing", async () => {

@@ -26,6 +26,11 @@ export const HOME_OPERATING_CONTEXT = [
   "Compaction is disabled for Home, so this conversation's history stays canonical and grows as it is used.",
 ].join("\n");
 
+export type HomeTaskToolRequest = { action: "status"; taskId: string }
+  | { action: "report"; taskId: string; offset: number; limit: number }
+  | ({ action: "steer"; text: string } & import("./home-task-dispatcher.js").HomeTaskControlRequest)
+  | ({ action: "stop" } & import("./home-task-dispatcher.js").HomeTaskControlRequest);
+
 /**
  * The one first-party module only a Home runtime loads. It contributes Home's
  * operating context, registers the memory tools, places the view's cache
@@ -44,20 +49,14 @@ export const HOME_OPERATING_CONTEXT = [
  * runtime directly, outside every request wrapper, so this handler is the only
  * mechanism that keeps Home's prompt-cache refreshes at zero.
  */
-export type HomeTaskToolRequest = { action: "status"; taskId: string }
-  | { action: "report"; taskId: string; offset: number; limit: number }
-  | ({ action: "steer"; text: string } & import("./home-task-dispatcher.js").HomeTaskControlRequest)
-  | ({ action: "stop" } & import("./home-task-dispatcher.js").HomeTaskControlRequest);
-
 export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess | undefined,
-  delegate?: (request: HomeTaskDispatchRequest) => Promise<HomeTaskHandle>,
-  task?: (request: HomeTaskToolRequest) => Promise<unknown>): ExtensionFactory {
+  delegate: (request: HomeTaskDispatchRequest) => Promise<HomeTaskHandle>,
+  task: (request: HomeTaskToolRequest) => Promise<unknown>): ExtensionFactory {
   return (pi) => {
     for (const tool of homeMemoryTools(memoryTools)) pi.registerTool(tool);
     pi.registerTool({ name: "delegate", label: "Delegate", description: "Dispatch finite work once in a trusted project. Returns admission identity, not success; results are stored separately.",
       parameters: Type.Object({ taskId: Type.String({ minLength: 1, maxLength: 160 }), intent: Type.String({ minLength: 1, maxLength: 65536 }), target: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
       executionMode: "sequential", execute: async (_id, request) => {
-        if (!delegate) throw new Error("Home dispatch is unavailable");
         const { taskId, sessionId, operationId } = await delegate(request);
         return { content: [{ type: "text", text: "Task admitted; a report is required for its result." }], details: { taskId, sessionId, operationId } };
       },
@@ -69,7 +68,6 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
         Type.Object({ action: Type.Literal("steer"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), controllerGeneration: Type.Integer({ minimum: 1 }), text: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
         Type.Object({ action: Type.Literal("stop"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), controllerGeneration: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
       ]), executionMode: "sequential", execute: async (_id, request) => {
-        if (!task) throw new Error("Home task control is unavailable");
         const result = await task(request);
         return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },

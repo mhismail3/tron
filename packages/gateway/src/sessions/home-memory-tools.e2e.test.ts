@@ -13,7 +13,7 @@
  *
  * The retained artifact is `test-results/home-memory-tools/report.json`.
  *
- * Failure modes (progress.md, written before the code): F1 a stale projection, F2
+ * Failure modes these cases exist for: F1 a stale projection, F2
  * reasoning/credential/oversize leakage, F3 a stale child summary instead of the
  * placeholder, F4 an address that is not a line, F5 `[omitted]`, F6 a date from
  * the wrong source or a guess, F7 search misses/bounds/hidden omissions, F8 an
@@ -36,6 +36,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicMessageRecord, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicStore } from "../episodic/episodic-store.js";
 import { HOME_MEMORY_VIEW_MARKER, type HomeMemoryUnavailableReason } from "../home/home-memory.js";
+import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeMemoryToolDetails } from "../home/home-memory-tools.js";
 import type { HomeMemoryStatus } from "../protocol/types.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -140,6 +141,8 @@ interface Fixture {
   requests: CapturedRequest[];
   /** Every record Home's memory reported (its coded ingest failures). */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
+  /** Every record the request seam reported: activation sizes and refusals. */
+  requestRecords: HomeRequestRecord[];
   registry: RuntimeRegistry;
   sessionId: string;
   homeId: string;
@@ -158,6 +161,7 @@ function openRegistry(f: Fixture): RuntimeRegistry {
     sessionListChanged: () => {},
     homeMemorySummarizer: () => ({ summarizer: deterministicSummarizer(f.compactor) }),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
+    homeRequestDiagnostic: (record) => f.requestRecords.push(record),
   });
   registries.push(registry);
   return registry;
@@ -184,6 +188,7 @@ async function fixture(label: string, options: { configure?: boolean } = {}): Pr
     compactor: { calls: 0, gate: undefined, release: undefined, failing: false } as CompactorState,
     requests: [] as CapturedRequest[],
     memoryDiagnostics: [] as Array<{ event: string; reason?: string }>,
+    requestRecords: [] as HomeRequestRecord[],
   } as Fixture;
   await attach(f, options);
   return f;
@@ -379,7 +384,7 @@ function expectedDateText(entry: CanonicalEntry): string {
     + ` ${offset < 0 ? "-" : "+"}${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
 }
 
-const refusalsOf = (f: Fixture) => f.registry.homeOwner().requestPolicyFor(f.sessionId)?.refusalLog().map((entry) => entry.reason) ?? [];
+const refusalsOf = (f: Fixture) => f.requestRecords.flatMap(record => record.event === "refused" ? [record.reason] : []);
 
 /** Read persisted catalog entries through the active store, including a checkpoint
  * and any remaining append tail. */
@@ -686,7 +691,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
     await waitUntil(async () => (await memoryStatus(f)).blocked === "permanent-failure");
     const requestsBefore = f.requests.length;
     await f.slot.prompt(longInput("blocked second"));
-    await waitUntil(() => f.registry.homeOwner().requestPolicyFor(f.sessionId)?.refusalLog().some(entry => entry.reason === "memory-blocked") === true);
+    await waitUntil(() => refusalsOf(f).includes("memory-blocked"));
     const row = { blocked: (await memoryStatus(f)).blocked ?? null, providerRequests: f.requests.length - requestsBefore };
     report.cases.push({ case: "blocked", ...row });
     expect(row.blocked).toBe("permanent-failure");

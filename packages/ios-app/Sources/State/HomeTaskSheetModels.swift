@@ -59,14 +59,14 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     }
     struct Wake: Decodable, Equatable, Sendable {
         enum State: String, Decodable, Sendable {
-            case pending, claimed, admitted, terminal, acknowledged, blocked
-            case cancelledBeforeAdmission = "cancelled-before-admission", outcomeUnknown = "outcome-unknown"
+            case pending, claimed, admitted, terminal, acknowledged, blocked, outcomeUnknown = "outcome-unknown"
         }
         let state: State
         let routeGeneration: Int
         let delivery: JSONValue?
+        /// An outcome-unknown wake always carries its delivery, so only an unadmitted wake can be redelivered.
         var canRedeliver: Bool {
-            delivery == nil && [.pending, .blocked, .cancelledBeforeAdmission, .outcomeUnknown].contains(state)
+            delivery == nil && [.pending, .blocked].contains(state)
         }
     }
     let taskId: String
@@ -146,9 +146,7 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
                   workerProfile: workerProfile, policyRevision: policyRevision, restoreEpoch: restoreEpoch)
         }
     }
-    let revision: Int
     let scopes: [Scope]
-    let requests: [Request]
     let decisions: [Decision]
     let grants: [Grant]
     /// Requests no decision has answered, computed once during admission.
@@ -187,9 +185,7 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
                   return grant.expiresAt == decision.expiresAt && grant.binding == request.request
               }) else { throw invalidHomeTask() }
         return Self(
-            revision: wire.revision,
             scopes: wire.scopes,
-            requests: wire.requests,
             decisions: wire.decisions,
             grants: wire.grants,
             pendingRequests: wire.requests.filter { !decidedRequestIDs.contains($0.id) }

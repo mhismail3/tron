@@ -16,6 +16,7 @@ import { runHomeInput } from "../client/terminal-chat.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
+import { issueGrant } from "../../test-support/home-task-grant.js";
 
 const evidence: Array<Record<string, unknown>> = [];
 afterEach(async () => {
@@ -70,16 +71,6 @@ async function observeTaskAcknowledgement<T>(f: Awaited<ReturnType<typeof fixtur
   return accepted;
 }
 
-
-async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
-  request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
-  input: { decisionId: string; approved?: boolean; expiresAt: number }) {
-  const { authorizationRequestId, HomeTaskAuthorizationError } = await import("./home-task-authorization.js");
-  let requestId = authorizationRequestId(request);
-  await owner.authorize(request).catch(error => { if (error instanceof HomeTaskAuthorizationError && error.requestId) requestId = error.requestId; });
-  const result = await owner.recordDecisionAndGrant(requestId, { ...input, approved: input.approved ?? true, restoreEpoch: request.restoreEpoch });
-  return result.grant!;
-}
 
 describe("Home task authorization RPC", () => {
   async function controls() {
@@ -393,10 +384,8 @@ describe("Home task bounded backlogs", () => {
     for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null, reportRefs: null, terminalEvidence: null, wake: null, spend: null }, null);
     const retained = new Set<string>(); let peak = 0;
     const observe = (task: any) => { if (task.lifecycle !== "terminal") { retained.add(task.taskId); peak = Math.max(peak, retained.size); } };
-    const list = HomeTaskStore.prototype.list;
-    vi.spyOn(HomeTaskStore.prototype, "list").mockImplementation(function(visit) { return list.call(this, task => { observe(task); visit(task); }); });
-    const records = (HomeTaskStore.prototype as any).records;
-    if (records) vi.spyOn(HomeTaskStore.prototype as any, "records").mockImplementation(async function*(this: HomeTaskStore) { for await (const task of records.call(this)) { observe(task); yield task; } });
+    const records = HomeTaskStore.prototype.records;
+    vi.spyOn(HomeTaskStore.prototype, "records").mockImplementation(async function*(this: HomeTaskStore) { for await (const task of records.call(this)) { observe(task); yield task; } });
     const update = HomeTaskStore.prototype.update;
     vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function(taskId, change) { const task = await update.call(this, taskId, change); retained.delete(taskId); return task; });
     const cold = await f.restart();
@@ -1407,39 +1396,28 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "explicit-permission-reconfirmation", refusedBefore: true, admittedAfter: true });
   }, 20_000);
 
-  it.each([
-    { label: "async", version: "0.76.1-tron.4", input: { agent: "worker", task: "work", async: true }, allowed: false },
-    { label: "foreground", version: "0.76.1-tron.4", input: { agent: "worker", task: "work", async: false }, allowed: false },
-    { label: "implicit-async", version: "0.76.1-tron.4", input: { agent: "worker", task: "work" }, allowed: false },
-    { label: "workflow", version: "0.76.1-tron.4", input: { workflow: true, async: false }, allowed: false },
-    { label: "resume", version: "0.76.1-tron.4", input: { action: "resume", id: "run" }, allowed: false },
-    { label: "scheduled", version: "0.76.1-tron.4", input: { action: "schedule.create", at: "later" }, allowed: false },
-    { label: "unmanaged-read-only", version: "0.76.1-tron.4", input: { action: "guide" }, allowed: false },
-    { label: "unknown-version", version: "0.76.1-tron.6", input: { action: "guide" }, allowed: false },
-  ])("gates task producer $label at the actual tool-call boundary", async ({ version, input, allowed, label }) => {
-    const f = await fixture(version);
-    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", input)], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+  it("refuses a same-named unmanaged subagent provider at the tool-call boundary", async () => {
+    const f = await fixture(true);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", { agent: "worker", task: "work", async: true })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const result = await (await dispatch(f)).completion;
-    expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(allowed);
+    expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(false);
     expect(result.terminalEvidence?.outcome).toBe("final");
-    evidence.push({ case: `producer-${label}`, allowed, version, injectedProducer: true });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "unverified-provider" }));
+    evidence.push({ case: "producer-subagent-unmanaged-provider", executed: false, injectedProducer: true });
   }, 20_000);
 
-  it.each([
-    { version: "0.76.1-tron.4", input: { id: "run", nonBlocking: true }, label: "subscription" },
-    { version: "0.76.1-tron.4", input: { id: "run", nonBlocking: false }, label: "unmanaged known-version wait" },
-    { version: "0.76.1-tron.6", input: { id: "run", nonBlocking: false }, label: "unknown wait provider" },
-  ])("refuses $label before bg_wait can install later work", async ({ version, input, label }) => {
-    const f = await fixture(version);
-    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bg_wait", input)], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+  it("refuses a same-named unmanaged bg_wait before it can install later work", async () => {
+    const f = await fixture(true);
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bg_wait", { id: "run", nonBlocking: false })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const result = await (await dispatch(f)).completion;
     expect(existsSync(join(f.cwd, "wait-effect.json"))).toBe(false);
     expect(result.terminalEvidence?.outcome).toBe("final");
-    evidence.push({ case: `wait-${label}`, executed: false, version });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "unverified-provider" }));
+    evidence.push({ case: "wait-unmanaged-provider", executed: false });
   }, 20_000);
 
   it("applies the same producer refusal to nested codemode calls", async () => {
-    const f = await fixture("0.76.1-tron.4", true);
+    const f = await fixture(true, true);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code: 'await tools.subagent({agent:"worker",task:"work",async:false});' })], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const result = await (await dispatch(f)).completion;
     expect(existsSync(join(f.cwd, "subagent-effect.json"))).toBe(false);
@@ -1469,7 +1447,7 @@ describe("Home task production dispatch", () => {
   }, 20_000);
 
   it("does not apply the task producer gate to ordinary async subagent calls", async () => {
-    const f = await fixture("0.76.1-tron.4");
+    const f = await fixture(true);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", { agent: "worker", task: "work", async: true })], { stopReason: "toolUse" }), fauxAssistantMessage("ordinary completion")]);
     const slot = await f.registry.create(f.cwd); await slot.prompt("ordinary delegation");
     await waitFor(() => existsSync(join(f.cwd, "subagent-effect.json")), "ordinary async producer invocation");
@@ -1659,7 +1637,7 @@ describe("Home task production dispatch", () => {
       expect(() => process.kill(pid, 0)).toThrow();
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
-    expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined" });
+    expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined", elapsedMs: expect.any(Number) });
     expect(JSON.stringify(signal)).not.toContain(f.cwd);
     expect(result.spend!.inputTokens + result.spend!.outputTokens).toBeGreaterThanOrEqual(scenario === "blocked-provider" ? 0 : 1);
     evidence.push({ case: scenario, turnsAtStop, entriesAtStop, spend: result.spend, signal, noFurtherEffects: true });
@@ -1686,7 +1664,7 @@ describe("Home task production dispatch", () => {
     const result = await run.completion;
     stop.mockRestore();
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "deadline-stop-failed" });
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.runaway-stop", cancelAndJoin: "failed", spendReference: expect.any(String) }));
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.runaway-stop", cancelAndJoin: "failed", elapsedMs: expect.any(Number), spendReference: expect.any(String) }));
     try {
       const before = slot.canonicalSessionEntries().length;
       await expect((slot as any).taskWorker.accept(slot.id, run.operationId,
@@ -1697,22 +1675,4 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "deadline-join-failed", injectedFailure: true, outcome: "unknown", lateReportRefused: true, actualStopCleanedUp: true });
   }, 20_000);
 
-  it("preserves authority on restart/file replacement but requires reconfirmation after copying a namespace", async () => {
-    const f = await fixture();
-    f.faux.setResponses([fauxAssistantMessage("no report")]);
-    await (await dispatch(f)).completion;
-    const store = new HomeTaskStore(f.tronHome, (f.registry as any).workspace);
-    const before = await store.restoreEpoch();
-    const taskPath = await taskFile(f, "task-one");
-    const tempPath = `${taskPath}.tmp`;
-    await writeFile(tempPath, await readFile(taskPath), { mode: 0o600 }); await rename(tempPath, taskPath);
-    expect(await store.restoreEpoch()).toBe(before);
-    const source = join(f.tronHome, "gateway/home/tasks");
-    const backup = join(f.root, "copied-tasks");
-    await cp(source, backup, { recursive: true, preserveTimestamps: true });
-    await rm(source, { recursive: true }); await rename(backup, source);
-    expect(await store.restoreEpoch()).not.toBe(before);
-    await expect(dispatch(f, "task-after-restore")).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
-    evidence.push({ case: "restore-directory", preservedOnFileReplacement: true, refusedAfterCopy: true });
-  }, 20_000);
 });

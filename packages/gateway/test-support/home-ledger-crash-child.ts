@@ -2,15 +2,18 @@ import { writeFileSync } from "node:fs";
 import { HomeOwner } from "../src/home/home-owner.js";
 import { TronWorkspace } from "../src/workspace/tron-workspace.js";
 
-const [tronHome, sessionId, phase, marker] = process.argv.slice(2);
-if (!tronHome || !sessionId || !marker || phase !== "after") throw new Error("expected crash fixture arguments");
+const [tronHome, sessionId, marker] = process.argv.slice(2);
+if (!tronHome || !sessionId || !marker) throw new Error("expected crash fixture arguments");
 const owner = new HomeOwner({
   tronHome,
   trust: {} as never,
   workspace: new TronWorkspace(tronHome),
+  // The crash path only seals a chapter, which never dispatches a task.
+  taskSessions: {} as never,
   sessions: {
     serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
     chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
+    hasConversation: async () => false,
   } as never,
   memorySummarizer: () => ({ summarizer: async () => { throw new Error("unused"); } }),
 });

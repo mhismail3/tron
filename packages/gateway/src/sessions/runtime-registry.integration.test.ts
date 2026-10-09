@@ -14,12 +14,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
 import { admitsAutomationAction } from "../automations/automation-contract.js";
 import { GatewayAutomationExecutor } from "../automations/automation-executor.js";
-import { OwnedSessionDispatch, OWNED_OPERATION_DEADLINE_MS } from "./owned-session-dispatch.js";
 import type { AutomationExecutionHandle } from "../automations/automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -196,7 +195,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
   const syntheticTranscriptSizes = new Map<string, number>();
-  const ownedDeadlineReportCases: Array<Record<string, unknown>> = [];
 
   async function coldFixture(label: string, options: {
     nested?: boolean;
@@ -276,52 +274,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
   }
 
-  async function startOwnedOperation(slot: RuntimeSlot, registry: RuntimeRegistry, prompt: string) {
-    const operationId = `task:deadline:${randomUUID()}`;
-    let finish!: (value: unknown) => void;
-    const completion = new Promise<unknown>((resolve) => { finish = resolve; });
-    await slot.prompt(prompt, [], undefined, {
-      text: prompt, attachmentEnvelope: "", attachmentCount: 0,
-    }, undefined, {
-      operationId,
-      origin: { kind: "gateway", ownerId: "home-task-test", title: "Home task", confidence: "boundary" },
-      onTerminal: (terminal) => { finish(terminal); },
-    });
-    return {
-      operationId,
-      handle: {
-        operationId,
-        completion,
-        cancel: async () => slot.abort("agent", operationId),
-        acknowledgeTerminal: async () => registry.clearOwnedOperationMarker(slot.id, operationId),
-      },
-    };
-  }
-
-  async function ownedDeadlineFixture(label: string, faux: ReturnType<typeof fauxProvider>) {
-    const root = await mkdtemp(join(tmpdir(), `tron-owned-deadline-${label}-`));
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    const registry = new RuntimeRegistry({
-      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => {
-        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-        runtime.registerNativeProvider(faux.provider);
-        return runtime;
-      },
-      trust: new TrustService(agentDir), broadcast: () => {},
-      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    });
-    registries.push(registry);
-    await initializeRegistry(registry);
-    const slot = await registry.create(cwd);
-    const model = faux.getModel();
-    await slot.setModel(model.provider, model.id);
-    return { root, cwd, registry, slot };
-  }
-
   /** An admitted provider root with the private mode and canonical path the
    * slot's artifact policy requires; the caller removes `delegated.root`. */
   async function delegatedFixtureRoot(label: string): Promise<{ root: string; delegatedRoot: string }> {
@@ -330,16 +282,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(delegatedRoot, { recursive: true, mode: 0o700 });
     return { root, delegatedRoot };
   }
-
-  afterAll(async () => {
-    if (ownedDeadlineReportCases.length === 0) return;
-    const directory = join(process.cwd(), "test-results", "owned-session-deadline");
-    await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, "report.json"), `${JSON.stringify({
-      cases: ownedDeadlineReportCases,
-      generatedAt: new Date().toISOString(),
-    }, null, 2)}\n`);
-  });
 
   afterEach(async () => {
     try {
@@ -9052,7 +8994,7 @@ export default function (pi) {
   });
 
   it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-abort-failed-stop-"));
+    const root = await temporaryRoot("tron-abort-failed-stop-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9099,7 +9041,7 @@ export default function (pi) {
   });
 
   it("records a completed receipt for a Stop that arrives after a natural completion", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-abort-after-completion-"));
+    const root = await temporaryRoot("tron-abort-after-completion-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -10317,142 +10259,6 @@ export default function (pi) {
     }, "the detached process to exit");
     expect(slot.snapshot().toolExecutions).toEqual([]);
   });
-
-  it.each(["no-effect", "successful-read"] as const)("deadline-stops endless %s turns without losing canonical usage or allowing later effects", async (scenario) => {
-      let fixture: Awaited<ReturnType<typeof ownedDeadlineFixture>> | undefined;
-      let owned: Awaited<ReturnType<typeof startOwnedOperation>> | undefined;
-      try {
-        const faux = fauxProvider({ provider: `tron-owned-deadline-${scenario}`, tokensPerSecond: 10_000 });
-        fixture = await ownedDeadlineFixture(`loop-${scenario}`, faux);
-        const readPath = join(fixture.cwd, "readable.txt");
-        await writeFile(readPath, "canonical read payload\n");
-        let turns = 0;
-        const MAX_SIMULATED_TURNS = 256;
-        const response = () => {
-          turns += 1;
-          if (turns < MAX_SIMULATED_TURNS) faux.appendResponses([response]);
-          return fauxAssistantMessage([
-            fauxToolCall("read", { path: scenario === "no-effect" ? join(fixture!.cwd, "missing.txt") : readPath }, { id: `read-${turns}` }),
-          ], { stopReason: "toolUse" });
-        };
-        faux.setResponses([response]);
-        owned = await startOwnedOperation(fixture.slot, fixture.registry, "continue until stopped");
-        const { operationId, handle } = owned;
-        await waitFor(() => turns >= 3, `${scenario} provider turns`);
-        const beforeUsage = (fixture.slot as any).runtime.session.sessionManager.getBranch()
-          .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant")
-          .reduce((total: number, entry: any) => total + (entry.message.usage?.input ?? 0) + (entry.message.usage?.output ?? 0), 0);
-        expect(beforeUsage).toBeGreaterThan(0);
-        const diagnostics: unknown[] = [];
-        const dispatch = new OwnedSessionDispatch(fixture.registry, { diagnostic: (record) => diagnostics.push(record) });
-        vi.useFakeTimers();
-        const stopped = dispatch.enforceDeadline(handle as any);
-        await vi.advanceTimersByTimeAsync(OWNED_OPERATION_DEADLINE_MS);
-        const outcome = await stopped;
-        vi.useRealTimers();
-        expect(outcome).toMatchObject({ state: "deadline-stopped", terminal: { lifecycle: "interrupted" } });
-        expect(diagnostics).toMatchObject([{ event: "owned-operation.deadline-stop", cancelAndJoin: "joined" }]);
-        const turnsAtStop = turns;
-        const entriesAtStop = (fixture.slot as any).runtime.session.sessionManager.getBranch().length;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        expect(turns).toBe(turnsAtStop);
-        expect((fixture.slot as any).runtime.session.sessionManager.getBranch()).toHaveLength(entriesAtStop);
-        const afterUsage = (fixture.slot as any).runtime.session.sessionManager.getBranch()
-          .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant")
-          .reduce((total: number, entry: any) => total + (entry.message.usage?.input ?? 0) + (entry.message.usage?.output ?? 0), 0);
-        expect(afterUsage).toBeGreaterThanOrEqual(beforeUsage);
-        expect(afterUsage).toBeGreaterThan(0);
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        const usageAfterQuiescence = (fixture.slot as any).runtime.session.sessionManager.getBranch()
-          .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant")
-          .reduce((total: number, entry: any) => total + (entry.message.usage?.input ?? 0) + (entry.message.usage?.output ?? 0), 0);
-        expect(usageAfterQuiescence).toBe(afterUsage);
-        expect(fixture.slot.snapshot().operation?.id).not.toBe(operationId);
-        ownedDeadlineReportCases.push({
-          scenario, terminal: "deadline-stopped", turnsAtStop, usageTokens: afterUsage,
-          noFurtherTurns: turns === turnsAtStop, noFurtherCanonicalEntries: entriesAtStop === (fixture.slot as any).runtime.session.sessionManager.getBranch().length,
-        });
-      } finally {
-        vi.useRealTimers();
-        if (fixture && owned && fixture.slot.isBusy) await owned.handle.cancel().catch(() => {});
-        if (fixture) {
-          await fixture.registry.dispose();
-          const index = registries.indexOf(fixture.registry);
-          if (index >= 0) registries.splice(index, 1);
-          await rm(fixture.root, { recursive: true, force: true });
-        }
-      }
-  }, 30_000);
-
-  it("deadline-cancels a faux provider request blocked in flight", async () => {
-    let requestStarted!: () => void;
-    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
-    let providerAborted = false;
-    const faux = fauxProvider({ provider: "tron-owned-deadline-blocked", tokensPerSecond: 10_000 });
-    faux.setResponses([(_context, options) => new Promise((_resolve, reject) => {
-      requestStarted();
-      options?.signal?.addEventListener("abort", () => {
-        providerAborted = true;
-        reject(new Error("blocked faux request aborted"));
-      }, { once: true });
-    })]);
-    const fixture = await ownedDeadlineFixture("blocked-provider", faux);
-    let owned: Awaited<ReturnType<typeof startOwnedOperation>> | undefined;
-    try {
-      owned = await startOwnedOperation(fixture.slot, fixture.registry, "wait for blocked provider");
-      const { handle } = owned;
-      await started;
-      const dispatch = new OwnedSessionDispatch(fixture.registry);
-      vi.useFakeTimers();
-      const stopped = dispatch.enforceDeadline(handle as any);
-      await vi.advanceTimersByTimeAsync(OWNED_OPERATION_DEADLINE_MS);
-      await expect(stopped).resolves.toMatchObject({ state: "deadline-stopped" });
-      vi.useRealTimers();
-      expect(providerAborted).toBe(true);
-      expect(fixture.slot.isBusy).toBe(false);
-      ownedDeadlineReportCases.push({ scenario: "blocked-provider", terminal: "deadline-stopped", providerAborted, slotIdle: !fixture.slot.isBusy });
-    } finally {
-      vi.useRealTimers();
-      if (owned && fixture.slot.isBusy) await owned.handle.cancel().catch(() => {});
-      await fixture.registry.dispose();
-      const index = registries.indexOf(fixture.registry);
-      if (index >= 0) registries.splice(index, 1);
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  it.skipIf(process.platform === "win32")("deadline-cancels and joins an operation-owned foreground bash process", async () => {
-    const faux = fauxProvider({ provider: "tron-owned-deadline-foreground", tokensPerSecond: 10_000 });
-    const fixture = await ownedDeadlineFixture("foreground-bash", faux);
-    let owned: Awaited<ReturnType<typeof startOwnedOperation>> | undefined;
-    const pidPath = join(fixture.cwd, "sleep.pid");
-    faux.setResponses([fauxAssistantMessage([
-      fauxToolCall("bash", { command: `sleep 120 & echo $! > ${JSON.stringify(pidPath)}; wait` }, { id: "owned-sleep" }),
-    ], { stopReason: "toolUse" })]);
-    try {
-      owned = await startOwnedOperation(fixture.slot, fixture.registry, "run foreground process");
-      const { handle } = owned;
-      await waitFor(() => existsSync(pidPath), "the operation-owned sleep PID file");
-      const pid = Number(await readFile(pidPath, "utf8"));
-      expect(() => process.kill(pid, 0)).not.toThrow();
-      const dispatch = new OwnedSessionDispatch(fixture.registry);
-      vi.useFakeTimers();
-      const stopped = dispatch.enforceDeadline(handle as any);
-      await vi.advanceTimersByTimeAsync(OWNED_OPERATION_DEADLINE_MS);
-      await expect(stopped).resolves.toMatchObject({ state: "deadline-stopped" });
-      vi.useRealTimers();
-      expect(() => process.kill(pid, 0)).toThrow();
-      expect(fixture.slot.isBusy).toBe(false);
-      ownedDeadlineReportCases.push({ scenario: "foreground-process", terminal: "deadline-stopped", childJoined: true, slotIdle: !fixture.slot.isBusy });
-    } finally {
-      vi.useRealTimers();
-      if (owned && fixture.slot.isBusy) await owned.handle.cancel().catch(() => {});
-      await fixture.registry.dispose();
-      const index = registries.indexOf(fixture.registry);
-      if (index >= 0) registries.splice(index, 1);
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  }, 30_000);
 
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await temporaryRoot("tron-tool-order-integration-");

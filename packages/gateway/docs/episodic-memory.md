@@ -14,17 +14,17 @@ it the commits the runtime reports, and sends each activation the view it render
 ## The owner and its inputs
 
 - `EpisodicMemory.open` loads (or starts) the memory for one source session:
-  the workspace, the source session id and its canonical JSONL path, limits,
-  and either an injected compactor or the pi-ai model and `ModelRuntime` the
-  default compactor runs on. There is **no default model**: it is the caller's,
-  and there is no budget (#493). One store has **one opener per
+  the workspace, the source identity and its `EpisodicSessionSource` (below),
+  optional limits, an injected compactor (`summarizer`), and the `isPaused` and
+  `diagnostic` hooks. The compactor's model is the caller's: there is **no
+  default model**, and there is no budget (#493). One store has **one opener per
   process**: a second `open` for the same session refuses with `already-open`,
   because two memories would write the same files without a lock between them.
 - `entriesCommitted(sessionId)` asks its source for the deltas after its cursor,
   ingests what is new, and drains the pump. It awaits the drain, so a caller
   that wants the model calls off its own path simply does not await it.
-  Ingestion, invalidation and `resume()` are serialized behind one mutex; the
-  pump is not, so a build may still be running when the next commit invalidates
+  Ingestion, invalidation and `resumeIngested()` are serialized behind one mutex;
+  the pump is not, so a build may still be running when the next commit invalidates
   nodes (see **Concurrency** below).
 - `ingestForRead(sessionId)` refreshes only the catalog/cursor through that same
   ingestion mutex, without admitting compactor work. Home's native browser uses
@@ -46,8 +46,7 @@ it the commits the runtime reports, and sends each activation the view it render
   releases this session's opener. The wait is what keeps a reconfiguration from
   handing the store to a second owner while the first is still writing it.
 - The memory reads canonical bytes only through its `EpisodicSessionSource`
-  (below); it never opens a session file itself, and it has no single-session
-  reader. A delta continues from the chapter cursor (dev/ino, size, complete byte
+  (below); it never opens a session file itself. A delta continues from the chapter cursor (dev/ino, size, complete byte
   offset, the last complete line's digest and the complete-prefix digest) when
   the file only grew. A navigation, a context edit or a changed chapter identity
   re-reads the chapter whole, and the projected messages are reconciled before
@@ -80,17 +79,15 @@ it the commits the runtime reports, and sends each activation the view it render
   projection plus ID/parent topology, not aggregate transcript bytes.
 - The strict Home cursor is version 2. Every chapter requires file-change
   metadata, sealed state and a complete-prefix digest; older Home formats are
-  preserved and refused before cleanup. No dual reader or migration is provided.
-  No single-session cursor or legacy timestamp lookup exists: the memory has one
-  source, Home's.
+  preserved and refused before cleanup.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
   rejects instead of hanging; and an already-aborted signal rejects at once. The
   view's budget is soft, so this is not a hard window check; that belongs to the
   request layer.
-- `status()` is the bounded status query (below); `resume()` clears a blocked
-  state and restarts the pump; `dispose()` closes the memory, aborts in-flight
+- `status()` is the bounded status query (below); `resumeIngested()` clears a
+  blocked state and restarts the pump; `dispose()` closes the memory, aborts in-flight
   compactor calls, waits for an ingest that is still writing, and only then
   releases every waiter and this session's opener.
 
@@ -159,8 +156,9 @@ state/episodic/<sourceSessionId>/
   the namespace, so a surviving session whose own namespace was deleted rebuilds
   from its source and its recorded spend starts again (D5: repair, with no
   budget; #420 owns restore).
-- Every open of an existing store folds replayed tails and repairs forward into
-  a checkpoint before returning. While running, the owner maintains a serialized
+- Opening an existing store replays its checkpoint and log tails and repairs an
+  interrupted write in place; it publishes no checkpoint. While running, the owner
+  maintains a serialized
   byte estimate as live records are inserted, replaced, or invalidated; it
   checkpoints when log bytes exceed that estimate by the internal
   superseded-record margin or cross the internal byte trigger. A small log that
@@ -168,8 +166,7 @@ state/episodic/<sourceSessionId>/
   records, so ordinary small appends do not serialize or rewrite the whole store. Large invalidations contribute to the same log threshold. Once the
   pointer is durable, append logs are replaced by empty owner-only files and
   superseded checkpoint directories and recognized interrupted temp files are
-  removed. Legacy JSONL logs seed this same checkpoint representation; no schema
-  migration or canonical history mutation is performed.
+  removed. No schema migration or canonical history mutation is performed.
 - The version is `EPISODIC_STORE_VERSION` (2). Markers and state documents use
   strict field sets; there is no migration path. A store this owner cannot read
   is refused rather than guessed at.
@@ -188,7 +185,7 @@ oversized-write refusal with prior bytes preserved, and ordinary small state.
 The whole-state rewrite/serialization cost is not claimed constant-time; the
 Home hardening audit (#555) owns its measurement.
 
-## Projection (departure 1: source projection before compression)
+## Projection
 
 Each canonical session entry **on the session's current branch** becomes at
 most one logged message, in branch order, with a permanent index. The memory
@@ -316,7 +313,7 @@ projection is never stale.
 
 ## Concurrency
 
-- Ingestion, invalidation and `resume()` take one per-memory mutex
+- Ingestion, invalidation and `resumeIngested()` take one per-memory mutex
   (`packages/gateway/src/util/async-mutex.ts`), so two `entriesCommitted` calls
   cannot interleave index assignment or append a message twice. `dispose()` takes
   the same mutex before it releases the opener, so the one opener per store is
@@ -368,9 +365,11 @@ projection is never stale.
    closure durably, and only then serves the memory.
 7. **A blocked memory is persisted state**, and the retries are bounded
    (below). The recipe retries forever because its next turn waits on the
-   summary; here the blocked state is visible and `resume()` restarts the pump.
-8. **Every stored record carries a revision**, so the latest record for an index
-   or address is unambiguous after a crash.
+   summary; here the blocked state is visible and an operator resume
+   (`resumeIngested`) restarts the pump.
+8. **Every stored record carries a revision**, assigned by the queued append that
+   writes it, so the latest record for an index or address is unambiguous after a
+   crash.
 9. **A `null` context edit and a navigation are the same `[omitted]` node**, and
    a message that projects to no text becomes `[omitted]` rather than vanishing.
    Dropping the slot would renumber every later message, and indices are
@@ -430,18 +429,14 @@ not leave their unique 64 KiB text payloads reachable as history grows. The
 scale test measures only the K=1 and K=30 endpoints: it streams V8 heap snapshots,
 records string-node name indexes and self sizes, then resolves just edit-prefixed
 strings from the later string table. It checks the reachable payload count and
-bytes, independent of unrelated process-wide allocations. Peak allocation and
-legacy catalog replay remain separate heap measurements.
+bytes, independent of unrelated process-wide allocations. Its catalog-log replay
+measurement (peak and retained heap as the log grows) is a separate test in the
+same file.
 
 The second row is the honest worst case: an edit at the start of a long history
 invalidates essentially the whole tree. The e2e test also proves the invalidated
 set is *exactly* the predicted one (computed from the durable records, chunks
-unioned) and that the rebuilt leaves are exactly the invalidated leaves. A
-recorded one-time control confirmed the comparison is not vacuous: an oracle
-whose due weight dropped the level term (`due = T - start`) diverged from the
-view at step 8 of a 300-message run. A uniform exponent shift provably cannot
-diverge — `(T-s1)/2^(l1+e) > (T-s2)/2^(l2+e)` is independent of `e` — which is
-why that control was removed rather than kept as a permanent test.
+unioned) and that the rebuilt leaves are exactly the invalidated leaves.
 
 ## Home operator pause
 
@@ -504,9 +499,9 @@ report is `test-results/home-activation/report.json`.
   and could misfire on legitimate edit races, so there is none.
 - A canonical read failure blocks with `source-unavailable`.
 - A blocked memory stops its pump, is visible in `status().blocked`, rejects
-  `whenReady`, and survives a restart. `resume()` clears it, re-reads the source
-  and restarts the pump; the caller must have fixed the cause (a reachable
-  source, a recovered provider).
+  `whenReady`, and survives a restart. `resumeIngested()` clears it, re-reads
+  the source and restarts the pump; the caller must have fixed the cause (a
+  reachable source, a recovered provider).
 
 ## Status query
 
@@ -552,6 +547,13 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 - `packages/gateway/test-results/episodic-reasoning-model/report.json` — the
   reasoning-model end-to-end cases (`npx vitest run
   src/episodic/episodic-reasoning-model.e2e.test.ts`).
+- `packages/gateway/test-results/home-memory/continuity.json` — the Home source
+  end-to-end run's chapter-continuity counts, from `home-source.e2e.test.ts`
+  (`npx vitest run src/episodic/home-source.e2e.test.ts`).
+- `packages/gateway/test-results/home-memory/heap.json`,
+  `heap-production.json` and `heap-over-cap.json` — the Home source scale runs'
+  retained and peak heap per message at the test's caps and at production caps,
+  from `home-source.scale.test.ts` (`npm run test:scale`).
 
 ## Home's use of this module
 

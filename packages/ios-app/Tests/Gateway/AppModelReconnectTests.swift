@@ -1698,31 +1698,6 @@ struct AppModelReconnectTests {
         }
     }
 
-    @Test("an ordinary chat with unknown Home status reads once and never shows another session's status")
-    func ordinaryChatWithUnknownHomeStatusReadsOnce() async throws {
-        let socket = ScriptedGatewaySocket()
-        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
-            let profile = try #require(fixture.model.profiles.selected)
-            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
-            try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
-            try await connecting.value
-            let presentation = PresentationActivityCoordinator()
-            let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
-            presentation.register(chat, parent: nil)
-
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
-            let read = try await waitForMethod("home.status", on: socket)
-            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
-            try await waitForHomePhase(.ready, model: fixture.model)
-            #expect(fixture.model.homeStatus.status?.sessionId == "home-session")
-            #expect(fixture.model.homeStatus.status?.sessionId != "ordinary-session")
-            for _ in 0..<20 { await Task.yield() }
-            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
-            fixture.model.unmountHomeStatus(surfaceToken: chat)
-        }
-    }
-
     @Test("a known Home status for another session makes an ordinary chat read nothing")
     func knownHomeStatusForAnotherSessionDoesNotRead() async throws {
         let socket = ScriptedGatewaySocket()
@@ -1944,7 +1919,7 @@ struct AppModelReconnectTests {
             let expiredAttempt = Task {
                 try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id))
             }
-            try await waitForDesignationState(isDesignating: true, model: fixture.model)
+            try await waitForHomeCommandState(isRunning: true, model: fixture.model)
             for _ in 0..<80 where fixture.model.homeMutations.isRunning(profileID: profile.id) {
                 try await clock.waitUntilSleeping(count: 1, duration: .milliseconds(100))
                 clock.advance(by: .milliseconds(100))
@@ -2011,7 +1986,6 @@ struct AppModelReconnectTests {
                 // GatewayClient reports CancellationError only while transmission is still queued.
             }
             await gate.release()
-            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
             #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
 
             let retry = Task { try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
@@ -2132,6 +2106,33 @@ struct AppModelReconnectTests {
             #expect(frames.filter { $0.objectValue?["method"]?.stringValue == "command.status" }.count == 3)
             foreground?.cancel()
             fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
+    /// Route admission has one owner, the row's policy. A status the row does not open
+    /// forms no route, even when the Gateway also names an openable chapter.
+    @Test("a Home status the row would not open forms no route, even with an openable chapter")
+    func homeRouteRefusesStatusThatRowDoesNotOpen() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(phase: "unavailable")))
+            try await waitForHomePhase(.unavailable, model: fixture.model)
+            let status = try #require(fixture.model.homeStatus.status)
+            #expect(HomePinnedRowPolicy.action(for: status) == .unavailable)
+            #expect(throws: CancellationError.self) {
+                try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
+            }
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
         }
     }
 
@@ -2915,9 +2916,9 @@ struct AppModelReconnectTests {
 
     /// `sessionId` is the reserved successor and `openSessionID` the chapter a route
     /// opens; they differ only while a rollover is pending.
-    private func homeStatusResult(sessionID: String = "home-session", openSessionID: String = "home-session") -> JSONValue {
+    private func homeStatusResult(phase: String = "ready", sessionID: String = "home-session", openSessionID: String = "home-session") -> JSONValue {
         .object([
-            "phase": .string("ready"),
+            "phase": .string(phase),
             "activation": .object(["available": .bool(false)]),
             "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
             "recovery": .object(["action": .string("none")]),
@@ -2940,16 +2941,16 @@ struct AppModelReconnectTests {
         throw GatewayFailure(code: "test_timeout", message: "Expected Home status phase \\(phase)", retryable: false, details: nil)
     }
 
-    private func waitForDesignationState(
-        isDesignating: Bool,
+    private func waitForHomeCommandState(
+        isRunning: Bool,
         model: AppModel
     ) async throws {
         let deadline = ContinuousClock.now + .seconds(2)
         while ContinuousClock.now < deadline {
-            if model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? "") == isDesignating { return }
+            if model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? "") == isRunning { return }
             try await Task.sleep(for: .milliseconds(1))
         }
-        throw GatewayFailure(code: "test_timeout", message: "Expected Home designation state \\(isDesignating)", retryable: false, details: nil)
+        throw GatewayFailure(code: "test_timeout", message: "Expected Home command running state \\(isRunning)", retryable: false, details: nil)
     }
 
     private func waitForConnectionState(

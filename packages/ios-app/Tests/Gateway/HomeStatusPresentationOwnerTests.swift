@@ -3,9 +3,9 @@ import Observation
 @testable import TronMobileCore
 @testable import TronMobile
 
-/// Failure modes from #420's status-owner slice: malformed protocol data,
-/// stale profile/connection/read and surface leases, capability loss, background
-/// retirement, unobserved projection replacement, and refresh cadence.
+/// Failure modes: malformed protocol data, stale profile/connection/read and surface
+/// leases, capability loss, background retirement, unobserved projection replacement,
+/// and refresh cadence.
 @MainActor
 final class HomeStatusPresentationOwnerTests: XCTestCase {
     /// The owner holds its presentation coordinator weakly, so each mounted
@@ -17,17 +17,24 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         let status = try HomeStatusDTO.decode(JSONValue.parse(Data(validStatus.utf8)))
         XCTAssertEqual(status.phase, .ready)
         XCTAssertEqual(status.activation.available, false)
-        XCTAssertTrue(status.readiness.ready)
-        XCTAssertEqual(status.recovery.action, .none)
         XCTAssertThrowsError(try HomeStatusDTO.decode(JSONValue.parse(Data(#"{"phase":"ready"}"#.utf8))))
+    }
+
+    /// The client decodes only the status fields it reads. `readiness.ready`,
+    /// `recovery.action` and `live` are not read, so a Gateway value this build has
+    /// never seen must not make the whole status unavailable.
+    func testStatusDoesNotDecodeFieldsTheClientDoesNotRead() throws {
+        let future = #"{"phase":"ready","activation":{"available":false},"readiness":{"ready":7,"gaps":[]},"recovery":{"action":"future-action","reason":null},"available":true,"enabled":true,"live":"maybe","sessionPresent":true,"memory":{"configured":true,"open":true}}"#
+        let status = try HomeStatusDTO.decode(JSONValue.parse(Data(future.utf8)))
+        XCTAssertEqual(status.phase, .ready)
     }
 
     func testRejectsUnknownPhaseAndMalformedActivationReadinessOrRecovery() {
         for replacement in [
             (#""phase":"ready""#, #""phase":"future-phase""#),
             (#""activation":{"available":false}"#, #""activation":{}"#),
-            (#""readiness":{"ready":true,"gaps":[]}"#, #""readiness":{"ready":"yes","gaps":[]}"#),
-            (#""recovery":{"action":"none"}"#, #""recovery":{"action":"guess"}"#),
+            (#""readiness":{"ready":true,"gaps":[]}"#, #""readiness":{"ready":true,"gaps":"none"}"#),
+            (#""recovery":{"action":"none"}"#, #""recovery":{"action":"none","reason":7}"#),
         ] {
             let malformed = validStatus.replacingOccurrences(of: replacement.0, with: replacement.1)
             XCTAssertThrowsError(try HomeStatusDTO.decode(JSONValue.parse(Data(malformed.utf8))))
@@ -73,7 +80,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         XCTAssertTrue(owner.publish(value, for: old))
         owner.connectionRetired()
         XCTAssertNil(owner.status)
-        owner.connectionAvailable(profileID: "p", connectionID: "new", capabilityEnabled: true)
+        owner.configure(profileID: "p", connectionID: "new", capabilityEnabled: true)
         let replacement = try XCTUnwrap(owner.beginRead(profileID: "p", connectionID: "new", capabilityEnabled: true, token: token, coordinator: coordinator))
         XCTAssertFalse(owner.publish(value, for: old))
         XCTAssertTrue(owner.publish(value, for: replacement))
@@ -156,7 +163,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
             fetched.fulfill()
             return try self.decodeStatus()
         }
-        owner.connectionAvailable(profileID: "paired", connectionID: "c", capabilityEnabled: true)
+        owner.configure(profileID: "paired", connectionID: "c", capabilityEnabled: true)
         await fulfillment(of: [fetched], timeout: 1)
         XCTAssertEqual(fetchCount, 1)
         owner.retireSurface(token)
@@ -188,11 +195,11 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     func testProfileRetirementForgetsCapabilityButConnectionLossKeepsIt() {
         let (owner, _, token) = mountedOwner()
         owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
-        XCTAssertTrue(owner.isCapabilityEnabled)
+        XCTAssertTrue(owner.capabilityEnabled)
         owner.connectionRetired()
-        XCTAssertTrue(owner.isCapabilityEnabled)
+        XCTAssertTrue(owner.capabilityEnabled)
         owner.profileRetired()
-        XCTAssertFalse(owner.isCapabilityEnabled)
+        XCTAssertFalse(owner.capabilityEnabled)
         owner.retireSurface(token)
     }
 
@@ -257,7 +264,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         XCTAssertEqual(fetchCount, 1, "a claim that has not published polls at no cadence")
         await owner.invalidateMounted()
         XCTAssertEqual(fetchCount, 1, "a claim that has not published is not refreshed by invalidation")
-        owner.connectionAvailable(profileID: "p", connectionID: "next", capabilityEnabled: true)
+        owner.configure(profileID: "p", connectionID: "next", capabilityEnabled: true)
         await fulfillment(of: [reconnected], timeout: 1)
         XCTAssertEqual(fetchCount, 2)
         owner.retireSurface(token)
@@ -278,25 +285,6 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         XCTAssertEqual(fetchCount, 2, "a promoted claim refreshes on invalidation")
         try await Task.sleep(for: .seconds(5.5))
         XCTAssertEqual(fetchCount, 3, "a promoted claim runs the five-second mounted fallback")
-        owner.retireSurface(token)
-        coordinator.retire(token)
-    }
-
-    /// Rollover: the reserved successor is `sessionId`, while the sealed
-    /// predecessor is the only openable chapter. A chat opened on the predecessor
-    /// is claimed by what it opens, so it keeps the status surface.
-    func testClaimOnSealedPredecessorIsPromotedDuringRollover() async throws {
-        var fetchCount = 0
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.home)) { _ in
-            fetchCount += 1
-            return try self.decodeStatus(sessionID: "successor-session", openSessionID: "predecessor-session")
-        }
-        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
-        try await waitUntil { owner.status != nil }
-        XCTAssertEqual(owner.status?.openSessionId, "predecessor-session")
-        XCTAssertEqual(fetchCount, 1)
-        await owner.invalidateMounted()
-        XCTAssertEqual(fetchCount, 2, "a claim on the openable predecessor is promoted and refreshes")
         owner.retireSurface(token)
         coordinator.retire(token)
     }
@@ -340,7 +328,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         coordinator.retire(cover)
         owner.presentationActivityChanged(for: token)
         XCTAssertEqual(owner.status?.sessionId, "home-session", "the released status stays for the dashboard")
-        owner.connectionAvailable(profileID: "p", connectionID: "next", capabilityEnabled: true)
+        owner.configure(profileID: "p", connectionID: "next", capabilityEnabled: true)
         try await Task.sleep(for: .seconds(5.5))
         XCTAssertEqual(fetchCount, 1, "a released claim reads on no invalidation, mutation, uncover, connection, or fallback")
         owner.retireSurface(token)

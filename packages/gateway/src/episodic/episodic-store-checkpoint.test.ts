@@ -17,13 +17,19 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
+/** Publishes a checkpoint now, as the owner does once the log grows past its threshold. */
+async function checkpointNow(memory: EpisodicMemory): Promise<void> {
+  const owner = memory as unknown as { enqueueAppend: (operation: () => Promise<void>) => Promise<void>; publishCheckpoint: () => Promise<void> };
+  await owner.enqueueAppend(() => owner.publishCheckpoint());
+}
+
 const summarizer: EpisodicSummarizer = async request => {
   const last = request.turns.at(-1)!;
   return { role: "assistant", content: [{ type: "text", text: last.text.slice(-120) }], api: "openai-completions", provider: "test", model: "test", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() } as never;
 };
 
 describe("episodic store checkpoint", () => {
-  it("folds a legacy store forward before returning an opener", async () => {
+  it("reopening a store below the checkpoint threshold writes no checkpoint", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-episodic-checkpoint-"));
     roots.push(root);
     const cwd = join(root, "project");
@@ -33,25 +39,24 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "checkpoint message", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0 } };
+    const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
+    const memory = await EpisodicMemory.open(options);
     await memory.entriesCommitted(manager.getSessionId());
     expect(memory.status().messages).toBe(1);
-    const legacyNamespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
-    expect((await readdir(legacyNamespace)).some(name => /^checkpoint-/u.test(name))).toBe(false);
+    expect((await readdir(namespace)).some(name => /^checkpoint-/u.test(name))).toBe(false);
     await memory.dispose();
-    const existing = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
-    const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
-    const names = await readdir(namespace);
-    expect(names.some(name => name.startsWith("checkpoint-"))).toBe(true);
-    expect(names).toContain("checkpoint.current.json");
-    expect(existing.status().messages).toBe(1);
-    await existing.dispose();
-    const reopened = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    // The log is far below the checkpoint threshold, so an open replays it and
+    // publishes nothing: a checkpoint is written by growth, never by an open.
+    const reopened = await EpisodicMemory.open(options);
     expect(reopened.status().messages).toBe(1);
+    const names = await readdir(namespace);
+    expect(names.some(name => name.startsWith("checkpoint-"))).toBe(false);
+    expect(names).not.toContain("checkpoint.current.json");
     await reopened.dispose();
   });
 
-  it("streams a legacy history larger than the aggregate JSON limit into live maps", async () => {
+  it("streams a long catalog log larger than the aggregate JSON limit into live maps", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-episodic-stream-replay-"));
     roots.push(root);
     const workspace = new TronWorkspace(join(root, "home"));
@@ -66,12 +71,12 @@ describe("episodic store checkpoint", () => {
     await store.saveState({ version: EPISODIC_STORE_VERSION, generation: 0, cursor: null, blocked: null, spend: 0 });
     const lineBytes = Buffer.byteLength(`${JSON.stringify(base)}\n`);
     const repetitions = Math.ceil((64 * 1024 * 1024 + 1) / lineBytes);
-    let legacy = "";
-    for (let index = 0; index < repetitions; index += 1) legacy += `${JSON.stringify({ ...base, revision: index + 1 })}\n`;
+    let log = "";
+    for (let index = 0; index < repetitions; index += 1) log += `${JSON.stringify({ ...base, revision: index + 1 })}\n`;
     const catalogPath = join(root, "home", "workspace", "state", "episodic", sessionId, "catalog.jsonl");
-    await writeFile(catalogPath, legacy, { mode: 0o600 });
-    expect(Buffer.byteLength(legacy)).toBeGreaterThan(64 * 1024 * 1024);
-    legacy = "";
+    await writeFile(catalogPath, log, { mode: 0o600 });
+    expect(Buffer.byteLength(log)).toBeGreaterThan(64 * 1024 * 1024);
+    log = "";
     const snapshot = await store.read();
     expect(snapshot.messages.size).toBe(1);
     expect(snapshot.messages.get(0)?.revision).toBe(repetitions);
@@ -90,7 +95,7 @@ describe("episodic store checkpoint", () => {
     owners.push(workspace);
     let calls = 0;
     const controlled: EpisodicSummarizer = async request => { calls += 1; return fauxAssistantMessage(request.turns.at(-1)!.text.slice(-100)); };
-    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer: controlled, limits: { nodeBytes: 512, retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer: controlled, limits: { nodeBytes: 512, retryMs: 0 } };
     const memory = await EpisodicMemory.open(options);
     const owner = memory as unknown as {
       composeNode: (...args: any[]) => Promise<any>;
@@ -132,6 +137,34 @@ describe("episodic store checkpoint", () => {
     await reopenedAgain.dispose();
   });
 
+  it("gives every durable record the next revision in append order, with no gaps", async () => {
+    // The watermark and the browser revision fence both read revisions, so a
+    // revision that is burned or reassigned after it is assigned would make the
+    // log disagree with the number it reports. Only the queued append assigns one.
+    const root = await mkdtemp(join(tmpdir(), "tron-episodic-revisions-"));
+    roots.push(root);
+    const cwd = join(root, "project");
+    const sessionDir = join(root, "sessions");
+    await Promise.all([mkdir(cwd, { recursive: true }), mkdir(sessionDir, { recursive: true })]);
+    const manager = SessionManager.create(cwd, sessionDir);
+    for (let index = 0; index < 3; index += 1) manager.appendMessage({ role: "user", content: `revision message ${index} ${"r".repeat(600)}`, timestamp: Date.now() });
+    const workspace = new TronWorkspace(join(root, "home"));
+    owners.push(workspace);
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { nodeBytes: 512, retryMs: 0 } });
+    await memory.entriesCommitted(manager.getSessionId());
+    await memory.dispose();
+    const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
+    const revisions: number[] = [];
+    for (const file of ["catalog.jsonl", "nodes.jsonl"]) {
+      for (const line of (await readFile(join(namespace, file), "utf8")).split("\n")) {
+        if (line.trim() !== "") revisions.push((JSON.parse(line) as { revision: number }).revision);
+      }
+    }
+    revisions.sort((left, right) => left - right);
+    expect(revisions.length).toBeGreaterThan(3);
+    expect(revisions).toEqual(revisions.map((_, index) => index + 1));
+  });
+
   it("refuses a symlinked staging entry without touching its target", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-episodic-checkpoint-symlink-"));
     roots.push(root);
@@ -142,12 +175,11 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "safe cleanup target", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0 } };
     const first = await EpisodicMemory.open(options);
     await first.entriesCommitted(manager.getSessionId());
+    await checkpointNow(first);
     await first.dispose();
-    const folded = await EpisodicMemory.open(options);
-    await folded.dispose();
     const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
     const outside = join(root, "outside");
     await mkdir(outside, { mode: 0o700 });
@@ -167,12 +199,11 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "fold tail message", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0 } };
     const first = await EpisodicMemory.open(options);
     await first.entriesCommitted(manager.getSessionId());
+    await checkpointNow(first);
     await first.dispose();
-    const folded = await EpisodicMemory.open(options);
-    await folded.dispose();
     const store = new EpisodicStore(workspace, manager.getSessionId(), EPISODIC_DEFAULTS.maxStoreLineBytes);
     const snapshot = await store.read();
     const previous = snapshot.messages.get(0)!;
@@ -205,7 +236,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "checkpoint disposal ordering", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0 } });
     await memory.entriesCommitted(manager.getSessionId());
     const owner = memory as unknown as {
       store: { shouldCheckpoint: (...args: any[]) => Promise<boolean>; checkpoint: (...args: any[]) => Promise<void> };
@@ -240,7 +271,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "before checkpoint failure", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0 } });
     await memory.entriesCommitted(manager.getSessionId());
     const owner = memory as unknown as { store: { checkpoint: (...args: any[]) => Promise<void> }; enqueueAppend: (operation: () => Promise<void>) => Promise<void>; publishCheckpoint: () => Promise<void> };
     owner.store.checkpoint = async () => { throw new Error("injected checkpoint reclamation failure"); };
@@ -261,12 +292,11 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "durable checkpoint entry", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0 } };
     const initial = await EpisodicMemory.open(options);
     await initial.entriesCommitted(manager.getSessionId());
+    await checkpointNow(initial);
     await initial.dispose();
-    const folded = await EpisodicMemory.open(options);
-    await folded.dispose();
     const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
     const checkpoint = (await readdir(namespace)).find(name => /^checkpoint-[A-Za-z0-9.-]+$/u.test(name))!;
     const nodesPath = join(namespace, checkpoint, "nodes.jsonl");

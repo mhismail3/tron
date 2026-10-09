@@ -11,10 +11,10 @@ struct HomePinnedRowPolicyTests {
             #expect(HomePinnedRowPolicy.action(for: status) == .designate)
         }
 
-        let ready = try status(phase: .ready, enabled: true, sessionPresent: true, sessionID: "home-current", openSessionID: "home-current")
-        #expect(HomePinnedRowPolicy.action(for: ready) == .open(sessionID: "home-current"))
-        let active = try status(phase: .active, enabled: true, sessionPresent: true, sessionID: "home-current", openSessionID: "home-current")
-        #expect(HomePinnedRowPolicy.action(for: active) == .open(sessionID: "home-current"))
+        for phase in [HomeStatusDTO.Phase.ready, .active, .paused, .blocked] {
+            let open = try status(phase: phase, enabled: true, sessionPresent: true, sessionID: "home-current", openSessionID: "home-current")
+            #expect(HomePinnedRowPolicy.action(for: open) == .open(sessionID: "home-current"), "phase \(phase)")
+        }
         let stale = try status(phase: .ready, enabled: true, sessionPresent: false, sessionID: "home-stale", openSessionID: nil)
         #expect(HomePinnedRowPolicy.action(for: stale) == .unavailable)
         #expect(HomePinnedRowPolicy.action(for: nil) == .unavailable)
@@ -54,10 +54,10 @@ struct HomePinnedRowPolicyTests {
         var value: [String: JSONValue] = [
             "phase": .string(phase.rawValue),
             "activation": .object(["available": .bool(false)]),
-            "readiness": .object(["ready": .bool(false), "gaps": .array([])]),
-            "recovery": .object(["action": .string("none")]),
+            "readiness": .object(["gaps": .array([])]),
+            "recovery": .object([:]),
             "available": .bool(true), "enabled": .bool(enabled),
-            "live": .bool(false), "sessionPresent": .bool(sessionPresent),
+            "sessionPresent": .bool(sessionPresent),
             "memory": .object(["configured": .bool(false), "open": .bool(false)]),
         ]
         if let sessionID { value["sessionId"] = .string(sessionID) }

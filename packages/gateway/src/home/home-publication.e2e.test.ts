@@ -23,6 +23,7 @@ vi.mock("../util/durable-json.js", async importOriginal => {
 import { TrustService } from "../admin/trust-service.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeOwner } from "./home-owner.js";
+import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -45,12 +46,16 @@ describe("Home durable publication reconciliation", () => {
       tronHome,
       trust: new TrustService(join(root, "agent")),
       workspace,
+      // Publication recovery never dispatches a task, so the task namespace is never read.
+      taskSessions: {} as RuntimeRegistry,
       sessions: {
         createHomeSession: async () => "session-1",
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
         sessionPresent: async () => true,
         hasLiveRuntime: () => false,
         applySessionModel: async () => {},
+        chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
+        hasConversation: async () => false,
         serializeSessionMutation: async (_id, commit) => commit(),
         replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
         beginHomePublicationReconciliation: () => {},
@@ -87,12 +92,16 @@ describe("Home durable publication reconciliation", () => {
       tronHome,
       trust: new TrustService(join(root, "agent")),
       workspace,
+      // Publication recovery never dispatches a task, so the task namespace is never read.
+      taskSessions: {} as RuntimeRegistry,
       sessions: {
         createHomeSession: async () => "session-1",
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
         sessionPresent: async () => true,
         hasLiveRuntime: () => false,
         applySessionModel: async () => {},
+        chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
+        hasConversation: async () => false,
         serializeSessionMutation: async (_id, commit) => commit(),
         replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
         beginHomePublicationReconciliation: () => {},

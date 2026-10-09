@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicStore } from "./episodic-store.js";
+import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
 import { EPISODIC_STORE_VERSION, EPISODIC_STATE_MAX_BYTES, type EpisodicStoreState } from "./episodic-contract.js";
 
-// The new write/read contract covers the ledger's existing 100k chapter limit.
-const maxChapters = 100_000;
+// A state with the ledger's full chapter count must write and read back.
+const maxChapters = HOME_MAX_CHAPTERS;
 const maxStateBytes = EPISODIC_STATE_MAX_BYTES;
 function state(chapters: number): EpisodicStoreState {
   const cursor = { dev: 1, ino: 1, size: 1, completeBytes: 1, leafEntryId: "entry", leafLineDigest: "a".repeat(64), completePrefixDigest: "b".repeat(64) };

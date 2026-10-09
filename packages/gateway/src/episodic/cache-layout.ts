@@ -21,10 +21,10 @@ export const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;
  * of the text, or with no new line end before it, adds no cut. The pieces
  * rejoin to exactly `text`, and every piece but the last ends with a line end.
  */
-export function cachePieces(text: string, marks: readonly number[] = CACHE_MARKS): string[] {
+export function cachePieces(text: string): string[] {
   const pieces: string[] = [];
   let start = 0;
-  for (const mark of marks) {
+  for (const mark of CACHE_MARKS) {
     if (mark >= text.length) break;
     const lineEnd = text.lastIndexOf("\n", mark - 1);
     if (lineEnd < start) continue;

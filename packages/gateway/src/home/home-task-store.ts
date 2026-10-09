@@ -146,15 +146,6 @@ export class HomeTaskStore {
     });
   }
 
-  /** Calls a synchronous visitor for each secure bounded record. Uninitialized
-   * absence is an empty read, not setup or a refusal; missing-after-init still
-   * fails closed. The caller owns its projection; there is no task-count cap. */
-  async list(visit: (record: HomeTaskRecord) => void): Promise<void> {
-    await this.run(async () => {
-      await this.inspect(visit);
-    });
-  }
-
   /** Sequential consumers may await mutations between records. Namespace
    * validation finishes under the mutex; no lock is held across a yield. */
   async *records(): AsyncGenerator<HomeTaskRecord> {
@@ -336,14 +327,13 @@ export class HomeTaskStore {
     return validateAuthorization(auth.value);
   }
 
-  private async inspect(visit?: (record: HomeTaskRecord) => void): Promise<HomeTaskAuthorizationState | undefined> {
+  private async inspect(): Promise<HomeTaskAuthorizationState | undefined> {
     const state = await this.inspectAuthority();
     if (!state) return undefined;
     // Each file is validated and released before the next one.
     for await (const name of this.taskNames()) {
       const task = await this.readNamedTask(name);
       validateAuthorityReferences(task, state);
-      visit?.(task);
     }
     return state;
   }
@@ -537,7 +527,7 @@ function validateTask(value: unknown): HomeTaskRecord {
     if (value.lifecycle !== "terminal" || !keys(wake, ["eventId", "routeGeneration", "createdAt", "state", "push", "delivery", "acknowledgedAt", "redeliveries"])
       || wake.eventId !== `task-result-${createHash("sha256").update(value.taskId as string).digest("hex")}` || !positive(wake.routeGeneration)
       || !text(wake.createdAt, 64) || !Number.isFinite(Date.parse(wake.createdAt))
-      || !["pending", "claimed", "admitted", "terminal", "acknowledged", "cancelled-before-admission", "blocked", "outcome-unknown"].includes(wake.state as string)
+      || !["pending", "claimed", "admitted", "terminal", "acknowledged", "blocked", "outcome-unknown"].includes(wake.state as string)
       || !["pending", "decided"].includes(wake.push as string)
       || !Array.isArray(wake.redeliveries) || wake.redeliveries.some(item => !keys(item, ["from", "to"]) || !positive(item.from) || !positive(item.to))
       || ((wake.state === "acknowledged") !== (wake.acknowledgedAt !== null))

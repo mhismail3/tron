@@ -3,11 +3,11 @@ import { GatewayError } from "../errors.js";
 /** Shared ledger/source bound; no second chapter-count authority. */
 export const HOME_MAX_CHAPTERS = 100_000;
 
-/** Admission and the canonical growth observer share these exact boundaries. */
+/** Admission, rollover and the canonical growth observer share these exact boundaries. */
 export const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
 export const HOME_HARD_ENTRIES = 100_000;
 
-/** Physical chapter state consumed only by the runtime that owns that session. */
+/** Physical chapter state for one session id, as the Home chapter ledger answers it to mutation owners. */
 export interface HomeChapterState {
   sessionId: string;
   sealed: boolean;

@@ -219,7 +219,7 @@ describe("episodic memory reclamation scale", () => {
       manager.appendMessage({ role: "user", content: "stable final message", timestamp: Date.now() });
       const workspace = new TronWorkspace(join(root, "home"));
       owners.push(workspace);
-      const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
+      const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 0, jobs: 4 } });
       await memory.entriesCommitted(manager.getSessionId());
       const target = manager.getBranch().find(entry => entry.type === "message")!;
       for (let edit = 0; edit < edits; edit += 1) {
@@ -265,7 +265,7 @@ describe("episodic memory reclamation scale", () => {
       owners.push(workspace);
       const sessionId = manager.getSessionId();
       const sessionFile = manager.getSessionFile()!;
-      let memory: EpisodicMemory | null = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
+      let memory: EpisodicMemory | null = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { retryMs: 0, jobs: 4 } });
       await memory.entriesCommitted(sessionId);
       const target = manager.getBranch().find(entry => entry.type === "message")!;
       for (let edit = 0; edit < edits; edit += 1) manager.appendContextEdit(target.id, { content: `fixed live replacement ${"x".repeat(128 * 1024)}` });
@@ -284,7 +284,7 @@ describe("episodic memory reclamation scale", () => {
       const sampler = setInterval(() => { peak = Math.max(peak, process.memoryUsage().heapUsed); }, 1);
       let reopened: EpisodicMemory | undefined;
       try {
-        reopened = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
+        reopened = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { retryMs: 0, jobs: 4 } });
         peak = Math.max(peak, process.memoryUsage().heapUsed);
         expect(reopened.status().messages).toBe(100);
         liveNodeCounts.push(reopened.status().nodes.total);
@@ -304,16 +304,16 @@ describe("episodic memory reclamation scale", () => {
     console.log(`episodic open heap N=100 K=1,10,50: ${JSON.stringify(measurements)}`);
   }, 180_000);
 
-  it("bounds legacy replay peak and retained source payloads as history grows", async () => {
+  it("bounds catalog-log replay peak and retained source payloads as history grows", async () => {
     setFlagsFromString("--expose_gc");
     const collect = runInNewContext("gc") as () => void;
     const replayMeasurements: Array<{ revisions: number; logBytes: number; peakDelta: number; retainedDelta: number }> = [];
     for (const revisions of [100, 5_000, 75_000]) {
-      const root = await mkdtemp(join(tmpdir(), "tron-episodic-legacy-heap-"));
+      const root = await mkdtemp(join(tmpdir(), "tron-episodic-replay-heap-"));
       roots.push(root);
       const workspace = new TronWorkspace(join(root, "home"));
       owners.push(workspace);
-      const sessionId = `legacy-heap-${revisions}`;
+      const sessionId = `replay-heap-${revisions}`;
       const store = new EpisodicStore(workspace, sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
       const base: EpisodicMessageRecord = {
         revision: 1, index: 0, entryId: "one-live-message", kind: "user", text: "x".repeat(900), omitted: false, omissions: [],
@@ -360,7 +360,7 @@ describe("episodic memory reclamation scale", () => {
     expect(replayMeasurements.at(-1)!.logBytes).toBeGreaterThan(64 * 1024 * 1024);
     expect(Math.max(...replayMeasurements.map(item => item.peakDelta)) - Math.min(...replayMeasurements.map(item => item.peakDelta))).toBeLessThan(32 * 1024 * 1024);
     expect(Math.max(...replayMeasurements.map(item => item.retainedDelta)) - Math.min(...replayMeasurements.map(item => item.retainedDelta))).toBeLessThan(8 * 1024 * 1024);
-    console.log(`episodic legacy replay heap N=1 K=100,5000,75000: ${JSON.stringify(replayMeasurements)}`);
+    console.log(`episodic catalog-log replay heap N=1 K=100,5000,75000: ${JSON.stringify(replayMeasurements)}`);
 
     const sourceMeasurements: Array<{ edits: number; baseline: number; peakDelta: number; retainedPayloads: number; retainedPayloadBytes: number }> = [];
     const liveNodeCounts: number[] = [];
@@ -381,7 +381,7 @@ describe("episodic memory reclamation scale", () => {
       owners.push(workspace);
       const sessionId = manager.getSessionId();
       const sessionFile = manager.getSessionFile()!;
-      const memory = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { nodeBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {} });
+      const memory = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { nodeBytes: 512, jobs: 4, retryMs: 0 } });
       await memory.entriesCommitted(sessionId);
       await memory.whenReady(memory.status().messages);
       const targetId = manager.getBranch().find(entry => entry.type === "message")!.id;

@@ -422,9 +422,9 @@ interface RuntimeSlotHooks {
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
   /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
-  homeQuiescent?: (sessionId: string) => Promise<void>;
-  homeChapterRefused?: (reason: "sealed-write") => void;
-  homeChapterLimitStopped?: (details: {
+  homeQuiescent: (sessionId: string) => Promise<void>;
+  homeChapterRefused: (reason: "sealed-write") => void;
+  homeChapterLimitStopped: (details: {
     chapterOrdinal: number;
     boundary: HomeHardBoundary;
     crossingBytes: number;
@@ -475,9 +475,9 @@ type PromptOwnership = AutomationPromptOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
-  homeTask?: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
-  homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
-  validateTaskMarker?: (sessionId: string, marker: unknown) => Promise<void>;
+  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
@@ -533,7 +533,7 @@ export interface RuntimeSlotDependencies {
    * I/O while the session is not archived. */
   beforeRunAdmission: (sessionId: string) => Promise<void>;
   /** HomeOwner policy, revalidated synchronously after prompt admission awaits. */
-  homeChapterAdmission?: (sessionId: string, metrics: { bytes: number; entries: number }) => void;
+  homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => void;
   /** Gateway-owned archive projection for one session, read at snapshot time.
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
@@ -542,29 +542,28 @@ export interface RuntimeSlotDependencies {
    * creation, so a profile change is never cached past the runtime it applies
    * to. `unnamed` is the only state in which the explicit creation profile
    * applies. */
-  homeProfile?: (sessionId: string, cwd: string) => "home" | "ordinary" | "unnamed";
+  homeProfile: (sessionId: string, cwd: string) => "home" | "ordinary" | "unnamed";
   /** Recorded chat model for an enabled Home, applied when reconstructing an
    * unloaded runtime instead of restoring the transcript's incidental model. */
-  homeModel?: (sessionId: string) => { provider: string; id: string } | undefined;
+  homeModel: (sessionId: string) => { provider: string; id: string } | undefined;
   /** Tron Home's request seam for one session id. Asked once per runtime
    * creation, never for a fork or an ordinary session. */
-  homeRequestPolicy?: (sessionId: string) => HomeRequestPolicy | undefined;
-  homeInboxAdmission?: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<void>;
-  homeInboxSettlement?: (sessionId: string, operationId: string) => Promise<void>;
+  homeRequestPolicy: (sessionId: string) => HomeRequestPolicy | undefined;
+  homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<void>;
+  homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
-  homeMemory?: HomeMemoryPort;
+  homeMemory: HomeMemoryPort;
   /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
-   * `memory_search` tools the tron-home module registers. Optional because a slot
-   * is constructible without a Home owner; a slot that has one always offers it,
-   * and it answers undefined for any session that is not the enabled Home. */
-  homeMemoryTools?: (sessionId: string) => HomeMemoryToolAccess | undefined;
+   * `memory_search` tools the tron-home module registers. It answers undefined
+   * for any session that is not the enabled Home. */
+  homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
-  homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
+  homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
   /** Physical chapter state is consulted only by mutation owners. The registry
    * answers it from the Home chapter ledger; any other session is unsealed. */
-  homeChapterState?: (sessionId: string) => HomeChapterState;
+  homeChapterState: (sessionId: string) => HomeChapterState;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -1746,7 +1745,7 @@ export class RuntimeSlot {
    * names it, and never a fork or a reset (which produce a new session id). */
   private isHomeProfile(sessionManager: SessionManager): boolean {
     const sessionId = sessionManager.getSessionId();
-    const decision = this.dependencies.homeProfile?.(sessionId, sessionManager.getCwd()) ?? "unnamed";
+    const decision = this.dependencies.homeProfile(sessionId, sessionManager.getCwd());
     if (decision === "home") return true;
     if (decision === "ordinary") return false;
     return this.explicitHomeSessionId === sessionId;
@@ -1769,7 +1768,8 @@ export class RuntimeSlot {
       // can register a provider into its runtime, and it runs on the Gateway-wide
       // runtime where `home.designate` admitted its model and user provider
       // packages such as CortexKit's are registered (#480).
-      const binding = this.isHomeProfile(sessionManager)
+      const home = this.isHomeProfile(sessionManager);
+      const binding = home
         ? await this.dependencies.homeModelRuntime()
         : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
       const modelRuntime = binding.runtime;
@@ -1787,7 +1787,6 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const home = this.isHomeProfile(sessionManager);
       // One-shot: a brand-new Home session's first runtime carries the explicit
       // profile; every later runtime asks the record.
       this.explicitHomeSessionId = undefined;
@@ -1817,14 +1816,13 @@ export class RuntimeSlot {
         ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
         // Home's memory tools are answered per call, because the memory a
         // running Home reads can be reconfigured, blocked or released.
-        homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools?.(sessionId),
-        ...(this.dependencies.homeDelegate ? { homeDelegate: this.dependencies.homeDelegate } : {}),
-        ...(this.dependencies.homeTask ? { homeTask: this.dependencies.homeTask } : {}),
+        homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools(sessionId),
+        homeDelegate: this.dependencies.homeDelegate,
+        homeTask: this.dependencies.homeTask,
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
-      // Tron modules plus tron-home. An ordinary runtime is byte-for-byte what
-      // it was: the Home branch changes nothing it would have built.
+      // Tron modules plus tron-home.
       // Home delegates only through Home tasks, never through managed pi-subagents.
       const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
       const settingsManager = home ? undefined : SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
@@ -1894,7 +1892,7 @@ export class RuntimeSlot {
       }
       const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
-      const recordedHomeModel = home ? this.dependencies.homeModel?.(sessionManager.getSessionId()) : undefined;
+      const recordedHomeModel = home ? this.dependencies.homeModel(sessionManager.getSessionId()) : undefined;
       const homeModel = recordedHomeModel
         ? modelRuntime.getPhysicalModel(recordedHomeModel.provider, recordedHomeModel.id)
         : undefined;
@@ -1956,7 +1954,7 @@ export class RuntimeSlot {
       if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
-        ? this.dependencies.homeRequestPolicy?.(sessionManager.getSessionId())
+        ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
@@ -1991,8 +1989,9 @@ export class RuntimeSlot {
     const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
     if (markers.length > 1) throw new GatewayError("conflict", "Conflicting canonical task markers");
     if (markers.length) {
-      if (!this.dependencies.validateTaskMarker || markers[0]?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
-      await this.dependencies.validateTaskMarker(this.id, markers[0].data);
+      const marker = markers[0];
+      if (marker?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
+      await this.dependencies.validateTaskMarker(this.id, marker.data);
     }
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
       cwd: this.sessionManager.getCwd(),
@@ -2144,7 +2143,7 @@ export class RuntimeSlot {
     if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
       throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
     }
-    if (this.dependencies.homeChapterState?.(this.id).homeId || this.liveProfile() === "home") {
+    if (this.dependencies.homeChapterState(this.id).homeId || this.liveProfile() === "home") {
       throw new HomeChapterIdentityReplacementError(this.id);
     }
     const previous = this.rebindAttentionDisposition;
@@ -3523,7 +3522,7 @@ export class RuntimeSlot {
       // The terminal receipt is already canonical. A failed settlement leaves its
       // delivery admitted for the next activation to re-prove; it must not strand
       // this operation's work entry or its terminal observers.
-      await this.dependencies.homeInboxSettlement?.(this.id, receipt.operationId).catch(error => {
+      await this.dependencies.homeInboxSettlement(this.id, receipt.operationId).catch(error => {
         this.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
       });
     }
@@ -3871,7 +3870,7 @@ export class RuntimeSlot {
         return;
       }
       this.hooks.settled(this.id);
-      await this.hooks.homeQuiescent?.(this.id);
+      await this.hooks.homeQuiescent(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
       this.operation ??= this.compactionOperation;
       this.revision += 1;
@@ -6542,7 +6541,6 @@ export class RuntimeSlot {
   private noteCanonicalEntriesCommitted(): void {
     if (this.liveProfile() !== "home") return;
     const homeMemory = this.dependencies.homeMemory;
-    if (!homeMemory) return;
     queueMicrotask(() => { homeMemory.entriesCommitted(this.id); });
   }
 
@@ -7949,7 +7947,7 @@ export class RuntimeSlot {
           this.publishSnapshot();
           this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
           if (this.homeRequestPolicy) {
-            await this.dependencies.homeInboxAdmission?.(this.id, operationId, async message => {
+            await this.dependencies.homeInboxAdmission(this.id, operationId, async message => {
               await session.sendCustomMessage(message, { triggerTurn: false });
               const entry = session.sessionManager.getLeafEntry();
               if (entry?.type !== "custom_message" || entry.customType !== message.customType
@@ -8933,7 +8931,7 @@ export class RuntimeSlot {
       // The Home record is the single source of truth for the model a re-enable
       // restores, and only an enabled Home's change belongs to it.
       if (this.liveProfile() === "home") {
-        await this.dependencies.homeModelChanged?.(this.id, { provider, id: modelId });
+        await this.dependencies.homeModelChanged(this.id, { provider, id: modelId });
       }
       this.revision += 1;
       this.publishSnapshot();
@@ -10107,8 +10105,7 @@ export class RuntimeSlot {
   }
 
   private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
-    const state = this.dependencies.homeChapterState?.(manager.getSessionId());
-    if (!state) return;
+    const state = this.dependencies.homeChapterState(manager.getSessionId());
     const authority = this.homeMaterializationAuthority;
     const ownsMaterialization = Boolean(authority
       && state.materializing
@@ -10121,7 +10118,7 @@ export class RuntimeSlot {
       && manager.getSessionFile() === authority.expectedPath);
     try { assertChapterWritable(state, ownsMaterialization); }
     catch (error) {
-      if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused?.("sealed-write");
+      if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused("sealed-write");
       throw error;
     }
   }
@@ -10129,14 +10126,14 @@ export class RuntimeSlot {
   private assertHomePromptAdmission(): void {
     this.assertHomeLimitNotStopping();
     this.assertChapterWritable();
-    if (!this.dependencies.homeChapterState?.(this.id).homeId) return;
+    if (!this.dependencies.homeChapterState(this.id).homeId) return;
     const path = this.sessionFile;
     let bytes = 0;
     if (path) {
       try { bytes = statSync(path).size; }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
-    this.dependencies.homeChapterAdmission?.(this.id, { bytes, entries: this.canonicalEntryCount });
+    this.dependencies.homeChapterAdmission(this.id, { bytes, entries: this.canonicalEntryCount });
   }
 
   private assertHomeLimitNotStopping(): void {
@@ -10166,8 +10163,8 @@ export class RuntimeSlot {
       try {
         const settledBytes = path ? statSync(path).size : 0;
         const settledEntries = this.canonicalEntryCount;
-        this.hooks.homeChapterLimitStopped?.({
-          chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
+        this.hooks.homeChapterLimitStopped({
+          chapterOrdinal: this.dependencies.homeChapterState(this.id).ordinal ?? 0,
           boundary,
           crossingBytes: crossing.crossingBytes,
           crossingEntries: crossing.crossingEntries,

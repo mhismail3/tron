@@ -75,20 +75,20 @@ export class HomeTaskReportOwner {
   }
   async joinStop(): Promise<void> { await this.stopping; }
   readonly identity: Readonly<HomeTaskWorkerIdentity>;
-  private admission: { interrupt?: () => Promise<void> } | undefined;
-  constructor(identity: HomeTaskWorkerIdentity, interrupt?: () => Promise<void>) {
+  private admission: { interrupt: () => Promise<void> } | undefined;
+  constructor(identity: HomeTaskWorkerIdentity, interrupt: () => Promise<void>) {
     this.identity = Object.freeze({ ...identity });
-    this.admission = { ...(interrupt ? { interrupt } : {}) };
+    this.admission = { interrupt };
   }
 
-  get controlsActive(): boolean { return !!this.admission?.interrupt; }
+  get controlsActive(): boolean { return this.admission !== undefined; }
   get acceptsSteering(): boolean { return !!this.admission && !this.sealed && !this.stopping; }
   /** Settlement releases execution callbacks with the lease, even when exact
    * Stop failed. Immutable evidence remains, but no late report can rewrite it. */
   retire(): void { this.admission = undefined; this.cancel(); }
 
   async stop(): Promise<void> {
-    if (!this.admission?.interrupt) throw new Error("Task control is unavailable");
+    if (!this.admission) throw new Error("Task control is unavailable");
     this.requestStop(this.admission.interrupt);
     await this.joinStop();
   }

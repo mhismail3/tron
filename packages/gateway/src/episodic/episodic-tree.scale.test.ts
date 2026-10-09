@@ -1,7 +1,7 @@
 import { runInNewContext } from "node:vm";
 import { setFlagsFromString } from "node:v8";
 import { expect, it } from "vitest";
-import { EPISODIC_DEFAULTS } from "./episodic-contract.js";
+import { EPISODIC_CAP_TAIL_CHARS, EPISODIC_DEFAULTS } from "./episodic-contract.js";
 import { capText } from "./episodic-tree.js";
 
 /*
@@ -23,7 +23,7 @@ it("keeps the capped text of a message from retaining its source", () => {
   for (let index = 0; index < messages; index += 1) {
     // A parsed canonical line yields a string that nothing else references.
     const source = JSON.parse(JSON.stringify({ text: `message ${index} ` + "x".repeat(sourceChars) })).text as string;
-    kept.push(capText(source, cap, EPISODIC_DEFAULTS.capTailChars).text);
+    kept.push(capText(source, cap, EPISODIC_CAP_TAIL_CHARS).text);
   }
   collect(); collect();
   const retainedPerMessage = (process.memoryUsage().heapUsed - baseline) / messages;

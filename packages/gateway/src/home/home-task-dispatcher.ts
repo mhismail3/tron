@@ -179,11 +179,9 @@ export class HomeTaskDispatcher {
         reports.cancel();
         await slot.cancelHomeTaskOperation(operationId, reason);
       };
-      let deadlineDiagnostic: { operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed" } | undefined;
-      const deadline = new OwnedSessionDispatch(this.sessions, { diagnostic: record => { deadlineDiagnostic = record; } });
       // Arm before the first asynchronous prompt preflight; cancellation never
       // queues behind the lane whose blocked admission it must interrupt.
-      const bounded = deadline.enforceDeadline({ operationId, completion: terminal, cancel: cancellation });
+      const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation });
       work.transition("foreground-agent-operation");
       const admitted = dispatch.admit(slot, `${task.intent.text}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
@@ -241,9 +239,9 @@ export class HomeTaskDispatcher {
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
         this.diagnostic?.({ event: "home.task.spend", taskHash: hash(final.taskId), spendReference,
           inputTokens: spend.inputTokens, outputTokens: spend.outputTokens, unpriced: true });
-        if (deadlineDiagnostic) this.diagnostic?.({ event: "home.task.runaway-stop", taskHash: hash(final.taskId),
-          operationHash: deadlineDiagnostic.operationHash, elapsedMs: deadlineDiagnostic.elapsedMs,
-          cancelAndJoin: deadlineDiagnostic.cancelAndJoin, spendReference });
+        if (outcome.state === "deadline-stopped" || outcome.state === "deadline-stop-failed") this.diagnostic?.({ event: "home.task.runaway-stop", taskHash: hash(final.taskId),
+          operationHash: hash(operationId), elapsedMs: outcome.elapsedMs,
+          cancelAndJoin: deadlineStopped ? "joined" : "failed", spendReference });
         await dispatch.acknowledge(slot.id, operationId, ownedLease);
         await this.inbox.publish(final.taskId);
         return (await this.store.read(final.taskId))!;
