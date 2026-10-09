@@ -7711,10 +7711,12 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let releaseInitial!: () => void;
     let releaseSteering!: () => void;
+    let initialStarted!: () => void;
     let steeringStarted!: () => void;
     let followUpStarted!: () => void;
     const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
     const steeringBarrier = new Promise<void>((resolve) => { releaseSteering = resolve; });
+    const initialStart = new Promise<void>((resolve) => { initialStarted = resolve; });
     const steeringStart = new Promise<void>((resolve) => { steeringStarted = resolve; });
     const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
     onTestFinished(() => {
@@ -7724,6 +7726,7 @@ export default function (pi) {
     const faux = fauxProvider({ provider: "tron-steering-follow-up-observation-retirement", tokensPerSecond: 10_000 });
     faux.setResponses([
       async () => {
+        initialStarted();
         await initialBarrier;
         return fauxAssistantMessage("initial complete");
       },
@@ -7765,6 +7768,10 @@ export default function (pi) {
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");
     const initialOperationId = slot.snapshot().operation?.id;
     expect(initialOperationId).toBeTruthy();
+    // The steer must arrive after the first model call has started. A steer
+    // accepted before that call is folded into its context and no steering turn
+    // runs, which is what the phase poll alone allowed under load.
+    await initialStart;
     const steer = await slot.prompt("steer during foreground run", [], "steer");
     releaseInitial();
     await steeringStart;
