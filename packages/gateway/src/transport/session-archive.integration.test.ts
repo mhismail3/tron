@@ -376,6 +376,28 @@ const attentionRecord = async (root: string, sessionId: string): Promise<unknown
   return document.sessions[sessionId];
 };
 
+/** Holds every outbound write the Gateway has to this process's sockets until
+ * the returned release runs. The frame is still handed to the socket; only its
+ * completion waits, which is how a loaded host delays a write. The outbound
+ * queue then keeps later frames behind the held one, so a newer snapshot
+ * supersedes an unsent one and the client receives it as a rebaseline. */
+function stallOutboundWrites(server: GatewayServer): () => void {
+  const sockets = server as unknown as { localSockets: { clients: Set<WebSocket> }; pairedSockets: { clients: Set<WebSocket> } };
+  let stalled = true;
+  const held: Array<() => void> = [];
+  for (const socket of [...sockets.localSockets.clients, ...sockets.pairedSockets.clients]) {
+    const send = socket.send.bind(socket);
+    socket.send = ((data: string, complete: (error?: Error) => void) => send(data, (error) => {
+      if (stalled) held.push(() => complete(error));
+      else complete(error);
+    })) as WebSocket["send"];
+  }
+  return () => {
+    stalled = false;
+    for (const complete of held.splice(0)) complete();
+  };
+}
+
 /** Fails every durable archive-record removal from now on, modelling a full or
  * failing disk at the store's exact write boundary. */
 function failArchiveRemovals(registry: RuntimeRegistry): () => void {
@@ -408,6 +430,11 @@ const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
     }
     return [];
   });
+
+/** The Gateway's published row phase. A held subscriber write cannot show the
+ * run yet, so the wait reads the registry to know the run's snapshot is queued. */
+const runningInRegistry = (registry: RuntimeRegistry, sessionId: string): boolean =>
+  (registry as unknown as { latestSummaries: Map<string, { phase?: string }> }).latestSummaries.get(sessionId)?.phase === "running";
 
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
@@ -1854,17 +1881,26 @@ describe("session archive over the real Gateway", () => {
       // active projection the commit rechecks can notice it. Its frames arrive
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
+      // Held socket writes model a loaded host: the run's first running snapshot
+      // queues behind them, and the commit's own republish supersedes it.
+      const releaseSocketWrites = stallOutboundWrites(f.current().server);
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
       await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
-      await waitWithStallState(() => snapshotFrames(client, session.id).some(
-        (frame) => frame.payload?.phase === "running"), "externally started run");
+      await waitWithStallState(() => runningInRegistry(f.current().registry, session.id), "externally started run in the registry");
       releaseWrite();
+      // The restored row's republish is queued behind the held write before
+      // the backstop clears the record, so the release below delivers it.
+      await waitFor(() => f.archiveDiagnostic.mock.calls.some(
+        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
+      releaseSocketWrites();
+      // The running state reaches the client as a rebaseline when its snapshot
+      // was superseded while queued, so the oracle reads delivered authority.
+      await waitWithStallState(() => deliveredAuthorityFrames(client, session.id).some(
+        (frame) => frame.payload?.phase === "running"), "externally started run");
       const response = await archiving;
       expect(response.ok, JSON.stringify(response)).toBe(true);
       expect(response.result).toEqual({ archived: false });
       expect(await listedIds(client, "exclude")).toContain(session.id);
-      await waitFor(() => f.archiveDiagnostic.mock.calls.some(
-        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
       releaseRun();
       await waitFor(async () => (await archivedRecord(f.root, session.id)) === undefined, "record cleared behind the run");
       await waitFor(async () => (await list(client, "exclude")).sessions.some(
