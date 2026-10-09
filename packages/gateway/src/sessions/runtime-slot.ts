@@ -1229,7 +1229,10 @@ export class RuntimeSlot {
     return this.runtime.session.modelRuntime;
   }
 
-  /** Actionable work only; decorative presentation must not block trust/delete. */
+  /** Actionable work only; decorative presentation must not block trust/delete.
+   * True from slot admission, which precedes the SDK's agent admission: a Stop in
+   * that window revokes the prompt. A test that Stops a run waits for the run's own
+   * entry, not for this. */
   get isBusy(): boolean {
     return this.isBusyExceptWorkToken();
   }

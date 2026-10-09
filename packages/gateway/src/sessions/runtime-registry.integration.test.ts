@@ -9011,8 +9011,10 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let release!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { release = resolve; });
+    let agentEntered!: () => void;
+    const agentAdmitted = new Promise<void>((resolve) => { agentEntered = resolve; });
     const faux = fauxProvider({ provider: "tron-abort-invocation", tokensPerSecond: 10_000 });
-    faux.setResponses([async () => { await responseBarrier; return fauxAssistantMessage("should not complete"); }]);
+    faux.setResponses([async () => { agentEntered(); await responseBarrier; return fauxAssistantMessage("should not complete"); }]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const registry = new RuntimeRegistry({
@@ -9026,7 +9028,8 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("interrupt me");
-    await waitFor(() => slot.isBusy, "the slot to take work");
+    // Stop only after the SDK admitted the run; see the failed-Stop case below.
+    await agentAdmitted;
     const aborting = slot.abort("agent");
     release();
     await aborting;
@@ -9044,8 +9047,10 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let release!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { release = resolve; });
+    let agentEntered!: () => void;
+    const agentAdmitted = new Promise<void>((resolve) => { agentEntered = resolve; });
     const faux = fauxProvider({ provider: "tron-abort-failed-stop", tokensPerSecond: 10_000 });
-    faux.setResponses([async () => { await responseBarrier; return fauxAssistantMessage("completed on its own"); }]);
+    faux.setResponses([async () => { agentEntered(); await responseBarrier; return fauxAssistantMessage("completed on its own"); }]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const registry = new RuntimeRegistry({
@@ -9059,7 +9064,9 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("finish on its own");
-    await waitFor(() => slot.isBusy, "the slot to take work");
+    // `isBusy` turns true at slot admission, before the SDK admits the run; a Stop
+    // in that window revokes the prompt and never reaches `session.abort`.
+    await agentAdmitted;
     const session = (slot as unknown as { runtime: { session: { abort(): Promise<void> } } }).runtime.session;
     const sdkAbort = session.abort.bind(session);
     session.abort = async () => { throw new Error("abort refused"); };
