@@ -1204,6 +1204,7 @@ class PlatformProbeTests(unittest.TestCase):
     def setUp(self):
         self.platform = reinstall.MacPlatform(Path('/fixture/home'))
         self.loaded = None
+        self.launchd_stdout = b''
         self.listener = False
         self.unreadable = False
         self.processes = b'123 /usr/bin/fixture-app\n'
@@ -1218,8 +1219,10 @@ class PlatformProbeTests(unittest.TestCase):
         if argv[0] == '/usr/sbin/lsof':
             return SimpleNamespace(returncode=0 if self.listener else 1,
                                    stdout=b'123' if self.listener else b'', stderr=b'')
-        return SimpleNamespace(returncode=0 if argv[-1].endswith('/' + str(self.loaded)) else 113,
-                               stdout=b'', stderr=b'permission denied' if self.unreadable else b'Could not find service')
+        loaded = argv[-1].endswith('/' + str(self.loaded))
+        return SimpleNamespace(returncode=0 if loaded else 113,
+                               stdout=self.launchd_stdout if loaded else b'',
+                               stderr=b'permission denied' if self.unreadable else b'Could not find service')
 
     def offline(self):
         with patch.object(reinstall, 'command', side_effect=self.command), \
@@ -1236,6 +1239,30 @@ class PlatformProbeTests(unittest.TestCase):
         for label in ('com.tron.server', 'com.tron.server.dev', 'com.tron.server.preview',
                       'com.tron.server.dev-takeover', 'com.tron.gateway.dev', 'com.tron.mac.native-host'):
             self.loaded = label
+            with self.assertRaisesRegex(reinstall.Stop, 'service-loaded'):
+                self.offline()
+
+    def test_quit_stopped_release_jobs_are_offline(self):
+        # Quit stops the Stable Gateway and keeps its approved registration.
+        self.loaded = 'com.tron.server'
+        self.launchd_stdout = b'gui/501/com.tron.server = {\n\tstate = not running\n\tlast exit code = 0\n\tendpoints = {\n\t\tstate = active\n\t}\n}\n'
+        self.offline()
+        for running in (b'gui/501/com.tron.server = {\n\tstate = running\n\tpid = 81029\n}\n',
+                        b'gui/501/com.tron.server = {\n\tstate = not running\n\tpid = 81029\n}\n',
+                        b'gui/501/com.tron.server = {\n\t\tstate = not running\n}\n', b''):
+            self.launchd_stdout = running
+            with self.assertRaisesRegex(reinstall.Stop, 'service-loaded'):
+                self.offline()
+        self.loaded = 'com.tron.mac.native-host'
+        self.launchd_stdout = b'gui/501/com.tron.mac.native-host = {\n\tstate = not running\n}\n'
+        self.offline()
+        self.launchd_stdout = b'gui/501/com.tron.mac.native-host = {\n\tstate = running\n\tpid = 4242\n}\n'
+        with self.assertRaisesRegex(reinstall.Stop, 'service-loaded'):
+            self.offline()
+        for label in ('com.tron.server.dev', 'com.tron.server.preview', 'com.tron.server.dev-takeover',
+                      'com.tron.gateway.dev'):
+            self.loaded = label
+            self.launchd_stdout = b'gui/501/x = {\n\tstate = not running\n}\n'
             with self.assertRaisesRegex(reinstall.Stop, 'service-loaded'):
                 self.offline()
 
