@@ -364,6 +364,9 @@ configurations and Node test scripts.
    `<owner>/<repo><verify.evidenceRepositorySuffix>`, derived at run time,
    under `<issue>/<head>/`. They are not scrubbed and hold local paths, so
    verify uploads nothing unless GitHub reports that repository as private.
+   Each upload is a commit on that repository's branch. Concurrent lands race
+   for its head, so a lost race (HTTP 409) re-reads the file and re-applies the
+   same upload, at most five times; any other error fails the post.
 5. The public comment has a table of checks, commands, results, wall times and
    carried-from commits, plus the last `verify.excerptLines` lines of each
    failed log. The repository root and home directory are replaced by `<repo>`
@@ -581,6 +584,8 @@ unrelated Gateway source does not.
 14. **A crash or partial post leaves a success status.** The status is
     `pending` before any lookup or upload, `success` is set only after the
     comment exists and only for a passing receipt, and any error sets `failure`.
+    A concurrent poster's evidence commit (HTTP 409) is re-applied rather than
+    stopping the post (`test_concurrent_evidence_commit_is_reapplied_not_fatal`).
 15. **Evidence leaks personal data.** Every public comment passes the scrub
     command first; excerpts are redacted; full logs go only to the evidence
     repository, and only when GitHub reports it as private.

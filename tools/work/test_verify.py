@@ -52,6 +52,13 @@ FAKE_GH = textwrap.dedent(
         if fail and fail in path:
             print("gh: injected failure (HTTP 500)", file=sys.stderr)
             sys.exit(1)
+        # FAKE_GH_CONFLICT_ONCE: a marker path; the first contents PUT loses the
+        # evidence branch's compare-and-swap to a concurrent poster.
+        conflict = os.environ.get("FAKE_GH_CONFLICT_ONCE")
+        if conflict and method == "PUT" and "/contents/" in path and not os.path.exists(conflict):
+            open(conflict, "w").close()
+            print("gh: is at 1111111 but expected 2222222 (HTTP 409)", file=sys.stderr)
+            sys.exit(1)
         if method == "GET" and "/contents/" in path:
             print("gh: Not Found (HTTP 404)", file=sys.stderr)
             sys.exit(1)
@@ -716,9 +723,9 @@ class PostFixture(VerifyFixture):
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         fake.chmod(0o755)
         self._env = {k: os.environ.get(k) for k in ("WORK_GH", "FAKE_GH_LOG", "FAKE_GH_FAIL", "FAKE_GH_PR",
-                                                 "FAKE_GH_EVIDENCE_PUBLIC")}
+                                                 "FAKE_GH_EVIDENCE_PUBLIC", "FAKE_GH_CONFLICT_ONCE")}
         os.environ.update(WORK_GH=str(fake), FAKE_GH_LOG=str(self.gh_log))
-        for key in ("FAKE_GH_FAIL", "FAKE_GH_PR", "FAKE_GH_EVIDENCE_PUBLIC"):
+        for key in ("FAKE_GH_FAIL", "FAKE_GH_PR", "FAKE_GH_EVIDENCE_PUBLIC", "FAKE_GH_CONFLICT_ONCE"):
             os.environ.pop(key, None)
 
     def tearDown(self):
@@ -814,6 +821,17 @@ class PostStatusTests(PostFixture):
         status_paths = {path for _, path, _ in self.api_calls() if "/statuses/" in path}
         self.assertEqual(status_paths, {f"repos/acme/widget/statuses/{head}"})
         self.assertIn(head, self.comment_bodies()[0])
+
+    def test_concurrent_evidence_commit_is_reapplied_not_fatal(self):
+        # Concurrent lands commit to the same evidence branch; losing its
+        # compare-and-swap (HTTP 409) re-reads and re-applies the upload.
+        self.commit(self.repo, "app/a.txt", "two\n")
+        self.push()
+        os.environ["FAKE_GH_CONFLICT_ONCE"] = str(self.tmp / "conflicted")
+        self.post(self.verify())
+        self.assertEqual(self.statuses(), ["pending", "success"])
+        puts = [path for method, path, _ in self.api_calls() if method == "PUT" and "/contents/" in path]
+        self.assertEqual(len(puts), len(set(puts)) + 1)
 
     def test_failing_receipt_posts_failure(self):
         self.commit(self.repo, "app/a.txt", "two\n")
