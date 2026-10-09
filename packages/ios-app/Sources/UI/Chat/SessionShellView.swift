@@ -152,8 +152,7 @@ struct SessionShellView: View {
         guard let route = presentedSession, route.isHome,
               let profileID = model.profiles.selected?.id,
               let status = model.homeStatus.status,
-              let next = try? model.navigationRouteForHome(profileID: profileID, status: status),
-              next.sessionID != route.sessionID else { return }
+              let next = try? model.followedHomeRoute(from: route, profileID: profileID, status: status) else { return }
         present(next)
     }
 

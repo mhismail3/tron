@@ -542,6 +542,16 @@ final class ComposerDraftCoordinator {
         return scope
     }
 
+    /// A Home route's unsent text follows it to the chapter Home names next. The
+    /// destination takes the text only as an absent draft, the same seed rule as an
+    /// initial editor text, so a retained successor draft is never replaced. The
+    /// source keeps its own draft: a submission still in flight on the sealed
+    /// chapter may restore that text.
+    func carryDraft(from source: ComposerDraftScope, to destination: ComposerDraftScope) {
+        guard source != destination, let text = drafts[source]?.text, !text.isEmpty else { return }
+        touch(destination, installing: text)
+    }
+
     func text(for scope: ComposerDraftScope) -> String {
         drafts[scope]?.text ?? ""
     }

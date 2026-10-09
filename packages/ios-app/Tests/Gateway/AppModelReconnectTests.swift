@@ -1829,6 +1829,51 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a Home follow carries the sealed chapter's unsent text to the successor route")
+    func homeFollowCarriesUnsentTextToSuccessor() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let sealedRoute = try fixture.model.navigationRouteForHome(profileID: profile.id, status: try #require(fixture.model.homeStatus.status))
+            #expect(sealedRoute.sessionID == "predecessor-session")
+            let sealedDraft = ComposerDraftScope(profileID: profile.id, sessionID: "predecessor-session")
+            fixture.model.composerDrafts.setText("typed after the send", for: sealedDraft)
+
+            // Home names the successor once the logical prompt materializes it.
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "predecessor-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: read.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "successor-session")))
+            for _ in 0..<200 where fixture.model.homeStatus.status?.openSessionId != "successor-session" {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let materialized = try #require(fixture.model.homeStatus.status)
+            #expect(materialized.openSessionId == "successor-session")
+
+            let followed = try #require(try fixture.model.followedHomeRoute(from: sealedRoute, profileID: profile.id, status: materialized))
+            #expect(followed.sessionID == "successor-session")
+            #expect(followed.isHome)
+            let successorDraft = ComposerDraftScope(profileID: profile.id, sessionID: "successor-session")
+            #expect(fixture.model.composerDrafts.text(for: successorDraft) == "typed after the send",
+                    "the successor composer opens with the unsent text the Home route carried")
+            #expect(fixture.model.composerDrafts.text(for: sealedDraft) == "typed after the send", "the sealed chapter keeps its own draft")
+            #expect(try fixture.model.followedHomeRoute(from: followed, profileID: profile.id, status: materialized) == nil,
+                    "a route that already opens the named chapter does not follow")
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
+        }
+    }
+
     @Test("a chat claim that finds another session releases Home reads, including on session invalidations")
     func nonMatchingChatClaimReadsNoMoreAfterInvalidation() async throws {
         let socket = ScriptedGatewaySocket()

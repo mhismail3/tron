@@ -418,6 +418,34 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("a Home follow carries the sealed chapter's unsent text only into an absent successor draft")
+    func homeFollowCarriesUnsentTextWithoutReplacingSuccessorDraft() async throws {
+        try await withTestWatchdog { @MainActor in
+            let coordinator = ComposerHarness().coordinator
+            let sealed = coordinator.prepareDraft(profileID: "profile", sessionID: "predecessor", initialText: nil)
+            coordinator.setText("typed after the send", for: sealed)
+            let successor = ComposerDraftScope(profileID: "profile", sessionID: "successor")
+
+            coordinator.carryDraft(from: sealed, to: successor)
+            #expect(coordinator.text(for: successor) == "typed after the send")
+            #expect(coordinator.text(for: sealed) == "typed after the send", "the sealed chapter keeps its own draft")
+            // The successor's composer prepares its scope without seed text and must see the carried draft.
+            let prepared = coordinator.prepareDraft(profileID: "profile", sessionID: "successor", initialText: nil)
+            #expect(prepared == successor)
+            #expect(coordinator.text(for: prepared) == "typed after the send")
+
+            let existing = coordinator.prepareDraft(profileID: "profile", sessionID: "existing", initialText: "successor edit")
+            coordinator.carryDraft(from: sealed, to: existing)
+            #expect(coordinator.text(for: existing) == "successor edit", "a retained successor draft is never replaced")
+
+            let unopened = ComposerDraftScope(profileID: "profile", sessionID: "unopened")
+            let empty = ComposerDraftScope(profileID: "profile", sessionID: "empty-successor")
+            coordinator.carryDraft(from: unopened, to: empty)
+            #expect(coordinator.text(for: empty).isEmpty)
+            #expect(coordinator.revision(for: empty) == 0, "an empty chapter draft creates no successor draft")
+        }
+    }
+
     @Test("unchanged text is an LRU access that changes no observed draft state")
     func unchangedTextIsUnobservedLRUAccess() async throws {
         try await withTestWatchdog { @MainActor in

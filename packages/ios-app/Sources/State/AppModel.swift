@@ -4864,6 +4864,23 @@ final class AppModel {
         )
     }
 
+    /// The Home route's next chapter, or nil when the route already opens the
+    /// chapter Home names. The route's unsent text moves with it to that chapter's
+    /// draft (see `ComposerDraftCoordinator.carryDraft`).
+    func followedHomeRoute(
+        from route: SessionNavigationRoute,
+        profileID: String,
+        status: HomeStatusDTO
+    ) throws -> SessionNavigationRoute? {
+        let next = try navigationRouteForHome(profileID: profileID, status: status)
+        guard next.sessionID != route.sessionID else { return nil }
+        composerDrafts.carryDraft(
+            from: ComposerDraftScope(profileID: profileID, sessionID: route.sessionID),
+            to: ComposerDraftScope(profileID: profileID, sessionID: next.sessionID)
+        )
+        return next
+    }
+
     /// Home control effects belong to the receipt owner, not the mounted read.
     /// A fresh projection is requested only after accepted terminal completion.
     func performHomeControl(_ command: HomeMutationCoordinator.Command, authority: HomeMutationCoordinator.Authority) async throws {
