@@ -1471,6 +1471,92 @@ final class ChatViewScrollHarness {
 
     var probeObservation: ChatHostedObservation { probe.observation }
 
+    var openingOverlayMotionMarker: ChatOpeningOverlayMotionMarker? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        return descendants(hostingController.view).compactMap { $0 as? ChatOpeningOverlayMotionMarker }.first
+    }
+
+    var openingOverlayMotionFrame: CGRect {
+        guard let marker = openingOverlayMotionMarker else { return window.bounds }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    var openingOverlayMotionOpacity: CGFloat {
+        guard let marker = openingOverlayMotionMarker else { return 0 }
+        var opacity: CGFloat = 1
+        var layer: CALayer? = marker.layer.presentation() ?? marker.layer
+        while let current = layer {
+            opacity *= CGFloat(current.opacity)
+            layer = current.superlayer
+        }
+        return opacity
+    }
+
+    func driveOpeningOverlay(failed: Bool) {
+        probe.openingOverlayControl?(failed)
+    }
+
+    var composerProcessOrbMotionMarker: ChatComposerProcessOrbMotionMarker? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        return descendants(hostingController.view).compactMap { $0 as? ChatComposerProcessOrbMotionMarker }.first
+    }
+
+    var composerProcessOrbMotionFrame: CGRect? {
+        guard let marker = composerProcessOrbMotionMarker else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    func deliverProcessActivity(_ activity: SessionProcessActivity) async throws {
+        guard let socket else { throw HarnessError.missingSocket }
+        let current = model.selectedSnapshot ?? snapshot
+        let revision = (current.processOverview?.revision ?? 0) + 1
+        let asOf = activity.lifecycle.observedAt
+        let active = activity.visibility == .active
+        let recent = activity.visibility == .recent
+        let overview = SessionProcessOverview(
+            revision: revision,
+            asOf: asOf,
+            activeCount: active ? 1 : 0,
+            recentCount: recent ? 1 : 0,
+            problemCount: 0,
+            visibility: active ? .active : (recent ? .recent : .hidden),
+            nearestExpiry: recent ? activity.lifecycle.recentUntil : nil
+        )
+        let delta = SessionProcessDelta(
+            activity: activity,
+            removedProcessIds: [],
+            processRevision: revision,
+            processAsOf: asOf,
+            overview: overview
+        )
+        let data = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(delta))
+        let event = JSONValue.object([
+            "type": .string("event"),
+            "topic": .string("session.processActivity"),
+            "sessionId": .string(snapshot.sessionId),
+            "payload": .object([
+                "runtimeGeneration": .string(current.runtimeGeneration),
+                "eventSequence": .number(Double(current.eventSequence + 1)),
+                "revision": .number(Double(current.revision + 1)),
+                "data": data,
+            ]),
+        ])
+        await socket.enqueue(try JSONEncoder.gateway.encode(event))
+    }
+
+    var composerTrailingMotionMarker: ChatComposerTrailingMotionMarker? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        return descendants(hostingController.view).compactMap { $0 as? ChatComposerTrailingMotionMarker }.first
+    }
+
+    var composerTrailingMotionFrame: CGRect? {
+        guard let marker = composerTrailingMotionMarker else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
     var composerMotionFrame: CGRect? {
         TranscriptWindowOracle.composerFrame(in: hostingController.view)
     }
@@ -2774,6 +2860,7 @@ final class PresentedFrameRecorder: NSObject {
 
 enum HarnessError: Error {
     case invalidAuthorityBoundary
+    case missingSocket
     case missingTranscript
     case missingWindowScene
     case missingComposer

@@ -272,6 +272,9 @@ struct ChatComposerView: View {
                     onSend: onSend,
                     onAbort: onAbort
                 )
+                #if HOSTED_TEST
+                .background(ChatComposerTrailingMotionProbe(mode: trailingMode))
+                #endif
                 .transition(
                     reduceMotion
                         ? .opacity
@@ -351,6 +354,30 @@ struct ChatComposerView: View {
 }
 
 #if HOSTED_TEST
+final class ChatComposerTrailingMotionMarker: UIView {
+    var mode: ComposerTrailingMode?
+}
+
+struct ChatComposerTrailingMotionProbe: UIViewRepresentable {
+    let mode: ComposerTrailingMode
+
+    func makeUIView(context: Context) -> ChatComposerTrailingMotionMarker {
+        let view = ChatComposerTrailingMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.mode = mode
+        return view
+    }
+
+    func updateUIView(_ view: ChatComposerTrailingMotionMarker, context: Context) {
+        view.mode = mode
+    }
+
+    static func dismantleUIView(_ view: ChatComposerTrailingMotionMarker, coordinator: ()) {
+        view.mode = nil
+    }
+}
+
 final class ChatCatchUpMotionMarker: UIView {}
 
 struct ChatCatchUpMotionProbe: UIViewRepresentable {
