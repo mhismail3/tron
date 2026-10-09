@@ -265,10 +265,12 @@ async function pinnedNpmRoot() {
     const repoRoot = fileURLToPath(new URL("../", import.meta.url));
     const nodeVersion = (await readFile(join(repoRoot, ".node-version"), "utf8")).trim();
     assert.equal(process.version, `v${nodeVersion}`, "payload tests require the repository-pinned Node version");
-    const cacheRoot = resolve(repoRoot, process.env.TRON_CI_TOOLS_DIR ?? ".ci-tools");
+    // The npm tree that ships with the running pinned Node (asserted above); the
+    // digest below proves it is the archive tree. No separate toolchain install
+    // is a hidden prerequisite (a missing .ci-tools failed tests 15-22 together).
     const nodeRoot = process.env.TRON_NODE_ROOT
       ? resolve(process.env.TRON_NODE_ROOT)
-      : join(cacheRoot, `node-v${nodeVersion}-${process.arch}`);
+      : resolve(dirname(process.execPath), "..");
     const archiveNpmRoot = join(nodeRoot, "lib", "node_modules", "npm");
     let npmRoot = archiveNpmRoot;
     try { await lstat(npmRoot); }
