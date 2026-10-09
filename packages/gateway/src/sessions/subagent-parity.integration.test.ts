@@ -198,7 +198,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         // vary per execution, but file names and provider-authored text do not.
         text = text.split(dirname(sessionFile!)).join("<sessions>");
         text = withoutRoot(text, root, "<fixture>");
-        text = text.replace(/(?:<fixture>\/agent\/npm\/node_modules\/pi-subagents|<fixture>\/tron\/internal\/[^\s"']*?\/root)(?=\/|$)/g, "<provider>");
+        text = volatileProviderText(text);
         for (const [id, label] of identities) text = text.split(id).join(label);
         return text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<uuid>")
           .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, "<time>")
@@ -380,7 +380,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         subagents: ParityResourceRow[]; subagentDiagnostics?: string;
       };
       const resourceRow = (row: ParityResourceRow) => ({ ...row, ...(row.path ? {
-        path: withoutRoot(row.path, root, "<fixture>"),
+        path: volatileProviderText(withoutRoot(row.path, root, "<fixture>")),
       } : {}) });
       return {
         skills: resources.skills.skills.filter((row: ParityResourceRow) => ["pi-subagents", "council-mode"].includes(row.name)).map(resourceRow),
@@ -450,15 +450,31 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   }
 }, 60_000);
 
+// pi-subagents' installation root embeds its version and its bundled worker-eval
+// frames embed line/column positions. Both change on any fork bump and carry no
+// app-facing meaning, so the NEW capture and the committed OLD baseline share this rule.
+function volatileProviderText(text: string) {
+  return text
+    .replace(/(?:<fixture>\/agent\/npm\/node_modules\/pi-subagents|<fixture>\/tron\/internal\/pi-subagents\/[^\/\s"']+|<fixture>\/tron\/internal\/[^\s"']*?\/root)(?=\/|$)/g, "<provider>")
+    .replace(/\[worker eval\]:\d+:\d+/g, "[worker eval]:<frame>");
+}
+
 // Finite allowances from #611: this compares deterministic Gateway projections,
 // not Swift rendering or absolute timing. Arrays retain meaningful launch order.
 function compareParity(before: Record<string, unknown>, after: Record<string, unknown>, managedSource: string, upstream: Array<{ path: string; old: unknown; new: unknown; approved: string }>) {
   const differences: Array<{ path: string; old: unknown; new: unknown; approved: string | null }> = [];
   const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
+  const normalizeVolatile = (value: unknown): unknown => typeof value === "string" ? volatileProviderText(value)
+    : Array.isArray(value) ? value.map(normalizeVolatile)
+    : record(value) ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalizeVolatile(item)])) : value;
+  // The committed OLD baseline was captured before this rule existed; normalizing it
+  // here keeps both legs under one volatile-text rule without regenerating OLD.
+  const baseline = normalizeVolatile(before) as Record<string, unknown>;
   function approval(a: unknown, b: unknown, path: string): string | null {
     // Upstream changes accepted in decisions.md are exact value pairs, not
     // exemptions for content, details, or resource fields.
-    const expected = upstream.find(change => change.path === path && JSON.stringify(change.old) === JSON.stringify(a ?? null) && JSON.stringify(change.new) === JSON.stringify(b ?? null));
+    // Pairs stay raw evidence; they match after the same volatile rule as the baseline.
+    const expected = upstream.find(change => change.path === path && JSON.stringify(normalizeVolatile(change.old)) === JSON.stringify(a ?? null) && JSON.stringify(normalizeVolatile(change.new)) === JSON.stringify(b ?? null));
     if (expected) return expected.approved;
     if (path.endsWith(".source") && (a === "npm:pi-subagents@0.59.0" || a === null) && b === managedSource) return path.startsWith("skills.") || path.startsWith("packages.") ? "skills listed under the managed package" : "source and title label change (admitted producer attribution)";
     if (path.endsWith(".title") && (a === "Pi Subagents" || a === null) && b === "Subagents") return "source and title label change";
@@ -486,9 +502,9 @@ function compareParity(before: Record<string, unknown>, after: Record<string, un
       for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) visit(a[key], b[key], `${path}.${key}`);
     } else differences.push({ path, old: a ?? null, new: b ?? null, approved: null });
   }
-  visit(before.checkpoints, after.checkpoints, "checkpoints");
-  visit(before.settings, after.settings, "settings");
-  visit(before.packages, after.packages, "packages");
-  visit(before.inputPresentation, after.inputPresentation, "inputPresentation");
+  visit(baseline.checkpoints, after.checkpoints, "checkpoints");
+  visit(baseline.settings, after.settings, "settings");
+  visit(baseline.packages, after.packages, "packages");
+  visit(baseline.inputPresentation, after.inputPresentation, "inputPresentation");
   return differences;
 }
