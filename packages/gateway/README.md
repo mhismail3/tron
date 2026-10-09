@@ -3334,11 +3334,16 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 
 ## Episodic memory
 
-[Episodic memory](docs/episodic-memory.md) owns the projected-summary tree over
-one canonical session (`packages/gateway/src/episodic/`): its projection rules,
-the tree and view algorithms, invalidation semantics and measured cost,
-retries/budget/blocked states, and its storage under the internal workspace. No
-live session calls it yet; wiring it to Home's commits is a later task.
+[Episodic memory](docs/episodic-memory.md) owns the projected-summary tree
+(`packages/gateway/src/episodic/`): its projection rules, tree and view algorithms,
+invalidation semantics, reported token spend, bounded retries and blocked states,
+and its storage under the internal workspace. [Tron Home](docs/home.md#memory-and-readiness)
+is its live caller: HomeOwner keys one store by stable `homeId` and supplies the
+canonical chapter source in ledger order. RuntimeSlot reports committed entries
+and navigation; HomeMemory ingests the source and builds missing summaries in the
+background. Each activation waits for and freezes the view preceding its start,
+then sends that view instead of earlier activations' transcript. Ordinary sessions
+do not use episodic memory.
 
 ## Development
 
