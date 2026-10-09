@@ -2109,6 +2109,25 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("task stop and steer fence on the operation alone, with no controller generation")
+    func homeTaskControlSendsOperationWithoutGeneration() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let control = Task { try await fixture.model.performHomeControl(.steerTask(taskID: "task-one", operationID: "operation-one", text: "Use the exact task"), authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let sent = try await waitForMethod("home.steerTask", on: socket)
+            let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[sent.index])
+            let params = try #require(frame.objectValue?["params"]?.objectValue)
+            #expect(Set(params.keys) == ["commandId", "taskId", "operationId", "text"])
+            await socket.enqueue(successResponse(id: sent.id, result: .object(["accepted": .bool(true)])))
+            try await control.value
+        }
+    }
+
     /// Route admission has one owner, the row's policy. A status the row does not open
     /// forms no route, even when the Gateway also names an openable chapter.
     @Test("a Home status the row would not open forms no route, even with an openable chapter")

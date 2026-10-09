@@ -152,11 +152,11 @@ struct HomeTaskSheet: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
             }
-            if task.lifecycle == .active, let operation = task.operationId, let generation = task.controllerGeneration {
-                Button("Stop task", role: .destructive) { mutate(.stopTask(taskID: task.taskId, operationID: operation, generation: generation)) }
+            if task.lifecycle == .active, let operation = task.operationId {
+                Button("Stop task", role: .destructive) { mutate(.stopTask(taskID: task.taskId, operationID: operation)) }
                     .buttonStyle(TronActionButtonStyle(expands: false)).disabled(!canMutate)
                 TextField("Steering message", text: $steering, axis: .vertical).tronField()
-                Button("Send steer") { mutate(.steerTask(taskID: task.taskId, operationID: operation, generation: generation, text: steering)) }
+                Button("Send steer") { mutate(.steerTask(taskID: task.taskId, operationID: operation, text: steering)) }
                     .buttonStyle(TronActionButtonStyle(expands: false))
                     .disabled(!canMutate || steering.isEmpty || steering.count > 65536)
             }
@@ -230,10 +230,9 @@ struct HomeTaskSheet: View {
             TronGlassCard(accent: .tronEmerald) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(request.request.target).font(TronTypography.bodySM)
-                    Text("Intent revision \(request.request.intentRevision) · Policy \(request.request.policyRevision)").font(TronTypography.secondaryDescription)
+                    Text("Intent revision \(request.request.intentRevision)").font(TronTypography.secondaryDescription)
                     Text(request.request.intentDigest).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
                     Text("Scope: \(request.request.authorizationScope)").font(TronTypography.secondaryDescription)
-                    Text("Worker: \(request.request.workerProfile)").font(TronTypography.secondaryDescription)
                     Text("Restore epoch: \(request.request.restoreEpoch)").font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
                 }.padding(14)
             }
@@ -256,11 +255,6 @@ struct HomeTaskSheet: View {
     @ViewBuilder private func spend(_ spend: HomeTaskSpendDTO?) -> some View {
         if let spend {
             Text("\(spend.inputTokens.formatted()) input · \(spend.outputTokens.formatted()) output tokens").font(TronTypography.secondaryDescription)
-            if let cost = spend.knownCostUSD {
-                Text(cost, format: .currency(code: "USD")).font(TronTypography.secondaryDescription)
-                if let provenance = spend.pricingProvenance { Text(provenance).font(TronTypography.secondaryDescription) }
-            }
-            if spend.unpriced { Text("Unpriced").font(TronTypography.secondaryDescription) }
         } else { Text("Spend unavailable").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted) }
     }
     private func dates(created: Int, updated: Int) -> some View {

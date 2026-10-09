@@ -8,14 +8,8 @@ struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     let sourceDigest: String
     let inputTokens: Int
     let outputTokens: Int
-    let knownCostUSD: Double?
-    let pricingProvenance: String?
-    let unpriced: Bool
     var valid: Bool {
         HomeMemoryPageDTO.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
-            && (knownCostUSD.map { $0.isFinite && $0 >= 0 } ?? true)
-            && ((knownCostUSD == nil) == (pricingProvenance == nil))
-            && (pricingProvenance.map { homeText($0, bytes: 512) } ?? true)
     }
 }
 
@@ -52,7 +46,7 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
 /// Exact execution/route authority from home.taskStatus, never inferred from a
 /// list row. Immutable report bodies remain with the canonical Gateway owner.
 struct HomeTaskDTO: Decodable, Equatable, Sendable {
-    struct Intent: Decodable, Equatable, Sendable { let revision: Int; let text: String }
+    struct Intent: Decodable, Equatable, Sendable { let text: String }
     struct Terminal: Decodable, Equatable, Sendable {
         let outcome: HomeTaskOutcome
         let reason: String
@@ -76,8 +70,8 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let intent: Intent
     let target: String
     let lifecycle: HomeTaskLifecycle
+    /// Stop and steer are fenced by this operation ID alone.
     let operationId: String?
-    let controllerGeneration: Int?
     let spend: HomeTaskSpendDTO?
     let terminalEvidence: Terminal?
     let wake: Wake?
@@ -86,12 +80,11 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
         let task = try value.decode(Self.self)
         guard task.taskId == taskID, homeID(task.taskId), homeID(task.homeId),
               safeHomeCount(task.createdAt), safeHomeCount(task.updatedAt), task.updatedAt >= task.createdAt,
-              task.intent.revision > 0, homeText(task.intent.text, bytes: 65536), homeText(task.target, bytes: 4096),
+              homeText(task.intent.text, bytes: 65536), homeText(task.target, bytes: 4096),
               task.target.hasPrefix("/"), task.spend?.valid ?? true,
               (task.lifecycle == .terminal) == (task.terminalEvidence != nil),
               (task.lifecycle == .terminal) == (task.wake != nil),
-              task.operationId.map(homeID) ?? true, task.controllerGeneration.map({ $0 > 0 }) ?? true,
-              task.lifecycle != .active || (task.operationId != nil && task.controllerGeneration != nil),
+              task.operationId.map(homeID) ?? true, task.lifecycle != .active || task.operationId != nil,
               task.wake.map({ $0.routeGeneration > 0 }) ?? true else { throw invalidHomeTask() }
         return task
     }
@@ -103,12 +96,10 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
         let intentDigest: String
         let target: String
         let authorizationScope: String
-        let workerProfile: String
-        let policyRevision: Int
         let restoreEpoch: String
         var valid: Bool {
             intentRevision > 0 && homeText(intentDigest, bytes: 128) && homeText(target, bytes: 4096) && target.hasPrefix("/")
-                && [authorizationScope, workerProfile, restoreEpoch].allSatisfy(homeID) && policyRevision > 0
+                && [authorizationScope, restoreEpoch].allSatisfy(homeID)
         }
     }
     struct Scope: Decodable, Equatable, Sendable, Identifiable {
@@ -136,14 +127,12 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
         let intentDigest: String
         let target: String
         let authorizationScope: String
-        let workerProfile: String
-        let policyRevision: Int
         let restoreEpoch: String
         let expiresAt: Int
         let state: State
         var binding: Binding {
             .init(intentRevision: intentRevision, intentDigest: intentDigest, target: target, authorizationScope: authorizationScope,
-                  workerProfile: workerProfile, policyRevision: policyRevision, restoreEpoch: restoreEpoch)
+                  restoreEpoch: restoreEpoch)
         }
     }
     let scopes: [Scope]

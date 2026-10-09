@@ -342,7 +342,7 @@ private actor HostedHomeShellGateway {
             return (taskPermissions(), nil)
         case "home.stopTask", "home.steerTask":
             guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "active",
-                  params["operationId"]?.stringValue == "task-operation", params["controllerGeneration"]?.intValue == 7,
+                  params["operationId"]?.stringValue == "task-operation", params["controllerGeneration"] == nil,
                   !taskStopped, method != "home.steerTask" || params["text"]?.stringValue == "Use the exact task" else { return taskRefusal() }
             controlCount += 1
             if method == "home.stopTask" { taskStopped = true }
@@ -477,8 +477,7 @@ private actor HostedHomeShellGateway {
         (nil, .object(["code": .string("conflict"), "message": .string("Task fixture binding refused"), "retryable": .bool(false)]))
     }
     private func taskSpend() -> JSONValue {
-        .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12), "outputTokens": .number(3),
-            "knownCostUSD": .null, "pricingProvenance": .null, "unpriced": .bool(true)])
+        .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12), "outputTokens": .number(3)])
     }
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal" || taskStopped
@@ -491,13 +490,12 @@ private actor HostedHomeShellGateway {
         var record = taskSummary(id).objectValue!
         record["version"] = .number(1); record["revision"] = .number(1)
         record["homeId"] = .string("home-fixture"); record["generation"] = .number(1); record["routeGeneration"] = .number(1)
-        record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["workerProfile"] = .string("home-task-v1")
-        record["policyRevision"] = .number(1); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
+        record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
         record["sessionId"] = .string("worker-session"); record["stopIntent"] = .null
-        record["reportRefs"] = id == "terminal" ? .array([.object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
-            "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))])]) : .null
-        record["intent"] = .object(["revision": .number(1), "text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
-        record["operationId"] = .string("task-operation"); record["controllerGeneration"] = .number(7)
+        record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
+            "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
+        record["intent"] = .object(["text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
+        record["operationId"] = .string("task-operation")
         let terminal = id == "terminal" || taskStopped
         record["terminalEvidence"] = terminal ? .object(["outcome": .string(id == "active" ? "interrupted" : "final"), "reason": .string("explicit-report"), "sessionId": .string("worker-session"), "entryIds": .array([.string("terminal-entry")])]) : .null
         record["wake"] = terminal ? .object(["state": .string(id == "terminal" && !taskRedelivered ? "blocked" : "pending"),
@@ -509,8 +507,7 @@ private actor HostedHomeShellGateway {
     }
     private func taskBinding() -> JSONValue {
         .object(["intentRevision": .number(1), "intentDigest": .string(String(repeating: "a", count: 64)),
-            "target": .string("/trusted/project"), "authorizationScope": .string("full-work"), "workerProfile": .string("home-task-v1"),
-            "policyRevision": .number(1), "restoreEpoch": .string("fixture-epoch")])
+            "target": .string("/trusted/project"), "authorizationScope": .string("full-work"), "restoreEpoch": .string("fixture-epoch")])
     }
     private func taskPermissions() -> JSONValue {
         let ids = ["request-existing", "request-approve", "request-deny"]
