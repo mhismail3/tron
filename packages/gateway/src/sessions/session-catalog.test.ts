@@ -480,24 +480,35 @@ describe("SessionCatalog", () => {
     }
     const append = vi.spyOn(index, "append").mockResolvedValue(undefined);
     const realSummaryFor = source.summaryFor.bind(source);
+    // Each parse stays parked until the test releases it. The first batch then
+    // holds its 16 parses in flight for as long as the test needs, so the
+    // dispose lands at a known batch boundary regardless of how late the test
+    // observes the pass (a wall-clock parse delay raced the observer under load).
     const parses: string[] = [];
+    let releaseParses!: () => void;
+    const parseGate = new Promise<void>((resolve) => { releaseParses = resolve; });
     const summaryFor = vi.spyOn(source, "summaryFor").mockImplementation(async (path) => {
       parses.push(path);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await parseGate;
       return realSummaryFor(path);
     });
     try {
       const restarted = new SessionCatalog({ catalogRoot: () => sessions, index, source });
       restarted.start();
-      await waitFor(() => parses.length > 0, "the first catalog parse to start");
-      await restarted.dispose();
-      // One batch (RECONCILE_CONCURRENCY candidates) at most: a shutdown that
-      // waited for the other three batches would parse all 64 files.
-      expect(parses.length).toBeLessThanOrEqual(16);
+      await waitFor(() => parses.length === 16, "the first batch to park its parses");
+      // dispose() sets the shutdown flag before its first await, so the pass
+      // sees it once the parked batch is released.
+      const disposing = restarted.dispose();
+      releaseParses();
+      await disposing;
+      // Exactly the parked batch (RECONCILE_CONCURRENCY candidates): a shutdown
+      // that waited for the other three batches would parse all 64 files.
+      expect(parses.length).toBe(16);
       // A stopped pass publishes nothing and owes no write, so the document the
       // next startup reads is the one the first owner left.
       expect(await readFile(indexPath, "utf8")).toBe(document);
     } finally {
+      releaseParses();
       summaryFor.mockRestore();
       append.mockRestore();
     }
