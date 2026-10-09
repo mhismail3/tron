@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import {
-  EpisodicMemoryError, EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS,
-  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicLimits, type EpisodicSessionSource, type EpisodicSummarizer,
+  EpisodicMemoryError, EPISODIC_SEARCH_QUERY_CHARS,
+  type EpisodicBlocked, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSummarizer,
 } from "../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -85,7 +85,7 @@ const UNAVAILABLE_TEXT: Readonly<Record<HomeMemoryUnavailableReason, string>> = 
 };
 
 /** The Home memory's configured model. */
-export interface HomeMemoryConfig {
+interface HomeMemoryConfig {
   model: ModelRef;
 }
 
@@ -94,7 +94,7 @@ export interface HomeMemoryConfig {
  * this reaches the Gateway log, and an episodic failure's own message can carry
  * the canonical session path.
  */
-export type HomeMemoryIngestFailure =
+type HomeMemoryIngestFailure =
   | "source-unavailable"
   | "store-refused"
   | "blocked"
@@ -113,7 +113,7 @@ export type HomeMemoryModelResolution =
   | { summarizer: EpisodicSummarizer }
   | { refusal: "virtual-model" | "unavailable" };
 
-export interface HomeMemoryOptions {
+interface HomeMemoryOptions {
   /** The canonical source identity this memory is over; also its store namespace. */
   sessionId: string;
   workspace: TronWorkspace;
@@ -127,7 +127,6 @@ export interface HomeMemoryOptions {
    * own model calls: from the Gateway's ModelRuntime, never a session's. */
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
   diagnostic?: (record: HomeMemoryDiagnostic) => void;
-  limits?: Partial<EpisodicLimits>;
   /** Home ledger is the single pause authority, including across store replacement. */
   isPaused?: () => boolean;
 }
@@ -157,7 +156,7 @@ const VIEW_HEADER = [
 const VIEW_FOOTER = "</chat>";
 
 /** The view lines one request sent, by count and digest (#491). */
-export interface SentView {
+interface SentView {
   lines: number;
   digest: string;
 }
@@ -178,7 +177,7 @@ function digestLines(lines: readonly string[]): string {
  * written. After a rebalance the start changed, so nothing earlier is reusable
  * and the whole view is one block, written once.
  */
-export function viewPieces(text: string, previous: SentView | undefined): { pieces: string[]; sent: SentView } {
+function viewPieces(text: string, previous: SentView | undefined): { pieces: string[]; sent: SentView } {
   const lines = text === "" ? [] : text.split("\n");
   const kept = previous && previous.lines <= lines.length && digestLines(lines.slice(0, previous.lines)) === previous.digest
     ? previous.lines : lines.length;
@@ -247,11 +246,7 @@ export class HomeMemory {
   /** The persisted state of this memory's store, without opening it: its recorded
    * spend and the block that refuses every activation. */
   async persistedState(): Promise<{ spend: number; blocked: EpisodicBlocked | null } | undefined> {
-    const state = await readEpisodicState({
-      workspace: this.options.workspace,
-      sessionId: this.options.sessionId,
-      maxStoreLineBytes: this.options.limits?.maxStoreLineBytes ?? EPISODIC_DEFAULTS.maxStoreLineBytes,
-    });
+    const state = await readEpisodicState({ workspace: this.options.workspace, sessionId: this.options.sessionId });
     return state ? { spend: state.spend, blocked: state.blocked } : undefined;
   }
 
@@ -287,15 +282,6 @@ export class HomeMemory {
     });
   }
 
-  /**
-   * The frozen agent-facing view for one activation.
-   *
-   * The cut is the number of memory messages at or before the activation's start
-   * entry, and the wait is gist §6's "wait, don't cut": an activation waits until
-   * every line it will send is a built summary. The wait is abortable through the
-   * request's signal, so the user's Stop cancels it and their message stays in
-   * the log, unanswered.
-   */
   /** HomeOwner qualifies a not-started chapter with no prior history. The
    * memory must still be configured; no store/source is manufactured. */
   emptyChapterView(signal?: AbortSignal): HomeActivationView {
@@ -306,6 +292,15 @@ export class HomeMemory {
     return { text: pieces.join(""), pieces, waitedMs: 0, commit: () => {} };
   }
 
+  /**
+   * The frozen agent-facing view for one activation.
+   *
+   * The cut is the number of memory messages at or before the activation's start
+   * entry, and the wait is gist §6's "wait, don't cut": an activation waits until
+   * every line it will send is a built summary. The wait is abortable through the
+   * request's signal, so the user's Stop cancels it and their message stays in
+   * the log, unanswered.
+   */
   activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     return this.viewAtBoundary(activation, signal);
   }
@@ -571,7 +566,6 @@ export class HomeMemory {
         sessionSource: this.options.sessionSource,
         summarizer,
         ...(this.options.isPaused ? { isPaused: this.options.isPaused } : {}),
-        ...(this.options.limits ? { limits: this.options.limits } : {}),
         ...(this.options.diagnostic ? { diagnostic: this.options.diagnostic } : {}),
       });
     } catch (error) {
@@ -604,11 +598,10 @@ function messageOf(error: unknown): string {
 
 /**
  * Why an ingest failed, as a code. Undefined for a store that a reconfiguration
- * closed: that race is not a failure. Exported because the Gateway's log depends
- * on it: the reason is the only part of an episodic failure that may be recorded
- * (an episodic failure's own message can name the canonical session path).
+ * closed: that race is not a failure. Only this reason is recorded: an episodic
+ * failure's own message can name the canonical session path.
  */
-export function homeMemoryIngestFailure(error: unknown): HomeMemoryIngestFailure | undefined {
+function homeMemoryIngestFailure(error: unknown): HomeMemoryIngestFailure | undefined {
   if (!(error instanceof EpisodicMemoryError)) return "unknown";
   if (error.kind === "closed") return undefined;
   if (error.kind === "source") return "source-unavailable";

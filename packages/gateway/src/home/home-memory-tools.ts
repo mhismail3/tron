@@ -1,6 +1,6 @@
 import { Type, type TSchema } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { EPISODIC_DEFAULTS, EPISODIC_SEARCH_QUERY_CHARS } from "../episodic/episodic-contract.js";
+import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_SEARCH_QUERY_CHARS } from "../episodic/episodic-contract.js";
 import { capText } from "../episodic/episodic-tree.js";
 import {
   homeMemoryToolUnavailable,
@@ -55,8 +55,8 @@ const SEARCH_PARAMETERS = Type.Object({
 
 /** The bound on one tool result's text: the recipe's `CAP`, the same head-and-tail
  * truncation the projection applies to a logged tool result. */
-const RESULT_CHARS = EPISODIC_DEFAULTS.capChars;
-const RESULT_TAIL_CHARS = EPISODIC_DEFAULTS.capTailChars;
+const RESULT_CHARS = EPISODIC_CAP_CHARS;
+const RESULT_TAIL_CHARS = EPISODIC_CAP_TAIL_CHARS;
 
 /** Tool-result details: small, typed and durable in the transcript, so a reader
  * can tell an answer from a refusal without parsing the text. */

@@ -2,16 +2,14 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { EpisodicMemoryError, type EpisodicSessionSource, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import type { EpisodicSessionSource, EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { HomeMemory, homeMemoryIngestFailure } from "./home-memory.js";
+import { HomeMemory } from "./home-memory.js";
 
 /*
  * Home's memory owner without a running Gateway: the parts a session never
  * exercises. The lock that keeps #415's single-opener rule from being tripped by
- * a configuration racing an activation, and the failure vocabulary the Gateway
- * log depends on (a code, because an episodic failure's own message can carry the
- * canonical session path).
+ * a configuration racing an activation.
  */
 
 const roots: string[] = [];
@@ -73,19 +71,5 @@ describe("HomeMemory", () => {
     await Promise.all([first, second]);
     expect(lookups.length).toBe(2);
     await instance.dispose();
-  });
-
-  it("codes an ingest failure, and treats a store a reconfiguration closed as no failure", () => {
-    // The Gateway log records the reason, never the error: an episodic failure's
-    // message names the canonical session path.
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("source", "Canonical session /Users/someone/.tron/agent/sessions/x.jsonl cannot be read: ENOENT"))).toBe("source-unavailable");
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("invalid-store", "Episodic memory state has an unknown version"))).toBe("store-refused");
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("unsafe-store", "Episodic store file could not be inspected"))).toBe("store-refused");
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("blocked", "Episodic memory is blocked"))).toBe("blocked");
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session"))).toBe("invalid-request");
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("already-open", "Episodic memory for session x is already open in this process"))).toBe("already-open");
-    expect(homeMemoryIngestFailure(new Error("raw fs failure"))).toBe("unknown");
-    // A reconfiguration closes the store in flight; that race is written nowhere.
-    expect(homeMemoryIngestFailure(new EpisodicMemoryError("closed", "Episodic memory was disposed"))).toBeUndefined();
   });
 });
