@@ -116,6 +116,9 @@ regex implementations.
 ### Toolchain
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
+`scripts/tron` sets `PYTHONDONTWRITEBYTECODE=1` so native npm builds never write
+`__pycache__` into the pinned npm tree, which the digest in
+`config/ci-toolchain.env` rejects (#638).
 Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
 reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and

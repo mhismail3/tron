@@ -319,7 +319,9 @@ jobs:
         working-directory: packages/push-relay
 
   ios:
-    needs: scope
+    # After the required gateway job, so it never queues for a macOS runner behind
+    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
+    needs: [scope, gateway]
     if: ${{ !cancelled() && needs.scope.outputs.ios != 'false' }}
     runs-on: macos-26
     # The memory reserve protects a shared development Mac's Gateway. A hosted
@@ -366,7 +368,9 @@ jobs:
         run: scripts/ios-ci-test.sh cleanup
 
   pi-sdk-e2e:
-    needs: scope
+    # After the required gateway job, so it never queues for a macOS runner behind
+    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
+    needs: [scope, gateway]
     if: ${{ !cancelled() && needs.scope.outputs['pi-sdk-e2e'] != 'false' }}
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
@@ -431,7 +435,9 @@ jobs:
         run: scripts/ios-gateway-e2e-test clean
 
   mac:
-    needs: scope
+    # After the required gateway job, so it never queues for a macOS runner behind
+    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
+    needs: [scope, gateway]
     if: ${{ !cancelled() && needs.scope.outputs.mac != 'false' }}
     runs-on: macos-26
     steps:
