@@ -14,6 +14,27 @@ import subprocess
 
 JOBS = ("gateway", "ios", "pi-sdk-e2e", "mac")
 
+# Helpers select the macOS job whose hosted steps execute or read them: the
+# `scripts/tron` dispatcher (`mac generate`), the reinstall and native-host tests,
+# the personal-info and hook tests, and bundle-gateway.sh's payload inputs.
+MAC_HELPERS = frozenset({
+    "scripts/tron", "scripts/tron_mac_reinstall.py", "scripts/test-mac-reinstall.py",
+    "scripts/verify-mac-install.sh", "scripts/test-native-host.py", "scripts/validate-native-host.py",
+    "scripts/gateway-payload-deploy.mjs", "scripts/gateway-install-inputs.mjs",
+    "scripts/personal-info-guard.sh", "scripts/test-personal-info-guard.py", "scripts/install-hooks.sh",
+})
+# Helpers only Linux policy/gateway-tooling checks or local verify run. No hosted
+# macOS step can observe them, so they select no macOS job.
+NO_HOSTED_MACOS_HELPERS = frozenset({
+    "scripts/tron-dev", "scripts/tron-dev-state.mjs", "scripts/tron-dev-state.test.mjs",
+    "scripts/gateway-payload-deploy.test.mjs", "scripts/gateway-install-inputs.test.mjs",
+    "scripts/ci_verify_scope.py", "scripts/test-ci-verify-scope.py",
+    "scripts/ci_ios_infra_scope.py", "scripts/test-ci-ios-infra-scope.py",
+    "scripts/ios_verify_test_selection.py", "scripts/test-install-ci-tools-node.sh",
+    "scripts/test-tron-npm-bytecode.sh",
+})
+NO_HOSTED_MACOS_PREFIXES = ("scripts/tron-profile", "scripts/tron_profile_", "scripts/test-tron-profile")
+
 
 def select(paths: list[str]) -> set[str]:
     if not paths:
@@ -25,7 +46,7 @@ def select(paths: list[str]) -> set[str]:
         # Shared workflow/toolchain inputs precede the known policy-only owners.
         if path.startswith((".github/workflows/", "packages/protocol-fixtures/", "config/")) or path in {
             ".node-version", "scripts/ci_macos_scope.py", "scripts/generate-xcode-project",
-            "scripts/install-ci-tools.sh", "scripts/verify-ci-toolchain.sh", "scripts/tron",
+            "scripts/install-ci-tools.sh", "scripts/verify-ci-toolchain.sh", "scripts/hash-npm-runtime.py",
         }:
             return set(JOBS)
         if path.startswith(("docs/", "tools/work/", ".agents/", ".github/")) or path in {
@@ -42,6 +63,10 @@ def select(paths: list[str]) -> set[str]:
         elif path.startswith("packages/mac-app/"):
             selected.add("mac")
         elif path.startswith("packages/push-relay/"):
+            continue
+        elif path in MAC_HELPERS:
+            selected.add("mac")
+        elif path in NO_HOSTED_MACOS_HELPERS or path.startswith(NO_HOSTED_MACOS_PREFIXES):
             continue
         elif path.startswith(("scripts/ios-", "scripts/tron-ios-", "scripts/test-ios-", "scripts/patch-ios-")):
             selected.update(("ios", "pi-sdk-e2e"))

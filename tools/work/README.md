@@ -322,6 +322,15 @@ configurations and Node test scripts.
    with a positive integer; `--jobs 1` runs sequentially. The bound does not
    replace the native tools' live-memory admission or leases: exit 73 remains
    a refusal, never an automatic retry, and lease waits count in check time.
+   A check marked `"heavy": true` in `.github/work.json` also takes one of
+   `verify.heavySlots` host-wide slots (default `max(1, CPUs // 8)`), held as
+   flock'd files in the git common directory, so every worktree and session on
+   the host shares them. A check waiting for a slot prints
+   `waiting for a heavy slot`, its wait counts in its wall time, and independent
+   checks keep running. Heavy checks receive `VERIFY_CPU_SHARE` (CPUs divided by
+   the slot count); it can only lower the Gateway's Vitest width (at most 4). Slots are released
+   when a check's process group is retired. Heavy flags and the slot count are
+   execution choices, so they do not change the configuration hash.
    Checks sharing an optional `exclusiveGroup` name in `.github/work.json`
    never overlap within one invocation. Optional nonempty `exclusivePaths`
    restricts membership to diffs matching those globs (and requires a group).
@@ -477,9 +486,13 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   (no merge-base required). Recognized docs, work-tooling and push-relay-only
   changes skip macOS. Gateway inputs run the Gateway job, the hosted iOS/Gateway
   boundary and Mac packaging; iOS inputs run iOS and the boundary; Mac inputs run
-  Mac. Shared workflow, protocol and toolchain inputs, unknown paths, empty diffs
-  and unavailable Git inputs run all four. Deleted/renamed paths retain both
-  owners. Manual dispatch runs all four, and a failed classifier or missing output
+  Mac. Shared workflow, protocol and toolchain inputs (including the npm digest
+  helper `hash-npm-runtime.py`), unknown paths, empty diffs and unavailable Git
+  inputs run all four. Helpers select only the macOS job whose hosted steps run
+  or read them: the `scripts/tron` dispatcher (`mac generate`), reinstall and
+  native-host helpers, and the Gateway payload inputs select Mac; helpers that
+  only Linux checks or local verify run select none. Deleted/renamed paths retain
+  both owners. Manual dispatch runs all four, and a failed classifier or missing output
   never skips coverage. An explicit `!cancelled()` status check lets selected or
   missing-output jobs run even if an earlier job fails; an explicit `false` scope
   still skips, and workflow cancellation stops advisory work. `test_ci_scope.py`
@@ -1380,7 +1393,12 @@ A worktree is provably done when all of these hold:
   rebase, cherry-pick, revert or bisect in progress;
 - every ignored file matches a `cleanup.regenerableIgnored` glob. These are
   Git `glob` pathspecs: `*` stays within one path segment and `**` crosses
-  segments. Any other ignored file keeps the worktree and is named;
+  segments. Any other ignored file keeps the worktree and is named. A nested
+  Git checkout, which Git lists as one `dir/` entry, matches by its own path,
+  and is regenerable only while it is clean and re-fetchable: no uncommitted,
+  untracked or ignored file, and no commit that no remote-tracking branch
+  contains (SwiftPM's checkouts under DerivedData are). Otherwise it keeps the
+  worktree and is named with its reason;
 - no process has its working directory inside the worktree (`lsof`), other
   than `cleanup` and its ancestors when the worktree is the one `cleanup` was
   started from. When `lsof` fails, nothing counts as proven.
@@ -1449,7 +1467,8 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     worktree.
 54. **Local data is lost with the worktree.** Modified, staged or untracked
     files, a non-regenerable ignored file, an operation in progress, or a lock
-    keeps it. Ignored files that match the regenerable globs do not.
+    keeps it. Ignored files that match the regenerable globs do not, and a
+    nested checkout that matches them keeps it while it is not clean (88-90).
 55. **A live process loses its working directory.** Another process with its
     working directory inside keeps the worktree, and so does an `lsof` that
     fails. The caller's own shell does not block its own cleanup, but an
@@ -1498,3 +1517,18 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     no pull request the claim commit is the whole proof, so the remote claim
     branch keeps its lease on exactly that commit, as for a merged worktree, and
     a dry run of the same proof changes nothing.
+88. **A clean nested checkout keeps a merged worktree.** SwiftPM's checkouts
+    under a build root's `SourcePackages` are Git repositories nested in an
+    ignored directory. `test_cleanup.py` removes a merged worktree holding a
+    clean, remote-backed one. Git lists it as one `dir/` entry, so the regenerable
+    globs match its path in the cleanup code; a pathspec does not apply to it.
+89. **A nested checkout's local data is removed with it.** A nested checkout in
+    a regenerable build root with a modified or untracked file, or an ignored
+    file of its own, keeps the worktree and is named with its reason.
+90. **Commits only a local ref holds are removed with a nested checkout.** A
+    nested checkout whose commit no remote-tracking ref contains, on any local
+    branch and not only its HEAD, keeps the worktree.
+91. **A nested checkout outside the regenerable globs is removed.** A clean,
+    remote-backed nested checkout that no regenerable glob matches keeps the
+    worktree, and so does one under a directory whose name only resembles
+    `build` (`packages/build-tools/`).

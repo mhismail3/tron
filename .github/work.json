@@ -304,6 +304,7 @@
       },
       {
         "name": "gateway",
+        "heavy": true,
         "paths": [
           "packages/gateway/src/**/*.ts",
           "packages/gateway/test-support/**",
@@ -335,6 +336,7 @@
       },
       {
         "name": "pi-subagents",
+        "heavy": true,
         "paths": [
           "packages/gateway/package.json",
           "packages/gateway/package-lock.json",
@@ -348,6 +350,7 @@
       },
       {
         "name": "gateway-scale",
+        "heavy": true,
         "paths": [
           "packages/gateway/src/knowledge/*.scale.test.ts",
           "packages/gateway/src/knowledge/knowledge-catalog.ts",
@@ -380,6 +383,7 @@
       },
       {
         "name": "ios",
+        "heavy": true,
         "paths": [
           "packages/ios-app/Configuration/**",
           "packages/ios-app/Core/**",
@@ -428,6 +432,7 @@
       },
       {
         "name": "mac",
+        "heavy": true,
         "paths": [
           "packages/mac-app/Configuration/**",
           "packages/mac-app/Sources/**",
@@ -468,6 +473,7 @@
       },
       {
         "name": "mac-bundle-rebuild",
+        "heavy": true,
         "paths": [
           "packages/mac-app/scripts/bundle-gateway.sh",
           "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",
