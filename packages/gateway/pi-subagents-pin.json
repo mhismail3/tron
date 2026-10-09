@@ -18,7 +18,7 @@
   },
   "fork": {
     "repository": null,
-    "commit": "a0ddb64531df574dedcda1686a7d8d2bb62bfbb2"
+    "commit": "cc1117fd3c78677ca1419e245576a9ebccaf9655"
   },
   "upstream": {
     "package": "pi-subagents",
@@ -45,7 +45,7 @@
     },
     "fork": {
       "repository": null,
-      "commit": "57efaf57c8fef5e8908da1edd850875b4e41d351"
+      "commit": "4de4c32737c6965239cdfd949bfe83e65fe564e4"
     },
     "upstream": {
       "package": "pi-subagents",
