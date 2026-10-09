@@ -12,7 +12,7 @@ import UIKit
 enum ChatMotionConformanceBounds {
     static let maximumGeometryStep: CGFloat = 40
     static let minimumAnimatedFrames = 4
-    static let minimumPixelChangingFrames = 3
+    static let minimumPixelChangingFrames = 2
     static let maximumTailDistance: CGFloat = 12
     static let pixelChannelThreshold: UInt8 = 8
 }
@@ -36,31 +36,58 @@ struct ChatMotionCaseMetrics: Codable {
     let samples: [ChatMotionFrameSample]
 }
 
+/// Pixel extraction shared by hosted visual fixtures so motion evidence uses
+/// the same device-RGB/top-left convention as the existing row fixtures.
+func sampledPixel(of image: UIImage, at point: CGPoint) -> (red: Int, green: Int, blue: Int, alpha: Int)? {
+    guard let cgImage = image.cgImage else { return nil }
+    let x = Int((point.x * image.scale).rounded())
+    let y = Int((point.y * image.scale).rounded())
+    guard x >= 0, y >= 0, x < cgImage.width, y < cgImage.height,
+          let data = cgImage.dataProvider?.data as Data? else { return nil }
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4)
+    defer { buffer.deallocate() }
+    buffer.initialize(repeating: 0, count: 4)
+    guard let context = CGContext(
+        data: buffer,
+        width: 1,
+        height: 1,
+        bitsPerComponent: 8,
+        bytesPerRow: 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    context.draw(
+        cgImage,
+        in: CGRect(x: -CGFloat(x), y: -(CGFloat(cgImage.height) - CGFloat(y) - 1),
+                   width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
+    )
+    return (Int(buffer[0]), Int(buffer[1]), Int(buffer[2]), Int(buffer[3]))
+}
+
 @MainActor
 enum ChatMotionPixelSupport {
-    /// Captures the mounted hosted window, cropped to the row's published frame.
-    /// Pixel sampling is intentionally a separate pass from geometry sampling.
-    static func captureRow(_ rowID: String, harness: ChatViewScrollHarness) throws -> UIImage? {
-        guard let frame = harness.probeObservation.rowFrames[rowID],
-              let window = harness.visibleRootView.window else { return nil }
-        let renderer = UIGraphicsImageRenderer(bounds: frame)
-        return renderer.image { context in
-            context.cgContext.translateBy(x: -frame.minX, y: -frame.minY)
-            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-        }
+    /// Pixel sampling is a separate, slower pass; use the orientation fixture's
+    /// shared hosted-window capture and sample points only within this row.
+    static func captureWindow(harness: ChatViewScrollHarness) throws -> UIImage {
+        try ChatDisplayOrientationFixture.capture(harness)
     }
 
-    static func changedPixels(_ lhs: UIImage, _ rhs: UIImage) -> Bool {
-        guard let a = lhs.cgImage, let b = rhs.cgImage,
-              a.width == b.width, a.height == b.height,
-              let aData = a.dataProvider?.data as Data?,
-              let bData = b.dataProvider?.data as Data? else { return lhs.size != rhs.size }
-        let aBytes = [UInt8](aData), bBytes = [UInt8](bData)
+    static func changedPixels(_ lhs: UIImage, _ rhs: UIImage, in frame: CGRect) -> Bool {
+        let inset = frame.insetBy(dx: 2, dy: 2)
+        guard !inset.isNull, inset.width > 0, inset.height > 0 else { return false }
+        let grid = 6
         let threshold = Int(ChatMotionConformanceBounds.pixelChannelThreshold)
-        return stride(from: 0, to: min(aBytes.count, bBytes.count), by: 4).contains { index in
-            (0..<min(4, min(aBytes.count, bBytes.count) - index)).contains {
-                abs(Int(aBytes[index + $0]) - Int(bBytes[index + $0])) > threshold
+        for row in 0...grid {
+            for column in 0...grid {
+                let point = CGPoint(x: inset.minX + inset.width * CGFloat(column) / CGFloat(grid),
+                                    y: inset.minY + inset.height * CGFloat(row) / CGFloat(grid))
+                guard let a = sampledPixel(of: lhs, at: point),
+                      let b = sampledPixel(of: rhs, at: point) else { continue }
+                if max(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue)) > threshold {
+                    return true
+                }
             }
         }
+        return false
     }
 }

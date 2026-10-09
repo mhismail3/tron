@@ -1196,7 +1196,8 @@ final class ChatViewScrollHarness {
         usesRealOpening: Bool = false,
         unansweredRPCMethods: Set<String> = [],
         mediaFetch: ChatMediaFetch? = nil,
-        orientation: ChatTranscriptOrientation = .newestAtOrigin
+        orientation: ChatTranscriptOrientation = .newestAtOrigin,
+        reduceMotionEnabled: Bool = false
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(
             enablesComposerSubmission: true,
@@ -1219,7 +1220,8 @@ final class ChatViewScrollHarness {
                 installsSubscribedSnapshot: true,
                 enablesPresentationCover: enablesPresentationCover,
                 usesRealOpening: usesRealOpening,
-                orientation: orientation
+                orientation: orientation,
+                reduceMotionEnabled: reduceMotionEnabled
             )
             if usesRealOpening { await harness.startRPCResponder(unansweredMethods: unansweredRPCMethods) }
             return harness
