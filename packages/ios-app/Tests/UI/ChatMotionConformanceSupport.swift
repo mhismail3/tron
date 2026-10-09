@@ -35,6 +35,17 @@ struct ChatMotionCaseMetrics: Codable {
     let samples: [ChatMotionFrameSample]
 }
 
+/// Surface conformance samples identify their stable hosted marker directly;
+/// non-transcript owners need not masquerade as physical transcript rows.
+struct ChatMotionSurfaceMetrics: Codable {
+    let name: String
+    let hostedMarkerID: String
+    let maximumGeometryStep: Double
+    let maximumTailDistance: Double
+    let changedFrames: Int
+    let samples: [Double]
+}
+
 /// Pixel extraction shared by hosted visual fixtures so motion evidence uses
 /// the same device-RGB/top-left convention as the existing row fixtures.
 func sampledPixel(of image: UIImage, at point: CGPoint) -> (red: Int, green: Int, blue: Int, alpha: Int)? {

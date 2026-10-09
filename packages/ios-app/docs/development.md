@@ -1919,7 +1919,11 @@ run across a send or keyboard transaction. A send retires a still-applied app ta
 layout mutation. Short-content alignment is always bottom-owned by the native anchor; blank space remains above the physical tail.
 Editor-only composer height changes install atomically. Attachment, selected-skill, and
 resource-result identity changes use one value-scoped 240 ms smooth host-height transition with no
-root geometry feedback or scroll command; Reduce Motion makes that transition atomic. With the
+root geometry feedback or scroll command; the structural host associates accessory identity with the
+last installed height, so an identity read that precedes the new measured height cannot suppress the
+transition. Reduce Motion makes that transition atomic. `ChatSurfaceMotionConformanceTests` samples the
+attachment-strip insertion and removal at hosted display boundaries, enforcing a 20 pt maximum frame
+step and a 12 pt pinned-tail bound. With the
 keyboard visible, the panel list caps at three
 internally scrolling rows and the native editor at four visible lines. Every outgoing prompt uses one full-height straight fade/slide entrance; prompt length and optional chip content do not select another animation path.
 A mounted retained snapshot remains readable during reconnect, but command

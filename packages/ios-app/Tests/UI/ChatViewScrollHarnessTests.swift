@@ -1471,6 +1471,10 @@ final class ChatViewScrollHarness {
 
     var probeObservation: ChatHostedObservation { probe.observation }
 
+    var composerMotionFrame: CGRect? {
+        TranscriptWindowOracle.composerFrame(in: hostingController.view)
+    }
+
     /// `chat.tail.first-displacement` diagnostics seen so far. The incident's
     /// trace ring held 99 of them and evicted the geometry records they shared
     /// the ring with, so the CT-2 fixtures count them explicitly.
