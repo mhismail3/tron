@@ -116,7 +116,6 @@ struct ChatComposerStructuralHost<Content: View>: View {
             submissionTransitionActive: submissionActive,
             reduceMotion: reduceMotion
         )
-        installedAccessoryIdentity = measurement.accessoryIdentity
         heightTransitionRevision &+= 1
         let revision = heightTransitionRevision
 
@@ -124,6 +123,9 @@ struct ChatComposerStructuralHost<Content: View>: View {
             if submissionActive { onHeightSettled?(measurement.height) }
             return
         }
+        // The identity belongs to the last installed height, not to a geometry
+        // read that can arrive before SwiftUI reports the new natural size.
+        installedAccessoryIdentity = measurement.accessoryIdentity
         if animates {
             let animation = submissionAnimation
                 ?? ChatMotion.composerAccessoryResize

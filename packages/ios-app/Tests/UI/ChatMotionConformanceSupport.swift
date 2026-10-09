@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import SwiftUI
 import UIKit
 @testable import TronMobileCore
@@ -33,6 +34,30 @@ struct ChatMotionCaseMetrics: Codable {
     let pixelChangingFrames: Int?
     let rowIdentityInstances: Int
     let samples: [ChatMotionFrameSample]
+}
+
+/// Surface conformance samples identify their stable hosted marker directly;
+/// non-transcript owners need not masquerade as physical transcript rows.
+struct ChatMotionSurfaceMetrics: Codable {
+    let name: String
+    let hostedMarkerID: String
+    let maximumGeometryStep: Double
+    let maximumTailDistance: Double?
+    let changedFrames: Int
+    let pixelChangingFrames: Int?
+    let markerIdentityInstances: Int
+    let samples: [Double]
+    var rawMaximumGeometryStep: Double? = nil
+    var sampleIntervalMilliseconds: [Double]? = nil
+}
+
+/// Divide a delayed sample's total movement by elapsed display intervals so a
+/// missed callback is not mistaken for one oversized animation step.
+@MainActor
+func normalizedChatMotionStep(_ rawStep: CGFloat, elapsed: CFTimeInterval) -> CGFloat {
+    let frameRate = max(1, UIScreen.main.maximumFramesPerSecond)
+    let intervals = max(1, Int((elapsed * Double(frameRate)).rounded()))
+    return rawStep / CGFloat(intervals)
 }
 
 /// Pixel extraction shared by hosted visual fixtures so motion evidence uses

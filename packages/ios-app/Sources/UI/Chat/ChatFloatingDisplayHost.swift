@@ -186,7 +186,7 @@ private struct FloatingDisplayWindow: View {
                 #if HOSTED_TEST
                 .background(FloatingDisplayHostedProbe(move: { move($0) }, pan: {
                     handlePan($0, size: size, safeRect: safeRect)
-                }))
+                }, dismiss: onClose))
                 #endif
                 .coordinateSpace(name: FloatingWindowPanGesture.Space.window)
                 .position(center)
