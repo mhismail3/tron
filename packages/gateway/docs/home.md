@@ -1380,7 +1380,9 @@ explicitly resuming never discards completed summaries.
 An activation waits for the memory before it sends anything (the recipe's "wait,
 don't cut"): the wait covers the lines the view will carry, so an unbuilt line is
 never sent, and it is abortable, so the user's Stop cancels it and leaves their
-message in the log unanswered. Later steps of the same activation reuse the frozen
+message in the log unanswered. A Stop that lands before Pi appends the input is a
+different case: the admitted prompt is revoked before Pi starts it, so it writes no
+entry and no request is sent. Later steps of the same activation reuse the frozen
 text byte-for-byte.
 
 ## The memory tools

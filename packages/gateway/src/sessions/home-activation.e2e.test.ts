@@ -2029,10 +2029,13 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => f.compactor.entered > 0);
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
-    const second = slot.prompt(longInput("stop activation two"));
-    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    const second = slot.prompt(longInput("stop activation two")).then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    // The memory wait starts only after Pi has appended the input. Admission
+    // (`currentOperationId`) comes earlier, and a Stop before the append revokes
+    // the prompt; that interleaving is covered by its own test below.
+    await waitUntil(async () => (await canonicalMessages(slot)).some((message) => JSON.stringify(message).includes("stop activation two")));
     await slot.abort("agent");
-    const outcome = await second.then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    const outcome = await second;
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const messages = await canonicalMessages(slot);
     const row = {
@@ -2057,6 +2060,48 @@ describe("Tron Home activations end to end", () => {
     expect(row.inputStayedInLog).toBe(true);
     expect(row.answeredAfterInput).toBe(false);
     expect(row.slotPhase).toBe("idle");
+  }, 60_000);
+
+  it("revokes a Stop-admitted input that Pi has not appended: no canonical entry, no answer", async () => {
+    const f = await fixture("stop-before-append");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-stop-before-append");
+    f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
+    // The admitted prompt parks at the owner's inbox seam, which runs after
+    // `admit` and before Pi appends the input. Stop lands in that window.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    const held = vi.spyOn(f.registry.homeOwner(), "admitTaskResults").mockImplementation(async () => {
+      entered = true;
+      await gate;
+    });
+    try {
+      const outcome = slot.prompt(longInput("stop before append")).then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+      await waitUntil(() => entered);
+      expect(f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId()).toBeDefined();
+      const stopped = slot.abort("agent");
+      release();
+      await stopped;
+      const settled = await outcome;
+      await waitUntil(() => slot.snapshot().configurationBlocker === null);
+      const messages = await canonicalMessages(slot);
+      const row = {
+        outcome: settled,
+        providerRequests: requests.length,
+        inputInLog: messages.some((message) => JSON.stringify(message).includes("stop before append")),
+        slotPhase: slot.snapshot().phase,
+      };
+      report.cases.push({ case: "stop-before-append", ...row });
+      expect(row.outcome).toBe("GatewayError: Prompt stopped before agent admission");
+      expect(row.providerRequests).toBe(0);
+      expect(row.inputInLog).toBe(false);
+      expect(row.slotPhase).toBe("idle");
+    } finally {
+      release();
+      held.mockRestore();
+    }
   }, 60_000);
 
   it("refuses an unconfigured memory, then serves the next activation once configured", async () => {
