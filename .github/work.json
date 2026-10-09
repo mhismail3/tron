@@ -276,8 +276,11 @@
         "paths": [
           "tools/work/**",
           ".github/work.json",
+          ".github/workflows/ci.yml",
           "scripts/ci_macos_scope.py",
-          ".github/workflows/ci.yml"
+          "packages/mac-app/.gitignore",
+          "packages/gateway/src/tron-home-environment-policy.mjs",
+          "packages/gateway/test-support/tron-home-environment-preflight.mjs"
         ],
         "command": "python3 -m unittest discover -s tools/work"
       },

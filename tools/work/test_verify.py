@@ -24,6 +24,7 @@ from pathlib import Path
 
 import verify
 from gh import Gh
+from repo_template import clone_with_identity, copy_template
 
 REMOTE = "origin"
 BASE = "main"
@@ -69,7 +70,8 @@ def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-class VerifyFixture(unittest.TestCase):
+class EnvironmentAndSelectorTests(unittest.TestCase):
+    # These need no fixture repository, so they run once rather than once per fixture subclass.
     def test_live_home_environment_fails_before_check_selection(self):
         root = Path(__file__).resolve().parents[2]
         live_home = Path.home() / ".tron"
@@ -86,24 +88,25 @@ class VerifyFixture(unittest.TestCase):
 
     def test_tron_home_path_entries_are_allowed_but_data_roots_are_rejected(self):
         root = Path(__file__).resolve().parents[2]
-        user_home = self.tmp / "user-home"
-        agent_bin = user_home / ".tron" / "agent" / "bin"
-        policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
-        environment = {"HOME": str(user_home), "PATH": str(agent_bin)}
-        node = subprocess.check_output(["which", "node"], text=True).strip()
-        allowed = subprocess.run(
-            [node, str(policy)],
-            env=environment, capture_output=True, text=True,
-        )
-        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        with tempfile.TemporaryDirectory() as home:
+            user_home = Path(home) / "user-home"
+            agent_bin = user_home / ".tron" / "agent" / "bin"
+            policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
+            environment = {"HOME": str(user_home), "PATH": str(agent_bin)}
+            node = subprocess.check_output(["which", "node"], text=True).strip()
+            allowed = subprocess.run(
+                [node, str(policy)],
+                env=environment, capture_output=True, text=True,
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
 
-        rejected = subprocess.run(
-            [allowed.args[0], str(policy)],
-            env={**environment, "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent")},
-            capture_output=True, text=True,
-        )
-        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
-        self.assertIn("PI_CODING_AGENT_DIR=", rejected.stderr)
+            rejected = subprocess.run(
+                [allowed.args[0], str(policy)],
+                env={**environment, "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent")},
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+            self.assertIn("PI_CODING_AGENT_DIR=", rejected.stderr)
 
     def test_node_test_runner_rejects_home_name_selector(self):
         root = Path(__file__).resolve().parents[2]
@@ -162,6 +165,33 @@ class VerifyFixture(unittest.TestCase):
                 self.assertTrue(scale.matches(path))
         self.assertFalse(scale.matches("packages/gateway/src/sessions/session-manager.ts"))
 
+def _build_verify_template(root: Path) -> None:
+    """The history every VerifyFixture copies: a remote whose base holds three files, and a clone on BRANCH."""
+    remote = root / "remote.git"
+    git(root, "init", "-q", "--bare", "-b", BASE, str(remote))
+    seed = clone_with_identity(remote, root / "seed")
+    for relative in ("app/a.txt", "lib/b.txt", "README.md"):
+        VerifyFixture.write(seed, relative, "one\n")
+    git(seed, "add", "-A")
+    git(seed, "commit", "-q", "-m", "base")
+    git(seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
+    repo = clone_with_identity(remote, root / "repo")
+    git(repo, "checkout", "-q", "-b", BRANCH)
+
+
+_verify_template_root: Path
+
+
+def setUpModule():
+    # Built once per module; each VerifyFixture copies it.
+    global _verify_template_root
+    template = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(template.cleanup)
+    _verify_template_root = Path(template.name).resolve()
+    _build_verify_template(_verify_template_root)
+
+
+class VerifyFixture(unittest.TestCase):
     def setUp(self):
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
@@ -169,15 +199,9 @@ class VerifyFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
-        self.seed = self._clone("seed")
-        for relative in ("app/a.txt", "lib/b.txt", "README.md"):
-            self.write(self.seed, relative, "one\n")
-        git(self.seed, "add", "-A")
-        git(self.seed, "commit", "-q", "-m", "base")
-        git(self.seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
-        self.repo = self._clone("repo")
-        git(self.repo, "checkout", "-q", "-b", BRANCH)
+        self.seed = self.tmp / "seed"
+        self.repo = self.tmp / "repo"
+        copy_template(_verify_template_root, self.tmp, [self.seed, self.repo], REMOTE, self.remote)
         self.counts = self.tmp / "counts"
         self.counts.mkdir()
         self.fail_flag = self.tmp / "fail-app"
@@ -201,13 +225,6 @@ class VerifyFixture(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-
-    def _clone(self, name: str) -> Path:
-        path = self.tmp / name
-        git(self.tmp, "clone", "-q", str(self.remote), str(path))
-        git(path, "config", "user.name", "Agent")
-        git(path, "config", "user.email", "agent@example.invalid")
-        return path
 
     def _counting(self, name: str) -> str:
         return f"echo run >> {self.counts / name}"

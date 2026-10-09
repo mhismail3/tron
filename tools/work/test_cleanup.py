@@ -27,6 +27,7 @@ from unittest import mock
 import claim as claims
 import cleanup
 from gh import GhError
+from repo_template import clone_with_identity, copy_template
 
 REMOTE = "origin"
 BASE = "main"
@@ -76,22 +77,38 @@ def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def _build_cleanup_template(root: Path) -> None:
+    """The history every CleanupFixture copies: a remote whose base holds an ignore file and a README."""
+    remote = root / "remote.git"
+    git(root, "init", "-q", "--bare", "-b", BASE, str(remote))
+    repo = clone_with_identity(remote, root / "repo")
+    CleanupFixture.write(repo, ".gitignore", "node_modules/\nbuild/\n*.pyc\n*.secret\n")
+    CleanupFixture.write(repo, "README.md", "one\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "push", "-q", REMOTE, f"HEAD:{BASE}")
+
+
+_cleanup_template_root: Path
+
+
+def setUpModule():
+    # Built once per module; each CleanupFixture copies it.
+    global _cleanup_template_root
+    template = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(template.cleanup)
+    _cleanup_template_root = Path(template.name).resolve()
+    _build_cleanup_template(_cleanup_template_root)
+
+
 class CleanupFixture(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
         self.repo = self.tmp / "repo"
-        git(self.tmp, "clone", "-q", str(self.remote), str(self.repo))
-        git(self.repo, "config", "user.name", "Agent")
-        git(self.repo, "config", "user.email", "agent@example.invalid")
-        self.write(self.repo, ".gitignore", "node_modules/\nbuild/\n*.pyc\n*.secret\n")
-        self.write(self.repo, "README.md", "one\n")
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "-m", "base")
-        git(self.repo, "push", "-q", REMOTE, f"HEAD:{BASE}")
+        copy_template(_cleanup_template_root, self.tmp, [self.repo], REMOTE, self.remote)
         self.root = self.tmp / "worktrees"
 
         # Every release command appends the directory it ran in, so a test can
