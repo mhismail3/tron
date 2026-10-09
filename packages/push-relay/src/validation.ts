@@ -47,7 +47,7 @@ export function validateNotification(value: unknown, now = Date.now()):
   | { ok: true; value: NotificationRequest }
   | { ok: false; error: string } {
   if (!isRecord(value)) return { ok: false, error: "invalid_request" };
-  const allowed = ["version", "kind", "requestId", "message", "title", "sessionId", "machineId", "expiresAt"];
+  const allowed = ["version", "kind", "notificationKind", "interruptionLevel", "requestId", "message", "title", "sessionId", "machineId", "expiresAt"];
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     return { ok: false, error: "unknown_field" };
   }
@@ -55,8 +55,10 @@ export function validateNotification(value: unknown, now = Date.now()):
   const hasSessionId = value.sessionId !== undefined;
   const hasMachineId = value.machineId !== undefined;
   if (
-    value.version !== 1 || value.kind !== "agent_alert" ||
-    !isOpaqueId(value.requestId) ||
+    value.version !== 1 || value.kind !== "agent_alert"
+    || !["ask", "explicit", "agent_finished", "waiting"].includes(value.notificationKind as string)
+    || (value.interruptionLevel !== undefined && value.interruptionLevel !== "time-sensitive")
+    || !isOpaqueId(value.requestId) ||
     typeof value.message !== "string" || value.message.length < 1 || utf8(value.message).byteLength > MAX_MESSAGE_BYTES ||
     (value.title !== undefined && (typeof value.title !== "string" || value.title.length < 1 || utf8(value.title).byteLength > MAX_TITLE_BYTES)) ||
     hasSessionId !== hasMachineId ||

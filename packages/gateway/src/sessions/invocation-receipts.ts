@@ -8,7 +8,7 @@ export interface InvocationProjection {
   version: 1;
   invocationId: string;
   operationId: string;
-  source: "plain" | "skill" | "prompt" | "extension";
+  source: "plain" | "skill" | "prompt" | "extension" | "subagentWake";
   name?: string;
   arguments?: string;
   /** User-authored text for image-bearing prompts; Pi may append resize notes to its canonical message. */
@@ -33,12 +33,12 @@ const LIFECYCLES = new Set<InvocationLifecycle>([
   "staged", "accepted", "queued", "running", "waitingForInput", "retrying", "settling", "completed", "failed", "interrupted", "outcomeUnknown",
 ]);
 const KINDS = new Set(["start", "transition", "terminal", "binding"] as const);
-const SOURCES = new Set(["plain", "skill", "prompt", "extension"] as const);
+const SOURCES = new Set(["plain", "skill", "prompt", "extension", "subagentWake"] as const);
 const ORIGIN_KINDS = new Set(["user", "subagent", "extension", "process", "gateway", "assistant", "unknown"] as const);
 const ORIGIN_CONFIDENCE = new Set(["boundary", "receipt", "adapter", "unknown"] as const);
 
 type ReceiptKind = "start" | "transition" | "terminal" | "binding";
-type ReceiptSource = "plain" | "skill" | "prompt" | "extension";
+type ReceiptSource = "plain" | "skill" | "prompt" | "extension" | "subagentWake";
 
 interface InvocationReceiptCommon {
   receiptId: string;
@@ -176,8 +176,8 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   if (kind === "start" && (r.lifecycle !== "staged"
       || r.canonicalEntryId !== undefined || r.errorCode !== undefined
       || r.retryable !== undefined || r.parentEntryId !== undefined
-      || (r.source === "plain" && (r.name !== undefined || r.arguments !== undefined))
-      || (r.source !== "plain" && r.name === undefined))) return undefined;
+      || ((r.source === "plain" || r.source === "subagentWake") && (r.name !== undefined || r.arguments !== undefined))
+      || (r.source !== "plain" && r.source !== "subagentWake" && r.name === undefined))) return undefined;
   if (kind === "transition" && (!r.lifecycle || r.lifecycle === "staged"
       || TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (kind === "terminal" && (!TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle) || r.canonicalEntryId !== undefined)) return undefined;

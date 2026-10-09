@@ -37,9 +37,9 @@ Commands:
   work start <issue> [--session <id>]
                                     Claim a Ready issue: remote branch, Project
                                     status, claim comment, and its worktree
-  work verify [--post] [--evidence-manifest <json>]
-                                    Run diff-scoped checks and write a head-bound
-                                    receipt; optionally attach reviewed UI media.
+  work verify [--jobs N] [--post] [--evidence-manifest <json>]
+                                    Run diff-scoped checks concurrently (1 = sequential)
+                                    and write a head-bound receipt; attach reviewed UI media.
                                     --post publishes private evidence and status
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: needs-you,
@@ -48,6 +48,21 @@ Commands:
                                     Print every open issue (optionally recent closed
                                     ones) as a bounded JSON corpus for related-issue
                                     checks
+  work comment <issue> --body-file <md>
+                                    Privacy-check and audit a public issue comment
+  work issue create --title <t> --body-file <md> --kind <label>
+                     --visibility <label> --area <label> [--type task|epic]
+                                    File a typed task or epic with declared labels
+  work issue labels <issue> [--add <label>] [--remove <label>]
+                                    Change only declared work labels
+  work project add <issue>
+                                    Add an issue to the configured work Project
+  work project set <issue> [--status Proposed|Ready|Needs you|Blocked]
+                     [--priority P0|P1|P2|P3]
+                                    Set unclaimed work classification fields
+  work issue parent <issue> --epic <epic>
+  work issue block <issue> --blocked-by <issue>
+                                    Create native parent or blocker links
   work land [--title <t>] [--summary-file <md>] [--needs-user-validation <text>]
                                     From a claim worktree: merge the base in, verify,
                                     push, open or update the PR, wait for required

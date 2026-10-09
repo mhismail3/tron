@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -278,13 +279,16 @@ async function fixture(options: {
 
 /** An extension-owned trigger that starts a turn of its own. */
 const wakeExtension = (root: string) => `
-        import { existsSync } from "node:fs";
+        import { existsSync, unlinkSync, writeFileSync } from "node:fs";
         import { setTimeout as delay } from "node:timers/promises";
         export default function (pi) {
+          writeFileSync(${JSON.stringify(join(root, "wake-polling"))}, "polling");
           void (async () => {
             for (;;) {
               if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
                 pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
+                writeFileSync(${JSON.stringify(join(root, "wake-sent"))}, "sent");
+                unlinkSync(${JSON.stringify(join(root, "wake-polling"))});
                 return;
               }
               await delay(5);
@@ -655,7 +659,7 @@ describe("session archive over the real Gateway", () => {
     // changes phase, which only a token covering the whole row overlay can
     // carry, so an owner naming the old token must be answered with rows.
     const listChangesBefore = f.listChanged.mock.calls.length;
-    await restarted.registry.clearAutomationMarker(session.id, operationId);
+    await restarted.registry.clearOwnedOperationMarker(session.id, operationId);
     expect(f.listChanged.mock.calls.length).toBeGreaterThan(listChangesBefore);
     const after = await list(client, "exclude", { projectionToken: token });
     expect(after.notModified).toBeUndefined();
@@ -907,7 +911,7 @@ describe("session archive over the real Gateway", () => {
     const client = await f.connect();
     const session = await f.coldSession("automation-lease");
     await openSession(client, session.id);
-    const lease = await f.current().registry.acquireAutomationLease(session.id);
+    const lease = await f.current().registry.acquireOwnedSessionLease(session.id);
     try {
       const archive = await client.request("automation-lease-archive", "session.archive.set", {
         commandId: "automation-lease-archive-command", sessionId: session.id, archived: true,
@@ -1403,9 +1407,9 @@ describe("session archive over the real Gateway", () => {
     await archiveSession(client, session.id, "automation-archive-command");
     f.faux.setResponses([fauxAssistantMessage("scheduled response")]);
 
-    // Mirrors AutomationExecutor: take the automation lease for a persisted
-    // session, then admit the prompt with its exact operation ownership.
-    const lease = await f.current().registry.acquireAutomationLease(session.id);
+    // Mirrors AutomationExecutor: take the shared owned-session lease for a
+    // persisted session, then admit the prompt with exact operation ownership.
+    const lease = await f.current().registry.acquireOwnedSessionLease(session.id);
     const admission = await lease.slot.prompt(
       "scheduled run",
       [],
@@ -1821,10 +1825,21 @@ describe("session archive over the real Gateway", () => {
     const inWrite = new Promise<void>((resolve) => { enteredWrite = resolve; });
     let releaseWrite!: () => void;
     const writeBarrier = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let archiveWriteHeld = false;
     store.archive = async (sessionId) => {
+      archiveWriteHeld = true;
       enteredWrite();
       await writeBarrier;
+      archiveWriteHeld = false;
       return durableArchive(sessionId);
+    };
+    const stallState = () => `archive stall: watcherPolling=${existsSync(join(f.root, "wake-polling"))}, externalRunSubmitted=${existsSync(join(f.root, "wake-sent"))}, archiveWriteHeld=${archiveWriteHeld}`;
+    const waitWithStallState = async (condition: () => boolean, label: string) => {
+      try {
+        await waitFor(condition, label);
+      } catch (error) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; ${stallState()}`);
+      }
     };
     let releaseRun!: () => void;
     const runBarrier = new Promise<void>((resolve) => { releaseRun = resolve; });
@@ -1833,13 +1848,15 @@ describe("session archive over the real Gateway", () => {
       const archiving = client.request("started-during-write-request", "session.archive.set", {
         commandId: "started-during-write-command", sessionId: session.id, archived: true,
       });
+      void archiving.catch(() => {});
       await inWrite;
       // The extension's turn never passes Gateway run admission, so only the
       // active projection the commit rechecks can notice it. Its frames arrive
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
-      await waitFor(() => snapshotFrames(client, session.id).some(
+      await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
+      await waitWithStallState(() => snapshotFrames(client, session.id).some(
         (frame) => frame.payload?.phase === "running"), "externally started run");
       releaseWrite();
       const response = await archiving;

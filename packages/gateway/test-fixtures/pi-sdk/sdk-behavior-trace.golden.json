@@ -290,6 +290,7 @@
         "transcript[].durationMs:number",
         "transcript[].errorMessage:string",
         "transcript[].extensionOrigin.owner.id:string",
+        "transcript[].extensionOrigin.owner.kind:string",
         "transcript[].extensionOrigin.owner.source:string",
         "transcript[].extensionOrigin.owner.title:string",
         "transcript[].extensionOrigin.owner:object",
@@ -1794,6 +1795,30 @@
       "type": "message"
     },
     {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "completed",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
       "id": "<id>",
       "message": {
         "content": [
@@ -1863,30 +1888,6 @@
       "parentId": "<id>",
       "timestamp": "<timestamp>",
       "type": "message"
-    },
-    {
-      "customType": "tron.chat-invocation.v1",
-      "data": {
-        "createdAt": "<timestamp>",
-        "invocationId": "<id>",
-        "lifecycle": "completed",
-        "operationId": "<id>",
-        "origin": {
-          "confidence": "boundary",
-          "kind": "user"
-        },
-        "receiptId": "<id>",
-        "receiptKind": "terminal",
-        "sequence": "<n>",
-        "sessionId": "<id>",
-        "source": "plain",
-        "version": 1,
-        "writer": "gateway"
-      },
-      "id": "<id>",
-      "parentId": "<id>",
-      "timestamp": "<timestamp>",
-      "type": "custom"
     },
     {
       "customType": "tron.chat-invocation.v1",
@@ -2386,6 +2387,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Codemode"
         },
@@ -2553,6 +2555,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Mcp"
         },
@@ -2609,6 +2612,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Tool Search"
         },
@@ -2721,6 +2725,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Mcp"
         },

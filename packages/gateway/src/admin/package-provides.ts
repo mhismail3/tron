@@ -1,3 +1,4 @@
+import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { basename, dirname, sep } from "node:path";
 import type {
   Extension,
@@ -5,7 +6,7 @@ import type {
   ResolvedResource,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { PackageProvides } from "../protocol/types.js";
+import type { PackageProvides, PackageConflict } from "../protocol/types.js";
 import {
   loadSubagentCatalog,
   type AvailableSubagent,
@@ -34,7 +35,7 @@ export interface InstalledPackage {
 }
 
 /** An installed-package row with the names it provides. */
-export type PackageProvidesEntry = InstalledPackage & { provides: PackageProvides };
+export type PackageProvidesEntry = InstalledPackage & { provides: PackageProvides; conflict?: PackageConflict };
 
 type ResourceKind = "skills" | "prompts" | "themes";
 
@@ -59,7 +60,7 @@ function boundedNames(names: Iterable<string>): string[] {
  * already performs — and the extension load — pair with a package entry without
  * resolving anything a second time. */
 function isPackageOwned(sourceInfo: { source: string; scope: string; origin: string }, pkg: InstalledPackage): boolean {
-  return sourceInfo.origin === "package" && sourceInfo.source === pkg.source && sourceInfo.scope === pkg.scope;
+  return sourceInfo.source === pkg.source && (pkg.source === MANAGED_SUBAGENTS_SOURCE || sourceInfo.origin === "package" && sourceInfo.scope === pkg.scope);
 }
 
 /** Only resources the package filter left enabled are provided: a pattern that
@@ -71,7 +72,8 @@ function resourceNames(kind: ResourceKind, resources: ResolvedResource[], pkg: I
 }
 
 function extensionNames(extensions: Extension[], pkg: InstalledPackage): Pick<PackageProvides, "tools" | "commands"> {
-  const owned = extensions.filter((extension) => isPackageOwned(extension.sourceInfo, pkg));
+  const owned = extensions.filter((extension) => isPackageOwned(extension.sourceInfo, pkg)
+    || pkg.source === MANAGED_SUBAGENTS_SOURCE && isManagedSubagentExtension(extension));
   return {
     tools: boundedNames(owned.flatMap((extension) => [...extension.tools.keys()])),
     commands: boundedNames(owned.flatMap((extension) => [...extension.commands.keys()])),
@@ -114,6 +116,7 @@ export function packageProvides(input: PackageProvidesInput): PackageProvides {
 
 export interface PackageProvidesRequest {
   agentDir: string;
+  managedSubagents?: ManagedSubagents;
   trust: TrustService;
   cwd: string;
   settingsManager: SettingsManager;
@@ -126,6 +129,7 @@ export interface PackageProvidesRequest {
 }
 
 export interface PackageProvidesResult {
+  resources: ResolvedPaths;
   entries: PackageProvidesEntry[];
   diagnostic?: string;
 }
@@ -137,11 +141,20 @@ export interface PackageProvidesResult {
 export async function loadPackageProvides(request: PackageProvidesRequest): Promise<PackageProvidesResult> {
   const diagnostics: string[] = [];
   let extensions: Extension[] = [];
+  let resources = request.resources;
+  if (request.managedSubagents) {
+    try {
+      const managed = await request.managedSubagents.resources();
+      resources = { extensions: [...resources.extensions, ...managed.extensions], skills: [...resources.skills, ...managed.skills],
+        prompts: [...resources.prompts, ...managed.prompts], themes: resources.themes };
+    } catch (error) { diagnostics.push(`managed resources are unavailable: ${errorText(error)}`); }
+  }
   try {
     const loaded = await (request.loadExtensions ?? loadSessionFreeExtensions)(
       request.agentDir,
       request.trust,
       request.cwd,
+      request.managedSubagents,
     );
     extensions = loaded.extensions;
     if (loaded.errors.length > 0) {
@@ -154,16 +167,28 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
     agentDir: request.agentDir,
     cwd: request.cwd,
     settingsManager: request.settingsManager,
+    ...(request.managedSubagents ? { managedSubagents: request.managedSubagents } : {}),
     ...(request.loadDiscovery ? { loadDiscovery: request.loadDiscovery } : {}),
   });
   if (catalog.diagnostic) diagnostics.push(catalog.diagnostic);
   return {
-    entries: request.packages.map((pkg) => ({
+    resources,
+    entries: [...request.packages, ...managedPackage(request)].map((pkg) => ({
       ...pkg,
-      provides: packageProvides({ pkg, resources: request.resources, extensions, subagents: catalog.subagents }),
+      ...(request.managedSubagents && isUserSubagentsPackage(pkg.source) ? {
+        conflict: { code: "managed-provider" as const, message: IGNORED_SUBAGENTS_MESSAGE },
+        provides: { skills: [], prompts: [], themes: [], subagents: [], tools: [], commands: [] },
+      } : { provides: packageProvides({ pkg, resources, extensions, subagents: catalog.subagents }) }),
     })),
     ...(diagnostics.length > 0 ? { diagnostic: boundedDiagnostic(diagnostics.join("; ")) } : {}),
   };
+}
+
+function managedPackage(request: PackageProvidesRequest): InstalledPackage[] {
+  try {
+    const installedPath = request.managedSubagents?.verify();
+    return installedPath ? [{ source: MANAGED_SUBAGENTS_SOURCE, scope: "user", filtered: false, installedPath }] : [];
+  } catch { return []; }
 }
 
 function errorText(error: unknown): string {

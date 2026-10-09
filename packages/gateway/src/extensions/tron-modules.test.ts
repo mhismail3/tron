@@ -36,6 +36,7 @@ function tronModuleHost(options: { optionalOwners?: boolean } = {}): TronModuleH
     compactionPolicy: () => undefined,
     compactionStopped: () => false,
     compactionChanged: () => {},
+    joinTerminalReceiptWrites: async () => {},
     knowledge: {} as KnowledgeService,
     jev: {} as JevDecisionClient,
     connections: {} as ConnectionOwner,

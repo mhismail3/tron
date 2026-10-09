@@ -16,6 +16,7 @@ import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { observeTrustedAgentBrowserResult } from "../display/browser-live-view-adapter.js";
+import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 
 type ExtensionHandlerList = Parameters<Extension["handlers"]["set"]>[1];
@@ -27,11 +28,6 @@ type ExtensionShortcut = Parameters<Extension["shortcuts"]["set"]>[1];
  * the gateway presentation projection. AsyncLocalStorage preserves it across
  * promises and timers without guessing attribution for unattributed calls. */
 const ownerStorage = new AsyncLocalStorage<ExtensionOwner>();
-// Adapter classification is established once at the trusted extension-load
-// boundary; transcript code never guesses from customType, text, or renderer
-// registration.
-const trustedSubagentOwnerIDs = new Set<string>();
-const trustedSubagentAdapterSource = "npm:pi-subagents";
 /** First-party inline tool names and the exact inline extension that may own them. */
 const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["notify", "tron-notify"],
@@ -54,6 +50,9 @@ const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>()
 const admittedCallbackOwners = new WeakMap<Function, Extension>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
+export function withExtensionOwner<T>(owner: ExtensionOwner, operation: () => T): T {
+  return ownerStorage.run(owner, operation);
+}
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
 export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
   return invocationStorage.run(context, operation);
@@ -124,17 +123,21 @@ function humanizedDisplayName(extension: Extension): string {
 export function extensionOwnerFor(extension: Extension): ExtensionOwner {
   // Inline source labels are loader defaults; this exact generated path is the
   // stable release-owned capability identity used by native projections.
-  const source = extension.path === TRON_ASK_USER_INLINE_PATH
+  const source = isManagedSubagentExtension(extension) ? MANAGED_SUBAGENTS_SOURCE : extension.path === TRON_ASK_USER_INLINE_PATH
     ? TRON_ASK_USER_SOURCE
     : extension.sourceInfo.source;
-  const identity = `${source}\0${extension.resolvedPath}`;
-  const id = `extension:${createHash("sha256").update(identity).digest("base64url")}`;
-  if (source === trustedSubagentAdapterSource) trustedSubagentOwnerIDs.add(id);
-  return { id, title: humanizedDisplayName(extension), source };
+  return producerIdentity(source, extension.resolvedPath, isManagedSubagentExtension(extension) ? "Subagents" : humanizedDisplayName(extension));
+}
+
+export function producerIdentity(source: string, path: string, title: string): ExtensionOwner {
+  const id = `extension:${createHash("sha256").update(`${source}\0${path}`).digest("base64url")}`;
+  return { id, title, source, kind: source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension" };
 }
 
 export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | "extension" {
-  return trustedSubagentOwnerIDs.has(owner.id) ? "subagent" : "extension";
+  // Live admission and canonical receipt decoding supply the classification.
+  // Build provenance is not a second consumer-side capability discriminator.
+  return owner.kind ?? "extension";
 }
 
 /**
@@ -159,6 +162,7 @@ function ownCallback<T extends (...args: any[]) => any>(callback: T, extension: 
 interface RegistrationAdmission {
   extension: Extension;
   requireTronAskUser: boolean;
+  requireManagedSubagents: boolean;
   browserLiveView?: {
     views: BrowserLiveViewRegistry;
     sessionId: string;
@@ -193,6 +197,9 @@ class RegistrationMap<K, V> extends Map<K, V> {
 }
 
 function assertAdmissibleToolName(state: RegistrationAdmission, name: string): void {
+  if (name === "subagent" && state.requireManagedSubagents && !isManagedSubagentExtension(state.extension)) {
+    throw new GatewayError("conflict", "The subagent tool is reserved by the Tron-managed provider");
+  }
   if (name === "bash") throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
   for (const [tool, owner] of RESERVED_FIRST_PARTY_TOOLS) {
     if (name !== tool) continue;
@@ -343,11 +350,13 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
   views: BrowserLiveViewRegistry;
   sessionId: string;
   runtimeGeneration: string;
-}, options?: { requireTronAskUser?: boolean }): LoadExtensionsResult {
+}, options?: { requireTronAskUser?: boolean; managedSubagents?: ManagedSubagents }): LoadExtensionsResult {
   const loadToken = browserLiveView?.views.beginSessionLoad(browserLiveView.sessionId);
+  options?.managedSubagents?.admit(base.extensions);
   validateReservedCapabilities(base, options);
   const admission: Omit<RegistrationAdmission, "extension"> = {
     requireTronAskUser: options?.requireTronAskUser === true,
+    requireManagedSubagents: options?.managedSubagents !== undefined,
     ...(browserLiveView && loadToken ? { browserLiveView: { ...browserLiveView, loadToken } } : {}),
   };
   for (const extension of base.extensions) installRegistrationAdmission(extension, admission);

@@ -2232,7 +2232,10 @@ disarmed while a body part waits in the shared schedule and re-armed once it is
 forwarded, so a stalled client is still retired. Each such retirement writes a
 `proxy.client-idle-timeout` line to `proxy.log`, which CI retains; its
 `idleTimeoutMs` is the bound armed on that socket, so Node's 5 s keep-alive
-expiry of an idle connection (5000) is distinct from a stalled client (10000). A separate common-proxy
+expiry of an idle connection (5000) is distinct from a stalled client (10000).
+If the owned fault proxy exits before reporting readiness, the harness reports
+its process exit code or signal and prints the last 20 lines of `proxy.log` so
+startup failures retain their cause in CI output. A separate common-proxy
 blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
 `system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
 fixture counters increment once at the proxy forwarding transition, rather

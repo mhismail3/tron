@@ -8,7 +8,7 @@ import {
   type OverlayOptions,
   type TUI,
 } from "@earendil-works/pi-tui";
-import type { ExtensionFrame, ExtensionSurface } from "../../protocol/types.js";
+import type { ExtensionFrame, ExtensionOwner, ExtensionSurface } from "../../protocol/types.js";
 import { CapturingTuiMainScreen } from "./capturing-tui-main-screen.js";
 import { ComponentRegistry, type ComponentRecord, type RemoteComponentFactory } from "./component-registry.js";
 import { ExtensionPresentationStore } from "./extension-presentation-store.js";
@@ -44,7 +44,7 @@ type CustomFactory<T> = (
 ) => CustomComponent | Promise<CustomComponent>;
 
 interface SurfaceMeta {
-  owner?: { source: string };
+  owner?: Pick<ExtensionOwner, "source" | "kind">;
   kind: SurfaceKind;
   placement: SurfacePlacement;
   lifecycle: SurfaceLifecycle;
@@ -136,7 +136,7 @@ export class RemotePiExtensionHost {
         const previousMeta = host.surfaceMeta.get(key);
         host.placements.set(key, placement);
         const owner = currentExtensionOwner();
-        host.surfaceMeta.set(key, { kind: "widget", placement, lifecycle: "retained", inputMode: "none", ...(owner ? { owner: { source: owner.source } } : {}) });
+        host.surfaceMeta.set(key, { kind: "widget", placement, lifecycle: "retained", inputMode: "none", ...(owner ? { owner } : {}) });
         // Registry admission may reject a replacement while a bounded factory
         // is pending. Restore metadata when that admission does not commit.
         if (!host.mountComponent(key, content as RemoteComponentFactory)) {
@@ -235,7 +235,7 @@ export class RemotePiExtensionHost {
       this.customCall = call as CustomCall<unknown>;
     });
     const owner = currentExtensionOwner();
-    this.surfaceMeta.set(key, { kind: "custom", placement: "fullscreen", lifecycle: "blocking", inputMode: "keys", callId, ...(owner ? { owner: { source: owner.source } } : {}) });
+    this.surfaceMeta.set(key, { kind: "custom", placement: "fullscreen", lifecycle: "blocking", inputMode: "keys", callId, ...(owner ? { owner } : {}) });
     const done = (value: T): void => this.finishCustom(key, value, undefined);
     const customFactory: RemoteComponentFactory = () => factory(tui, theme, keybindings, done);
     if (!this.registry?.set(key, customFactory)) {
@@ -354,7 +354,7 @@ export class RemotePiExtensionHost {
       const frame = { ...parsed.frame, lines: parsed.frame.lines.map((line) => ({ plainText: line.plainText, runs: line.runs.map((run) => ({ text: run.text, style: { ...run.style } })) })), width: this.terminal.columns, height: parsed.frame.lines.length };
       const id = this.surfaceId(record.key);
       this.stageSurface({ id, kind: meta.kind, placement: meta.placement, lifecycle: meta.lifecycle, revision: this.nextRevision(id), focused: meta.kind === "custom", inputMode: meta.inputMode, frame,
-        ...(meta.owner ? { provenance: { source: meta.owner.source } } : {}) });
+        ...(meta.owner ? { provenance: { source: meta.owner.source, ...(meta.owner.kind ? { kind: meta.owner.kind } : {}) } } : {}) });
     }
     this.flushPresentation();
   }

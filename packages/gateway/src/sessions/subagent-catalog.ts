@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DefaultPackageManager, type SettingsManager } from "@earendil-works/pi-coding-agent";
+import { type SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../protocol/types.js";
 
 /** The third-party package that owns subagent discovery. */
@@ -29,12 +30,14 @@ export interface AvailableSubagent {
 export interface SubagentCatalog {
   subagents: AvailableSubagent[];
   diagnostic?: string;
+  invalidDefinitionCount?: number;
 }
 
 export interface SubagentCatalogRequest {
   agentDir: string;
   cwd: string;
   settingsManager: SettingsManager;
+  managedSubagents?: ManagedSubagents;
   /** Overrides loading pi-subagents' own discovery module (used by tests). */
   loadDiscovery?: (packageRoot: string) => Promise<unknown>;
 }
@@ -116,39 +119,6 @@ export function availableSubagentRow(subagent: AvailableSubagent): AvailableSuba
   };
 }
 
-/** Resolves the installed pi-subagents root from the packages the agent home's
- * settings (user first, then the current project's) configure; undefined when it
- * is not installed. Only the matching entry is resolved, so an unrelated broken
- * package cannot slow this read down. */
-export function installedSubagentPackageRoot(settingsManager: SettingsManager, agentDir: string, cwd: string): string | undefined {
-  const candidates: Array<{ source: string; scope: "user" | "project" }> = [
-    ...settingsManager.getPackages().map((pkg) => ({ source: packageSourceString(pkg), scope: "user" as const })),
-    ...projectPackages(settingsManager).map((pkg) => ({ source: packageSourceString(pkg), scope: "project" as const })),
-  ];
-  const match = candidates.find((candidate) => packageName(candidate.source) === SUBAGENT_PACKAGE);
-  if (!match) return undefined;
-  return new DefaultPackageManager({ cwd, agentDir, settingsManager }).getInstalledPath(match.source, match.scope);
-}
-
-/** Untrusted project settings are not loaded; project packages cannot apply. */
-function projectPackages(settingsManager: SettingsManager): Array<string | { source: string }> {
-  try {
-    return settingsManager.getProjectSettings().packages ?? [];
-  } catch {
-    return [];
-  }
-}
-
-function packageSourceString(source: string | { source: string }): string {
-  return typeof source === "string" ? source : source.source;
-}
-
-function packageName(source: string): string {
-  const withoutProtocol = source.replace(/^[a-z][a-z0-9+.-]*:/i, "");
-  const withoutVersion = withoutProtocol.replace(/@[^/]*$/, "").replace(/\/+$/, "");
-  return withoutVersion.split("/").pop() ?? "";
-}
-
 /** pi-subagents declares `jiti` but exposes no public discovery entry point, so
  * load its own `src/agents/agents.ts` through that declared dependency. The
  * imported module reads agent definitions and settings only; it spawns nothing. */
@@ -161,7 +131,7 @@ export async function loadPiSubagentsDiscovery(packageRoot: string): Promise<unk
   };
   const createJiti = loaded.createJiti ?? loaded.default?.createJiti;
   if (typeof createJiti !== "function") throw new Error("jiti did not expose createJiti");
-  return createJiti(import.meta.url).import(join(packageRoot, "src", "agents", "agents.ts"));
+  return createJiti(import.meta.url).import(join(packageRoot, "src", "agents", "agents.js"));
 }
 
 async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown> {
@@ -179,16 +149,26 @@ async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown>
  * diagnostic; it never rejects, so subagents cannot take down the response. */
 export async function loadSubagentCatalog(request: SubagentCatalogRequest): Promise<SubagentCatalog> {
   try {
-    const packageRoot = installedSubagentPackageRoot(request.settingsManager, request.agentDir, request.cwd);
-    if (!packageRoot) return unavailable(`${SUBAGENT_PACKAGE} is not installed`);
+    const packageRoot = request.managedSubagents?.verify();
+    if (!packageRoot) return unavailable(`managed ${SUBAGENT_PACKAGE} is not installed`);
     const discovery = await (request.loadDiscovery ?? loadPiSubagentsDiscovery)(packageRoot);
-    return { subagents: collectSubagents(await discoverAgents(discovery, request.cwd)) };
+    const raw = await discoverAgents(discovery, request.cwd);
+    const reports = raw !== null && typeof raw === "object" ? (raw as { agentDiagnostics?: unknown }).agentDiagnostics : undefined;
+    const invalid = Array.isArray(reports) ? reports.filter((report): report is { error: string } =>
+      report !== null && typeof report === "object" && typeof report.error === "string" && report.error.length > 0) : [];
+    return { subagents: collectSubagents(raw), ...(invalid.length ? {
+      invalidDefinitionCount: invalid.length,
+      diagnostic: boundedDiagnostic(`${invalid.length} invalid subagent definition(s): ${invalid[0]!.error}`),
+    } : {}) };
   } catch (error) {
     return unavailable(error instanceof Error ? error.message : String(error));
   }
 }
 
 function unavailable(reason: string): SubagentCatalog {
-  const bounded = reason.length <= MAX_DIAGNOSTIC_CHARACTERS ? reason : `${reason.slice(0, MAX_DIAGNOSTIC_CHARACTERS)}…`;
-  return { subagents: [], diagnostic: `subagent catalog unavailable: ${bounded}` };
+  return { subagents: [], diagnostic: boundedDiagnostic(`subagent catalog unavailable: ${reason}`) };
+}
+
+function boundedDiagnostic(text: string): string {
+  return text.length <= MAX_DIAGNOSTIC_CHARACTERS ? text : `${text.slice(0, MAX_DIAGNOSTIC_CHARACTERS - 1)}…`;
 }

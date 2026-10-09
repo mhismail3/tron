@@ -9,16 +9,17 @@ import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
 import { admitsAutomationAction } from "../automations/automation-contract.js";
 import { GatewayAutomationExecutor } from "../automations/automation-executor.js";
+import { OwnedSessionDispatch, OWNED_OPERATION_DEADLINE_MS } from "./owned-session-dispatch.js";
 import type { AutomationExecutionHandle } from "../automations/automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -28,7 +29,7 @@ import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
-import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
+import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import {
@@ -186,6 +187,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
   const syntheticTranscriptSizes = new Map<string, number>();
+  const ownedDeadlineReportCases: Array<Record<string, unknown>> = [];
 
   async function coldFixture(label: string, options: {
     nested?: boolean;
@@ -202,7 +204,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     /** Admit one explicit delegated artifact root, as the production cutover
      * does, so ambient discovery scans exactly that root. */
     delegatedRoot?: string;
-    beforeInitialize?: (sessionFile: string) => Promise<void>;
+    beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;
     notifications?: NotificationService;
     resources?: ResourceRecorder;
     runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
@@ -248,7 +250,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
     });
     registries.push(registry);
-    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
+    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!, registry);
     await initializeRegistry(registry, options.phaseObserver);
     await registry.recoverCanonicalAttention();
     return {
@@ -265,6 +267,52 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
   }
 
+  async function startOwnedOperation(slot: RuntimeSlot, registry: RuntimeRegistry, prompt: string) {
+    const operationId = `task:deadline:${randomUUID()}`;
+    let finish!: (value: unknown) => void;
+    const completion = new Promise<unknown>((resolve) => { finish = resolve; });
+    await slot.prompt(prompt, [], undefined, {
+      text: prompt, attachmentEnvelope: "", attachmentCount: 0,
+    }, undefined, {
+      operationId,
+      origin: { kind: "gateway", ownerId: "home-task-test", title: "Home task", confidence: "boundary" },
+      onTerminal: (terminal) => { finish(terminal); },
+    });
+    return {
+      operationId,
+      handle: {
+        operationId,
+        completion,
+        cancel: async () => slot.abort("agent", operationId),
+        acknowledgeTerminal: async () => registry.clearOwnedOperationMarker(slot.id, operationId),
+      },
+    };
+  }
+
+  async function ownedDeadlineFixture(label: string, faux: ReturnType<typeof fauxProvider>) {
+    const root = await mkdtemp(join(tmpdir(), `tron-owned-deadline-${label}-`));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir), broadcast: () => {},
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    return { root, cwd, registry, slot };
+  }
+
   /** An admitted provider root with the private mode and canonical path the
    * slot's artifact policy requires; the caller removes `delegated.root`. */
   async function delegatedFixtureRoot(label: string): Promise<{ root: string; delegatedRoot: string }> {
@@ -273,6 +321,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(delegatedRoot, { recursive: true, mode: 0o700 });
     return { root, delegatedRoot };
   }
+
+  afterAll(async () => {
+    if (ownedDeadlineReportCases.length === 0) return;
+    const directory = join(process.cwd(), "test-results", "owned-session-deadline");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "report.json"), `${JSON.stringify({
+      cases: ownedDeadlineReportCases,
+      generatedAt: new Date().toISOString(),
+    }, null, 2)}\n`);
+  });
 
   afterEach(async () => {
     try {
@@ -5228,7 +5286,119 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(JSON.stringify(warnings)).not.toContain("output");
   });
 
-  it("discovers real producer-serialized lifecycle headers without parsing reports", async () => {
+  it.each(["missing directory", "malformed status", "foreign header", "watcher error", "temporary status absence"] as const)(
+    "keeps root admission and observation independent of child %s", async (failure) => {
+      const fixture = await coldFixture("optional-child-detail");
+      try {
+        const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+        const runId = "optional-root";
+        const toolCallId = "optional-tool";
+        const childRun = "optional-child";
+        const artifactRoot = join(await realpath(fixture.cwd), ".pi", "subagents", "async-subagent-runs");
+        const asyncDir = join(artifactRoot, runId);
+        const childDir = join(artifactRoot, childRun);
+        const childSessionDir = join(dirname(slot.sessionFile!), basename(slot.sessionFile!, ".jsonl"), childRun, "run-0");
+        await mkdir(childSessionDir, { recursive: true });
+        const manager = SessionManager.create(fixture.cwd, childSessionDir, { id: "optional-child-session" });
+        manager.appendMessage(fauxAssistantMessage("Child transcript"));
+        const childFile = join(childSessionDir, "session.jsonl");
+        await rename(manager.getSessionFile()!, childFile);
+        await mkdir(asyncDir, { recursive: true });
+        // Derive the workflow/child documents from the producer capture, retaining
+        // its real header and lifecycle shape rather than mocking the read owner.
+        const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "frozen-real-active.json"), "utf8"));
+        const started = captured.startedAt as number;
+        const edge = { agent: "worker", label: "Worker", status: "running", async: true, runId: childRun,
+          workflowKey: "worker", sessionOwnerId: childRun, sessionFile: childFile };
+        const document = (id: string, mode: string, steps: unknown[], update: number) => ({
+          lifecycleProjection: { ...captured.lifecycleProjection, runId: id, toolCallId, sessionId: slot.sessionFile,
+            generatedAt: update, omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+            root: { id, kind: mode === "workflow" ? "workflow" : "subagent", label: "Root", state: "running", startedAt: started, updatedAt: update, children: [] } },
+          runId: id, toolCallId, sessionId: slot.sessionFile, mode, state: "running", startedAt: started, lastUpdate: update, steps,
+        });
+        const root = document(runId, "workflow", [edge], started + 5_000);
+        const child = { ...document(childRun, "single", [{ agent: "worker", sessionFile: childFile, status: "running", model: "fixture/child", toolCount: 3 }], started + 5_000),
+          parentWorkflowRunId: runId, workflowKey: "worker", sessionOwnerId: childRun };
+        const replace = async (directory: string, value: unknown) => {
+          await mkdir(directory, { recursive: true });
+          const temp = join(directory, "replacement.json");
+          await writeFile(temp, typeof value === "string" ? value : JSON.stringify(value));
+          await rename(temp, join(directory, "status.json"));
+        };
+        const internal = slot as unknown as {
+          extensionActivityWatchers: Map<string, { watcher: import("node:fs").FSWatcher; children: Map<string, import("node:fs").FSWatcher> }>;
+          extensionActivities: Map<string, ExtensionRunActivity>;
+          extensionRunOwnership: Map<string, { toolCallId: string; asyncDir: string; terminal: boolean }>;
+        };
+        try {
+          // Seed the same admitted launcher boundary as the producer-capture fixture.
+          internal.extensionActivities.set(toolCallId, { id: toolCallId, runId, toolCallId,
+            source: { source: "pi-subagents" }, title: "Subagents", status: "running", children: [],
+            startedAt: new Date(started).toISOString(), updatedAt: new Date(started).toISOString(),
+            lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: new Date(started).toISOString() } });
+          internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+          // Canonical launch evidence, not optional child detail, admits the root.
+          const runtimeManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+          runtimeManager.appendMessage({ role: "toolResult", toolName: "subagent", toolCallId, content: [{ type: "text", text: "Workflow started" }],
+            details: { runId, asyncId: runId, asyncDir, mode: "workflow", state: "running" }, isError: false, timestamp: started });
+          const activity = () => internal.extensionActivities.get(toolCallId);
+          const partial = () => activity()?.lifecycleOmissions?.children;
+          if (failure !== "missing directory") await replace(childDir, child);
+          await replace(asyncDir, root);
+          expect(await slot.discoverExtensionArtifact(asyncDir), "root artifact admission").toBe("accepted");
+          expect(activity(), "root admitted on its own evidence").toMatchObject({ runId, status: "running", updatedAt: new Date(started + 5_000).toISOString() });
+          expect(internal.extensionActivityWatchers.has(toolCallId), "root watcher started").toBe(true);
+          if (failure !== "missing directory") expect(activity()?.children[0], "reciprocal fixture detail").toMatchObject({ model: "fixture/child" });
+          await waitFor(() => internal.extensionActivityWatchers.get(toolCallId)?.children.has(childDir) === true, "root edge owns subscription");
+          if (failure === "missing directory") {
+            expect(partial()).toBe(1);
+          } else {
+            await waitFor(() => activity()?.children[0]?.model === "fixture/child", "initial optional detail hydrated");
+            if (failure === "malformed status") await replace(childDir, "{malformed");
+            if (failure === "foreign header") await replace(childDir, { ...child,
+              lifecycleProjection: { ...child.lifecycleProjection, sessionId: "/foreign/parent.jsonl" },
+              steps: [{ ...child.steps[0], model: "FORGED_MODEL" }] });
+            if (failure === "temporary status absence") await rm(join(childDir, "status.json"));
+            if (failure === "watcher error") {
+              const rootWatcher = internal.extensionActivityWatchers.get(toolCallId)!.watcher;
+              internal.extensionActivityWatchers.get(toolCallId)!.children.get(childDir)!.emit("error", new Error("Injected child observation failure"));
+              expect(internal.extensionActivityWatchers.get(toolCallId)?.watcher, "child error preserves the same root observer").toBe(rootWatcher);
+            }
+            const updated = { ...root, lastUpdate: started + 10_000,
+              lifecycleProjection: { ...root.lifecycleProjection, generatedAt: started + 10_000, root: { ...root.lifecycleProjection.root, updatedAt: started + 10_000 } } };
+            await replace(asyncDir, updated);
+            await waitFor(() => activity()?.updatedAt === new Date(started + 10_000).toISOString(), "root watcher publishes despite child failure");
+            expect(internal.extensionActivityWatchers.get(toolCallId)?.children.has(childDir), "unchanged edge stays subscribed").toBe(true);
+            expect(await slot.discoverExtensionArtifact(asyncDir), "optional detail never rejects discovery").toBe("accepted");
+            if (failure !== "watcher error") expect(partial()).toBe(1);
+            expect(JSON.stringify(activity())).not.toContain("FORGED_MODEL");
+          }
+          expect(internal.extensionActivityWatchers.has(toolCallId), "child failure cannot retire root").toBe(true);
+          // No discovery or root write: the child edge observation alone must wake
+          // hydration after a missing directory, invalid document or absent status.
+          await replace(childDir, { ...child, steps: [{ ...child.steps[0], model: "fixture/recovered", toolCount: 4 }] });
+          await waitFor(() => activity()?.children[0]?.model === "fixture/recovered", "child-only write hydrates detail");
+          expect(partial() ?? 0).toBe(0);
+          expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/recovered", toolCount: 4 })]));
+          // Retire subscriptions only on authoritative edge removal/root disposal.
+          await replace(asyncDir, { ...root, steps: [] });
+          await waitFor(() => internal.extensionActivityWatchers.get(toolCallId)?.children.size === 0, "root edge removal retires observation");
+        } finally {
+          // This fixture owns synthetic running evidence, not a provider process.
+          // Always settle it before the registry's drain-aware cleanup, even when
+          // an assertion fails against the unfixed optional-detail reader.
+          await replace(asyncDir, { ...root, state: "completed", endedAt: started + 20_000, lastUpdate: started + 20_000, steps: [],
+            lifecycleProjection: { ...root.lifecycleProjection, root: { ...root.lifecycleProjection.root, state: "complete", endedAt: started + 20_000, updatedAt: started + 20_000 } } });
+          await slot.discoverExtensionArtifact(asyncDir);
+        }
+        expect(internal.extensionActivityWatchers.size).toBe(0);
+      } finally {
+        await fixture.registry.dispose().finally(() => rm(fixture.root, { recursive: true, force: true }));
+      }
+    }, 15_000,
+  );
+
+  it("discovers real producer-serialized lifecycle headers without parsing oversized reports", async () => {
     const fixture = await coldFixture("embedded-lifecycle-header");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const runId = "frozen-real-run";
@@ -5256,7 +5426,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       };
       // The frozen producer capture uses a placeholder owner; bind it to this
       // fixture's exact canonical parent session before exercising admission.
-      parsed.lifecycleProjection.sessionId = slot.id;
+      parsed.lifecycleProjection.sessionId = slot.sessionFile;
       return JSON.stringify(parsed)
         .replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
         .replaceAll("/tmp/frozen-real-nested/session.jsonl", nestedFile);
@@ -5284,7 +5454,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(active).not.toHaveProperty("output");
     expect(JSON.stringify(active)).not.toContain("x".repeat(1_024));
     expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ childSessionRef: "frozen-child-session", currentTool: "bash" })]));
-    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: false });
+    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: true });
 
     // A legacy status payload may contain a presentation-shaped
     // `lifecycleProjection`, but that key is not proof that its sessionOwnerId
@@ -5332,7 +5502,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // These compact first-property headers were serialized by writeAsyncStatusAtomic
     // from packed pi-subagents d3bd36e5c1767c807615151922192554fef36ec3.
     const ownedHeader = await loadHeader("packed-producer-owned-lifecycle-header.json");
-    ownedHeader.sessionId = slot.id;
+    ownedHeader.sessionId = slot.sessionFile;
     const foreignHeader = await loadHeader("packed-producer-foreign-lifecycle-header.json");
     const foreignTerminalHeader = await loadHeader("packed-producer-foreign-terminal-lifecycle-header.json");
     expect(foreignHeader).toMatchObject({ runId, toolCallId, sessionId: "foreign-parent-session", root: { children: expect.arrayContaining([expect.objectContaining({ id: "step-a", state: "failed" })]) } });
@@ -5425,7 +5595,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ],
     };
     const projection = () => ({
-      version: 1, runId, toolCallId, sessionId: slot.id, generatedAt: root.updatedAt,
+      version: 1, runId, toolCallId, sessionId: slot.sessionFile, generatedAt: root.updatedAt,
       caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 30_720 },
       omitted: { runs: 0, children: 0, byteLimitExceeded: false }, root: structuredClone(root),
     });
@@ -5456,6 +5626,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         expect.objectContaining({ id: "step-c", status: "running" }),
       ]),
     });
+    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ byteLimitExceeded: true });
     expect((await readFile(statusPath)).byteLength).toBeGreaterThan(256 * 1_024);
 
     const foreignProjection = projection();
@@ -5781,21 +5952,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("does not reopen an unchanged ambient artifact for a live slot", async () => {
-    // A root shaped like the production provider root on 2026-09-28: 2,498 run
-    // directories, 556 finished status.json files and one live slot, which read
-    // every one of them on every 750 ms pass.
     const delegated = await delegatedFixtureRoot("ambient-steady-state");
     const startedAt = Date.now();
     const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
     await mkdir(runsRoot, { recursive: true });
-    const finished = Array.from({ length: 556 }, (_unused, index) => `finished-${String(index).padStart(4, "0")}`);
-    const empty = Array.from({ length: 2_498 - 556 }, (_unused, index) => `empty-${String(index).padStart(4, "0")}`);
-    await Promise.all([...empty, ...finished].map((name) => mkdir(join(runsRoot, name), { recursive: true })));
     const finishedStatus = (runId: string) => JSON.stringify({
       lifecycleArtifactVersion: 3, runId, state: "complete",
       startedAt: startedAt - 120_000, lastUpdate: startedAt - 120_000, endedAt: startedAt - 120_000,
     });
-    await Promise.all(finished.map((name) => writeFile(join(runsRoot, name, "status.json"), finishedStatus(name))));
     const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
@@ -5820,14 +5984,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
     const routed = vi.spyOn(slot, "discoverExtensionArtifact");
 
-    // Only the two runs this slot can attribute are offered; the finished runs of
-    // other sessions are examined by the walk but never reopened.
+    // Only the two runs this slot can attribute are offered.
     await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([finishedDir, liveDir]));
 
     // A pass over the unchanged root offers the finished artifact to nobody: it
     // already reached this slot, and the live one is refreshed by its exact
-    // binding. Everything else stays unopened.
+    // binding.
     routed.mockClear();
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([liveDir]));
@@ -7476,7 +7639,8 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
-  it("retires completion observations after queued successful operations settle", async () => {
+  it.each(["successful append", "pre-staging append failure"])(
+    "retires completion observations after queued successful operations settle (%s)", async (appendOutcome) => {
     const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -7489,10 +7653,11 @@ export default function (pi) {
     const followUpBarrier = new Promise<void>((resolve) => { releaseFollowUp = resolve; });
     const attentionBarrier = new Promise<void>((resolve) => { releaseAttention = resolve; });
     const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
-    onTestFinished(() => {
+    onTestFinished(async () => {
       releaseInitial();
       releaseFollowUp();
       releaseAttention();
+      await rm(root, { recursive: true, force: true });
     });
     const faux = fauxProvider({ provider: "tron-completion-observation-retirement", tokensPerSecond: 10_000 });
     faux.setResponses([
@@ -7541,14 +7706,56 @@ export default function (pi) {
     const initialOperationId = slot.snapshot().operation?.id;
     expect(initialOperationId).toBeTruthy();
     const queued = await slot.prompt("queued follow-up", [], "followUp");
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    const append = manager.appendCustomEntry.bind(manager);
+    let failed = false;
+    const receiptAppend = vi.spyOn(manager, "appendCustomEntry").mockImplementation((customType, data) => {
+      const receipt = data as { receiptKind?: unknown; operationId?: unknown } | undefined;
+      if (appendOutcome === "pre-staging append failure" && !failed && customType === INVOCATION_RECEIPT_TYPE
+        && receipt?.receiptKind === "terminal" && receipt?.operationId === initialOperationId) {
+        failed = true;
+        throw new Error("injected pre-staging terminal receipt failure");
+      }
+      return append(customType, data);
+    });
     releaseInitial();
-    await followUpStart;
-    releaseFollowUp();
+    try {
+      await followUpStart;
+      // Canonical receipt ordering cannot depend on the delayed attention store:
+      // ownership transfer settles the predecessor before the next input appends.
+      const entries = slot.canonicalSessionEntries();
+      const completionIndex = entries.findIndex(entry => entry.type === "message"
+        && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"));
+      expect(completionIndex).toBeGreaterThanOrEqual(0);
+      const followUpIndex = entries.findIndex(entry => entry.type === "message" && entry.message.role === "user"
+        && contentText(entry.message.content).includes("queued follow-up"));
+      if (appendOutcome === "pre-staging append failure") expect(failed).toBe(true);
+      // Transfer ends the predecessor, not completion admission. The next
+      // canonical input must wait even when its receipt needs a bounded retry.
+      expect(entries[completionIndex + 1]).toMatchObject({
+        type: "custom",
+        customType: INVOCATION_RECEIPT_TYPE,
+        data: { receiptKind: "terminal", operationId: initialOperationId, lifecycle: "completed" },
+      });
+      expect(followUpIndex).toBeGreaterThan(completionIndex + 1);
+    } catch (error) {
+      releaseAttention();
+      throw error;
+    } finally {
+      releaseFollowUp();
+    }
     await waitFor(() => faux.state.callCount === 2, "both successful model responses");
     await initial;
     releaseAttention();
     await waitFor(() => !slot.isBusy, "both operations to settle");
 
+    receiptAppend.mockRestore();
+    const persisted = (await readFile(manager.getSessionFile()!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line));
+    const terminalEntries = persisted.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.receiptKind === "terminal" && entry.data?.operationId === initialOperationId);
+    expect(terminalEntries).toHaveLength(1);
+    expect(terminalEntries[0].data).toMatchObject({ lifecycle: "completed" });
     expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
     expect(slotInternals.operationObservations.has(queued.operationId)).toBe(false);
     expect(slotInternals.operationObservations.size).toBe(0);
@@ -10014,6 +10221,142 @@ export default function (pi) {
     expect(slot.snapshot().toolExecutions).toEqual([]);
   });
 
+  it.each(["no-effect", "successful-read"] as const)("deadline-stops endless %s turns without losing canonical usage or allowing later effects", async (scenario) => {
+      let fixture: Awaited<ReturnType<typeof ownedDeadlineFixture>> | undefined;
+      let owned: Awaited<ReturnType<typeof startOwnedOperation>> | undefined;
+      try {
+        const faux = fauxProvider({ provider: `tron-owned-deadline-${scenario}`, tokensPerSecond: 10_000 });
+        fixture = await ownedDeadlineFixture(`loop-${scenario}`, faux);
+        const readPath = join(fixture.cwd, "readable.txt");
+        await writeFile(readPath, "canonical read payload\n");
+        let turns = 0;
+        const MAX_SIMULATED_TURNS = 256;
+        const response = () => {
+          turns += 1;
+          if (turns < MAX_SIMULATED_TURNS) faux.appendResponses([response]);
+          return fauxAssistantMessage([
+            fauxToolCall("read", { path: scenario === "no-effect" ? join(fixture!.cwd, "missing.txt") : readPath }, { id: `read-${turns}` }),
+          ], { stopReason: "toolUse" });
+        };
+        faux.setResponses([response]);
+        owned = await startOwnedOperation(fixture.slot, fixture.registry, "continue until stopped");
+        const { operationId, handle } = owned;
+        await waitFor(() => turns >= 3, `${scenario} provider turns`);
+        const beforeUsage = (fixture.slot as any).runtime.session.sessionManager.getBranch()
+          .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant")
+          .reduce((total: number, entry: any) => total + (entry.message.usage?.input ?? 0) + (entry.message.usage?.output ?? 0), 0);
+        expect(beforeUsage).toBeGreaterThan(0);
+        const diagnostics: unknown[] = [];
+        const dispatch = new OwnedSessionDispatch(fixture.registry, { diagnostic: (record) => diagnostics.push(record) });
+        vi.useFakeTimers();
+        const stopped = dispatch.enforceDeadline(handle as any);
+        await vi.advanceTimersByTimeAsync(OWNED_OPERATION_DEADLINE_MS);
+        const outcome = await stopped;
+        vi.useRealTimers();
+        expect(outcome).toMatchObject({ state: "deadline-stopped", terminal: { lifecycle: "interrupted" } });
+        expect(diagnostics).toMatchObject([{ event: "owned-operation.deadline-stop", cancelAndJoin: "joined" }]);
+        const turnsAtStop = turns;
+        const entriesAtStop = (fixture.slot as any).runtime.session.sessionManager.getBranch().length;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(turns).toBe(turnsAtStop);
+        expect((fixture.slot as any).runtime.session.sessionManager.getBranch()).toHaveLength(entriesAtStop);
+        const afterUsage = (fixture.slot as any).runtime.session.sessionManager.getBranch()
+          .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant")
+          .reduce((total: number, entry: any) => total + (entry.message.usage?.input ?? 0) + (entry.message.usage?.output ?? 0), 0);
+        expect(afterUsage).toBeGreaterThanOrEqual(beforeUsage);
+        expect(afterUsage).toBeGreaterThan(0);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const usageAfterQuiescence = (fixture.slot as any).runtime.session.sessionManager.getBranch()
+          .filter((entry: any) => entry.type === "message" && entry.message?.role === "assistant")
+          .reduce((total: number, entry: any) => total + (entry.message.usage?.input ?? 0) + (entry.message.usage?.output ?? 0), 0);
+        expect(usageAfterQuiescence).toBe(afterUsage);
+        expect(fixture.slot.snapshot().operation?.id).not.toBe(operationId);
+        ownedDeadlineReportCases.push({
+          scenario, terminal: "deadline-stopped", turnsAtStop, usageTokens: afterUsage,
+          noFurtherTurns: turns === turnsAtStop, noFurtherCanonicalEntries: entriesAtStop === (fixture.slot as any).runtime.session.sessionManager.getBranch().length,
+        });
+      } finally {
+        vi.useRealTimers();
+        if (fixture && owned && fixture.slot.isBusy) await owned.handle.cancel().catch(() => {});
+        if (fixture) {
+          await fixture.registry.dispose();
+          const index = registries.indexOf(fixture.registry);
+          if (index >= 0) registries.splice(index, 1);
+          await rm(fixture.root, { recursive: true, force: true });
+        }
+      }
+  }, 30_000);
+
+  it("deadline-cancels a faux provider request blocked in flight", async () => {
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    let providerAborted = false;
+    const faux = fauxProvider({ provider: "tron-owned-deadline-blocked", tokensPerSecond: 10_000 });
+    faux.setResponses([(_context, options) => new Promise((_resolve, reject) => {
+      requestStarted();
+      options?.signal?.addEventListener("abort", () => {
+        providerAborted = true;
+        reject(new Error("blocked faux request aborted"));
+      }, { once: true });
+    })]);
+    const fixture = await ownedDeadlineFixture("blocked-provider", faux);
+    let owned: Awaited<ReturnType<typeof startOwnedOperation>> | undefined;
+    try {
+      owned = await startOwnedOperation(fixture.slot, fixture.registry, "wait for blocked provider");
+      const { handle } = owned;
+      await started;
+      const dispatch = new OwnedSessionDispatch(fixture.registry);
+      vi.useFakeTimers();
+      const stopped = dispatch.enforceDeadline(handle as any);
+      await vi.advanceTimersByTimeAsync(OWNED_OPERATION_DEADLINE_MS);
+      await expect(stopped).resolves.toMatchObject({ state: "deadline-stopped" });
+      vi.useRealTimers();
+      expect(providerAborted).toBe(true);
+      expect(fixture.slot.isBusy).toBe(false);
+      ownedDeadlineReportCases.push({ scenario: "blocked-provider", terminal: "deadline-stopped", providerAborted, slotIdle: !fixture.slot.isBusy });
+    } finally {
+      vi.useRealTimers();
+      if (owned && fixture.slot.isBusy) await owned.handle.cancel().catch(() => {});
+      await fixture.registry.dispose();
+      const index = registries.indexOf(fixture.registry);
+      if (index >= 0) registries.splice(index, 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it.skipIf(process.platform === "win32")("deadline-cancels and joins an operation-owned foreground bash process", async () => {
+    const faux = fauxProvider({ provider: "tron-owned-deadline-foreground", tokensPerSecond: 10_000 });
+    const fixture = await ownedDeadlineFixture("foreground-bash", faux);
+    let owned: Awaited<ReturnType<typeof startOwnedOperation>> | undefined;
+    const pidPath = join(fixture.cwd, "sleep.pid");
+    faux.setResponses([fauxAssistantMessage([
+      fauxToolCall("bash", { command: `sleep 120 & echo $! > ${JSON.stringify(pidPath)}; wait` }, { id: "owned-sleep" }),
+    ], { stopReason: "toolUse" })]);
+    try {
+      owned = await startOwnedOperation(fixture.slot, fixture.registry, "run foreground process");
+      const { handle } = owned;
+      await waitFor(() => existsSync(pidPath), "the operation-owned sleep PID file");
+      const pid = Number(await readFile(pidPath, "utf8"));
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      const dispatch = new OwnedSessionDispatch(fixture.registry);
+      vi.useFakeTimers();
+      const stopped = dispatch.enforceDeadline(handle as any);
+      await vi.advanceTimersByTimeAsync(OWNED_OPERATION_DEADLINE_MS);
+      await expect(stopped).resolves.toMatchObject({ state: "deadline-stopped" });
+      vi.useRealTimers();
+      expect(() => process.kill(pid, 0)).toThrow();
+      expect(fixture.slot.isBusy).toBe(false);
+      ownedDeadlineReportCases.push({ scenario: "foreground-process", terminal: "deadline-stopped", childJoined: true, slotIdle: !fixture.slot.isBusy });
+    } finally {
+      vi.useRealTimers();
+      if (owned && fixture.slot.isBusy) await owned.handle.cancel().catch(() => {});
+      await fixture.registry.dispose();
+      const index = registries.indexOf(fixture.registry);
+      if (index >= 0) registries.splice(index, 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
     const agentDir = join(root, "agent");
@@ -11384,7 +11727,7 @@ export default function (pi) {
       expect.soft(existsSync(sentinel)).toBe(false);
       expect.soft(work.size).toBe(0);
       expect.soft(slot.isEvictionProtected).toBe(false);
-      expect((await registry.automationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
+      expect((await registry.ownedOperationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
 
       // The same installed command remains available to an explicit user.
       await slot.prompt(action.text);
@@ -12871,7 +13214,19 @@ export default function (pi) {
   // no request-path walks to the criterion this file measures above.
   it("publishes an external append to a catalog row without a walk", async () => {
     const recorded = resourceRecorder();
-    const fixture = await coldFixture("external-append", { resources: recorded });
+    let watchRequest: SessionCatalogWatchRequest | undefined;
+    const fixture = await coldFixture("external-append", {
+      resources: recorded,
+      beforeInitialize: async (_sessionFile, registry) => {
+        // Inject at the catalog's existing backend seam before it starts; the
+        // registry keeps its production discovery/index/row publication owners.
+        (catalogOwner(registry) as unknown as { watchCatalog: SessionCatalogOptions["watchCatalog"] }).watchCatalog = (request) => {
+          watchRequest = request;
+          return { close: () => {} };
+        };
+      },
+    });
+    onTestFinished(() => rm(fixture.root, { recursive: true, force: true }));
     const catalog = catalogOwner(fixture.registry);
     await catalog.settled();
 
@@ -12881,19 +13236,31 @@ export default function (pi) {
     await writeFile(child, `${JSON.stringify({
       type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
     })}\n`);
-    await waitFor(() => catalog.row(child)?.id === "id-child", "the child session's catalog row");
+    expect(watchRequest?.root).toBe(await realpath(join(fixture.agentDir, "sessions")));
+    const deliverHint = async (): Promise<void> => {
+      // Advance only the owner's debounce. No FSEvents delivery or latency is
+      // part of the oracle; the serial lane is the row-publication barrier.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        watchRequest!.onEvent(relative(watchRequest!.root, child));
+        await vi.advanceTimersByTimeAsync(CATALOG_EVENT_DEBOUNCE_MS);
+        await catalog.awaitQueuedChanges();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    await deliverHint();
+    expect(catalog.row(child)?.id).toBe("id-child");
     expect(catalog.row(child)?.delegated).toBe(true);
 
     const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
-    const appendedAt = Date.now();
     await appendFile(child, `${JSON.stringify({
       type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
     })}\n`);
-    await waitFor(() => catalog.row(child)?.messageCount === 1, "the child's first catalog message");
+    await deliverHint();
 
-    // The watcher's own hint, not a walk: the row is current within a second of
-    // the append and the sampler saw no catalog structure walk at all.
-    expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
+    // The watcher's hint, not a walk, publishes the canonical append facts.
+    expect(catalog.row(child)?.messageCount).toBe(1);
     expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
     expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
   });

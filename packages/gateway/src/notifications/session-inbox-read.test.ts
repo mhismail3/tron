@@ -36,7 +36,7 @@ async function fixture(entries: NotificationInboxEntry[]) {
   };
   const changed = vi.fn();
   const service = new NotificationService(store, relay as unknown as PushRelayClient,
-    () => Date.parse("2026-01-01T00:00:00.000Z"), undefined, changed);
+    () => Date.parse("2026-01-01T00:00:00.000Z"), changed);
   return { root, store, relay, service, changed };
 }
 

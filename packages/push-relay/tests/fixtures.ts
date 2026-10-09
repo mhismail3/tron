@@ -3,6 +3,7 @@ import type { NotificationRequest } from "../src/contracts";
 export const notification = {
   version: 1,
   kind: "agent_alert",
+  notificationKind: "ask",
   requestId: "request-identifier-0001",
   message: "Tron needs your input.",
   expiresAt: "2099-01-01T00:00:00.000Z",

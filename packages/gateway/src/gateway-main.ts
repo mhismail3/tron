@@ -1,3 +1,4 @@
+import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,7 +80,7 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await assertDelegatedRootCutoverReady(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
-// extensions. No source or installed package is rewritten at startup.
+// extensions. Existing installed packages are never rewritten in place.
 delegatedProviderEnvironment(delegatedRoot);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
@@ -105,6 +106,9 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
+// Activate this payload's exact offline closure before any Pi discovery. A
+// restart verifies/reuses the immutable root; damaged roots fail startup closed.
+const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
   logger.log(
@@ -143,11 +147,15 @@ const notifications = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
   Date.now,
-  undefined,
   (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
     event: "notification.inbox.read_failed", source: "notifications",
   }),
+  ({ kind, outcome, relayReason }) => logger.log(
+    outcome === "failed" || outcome === "refused" ? "warning" : "info",
+    `Push notification ${outcome}`,
+    { event: `notification.push.${outcome.replaceAll("_", "-")}`, source: "notifications", kind, outcome, reason: relayReason },
+  ),
 );
 await notifications.initialize();
 startupCheckpoint("notifications");
@@ -220,6 +228,7 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  managedSubagents,
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
@@ -331,12 +340,26 @@ const sessions = new RuntimeRegistry({
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
   ),
+  stopSteeringDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "failed" ? "warning" : "info",
+    `Stop continuation ${diagnostic.outcome}`,
+    { event: "session.stop-steering-continuation", source: "session", ...diagnostic },
+  ),
+  manualCompactionAdopted: (diagnostic) => logger.log(
+    "info",
+    "Queued manual compaction adopted by an active compaction",
+    { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
+  ),
   codemodeDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "completed" ? "info" : "warning",
     `Codemode execution ${diagnostic.outcome}`,
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
+  homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
+    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused"
+    || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
+    "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -486,10 +509,11 @@ const packages = new PackageService(
   trust,
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
+  managedSubagents,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
-const hookResources = new HookResources(config.agentDir, trust, workRegistry);
+const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,
@@ -547,7 +571,7 @@ function recordShutdownStep(step: string, durationMs: number): void {
   });
 }
 
-async function shutdown(reason: string, exitCode = 0): Promise<void> {
+async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false): Promise<void> {
   if (stopping) return;
   stopping = true;
   service.dispose();
@@ -558,8 +582,8 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     event: "gateway.stopped", source: "lifecycle", code: String(code), durationMs: performance.now() - stoppingAt,
   });
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
-  const forced = setTimeout(() => { recordStopped(1); process.exit(1); }, 15_000);
-  forced.unref();
+  const forced = drainAcceptedWork ? undefined : setTimeout(() => { recordStopped(1); process.exit(1); }, 15_000);
+  forced?.unref();
   try {
     automations.beginDrain();
     workRegistry.beginDrain();
@@ -568,19 +592,25 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     // slice, and a slice already in flight settles on its own.
     backgroundWork.stop();
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
-    await shutdownStep("cancellation", async () => { await Promise.allSettled([
-      automations.requestShutdownCancellation(),
-      workRegistry.requestCancellation(),
-    ]); }, recordShutdownStep);
-    // Administrative restart already waited without a deadline. Signal/error
-    // shutdown gets only a short cleanup grace; failure cannot reopen admission.
-    let cleanupTimer!: NodeJS.Timeout;
-    const cleanupGrace = new Promise<void>((resolve) => {
-      cleanupTimer = setTimeout(resolve, 2_000);
-      cleanupTimer.unref();
-    });
-    await shutdownStep("work-settle", () => Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]), recordShutdownStep);
-    clearTimeout(cleanupTimer);
+    if (!drainAcceptedWork) {
+      await shutdownStep("cancellation", async () => { await Promise.allSettled([
+        automations.requestShutdownCancellation(),
+        workRegistry.requestCancellation(),
+      ]); }, recordShutdownStep);
+    }
+    // Administrative restart and stop arrive here only after canonical drain
+    // completion; neither may trade accepted work for a cleanup deadline.
+    if (drainAcceptedWork) {
+      await shutdownStep("work-settle", () => workRegistry.waitUntilSettled(), recordShutdownStep);
+    } else {
+      let cleanupTimer!: NodeJS.Timeout;
+      const cleanupGrace = new Promise<void>((resolve) => {
+        cleanupTimer = setTimeout(resolve, 2_000);
+        cleanupTimer.unref();
+      });
+      await shutdownStep("work-settle", () => Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]), recordShutdownStep);
+      clearTimeout(cleanupTimer);
+    }
     if (workRegistry.size > 0) {
       logger.log(
         "warning",
@@ -598,7 +628,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
-    clearTimeout(forced);
+    if (forced) clearTimeout(forced);
     recordStopped(exitCode);
     process.exit(exitCode);
   } catch (error) {
@@ -610,20 +640,48 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
 }
 
 const DRAIN_STALL_LIMIT_MS = 180_000; // Bounds accepted work that stops making drain progress.
-const DRAIN_STALL_CHECK_INTERVAL_MS = 1_000; // Checks progress without relying on work completion callbacks.
-const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000; // Reports blockers periodically without filling the persistent log.
-let requestedRestart: Promise<void> | undefined;
+const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000; // Reports blockers from the canonical drain loop without filling the persistent log.
+type AdministrativeExitMode = "restart" | "stop";
+interface AdministrativeExitOwner {
+  mode: AdministrativeExitMode;
+  task: Promise<void>;
+}
+let administrativeExitOwner: AdministrativeExitOwner | undefined;
+
 function requestRestart(restartNow = false): void {
-  if (requestedRestart) {
-    if (restartNow) {
+  requestAdministrativeExit("restart", restartNow);
+}
+
+function requestStop(): void {
+  requestAdministrativeExit("stop");
+}
+
+function requestAdministrativeExit(mode: AdministrativeExitMode, restartNow = false): void {
+  if (administrativeExitOwner) {
+    if (mode === "restart" && restartNow) {
+      const supersedesStop = administrativeExitOwner.mode === "stop";
+      administrativeExitOwner.mode = "restart";
       const snapshot = sessions.administrativeDrainSnapshot();
       logDrainBlockers(snapshot);
+      logger.log("warning", supersedesStop
+        ? "Gateway restart requested immediately during intentional stop"
+        : "Gateway restart requested immediately during drain", { event: "gateway.restart-drain.stalled", source: "lifecycle" });
       void shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
     }
     return;
   }
+
+  const owner: AdministrativeExitOwner = { mode, task: Promise.resolve() };
+  administrativeExitOwner = owner;
+  owner.task = mode === "restart" ? runRestartDrain(restartNow) : runStopDrain();
+  void owner.task.finally(() => {
+    if (administrativeExitOwner === owner && !stopping) administrativeExitOwner = undefined;
+  }).catch(() => {});
+}
+
+async function runRestartDrain(restartNow: boolean): Promise<void> {
   logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
-  requestedRestart = (async () => {
+  try {
     if (restartNow) {
       const snapshot = sessions.administrativeDrainSnapshot();
       logDrainBlockers(snapshot);
@@ -631,16 +689,12 @@ function requestRestart(restartNow = false): void {
       await shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
       return;
     }
-    let stallTimer: NodeJS.Timeout | undefined;
-    let waitingLog: NodeJS.Timeout | undefined;
     const progress = new RestartDrainProgress();
-    const drainDecision = await new Promise<"idle" | ReturnType<RestartDrainProgress["evaluate"]>>((resolve, reject) => {
-      const check = () => {
-        const snapshot = sessions.administrativeDrainSnapshot();
-        const decision = progress.evaluate(snapshot, Date.now(), DRAIN_STALL_LIMIT_MS);
-        if (decision.outcome === "waiting") return;
-        clearInterval(stallTimer);
-        clearInterval(waitingLog);
+    let decision: ReturnType<RestartDrainProgress["evaluate"]> | undefined;
+    let lastWaitLogAt = Number.NEGATIVE_INFINITY;
+    const completed = await sessions.waitUntilIdle((snapshot) => {
+      decision = progress.evaluate(snapshot, Date.now(), DRAIN_STALL_LIMIT_MS);
+      if (decision.outcome === "stalled" || decision.outcome === "unresolved-owners") {
         if (decision.outcome === "stalled") {
           logDrainBlockers(snapshot);
           logger.log("warning", `Gateway restart drain stalled: category=${decision.blocker.category} method=${decision.blocker.method ?? "none"} ageMs=${decision.ageMs}`, {
@@ -653,34 +707,27 @@ function requestRestart(restartNow = false): void {
             });
           });
         }
-        resolve(decision);
-      };
-      stallTimer = setInterval(check, DRAIN_STALL_CHECK_INTERVAL_MS);
-      stallTimer.unref();
-      waitingLog = setInterval(() => logDrainBlockers(sessions.administrativeDrainSnapshot()), DRAIN_WAIT_LOG_INTERVAL_MS);
-      waitingLog.unref();
-      check();
-      // A drain failure must reach the restart-drain-failed path below; once a
-      // stall or unresolved-owner decision has settled this promise, it is ignored.
-      sessions.waitUntilIdle().then(() => resolve("idle"), reject);
-    });
-    if (stallTimer) clearInterval(stallTimer);
-    if (waitingLog) clearInterval(waitingLog);
-    if (drainDecision === "idle" || drainDecision.outcome === "completed" || drainDecision.outcome === "unresolved-owners") {
-      if (drainDecision === "idle" || drainDecision.outcome === "completed") {
-        logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
+        return false;
       }
+      const now = Date.now();
+      if (now - lastWaitLogAt >= DRAIN_WAIT_LOG_INTERVAL_MS) {
+        lastWaitLogAt = now;
+        logDrainBlockers(snapshot);
+      }
+      return true;
+    });
+    if (completed) {
+      logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
       await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
       return;
     }
-    if (drainDecision.outcome === "stalled") {
-      await shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
-      return;
+    if (decision?.outcome === "stalled" || decision?.outcome === "unresolved-owners") {
+      await shutdown(decision.outcome === "stalled" ? "restart drain stalled" : "restart drain has unresolved owners", SUPERVISOR_RELAUNCH_EXIT_CODE);
     }
-  })().catch((error) => {
+  } catch (error) {
     logger.log("error", "Gateway restart drain failed", { event: "gateway.restart-drain-failed", source: "lifecycle", error });
-    void shutdown("restart drain failed", 1);
-  });
+    await shutdown("restart drain failed", 1);
+  }
 }
 
 function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDrainSnapshot>): void {
@@ -691,6 +738,27 @@ function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDra
   logger.log("info", `Gateway restart waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
     event: "gateway.restart-drain.waiting", source: "lifecycle",
   });
+}
+
+async function runStopDrain(): Promise<void> {
+  logger.log("info", "Gateway stop scheduled after accepted work settles", { event: "gateway.stop-drain", source: "lifecycle" });
+  try {
+    await sessions.waitUntilIdle();
+    const finalSnapshot = sessions.administrativeDrainSnapshot();
+    if (finalSnapshot.phase === "complete" && finalSnapshot.blockerCount === 0) {
+      logger.log("info", "Gateway stop drain completed", { event: "gateway.stop-drain.completed", source: "lifecycle" });
+      await shutdown("requested stop", 0, true);
+      return;
+    }
+    sessions.failAdministrativeDrain();
+    logger.log("error", `Gateway stop refused: final drain phase=${finalSnapshot.phase} blockers=${finalSnapshot.blockerCount}`, {
+      event: "gateway.stop-drain.failed", source: "lifecycle",
+    });
+  } catch (error) {
+    logger.log("error", "Gateway stop drain failed; process remains available for recovery", {
+      event: "gateway.stop-drain.failed", source: "lifecycle", error,
+    });
+  }
 }
 
 const service = new GatewayService({
@@ -713,6 +781,7 @@ const service = new GatewayService({
   // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
   // restart drains accepted agent work before using the deliberate restart code.
   requestRestart,
+  requestStop,
   sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,
@@ -751,8 +820,8 @@ transport = new GatewayServer({
 });
 
 const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";
-process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, requestedRestart !== undefined)));
-process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, requestedRestart !== undefined)));
+process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, administrativeExitOwner?.mode === "restart")));
+process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, administrativeExitOwner?.mode === "restart")));
 process.on("uncaughtException", (error) => {
   logger.log("error", "Uncaught exception", { event: "process.uncaught-exception", source: "process", error });
   void shutdown("uncaught exception", 1);

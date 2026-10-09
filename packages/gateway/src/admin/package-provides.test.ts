@@ -1,8 +1,10 @@
+import { MANAGED_SUBAGENTS_SOURCE, ManagedSubagents } from "../sessions/managed-subagents.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../sessions/delegated-provider.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultPackageManager, SettingsManager, type Extension, type ResolvedPaths } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   MAX_PROVIDES_NAMES_PER_KIND,
   loadPackageProvides,
@@ -28,6 +30,20 @@ import { TrustService } from "./trust-service.js";
  * 5. An unbounded package could enlarge the response without a documented cap.
  */
 
+let previousEnvironment: NodeJS.ProcessEnv;
+beforeEach(() => {
+  previousEnvironment = {
+    [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
+    PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT,
+  };
+});
+afterEach(() => {
+  for (const [name, value] of Object.entries(previousEnvironment)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
+
 interface FixturePackage {
   directory: string;
   manifest: Record<string, unknown>;
@@ -44,6 +60,7 @@ async function fixture(packages: FixturePackage[]): Promise<{
   trust: TrustService;
 }> {
   const root = await mkdtemp(join(tmpdir(), "tron-package-provides-"));
+  delegatedProviderEnvironment(delegatedArtifactRoot(root));
   const agentDir = join(root, "agent");
   const workspace = join(root, "workspace");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(workspace, { recursive: true })]);
@@ -181,47 +198,26 @@ describe("package provides attribution", () => {
     }
   });
 
-  it("attributes pi-subagents' own agents to the pi-subagents package by definition file location", async () => {
-    const value = await fixture([
-      {
-        directory: "pi-subagents",
-        manifest: { extensions: ["./extensions/subagents.js"] },
-        files: {
-          "extensions/subagents.js": extensionModule("subagent", "subagent-cmd"),
-          "agents/explorer.md": "---\nname: explorer\n---\nBody\n",
-        },
-      },
-      {
-        directory: "package-beta",
-        manifest: { prompts: ["./prompts"] },
-        files: { "prompts/beta-prompt.md": prompt("beta-prompt") },
-      },
-    ]);
+  // This case alone installs and cold-loads the real closure; shared-host
+  // qualification measured 35s, unlike the synthetic packages in this file.
+  it("attributes real reserved provider tools and discovered agents to the managed package", async () => {
+    const value = await fixture([{ directory: "package-beta", manifest: { prompts: ["./prompts"] }, files: { "prompts/beta-prompt.md": prompt("beta-prompt") } }]);
     try {
-      const subagentsRoot = join(value.root, "pi-subagents");
+      const provider = new ManagedSubagents(value.root);
+      const root = provider.install();
       const { entries, diagnostic } = await loadPackageProvides({
-        agentDir: value.agentDir,
-        trust: value.trust,
-        cwd: value.workspace,
-        settingsManager: value.settings,
-        packages: value.entries,
-        resources: value.resources,
-        // pi-subagents' real discovery attaches the definition file; a user agent
-        // outside the package root is Local and belongs to no installed package.
-        loadDiscovery: async () => ({
-          discoverAgentsAll: () => ({
-            builtin: [{ name: "explorer", source: "builtin", filePath: join(subagentsRoot, "agents", "explorer.md") }],
-            user: [{ name: "worker", source: "user", filePath: join(value.agentDir, "agents", "worker.md") }],
-          }),
-        }),
+        agentDir: value.agentDir, trust: value.trust, cwd: value.workspace,
+        settingsManager: value.settings, packages: value.entries, resources: value.resources,
+        managedSubagents: provider,
       });
-      expect(providesFor(entries, "pi-subagents").subagents).toEqual(["explorer"]);
+      const managed = entries.find((entry) => entry.source === MANAGED_SUBAGENTS_SOURCE)!;
+      expect(managed.installedPath).toBe(root);
+      expect(managed.provides.tools).toContain("subagent");
+      expect(managed.provides.subagents.length).toBeGreaterThan(0);
       expect(providesFor(entries, "package-beta").subagents).toEqual([]);
       expect(diagnostic).toBeUndefined();
-    } finally {
-      await rm(value.root, { recursive: true, force: true });
-    }
-  });
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  }, 60_000);
 
   it("keeps the kinds that resolved when the extension load fails, plus one bounded diagnostic", async () => {
     const value = await fixture(twinPackages());
@@ -283,7 +279,6 @@ describe("package provides attribution", () => {
 
   it("keeps the other kinds when subagent discovery fails, plus a diagnostic", async () => {
     const value = await fixture([
-      { directory: "pi-subagents", manifest: {}, files: {} },
       {
         directory: "package-alpha",
         manifest: { skills: ["./skills"] },
@@ -298,6 +293,7 @@ describe("package provides attribution", () => {
         settingsManager: value.settings,
         packages: value.entries,
         resources: value.resources,
+        managedSubagents: (() => { const provider = new ManagedSubagents(value.root); provider.install(); return provider; })(),
         loadDiscovery: async () => { throw new Error("jiti could not load pi-subagents"); },
       });
       const alpha = providesFor(entries, "package-alpha");

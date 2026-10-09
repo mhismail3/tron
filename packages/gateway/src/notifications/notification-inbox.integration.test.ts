@@ -88,12 +88,12 @@ async function fixture() {
     store,
     { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient,
     Date.now,
-    undefined,
     (payload) => broadcasts.push(payload),
   );
   const service = new GatewayService({
     config: { tronHome: root },
     notifications,
+    sessions: { isAdministrativeDrainStarted: false },
     devices: { hasDevice: async () => false, revoke: async () => false },
     receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() },
   } as never);

@@ -209,7 +209,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status", "home.status", "home.context", "home.open", "home.memory.page", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.taskStatus", "home.stopTask", "home.memory.page", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -285,6 +285,8 @@ export interface GatewayServiceDependencies {
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: (restartNow?: boolean) => void;
+  /** Drain-owned intentional shutdown; the process owner chooses the non-relaunch exit policy. */
+  requestStop: () => void;
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
@@ -302,8 +304,6 @@ export interface GatewayServiceDependencies {
 }
 
 export class GatewayService {
-  private restartRequested = false;
-  private restartScheduled = false;
   private readonly gitWorktrees: GitWorktreeService;
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
@@ -409,7 +409,7 @@ export class GatewayService {
         ? { pushRegistrationRevision: this.dependencies.notifications.registrationRevision }
         : {}),
       capabilities: [
-        ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
+        ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1", "stop-supervised.v1"] : []),
         "sessions.v1",
         "device-label.v1",
         "diagnostic-export.v1",
@@ -459,8 +459,8 @@ export class GatewayService {
 
   async invoke(client: ClientContext, method: string, rawParams: unknown): Promise<JsonValue> {
     const params = object(rawParams ?? {}, "params");
-    if (this.restartRequested && !restartDrainMethods.has(method)) {
-      throw new GatewayError("busy", "The Gateway is draining accepted work before restart", true);
+    if (this.dependencies.sessions.isAdministrativeDrainStarted && !restartDrainMethods.has(method)) {
+      throw new GatewayError("busy", "The Gateway is draining accepted work", true);
     }
     switch (method) {
       case "system.info":
@@ -469,6 +469,53 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
         return safeJson(await this.requireHome().status());
       }
+      case "home.taskStatus": {
+        rejectUnknownFields(params, ["taskId"], method);
+        return safeJson(await this.requireHome().taskResult(string(params.taskId, "taskId", { max: 160 })));
+      }
+      case "home.redeliverTaskResult":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "taskId", "homeId", "routeGeneration"], method);
+          if (!Number.isSafeInteger(params.routeGeneration) || (params.routeGeneration as number) < 1) throw new GatewayError("invalid_request", "Invalid routeGeneration");
+          return safeJson(await this.requireHome().redeliverTaskResult(string(params.taskId, "taskId", { max: 160 }), {
+            homeId: string(params.homeId, "homeId", { max: 200 }), routeGeneration: params.routeGeneration as number,
+          }));
+        });
+      case "home.taskPermissions": {
+        rejectUnknownFields(params, [], method);
+        return safeJson(await this.requireHome().taskPermissions());
+      }
+      case "home.revokeTaskScope":
+      case "home.revokeTaskGrant":
+        return this.mutation(client, method, params, async () => {
+          const field = method === "home.revokeTaskScope" ? "scopeId" : "grantId";
+          rejectUnknownFields(params, ["commandId", field], method);
+          const id = string(params[field], field, { max: 160 });
+          return safeJson(method === "home.revokeTaskScope" ? await this.requireHome().revokeTaskScope(id) : await this.requireHome().revokeTaskGrant(id));
+        });
+      case "home.decideTaskGrant":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "requestId", "approved", "expiresAt"], method);
+          if (typeof params.approved !== "boolean" || !Number.isSafeInteger(params.expiresAt)) throw new GatewayError("invalid_request", "Decision requires approved and an integer expiresAt");
+          return safeJson(await this.requireHome().decideTaskGrant(string(params.requestId, "requestId", { max: 160 }), {
+            decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
+          }));
+        });
+      case "home.reconfirmPermissions":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().reconfirmTaskPermissions());
+        });
+      case "home.steerTask":
+      case "home.stopTask":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, method === "home.steerTask" ? ["commandId", "taskId", "operationId", "controllerGeneration", "text"] : ["commandId", "taskId", "operationId", "controllerGeneration"], method);
+          if (!Number.isSafeInteger(params.controllerGeneration) || (params.controllerGeneration as number) < 1) throw new GatewayError("invalid_request", "Invalid controllerGeneration");
+          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }), controllerGeneration: params.controllerGeneration as number };
+          if (method === "home.steerTask") await this.requireHome().maintainTask({ ...control, text: string(params.text, "text", { max: 65536 }) });
+          else await this.requireHome().stopTask(control);
+          return safeJson({ accepted: true });
+        }, method === "home.stopTask");
       case "home.open": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
         const home = this.requireHome();
@@ -853,7 +900,7 @@ export class GatewayService {
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
         // Identical registrations are naturally idempotent and write nothing at
         // all, so they are answered before the receipt owner opens one.
-        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"]);
         if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
         const notifications = this.requireNotifications();
         // `commandId` stays required here so an unchanged registration is still
@@ -867,6 +914,8 @@ export class GatewayService {
           previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
           relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
           ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
+          ...(params.notifyWhenFinished === undefined ? {} : { notifyWhenFinished: boolean(params.notifyWhenFinished, "notifyWhenFinished") }),
+          ...(params.notifyWhenWaiting === undefined ? {} : { notifyWhenWaiting: boolean(params.notifyWhenWaiting, "notifyWhenWaiting") }),
         };
         // An identical registration is naturally idempotent and writes nothing,
         // not even a command receipt, so it is answered before the receipt owner
@@ -906,17 +955,25 @@ export class GatewayService {
         if (Object.keys(params).some((key) => key !== "commandId" && key !== "restartNow")) {
           throw new GatewayError("invalid_request", "Gateway restart accepts only commandId and optional restartNow");
         }
-        if (this.restartRequested && !restartNow) {
-          throw new GatewayError("busy", "Gateway restart is already draining; inspect gateway.drain.status or command.status", true);
+        const priorDrain = this.dependencies.sessions.administrativeDrainSnapshot();
+        const drainInProgress = this.dependencies.sessions.isAdministrativeDrainStarted
+          && (priorDrain.phase === "preparing" || priorDrain.phase === "waiting");
+        if (drainInProgress && !restartNow) {
+          throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
         }
         let ownsSchedule = false;
         try {
           return await this.mutation(client, method, params, async () => {
             await this.requireNoActiveIosDeviceInstall();
-            if (restartNow && this.restartRequested) {
+            const currentDrain = this.dependencies.sessions.administrativeDrainSnapshot();
+            const currentDrainInProgress = this.dependencies.sessions.isAdministrativeDrainStarted
+              && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting");
+            if (currentDrainInProgress && !restartNow) {
+              throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
+            }
+            if (restartNow && currentDrainInProgress) {
               this.dependencies.requestRestart(true);
-              return safeJson({ restarting: false, scheduled: true, restartNow: true,
-                drain: this.dependencies.sessions.administrativeDrainSnapshot() });
+              return safeJson({ restarting: false, scheduled: true, restartNow: true, drain: currentDrain });
             }
             if (!this.dependencies.terminals.beginRestartDrain()) {
               throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
@@ -924,17 +981,14 @@ export class GatewayService {
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
-            // Waiting logins would only hold the drain until their timeout.
+            // Restart retains its established cancellation policy; intentional stop does not.
             this.dependencies.auth.cancelWaitingForRestart();
             this.dependencies.logger?.log(
               "info",
               `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
               { event: "gateway.restart.requested", source: "transport" }
             );
-            if (!this.restartRequested) {
-              this.restartRequested = true;
-              ownsSchedule = true;
-            }
+            ownsSchedule = true;
             return safeJson({
               restarting: drain.blockerCount === 0,
               scheduled: drain.blockerCount > 0,
@@ -943,18 +997,56 @@ export class GatewayService {
               drainRevision: drain.revision,
               drain,
             });
-            // Restart Now escalates a drain that already closed ordinary work
-            // admission; its receipt write is settlement of that accepted drain.
-          }, restartNow);
+          }, restartNow || priorDrain.phase === "failed" || priorDrain.phase === "complete");
         } finally {
-          // CommandReceiptStore has completed (or failed) its terminal write
-          // attempt before this boundary. A failed receipt cannot reopen the
-          // already accepted drain, so replacement still progresses exactly once.
-          if (ownsSchedule && !this.restartScheduled) {
-            this.restartScheduled = true;
+          // The receipt must settle before the process owner can close its transport.
+          if (ownsSchedule) {
             if (restartNow) this.dependencies.requestRestart(true);
             else setTimeout(this.dependencies.requestRestart, 100).unref();
           }
+        }
+      }
+      case "gateway.stop": {
+        if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
+          throw new GatewayError("unsupported", "Gateway stop requires an external supervisor");
+        }
+        if (Object.keys(params).some((key) => key !== "commandId")) {
+          throw new GatewayError("invalid_request", "Gateway stop accepts only commandId");
+        }
+        const priorDrain = this.dependencies.sessions.administrativeDrainSnapshot();
+        let ownsSchedule = false;
+        try {
+          return await this.mutation(client, method, params, async () => {
+            await this.requireNoActiveIosDeviceInstall();
+            const currentDrain = this.dependencies.sessions.administrativeDrainSnapshot();
+            if (this.dependencies.sessions.isAdministrativeDrainStarted
+              && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting")) {
+              throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
+            }
+            if (!this.dependencies.terminals.beginRestartDrain()) {
+              throw new GatewayError("busy", "Close active terminal sessions before stopping the Gateway", true);
+            }
+            const activeSessionIds = this.dependencies.sessions.activeSessionIds();
+            this.dependencies.automations?.beginDrain();
+            const drain = this.dependencies.sessions.beginAdministrativeDrain();
+            this.dependencies.logger?.log(
+              "info",
+              `Gateway stop requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
+              { event: "gateway.stop.requested", source: "transport" }
+            );
+            ownsSchedule = true;
+            return safeJson({
+              stopping: drain.blockerCount === 0,
+              scheduled: true,
+              activeSessionIds,
+              drainId: drain.drainId,
+              drainRevision: drain.revision,
+              drain,
+            });
+          }, true);
+        } finally {
+          // The receipt is durable before lifecycle retirement can close the socket.
+          if (ownsSchedule) setImmediate(this.dependencies.requestStop);
         }
       }
       case "automation.status": {
@@ -1567,6 +1659,8 @@ export class GatewayService {
           });
           const execution = slot.prompt(prompt, attachments.images, behavior, {
             text,
+            inputSource: "rpc",
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(resourceSource === undefined ? {} : {
               resourceInvocation: {
                 source: resourceSource,

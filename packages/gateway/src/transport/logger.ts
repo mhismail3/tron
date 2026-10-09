@@ -91,6 +91,7 @@ export interface LogRecord {
 export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries"> {
   event?: string;
   source?: string;
+  kind?: string;
   sessionId?: string;
   connectionId?: string;
   peerClientId?: string;

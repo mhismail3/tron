@@ -10,11 +10,24 @@ only in their canonical user entries rather than being duplicated into receipts;
 resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
 automatically replayed. When Pi appends a canonical successful assistant reply,
-RuntimeSlot immediately starts that exact completion's durable attention
-settlement; it does not wait for `agent_settled`, because Pi can begin a queued
-follow-up inside the same run. Settlement retires only the prior completion's
-receipt and marker while the follow-up remains active, and admits that exact
-completed observation cut once from the same completion owner. The operation
+RuntimeSlot starts the exact completion's durable attention settlement immediately
+rather than waiting for `agent_settled` (#522). A response completion is not an
+operation terminal outcome: automatic compaction and same-owner continuation may
+still run, and Stop during those phases must remain authoritative. Terminal
+receipts are decided only at final `agent_settled` or transfer to a distinct
+follow-up/extension operation. At transfer, the predecessor's exact completion
+is captured before its observation record retires. The SDK's awaited public
+admission hooks join pending canonical terminal receipt writes before the next
+operation's admitted user input, including bounded retries after a pre-staging
+failure. SDK-owned between-turn entries emitted before that input (for example,
+a tool-loadout system message) are outside this ordering guarantee and may fall
+on either side of the receipt. Consumers must not infer anything from receipt-
+versus-SDK-entry order. The hooks do not join attention I/O; already accepted follow-ups remain free
+to run while preceding attention commits. No terminal promise is retained on a
+completion-ownership item. Automation terminal notification still follows the
+owning attention settlement. Completion settlement retires only the prior
+completion's marker and work while the follow-up remains active, and admits that
+exact completed observation cut once from the same completion owner. The operation
 observation record owns both its cursor and terminal-callback
 completion deduplication. Ownership transfer retires that per-operation record;
 a completion already admitted to the durable ownership queue carries its exact
@@ -46,7 +59,7 @@ command-driven replacement cases in
 Transcript order is canonical branch order, never timestamp or activity recency.
 The v7 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
-is extension state. Producer attribution is only exact at a Gateway callback
+is extension state. Producer attribution is only exact at a Gateway-owned action or callback
 boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
 unknown. Every projection is bounded by count and byte limits and malformed
 recognized data fails closed for authoritative resynchronization.
@@ -274,6 +287,264 @@ delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 
+### Tron-owned `pi-subagents` build
+
+The delegated provider is distributed separately from the Gateway's Pi SDK. Its
+single source of version authority is `pi-subagents-pin.json`: the fork commit,
+source archive SHA-256, fork lockfile SHA-256, Node/npm build versions, and
+SHA-512 of the self-contained closure are bound together. `npm run
+check:pi-subagents` validates both selections' immutable inputs and package
+identity, compares source/closure runtime declarations, and traverses the complete
+lock-resolved runtime graph without registry access. Every direct or transitive
+non-peer dependency must resolve within the closure at the exact locked package
+path and version, with matching runtime declarations and installed npm lock
+`resolved`/`integrity` values. Nested versions, scoped packages, hoisting and cycles
+use the same graph check; an unpinned nested package cannot shadow a checked
+hoisted dependency. Pi host-provided peers are excluded, not dependencies merely
+sharing a peer's name. The integrity trust chain has three links: build-time
+`npm ci` verifies dependency tarballs against the lockfile SRI, deterministic
+packaging pins the resulting closure bytes with SHA-512, and the offline checker
+verifies that digest plus graph completeness and installed lock metadata. It does
+not attempt to recompute original registry-tarball SRI from extracted files.
+A retained predecessor
+pin must bind its exact source archive, lockfile, and self-contained closure;
+a fork predecessor carries the complete prior build provenance, while a registry
+predecessor also binds registry integrity. A partial rollback record is rejected. The retained
+`0.59.0` predecessor uses the public npm registry archive, verified against its
+`dist.integrity`. Its vendored runtime lock preserves the coordinator-extracted
+dependency records and versions, with a root derived from that archive's manifest;
+no development dependency versions are inferred. Source archives and lockfiles
+are retained under `artifacts/`; build the deterministic closure with `npm run
+build:pi-subagents-closure` using the pinned Node 22/npm toolchain. The builder
+reads the top-level pin selection; rebuild a predecessor in a disposable copy
+with its version and artifact inputs selected, never by changing a live install.
+`npm ci` validates even omitted development dependencies, so the builder removes
+them only from its temporary install manifest. The packaged manifest preserves
+the source metadata, including development dependencies, and adds sorted
+`bundledDependencies`. `npm run test:pi-subagents-scripts` includes a real npm
+runtime-only-lock regression with an unavailable registry.
+
+Prepare a new reviewed commit with `npm run update:pi-subagents -- --fork-repo
+<path-or-url> <full-fork-commit>`. The pin's `fork.repository` is null until a
+public fork URL is recorded; offline consumers never require that repository.
+Once recorded, the URL is the updater default and a different override is refused.
+The updater checks the exact pinned upstream release/tag and the fork's ancestry
+online, reports latest upstream for information only, and exports immutable git
+objects into a disposable tree. It uses the recorded Node/npm to install build
+dependencies, run `npm pack` (including the fork's packaging scripts), and build
+the closure. The candidate must have a new exact upstream-based `-tron.N` version.
+Before publication, the exact staged candidate must pass the offline real-Gateway
+activation/discovery/child-execution gate and the mandatory previous → candidate
+→ previous execution/resume probe. Both use disposable payloads and isolated homes;
+no repository pin or immutable artifact is published while either gate runs.
+Their passing JSON reports accompany the command result. Any gate failure refuses
+the update and removes its staging; original pin/artifact bytes remain unchanged.
+Only then does it exclusively create new immutable artifacts and atomically
+rename the pin, retaining the complete current pin (including fork provenance)
+as previous. A final
+`npm run check:pi-subagents` failure restores the original pin and removes only
+newly created files. The private `.pi-subagents-update-staging` directory is
+also the exclusive invocation lease; overlapping updates are refused. An
+uncatchable termination leaves it in place: inspect the interrupted owner before
+manually removing staging, never sweep another update's files. Dirty owned
+inputs, reused artifact paths, and mismatched provenance are refused. The updater never edits fork refs/working-tree files or
+installed Gateway homes, deploys, or starts a service. `test:pi-subagents-scripts`
+covers real local-git export/pack/build/check, both execution gates, unusable
+candidate and return-leg resume refusal, and late-failure restoration; only the
+online release metadata boundary is faked in those tests. The successful update
+regression compares the complete retained prior pin unchanged (repository,
+commit, source/lock/closure paths and hashes), and real previous/return legs
+require its exact fork-bound receipt. Work verification selects the offline
+checker and script suite for provider pin/artifacts/scripts, package manifests,
+and Node pin changes, not unrelated runtime sources.
+
+The closure excludes Pi SDK peer dependencies so those resolve from the selected
+Gateway SDK, not from a user npm tree. Gateway payloads carry the pin, input
+archives, and closure as fingerprinted app inputs; bundling refuses an invalid
+pin. This does not install the package into Stable or mutate a user's package
+manifest. The provider install/activation lifecycle is managed by Tron and is
+not an ordinary user package update.
+
+After building, `npm run install:pi-subagents -- <gateway-home>` explicitly
+extracts the selected closure offline into
+`<gateway-home>/internal/pi-subagents/<version>`. It stages files and a receipt
+(version, fork commit, closure SHA-512) together, verifies them, then publishes
+by directory rename. Failed staging is removed; an existing valid root is reused,
+and a damaged root is refused rather than overwritten in place. Previous version
+roots are not pruned. This activation entry point never defaults to a home and
+never edits `agent/npm/package.json`, runs npm installation, or downloads bytes.
+Every Gateway startup activates the exact closure carried by its selected
+payload, after delegated-root cutover admission and before Pi extension discovery.
+A verified existing root is reused without changing files or its receipt; a
+missing root is installed offline and damaged bytes/receipts fail startup closed.
+There is no channel-dependent installer, registry fetch, or user package update.
+`scripts/tron dev start` therefore builds/stages the Debug payload and its startup
+installs or verifies that payload's pin in `~/.tron-dev/internal/pi-subagents/`.
+Restart and rollback derive their selection from the newly selected payload.
+
+**Stable installation is maintainer-only:** update/promote the reviewed Gateway
+payload using the supported Stable payload workflow (or the Mac Release reinstall
+runbook if the installed launcher cannot select it). Startup of that selected
+payload performs the same offline activation in Stable's home; no separate agent
+install into Stable is authorized. Previous roots and all historical runs remain
+untouched. Remove an explicitly reported user-provider conflict yourself; Tron
+never edits that user declaration.
+
+One `ManagedSubagents` selection belongs to the Gateway payload and configured
+home, including when the agent directory is customized. Runtime extension loads,
+session-free admin loads, subagent discovery, `session.resources` and the managed
+`packages.list` row use that selection. Admission revalidates the receipt and
+every installed closure file against the pinned archive; a receipt alone cannot
+bless changed bytes. SDK peer ranges are checked against the selected Gateway payload. Pi's extension
+loader aliases their imports to its own host SDK exports; no SDK peer copies or
+links are installed, so a new Gateway payload can reuse the same immutable root.
+Before any managed extension load (including reload and session-free loads),
+`ManagedSubagents` requires `PI_SUBAGENTS_TEMP_ROOT` to resolve exactly to
+`delegatedArtifactRoot(tronHome)` for its explicitly supplied home. The registry
+also passes its home to this owner before constructing runtime dependencies,
+refusing a selection belonging to another home. Admission
+rechecks the binding after loading; an absent, blank or foreign binding fails
+with `conflict` rather than allowing the provider's system-temp fallback.
+In-process hosts and test fixtures must bind through
+`delegatedProviderEnvironment` before loading, and fixtures restore the previous
+environment only after runtime disposal and remove their own temporary homes.
+The real execution integration test asserts that no default
+`<os.tmpdir()>/pi-subagents-uid-<uid>` root was created.
+Before provider initialization, the delegated-provider environment owner also
+sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the running payload's own
+resolved `@earendil-works/pi-coding-agent` package root, replacing any inherited
+override. This process-lifetime binding lets the reserved provider's detached
+children use the selected host even when argv is not a Pi CLI and the reserved
+install has no SDK ancestor. Restart/rollback selects the new process's host;
+no SDK files or links are added to the provider install. They never resolve from
+user or global npm. Arbitrary shell commands still filter `PI_*`; this binding
+is for the provider's own children, not a shell command environment.
+The verified manifest also supplies its declared `pi.skills` and `pi.prompts`
+paths to Pi's `additionalSkillPaths` and `additionalPromptTemplatePaths`. Files
+and directories must remain inside the same verified root; user-package
+resource resolution is not used to recover these declarations. The same manifest
+owner uses Pi's local-package resolver to expand exact admitted resource files
+and attach managed package provenance. Both session resources and `packages.list`
+consume that result; ordinary local resources are not relabelled. Pi finalizes
+extension metadata after its override, so load completion also restores exact
+managed tool/command provenance before publishing the load. The SDK owns resource
+loading and replacement on reload.
+The exact loaded extension gets a build-bound `tron:pi-subagents@…#…` owner;
+user npm sources and provider-shaped local paths grant no delegated authority.
+The existing per-extension registration admission also reserves `subagent` for
+that owner at load and for late registrations; it is not a one-shot load check.
+User or project `npm:pi-subagents` declarations are ignored, never executed,
+and never contribute resources or the reserved tool. The managed pinned provider
+still loads; no settings or user npm-tree bytes are changed. `packages.list`
+retains the declaration with a typed `conflict` (`code: managed-provider`) and
+empty `provides`, alongside the managed provider's row. Settings labels it
+“Ignored” and displays: “Tron manages pi-subagents; this user declaration is
+ignored. Remove it with `pi remove npm:pi-subagents`.” Cleanup is optional.
+One `pi-subagents.user-package-ignored` warning per runtime startup/reload or
+session-free load reports the exclusion without exposing user paths/specs.
+
+The pinned Pi SDK's `DefaultResourceLoader.extensionsOverride` executes after
+module loading, so it is not an exclusion seam. `managedProviderSettingsView`
+supplies the resolver's `getGlobalSettings`/`getProjectSettings` package reads
+(and `getSettings`/`getPackages`) with a read-only filtered projection, including
+pre-trust, final and reload passes. The SDK's `DefaultPackageManager.resolve`
+uses these scoped reads; its package persistence paths use `setPackages` or
+`setProjectPackages`, which the view refuses, as it does package-bearing
+`applyOverrides`. Other calls bind to the canonical manager; non-package writes
+persist canonical unfiltered snapshots. Package admin retains its canonical
+manager for inventory/mutations and uses the view only for resource resolution.
+Any other extension claiming `subagent` still fails admission, including late
+registrations. Missing installation
+leaves delegated discovery unavailable in read-only/unactivated fixtures; managed
+startup activates it before discovery. Corrupt bytes or receipts fail closed. Catalog and package reads retain their
+bounded unavailable diagnostic. `managed-subagents.test.ts` installs one real
+immutable closure per file and shares it among admission/discovery cases;
+destructive byte/receipt cases own separate state. The two cold real-loader
+cases and `package-provides.test.ts`'s single real-closure attribution case have
+measured, explicit deadlines for parallel verification; synthetic cases retain
+the default bound.
+It exercises the real
+closure and SDK loader/discovery in an isolated empty home, plus exact host SDK
+export identity across two payload paths sharing one install.
+`managed-subagents.integration.test.ts` invokes the same startup activation
+boundary as `gateway-main` from an empty agent home and npm cache with npm offline
+and all TCP denied, verifies a second startup preserves root/receipt inode and
+mtime, then runs a
+real foreground child through `RuntimeRegistry` / `RuntimeSlot` and the host SDK.
+Only model output is scripted. It checks packaged/project discovery, the
+build-bound canonical activity owner, successful child completion, canonical
+child JSONL, the Gateway's matching child-session reference, and read-only
+transcript admission/projection through that declared child binding. Damaged bytes
+and receipt restart refusals are covered by `managed-subagents.test.ts`.
+Regenerate its
+sanitized evidence with
+`npx vitest run src/sessions/managed-subagents.integration.test.ts --maxWorkers=2` from the
+Gateway directory; the report is `test-results/managed-subagents.integration.json`
+(or `TRON_SUBAGENTS_REPORT` for an external evidence destination).
+
+`npm run test:pi-subagents-rollback` runs the real previous → candidate → previous
+sequence against one isolated home. Each leg loads a fresh Gateway runtime with
+the selected exact closure, discovers packaged/project agents, and completes a
+real foreground child. The return leg reconstructs the candidate parent, reads
+its retained run through the previous provider, refuses terminal live control,
+and resumes the candidate child through the producer's documented `action: resume`
+management API. Revival is detached even with `async: false`: the probe awaits the
+same canonical child identity/output and the producer's observed runner/writer
+exit-0 proof, then reads terminal producer status. Fixture retirement is a
+separate test-support process owner: each leg records native spawn handles/PIDs
+and detached groups, propagates its scoped `--import` preload to runner descendants,
+and stops/joins the trees before retiring HTTP state or removing roots. Normal
+exit, assertion failure and termination signals all use this owner; TERM is
+bounded and escalates once to KILL. Disposal confirms no owned non-zombie
+PID/group members remain and direct child exit events have settled, never
+retrying directory removal. Zombies cannot write; their reaping belongs to the
+parent/OS. macOS EPERM during signaling is ignored only after a fresh process
+snapshot proves the target is absent or contains exclusively zombies; live
+permission failures or failed inspections still reject disposal.
+The updater supplies the exclusive `TRON_TEST_PROCESS_OWNER_FAILURE` JSONL path
+inside its staging owner, outside disposable leg roots. Join failures record
+unjoined live PIDs, attempted signals and the error there. The owner regression
+suite keeps this record outside its disposable writer root and includes it plus
+host stderr in exit assertions, so a failure is diagnosable from one test log.
+Any record fails the update,
+restores owned publications and preserves staging for explicit diagnosis; a
+later update refuses that still-owned staging directory. Standalone probes own
+the same failure record within their fixture root and likewise refuse removal. Scripted model responses are
+turn-addressed, not globally queued, so parent notifications and the revived
+child cannot steal each other's responses. The fixture supplies the same reserved
+delegated-artifact root and process-owned Pi host binding as Gateway startup,
+before extension initialization. Its return-leg detached resume proves the host
+binding works from a reserved install, including overriding an unavailable
+inherited host selection.
+The original parent/child JSONL prefixes and all other retained session-tree run
+artifacts must remain unchanged; supported continuation appends canonical history rather
+than converting it. Both immutable installs/receipts survive rollback. Only the
+loopback model endpoint is scripted, including for the predecessor's CLI child.
+The loader and admission use the verified manifest's `pi.extensions`, not a
+candidate-specific filename; empty, escaping, missing or non-regular entries
+fail closed before loading. The suite also exercises invalid entries in actual
+receipt-verified closures.
+
+The sanitized report defaults to `test-results/managed-subagents.rollback.json`;
+set `TRON_SUBAGENTS_ROLLBACK_REPORT` to retain it elsewhere. To inspect the whole
+disposable home, set `TRON_SUBAGENTS_ROLLBACK_ROOT` to a **nonexistent** evidence
+directory; the probe refuses to overwrite an existing fixture. Without that
+explicit retention request, it removes the fixture on success and failure.
+Payload source copies always retire after the probe. This gate selects provider
+versions with the current Gateway/SDK, not historical Gateway executables or a
+Stable/Debug service transition. Actual service qualification and the broader
+detached/live control matrix remain separate release gates.
+
+After `npm run build`, run `npx vitest run
+src/sessions/managed-subagents.payload.test.ts --maxWorkers=2` to execute the
+bundler's real app-input staging step and activate that staged compiled runtime
+with TCP denied. It verifies both selections through the same trusted checker
+used by the payload verifier, proves the shipped installer is usable, and rejects
+a damaged retained closure. The report is
+`test-results/managed-subagents.payload.json` (or `TRON_SUBAGENTS_PAYLOAD_REPORT`).
+It shares the selected SDK dependency tree only; pin/artifact authority comes
+exclusively from staged app bytes.
+
 `test-fixtures/pi-sdk/corpus/` is the persisted-state upgrade corpus (epic #468,
 layer L1): an agent directory and canonical sessions the **outgoing** SDK wrote
 through the real Gateway, plus the Tron-level observation of that corpus reopened
@@ -434,9 +705,12 @@ attribution headers.
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
 purpose, declared tool and command names), so the installed list cannot name a
-module a session does not load or omit one it does. MCP servers are managed only
-through the explicit `mcp.*` methods below; they are not projected as Tron
-connection instances.
+module a session does not load or omit one it does. The always-loaded
+`tron-invocation-settlement` module comes first in definition and registration
+order. It has no tools or commands: its awaited hooks join RuntimeSlot-owned
+terminal receipt writes before the next admitted input, without waiting for
+attention settlement. MCP servers are managed only through the explicit `mcp.*`
+methods below; they are not projected as Tron connection instances.
 
 `hooks.list` serves the same hook fields `session.resources` returns
 (`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
@@ -707,8 +981,13 @@ worktrees, or branches.
 Every run durably snapshots its target and concrete execution-session ID before
 dispatch. Existing targets reuse their session ID; workspace runs receive a new
 predetermined UUID and create that exact identity through
-`RuntimeRegistry`/`RuntimeSlot`. A live-only generated slot carries an exact
-operation-owned lease until Pi persists its first user or assistant message.
+`RuntimeRegistry`/`RuntimeSlot`. `OwnedSessionDispatch` is the neutral boundary
+for shared session leases, exact recovery evidence, and terminal acknowledgement;
+Automation retains its own operation identity and result interpretation above
+that seam. The seam also owns the fixed 24-hour deadline primitive for callers
+that explicitly opt in; it does not impose a deadline on ordinary sessions or
+Automation. A live-only generated slot carries an exact operation-owned lease
+until Pi persists its first user or assistant message.
 Restart recovery always consults the run snapshot and concrete session identity.
 A new session with no user or assistant message remains memory-only; after the
 first user message, Pi persists the transcript and any earlier canonical
@@ -784,7 +1063,7 @@ future managed-state contract are owned by
 Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns one bounded projection
-`{ phase, activation, readiness, recovery, available, reason?, enabled, homeId?,
+`{ phase, activation, readiness, recovery, taskRecovery?, available, reason?, enabled, homeId?,
   sessionId?, generation?, model?, live, sessionPresent, memory }`. Phase,
 readiness and recovery are derived from the existing designation, memory and
 activation owners rather than stored as separate lifecycle state. `memory` is
@@ -811,7 +1090,7 @@ model; there is no budget to manage (memory spend is bounded by construction and
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
 curated runtime profile (no agent-directory or project discovery — including the
 agent directory's `SYSTEM.md`/`APPEND_SYSTEM.md` — no Pi built-ins, an
-`ask_user`/`display`/`notify` executable allowlist, per-session compaction
+`ask_user`/`display`/`notify`/memory-tools/`delegate`/`task` executable allowlist, per-session compaction
 disabled, a fixed physical model, and zero cache-warming requests), and its
 designation is keyed by session id, so a fork is ordinary. A profile change
 replaces the live runtime in place inside the session's own lane, and a record
@@ -822,6 +1101,37 @@ re-sent, the view is never persisted, and a request waits for the lines it will
 send (abortably) before it is made. Ordinary sessions are byte-for-byte
 unaffected. The record, the profile, the RPCs, fork and loadout semantics and
 what is not built yet are owned by [`docs/home.md`](docs/home.md).
+
+Home is delegate-only for project work: `delegate` admits finite work once in a
+trusted project through the neutral owned-session boundary. Workers retain normal
+project capabilities plus the explicit `report` tool; v1 refuses subagent
+execution/revival, scheduled work and durable `bg_wait` wake subscriptions because
+these can outlive the operation.
+Reports seal exact canonical evidence, never the latest assistant reply; absent
+report is limited/unknown. A fixed internal 24-hour deadline cancels and joins
+operation-owned work, and terminal usage remains explicitly unpriced. Unknown
+tracked detached work yields unknown, not a clean stop claim. Separate strict
+Home task state is initialized on first dispatch. Startup retires abandoned tasks
+from exact canonical reports or terminal unknown, never replaying a prompt, and
+co-commits the same result outbox. A recovery refusal fences task surfaces until
+the next start, exposed by `home.status.taskRecovery`; ordinary Gateway sessions
+still work. Recreated task directory
+identity requires explicit `home.reconfirmPermissions` (terminal
+`/home reconfirm-permissions`); this renews active standing scopes only, never
+revoked scopes or one-use grants. Maintainer-only `home.taskPermissions`,
+`home.revokeTaskScope`, `home.revokeTaskGrant` and `home.decideTaskGrant` list
+and revoke authority or approve/deny an exact durable request with one-use
+expiry-bound permission. Terminal `/home permissions`, `/home revoke-scope`,
+`/home revoke-grant`, `/home approve-grant` and `/home deny-grant` route through
+command receipts; Home cannot approve its own requests. `home.taskStatus`, `home.steerTask` and
+`home.stopTask` expose durable spend and shared control; terminal `/home task`,
+`/home steer` and `/home stop` target one task. Steering shares the session lane;
+Stop persists exact intent and cancels outside blocked admission. Canonical usage
+identities dedupe tokens before display; money is explicitly unpriced without
+authoritative billing provenance. Wake delivery waits for the next user Home activation; terminal tasks co-commit
+a durable inbox event and make one advisory push decision at most. Active-task
+restart reconciliation is required before release; iOS controls are subsequent
+slices, not automatically triggered Home calls.
 
 ## Runtime and state
 
@@ -970,11 +1280,21 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 
 ## Push notifications
 
-The first-party inline Pi extension reserves `notify({message})`; RuntimeSlot owns automatic terminal alerts. Pi 0.87 defines `agent_before_settle` as the final actionable boundary (entries plus one `continue: true` request) and `agent_settled` as notification-only after automatic work is finished. `pi.sendMessage(..., { triggerTurn: true })` from an `agent_settled` handler remains available but starts a distinct SDK run/operation with different receipt and notification semantics; it is not equivalent to an in-run `agent_before_settle` continuation. Candidate fixtures exercise `agent_before_settle`. A bounded installed-extension review found no equivalent old-style continuation consumer: `pi-subagents@0.59` uses `agent_settled` to resume widgets (its `triggerTurn` use belongs to `session_compact`), `pi-web-access@0.22` triggers turns from async fetch/command paths, and no `agent_settled` consumer was found in pi-goal, browser, or pi-sub-anthropic. Arbitrary project extensions were not exhaustively inspected, so review them before adoption if present; no compatibility shim is provided. Only Pi's final `agent_settled` at idle is terminal, so automatic retries, compaction retries, queued follow-ups, recoverable tool errors, and extension continuations do not announce an intermediate response. RuntimeSlot matches the exact final run's canonical assistant object and queues fixed, outcome-specific copy for normal completion, output limits, terminal errors (including retry exhaustion), aborts, or a tool/agent stop without a final response. Exact Gateway abort ownership overrides the last assistant reason, including cancellation during retry backoff. It never searches backward for an earlier successful answer or infers an outcome from error prose. The assistant entry ID remains the durable deduplication source and also keys one bounded RuntimeSlot observation disposition shared with successful-response attention state. Without a canonical assistant, the existing invocation terminal receipt ID is the source; a Gateway-derived run without an invocation uses its exact operation identity. An exact mobile subscription may publish `session.presentation.set` only after synchronization; monotonically revisioned visible/hidden updates are token-bound, one per connection, removed on close/replacement/disconnect/rekey/delete, and visible leases expire after 45 seconds unless iOS renews them. If that disposition observes an active chat, RuntimeSlot does not invoke notification enqueue: NotificationService writes only a durable `suppressed` receipt for the completion, creates no relay intent or inbox row, and excludes it from delivery quota. Terminal alerts otherwise carry the bounded session title plus the exact Gateway machine/session route; tapping is therefore profile-qualified rather than inferred from whichever server is selected on iOS. The extension receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, payload dictionary, or presentation policy. Admission is persisted before dispatch, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. Durable abuse ceilings admit up to 240 intents per session per hour and 480 intents per day globally or per target. Rate-limited attempts are returned synchronously but are not persisted, consume no quota, and cannot extend their own lockout. Preview-disabled grants still replace model-authored `notify` text with fixed generic copy; automatic terminal body copy is fixed by Tron rather than the model. The session title is the product-required terminal-alert title and is therefore shown independently of that model-text preview flag.
+Home task operations have one separate terminal owner: their immutable task
+record co-commits the wake inbox and durably decides one advisory push before
+enqueue. The hint uses a stable task-result event identity and logical `home`
+route; a crash after decision may omit it, never replay it. Ordinary terminal
+alerts remain unchanged. The wake inbox (not APNs or the notification bell)
+delivers the attributed result on the next Home message. See
+[Task wake inbox and terminal push](docs/home.md#task-wake-inbox-and-terminal-push).
 
-Automatic notification admission follows the owning canonical terminal receipt. Pi persists a brand-new session on its first user or assistant message, so canonical invocation and notification receipts appended before the first user message are flushed with it. A failure before any user or assistant message remains memory-only. Tron does not write the SDK's JSONL or create a second receipt journal to bypass that boundary. The same reasoning applies to a failed append on an already-flushed session: because the SDK inserts an entry into its live branch before the physical append, an entry that exists only in memory after a failure is never announced as a durable canonical receipt. Gateway fails closed with an unknown outcome for that exact identity rather than reporting success from memory, and a retry cannot repair it by appending a contradictory duplicate. Admitted prompt preflight/runtime failures and drain-cutoff interruptions use that same notification boundary even if Pi never creates an assistant. A rejected continuation following a successful response retains that response's already-owned terminal receipt rather than overwriting it with a contradictory failure; the stopped alert uses the preceding exact assistant source. Synthetic progress after rejection is not another admitted run. A queued follow-up's failure receives its own terminal receipt and exact marker retirement even when an earlier successful answer is still committing attention; that earlier receipt cannot substitute for the failed owner. In all cases, requests rejected before Gateway admission, handled commands/inputs, maintenance, and pending user interactions are not agent completions. Orderly shutdown of active foreground work preserves its marker, records `outcomeUnknown`, and attempts one interruption alert. Observation is latched before terminal receipt I/O so navigation during persistence cannot change the suppression decision. The persisted/wire kind `agent_finished` is a neutral terminal category, not success evidence; iOS labels it “Agent finished” with a stop icon and displays the reason-specific body. Push admission failure is diagnostic only and cannot fail canonical settlement. This is best-effort notification of observed lifecycle events, not a crash outbox: abrupt process/Mac loss or failed admission can lose an alert, and restart does not replay historical terminal events. Already admitted notification intents retain their existing durable dispatch/retry behavior. Focused coverage is in `runtime-terminal-notifications.integration.test.ts` and `tron-notify-extension.test.ts`.
+The first-party inline Pi extension reserves `notify({message})`; RuntimeSlot owns automatic terminal alerts. Pi 0.87 defines `agent_before_settle` as the final actionable boundary (entries plus one `continue: true` request) and `agent_settled` as notification-only after automatic work is finished. `pi.sendMessage(..., { triggerTurn: true })` from an `agent_settled` handler remains available but starts a distinct SDK run/operation with different receipt and notification semantics; it is not equivalent to an in-run `agent_before_settle` continuation. Candidate fixtures exercise `agent_before_settle`. A bounded installed-extension review found no equivalent old-style continuation consumer: `pi-subagents@0.59` uses `agent_settled` to resume widgets (its `triggerTurn` use belongs to `session_compact`), `pi-web-access@0.22` triggers turns from async fetch/command paths, and no `agent_settled` consumer was found in pi-goal, browser, or pi-sub-anthropic. Arbitrary project extensions were not exhaustively inspected, so review them before adoption if present; no compatibility shim is provided. Only Pi's final `agent_settled` at idle is terminal, so automatic retries, compaction retries, queued follow-ups, recoverable tool errors, and extension continuations do not announce an intermediate response. RuntimeSlot matches the exact final run's canonical assistant object and queues fixed, outcome-specific copy for normal completion, output limits, terminal errors (including retry exhaustion), aborts, or a tool/agent stop without a final response. Exact Gateway abort ownership overrides the last assistant reason, including cancellation during retry backoff. It never searches backward for an earlier successful answer or infers an outcome from error prose. The assistant entry ID remains the durable deduplication source and also keys one bounded RuntimeSlot observation disposition shared with successful-response attention state. Without a canonical assistant, the existing invocation terminal receipt ID is the source; a Gateway-derived run without an invocation uses its exact operation identity. An exact mobile subscription may publish `session.presentation.set` only after synchronization; monotonically revisioned visible/hidden updates are token-bound, one per connection, removed on close/replacement/disconnect/rekey/delete, and visible leases expire after 45 seconds unless iOS renews them. If that disposition observes an active chat, RuntimeSlot does not invoke notification enqueue: NotificationService writes only a durable `suppressed` receipt for the completion, creates no relay intent or inbox row, and excludes it from delivery quota. Terminal alerts otherwise carry the bounded session title plus the exact Gateway machine/session route; tapping is therefore profile-qualified rather than inferred from whichever server is selected on iOS. The extension receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, payload dictionary, or presentation policy. Admission is persisted before dispatch, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. The Gateway does not impose a routine daily notification quota; admission is bounded by the durable pending-intent capacity, and the relay owns the per-device hourly and routine-daily runaway backstop. Capacity refusals are returned synchronously and do not create intents or inbox rows. Preview-disabled grants still replace model-authored `notify` text with fixed generic copy; automatic terminal body copy is fixed by Tron rather than the model. The session title is the product-required terminal-alert title and is therefore shown independently of that model-text preview flag.
 
-The Gateway also owns a bounded 512-entry user-facing notification inbox in the same owner-only state transaction as delivery admission. A visible `queued` inbox row proves durable admission, not relay or APNs acceptance. New notification content, exact session route, per-target APNs request identities, delivery outcome, and global read state are canonical there; the iOS cache is only a bounded disposable projection. The inbox is part of the version-1 document shape; a document without it is rejected as malformed. `notification.inbox.list` takes `filter` (`all`, the default, or `unread`), an opaque keyset `cursor`, and `limit` (1 through 50, default 50), and rejects unknown keys. Rows order by `createdAt` descending then `id` ascending; `nextCursor` encodes the exact `(createdAt, id)` of the last returned row as `<createdAtEpochMs>.<id>`, and the next page returns rows strictly after it, so a page request never fails because the inbox changed and `unread` pages under the same keyset. The response carries the whole-inbox `revision` and the total `unreadCount` across every row, not the filtered page. A malformed cursor is `invalid_request`. `notification.inbox.read` accepts exactly one public inbox ID or APNs request ID and is idempotent: a row already read, or one evicted by the bound, answers `{ changed: false }` instead of failing. `notification.inbox.readAll` requires `through`, the keyset key of the newest row the user has seen, and marks only unread rows at or older than that key, so alerts newer than the cut stay unread. All three are ordinary command-receipt mutations. Reading the inbox is otherwise read-only: no admission, list, read, or read-all path rewrites the credential document unless it actually changed an inbox row. Retention evicts the oldest read rows before any unread row, so an unread alert is never dropped while a read row still occupies the bound. Every committed inbox mutation coalesces into one trailing `notification.inbox.changed` within about 250ms carrying `{ revision, unreadCount }` of that committed state, which lets a client skip a redundant refetch and project the bell immediately. Unknown, unavailable, suppressed, and rate-limited attempts create no inbox row. Preview-disabled explicit model text remains generic in both APNs and inbox storage.
+Automatic notification admission follows the owning canonical terminal receipt. Pi persists a brand-new session on its first user or assistant message, so canonical invocation and notification receipts appended before the first user message are flushed with it. A failure before any user or assistant message remains memory-only. Tron does not write the SDK's JSONL or create a second receipt journal to bypass that boundary. The same reasoning applies to a failed append on an already-flushed session: because the SDK inserts an entry into its live branch before the physical append, an entry that exists only in memory after a failure is never announced as a durable canonical receipt. Gateway fails closed with an unknown outcome for that exact identity rather than reporting success from memory, and a retry cannot repair it by appending a contradictory duplicate. Admitted prompt preflight/runtime failures and drain-cutoff interruptions use that same notification boundary even if Pi never creates an assistant. A rejected continuation following a successful response retains that response's already-owned terminal receipt rather than overwriting it with a contradictory failure; the stopped alert uses the preceding exact assistant source. Synthetic progress after rejection is not another admitted run. A queued follow-up's failure receives its own terminal receipt and exact marker retirement even when an earlier successful answer is still committing attention; that earlier receipt cannot substitute for the failed owner. In all cases, requests rejected before Gateway admission, handled commands/inputs, maintenance, and pending user interactions are not agent completions. Orderly shutdown of active foreground work preserves its marker, records `outcomeUnknown`, and attempts one interruption alert. Observation is latched before terminal receipt I/O so navigation during persistence cannot change the suppression decision. The persisted/wire kind `agent_finished` is a neutral terminal category, not success evidence; iOS labels it “Agent finished” with a stop icon and displays the reason-specific body. Push admission failure is diagnostic only and cannot fail canonical settlement. This is best-effort notification of observed lifecycle events, not a crash outbox: abrupt process/Mac loss or failed admission can lose an alert, and restart does not replay historical terminal events. Already admitted notification intents retain their existing durable dispatch/retry behavior. Focused coverage is in `runtime-terminal-notifications.integration.test.ts` and `tron-notify-extension.test.ts`; run `cd packages/gateway && npx vitest run src/sessions/runtime-terminal-notifications.integration.test.ts` to exercise the local fake-relay journey and write its repeatable JSON report to `packages/gateway/test-results/runtime-terminal-notifications.integration.json`.
+
+Automatic notification kinds are `ask` (Time Sensitive input-needed), `agent_finished` (only when no live session-owned subagent/workflow remains), and `waiting` (one alert per unchanged set of live background process identities). Pending work is selected from the session-owned extension activity identities and the shared live-work rule; disposable process projections and paused/recent history are not pending-work authorities. When that work wakes the session and settles with no remaining live work, the terminal response is `agent_finished`; unchanged waiting identities notify only once per episode. The Gateway policy defaults all three automatic kinds on and iOS exposes Input needed, Finished, and Waiting controls through registration upsert/status. `notifications.json` version 2 adds finished/waiting policy fields and migrates version 1 policy on read, retaining the old ask choice. Relay limits are 120/hour and 1,000 routine/day per device; ask and explicit notify bypass daily but retain the hourly backstop. Relay `rate_limited` is terminal, not retried. Version-1 pending deliveries have no admitted relay envelope and are retired as failed during the version-2 store migration; their inbox entries remain visible and a single `schema_upgrade` delivery signal is emitted. Ask forwards the fixed `time-sensitive` APNs interruption level.
+
+The Gateway also owns a bounded 512-entry user-facing notification inbox in the same owner-only state transaction as delivery admission. A visible `queued` inbox row proves durable admission, not relay or APNs acceptance. New notification content, exact session route, per-target APNs request identities, delivery outcome, and global read state are canonical there; the iOS cache is only a bounded disposable projection. The inbox is part of the versioned document shape; a document without it is rejected as malformed. `notification.inbox.list` takes `filter` (`all`, the default, or `unread`), an opaque keyset `cursor`, and `limit` (1 through 50, default 50), and rejects unknown keys. Rows order by `createdAt` descending then `id` ascending; `nextCursor` encodes the exact `(createdAt, id)` of the last returned row as `<createdAtEpochMs>.<id>`, and the next page returns rows strictly after it, so a page request never fails because the inbox changed and `unread` pages under the same keyset. The response carries the whole-inbox `revision` and the total `unreadCount` across every row, not the filtered page. A malformed cursor is `invalid_request`. `notification.inbox.read` accepts exactly one public inbox ID or APNs request ID and is idempotent: a row already read, or one evicted by the bound, answers `{ changed: false }` instead of failing. `notification.inbox.readAll` requires `through`, the keyset key of the newest row the user has seen, and marks only unread rows at or older than that key, so alerts newer than the cut stay unread. All three are ordinary command-receipt mutations. Reading the inbox is otherwise read-only: no admission, list, read, or read-all path rewrites the credential document unless it actually changed an inbox row. Retention evicts the oldest read rows before any unread row, so an unread alert is never dropped while a read row still occupies the bound. Every committed inbox mutation coalesces into one trailing `notification.inbox.changed` within about 250ms carrying `{ revision, unreadCount }` of that committed state, which lets a client skip a redundant refetch and project the bell immediately. Unknown, unavailable, suppressed, and rate-limited attempts create no inbox row. Preview-disabled explicit model text remains generic in both APNs and inbox storage.
 
 Opening a synchronized mobile chat also acknowledges every existing unread inbox row for that exact canonical session, across notification kinds and delivery outcomes. The trigger is a fresh visible transition of the existing token-bound `session.presentation.set` lease, after transport alias resolution and subscription admission—not `session.open`, technical clients, provisional synchronization, or hidden presentation. Ordinary visible renewals and duplicate/stale revisions do not take another read cut; re-entry, lease expiry, or a replacement reconnect token does. Notification selection and mutation linearize with admission and delivery settlement under the notification store mutex. Only the captured inbox IDs survive a failed write (at most 512); the existing two-second notification drain retries those IDs independently of relay availability or the initiating chat/socket. It never broadens a retry to newer alerts. No matching unread rows means no credential-document write or invalidation. Successful persistence broadcasts `notification.inbox.changed`, and later delivery settlement preserves read state. A migrated session identity takes its inbox rows with it, while a reset rebind (a fork or a new session) leaves the alerts it produced on the previous identity. An explicit `notify` admitted from a session the user is currently viewing is still delivered, but its inbox row is created already read so the bell cannot light for an alert the user is watching. Initial failures emit a bounded content-free diagnostic; unread state stays canonical. Pending IDs are process-local: a crash before persistence, or failure before a read cut can be captured, leaves rows unread until a later opening can acknowledge them. Focused regressions live in `session-inbox-read.test.ts`, `runtime-registry-notification-read.test.ts`, `notification-service.test.ts`, `notification-inbox.integration.test.ts`, and the presence/synchronization protocol tests.
 
@@ -1019,9 +1339,9 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
  clients may manage automations across that Gateway; this is not a new
  per-session authorization boundary.
 
-Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
+Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The per-kind policy is Gateway-owned, defaults all three kinds on, and round-trips through registration upsert/status; the ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
-Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. Quotas apply across the installation, canonical session, and target grant.
+Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. The Gateway adds no per-installation or per-session delivery quota; the relay applies a device-wide runaway backstop of 120 requests/hour and 1,000 routine requests/day, with ask and explicit notifications exempt from the daily cap.
 
 ## Transport
 
@@ -1291,7 +1611,22 @@ sealed in `versions/` before any candidate state names the version. The trusted
 source checkout must already have its lockfile-pinned Gateway development dependencies
 installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
-registry during an update. Source-only updates require the package lock and dependency declarations
+registry during an update. Before compiling, it compares applicable npm hidden-lock package
+records with the source lock, then walks the actual install to require every locked package for
+this platform/mode at its locked name and version, with no missing or extra package directories.
+Unsupported package-directory symlinks are rejected before their nested dependency trees are
+traversed, so a link cannot redirect the validator outside the install.
+The hidden lock is not compared byte-for-byte with the root lock: npm omits root metadata,
+platform-inapplicable optional packages, and—on production installs—development packages. This
+structural check does not cryptographically re-hash every installed package file. Source rebuild
+records a bounded `app/build-inputs.json` receipt for the explicit compiler, copied deployment and
+provider helpers, provider pin metadata, configuration, and toolchain inputs used to produce each
+payload. The provider pin checker separately binds copied archive bytes to their hashes. Dirty
+development builds are allowed, but the receipt must match those exact bytes; returning to a clean
+checkout at the same `sourceRevision` therefore cannot reuse output built from reverted edits.
+Unrelated untracked files are not build inputs. If installed inputs are stale or cannot be proved,
+source rebuild refuses before compilation and names `npm ci` as the remedy. Source-only updates
+require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
@@ -1563,8 +1898,24 @@ Stop is scoped to one invocation, not to an extension workflow. A stopped run's 
 assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
 continuations can distinguish a user stop from a completed run and decide whether to
 continue; Tron never silently disables extension continuation on the user's behalf, and the
-Stop affordance must not claim that it does. A continuation that starts after a stop is a
-new invocation with its own identity, never a resurrection of the stopped one.
+Stop affordance must not claim that it does. Accepted steering remains Gateway-owned through
+consumption. If Stop aborts a run with queued steering, RuntimeSlot closes Pi queue admission
+and preserves each original input record (raw submitted text, images, source, command and
+operation identity). It clears Pi's queued copies before the full abort so Pi cannot consume
+those copies at the abort boundary; steering accepted during settlement stays Gateway-owned.
+After the shared abort set settles, all originals are redelivered in order through normal
+serialized admission. The first starts the run and later items queue with
+their original behavior; a queue row retires only at its exact message-start or terminal
+admission boundary. Input handlers run again on redelivery because the first processed copy
+never reached the model and is discarded. Stop without queued steering leaves the session idle.
+The Gateway `session.stop-steering-continuation` log records the accepted steer count and
+continuation outcome. A continuation that starts after a stop reuses the accepted input's
+identity rather than resurrecting the stopped run. A future Pi API that accepts an already
+processed input without rerunning handlers is tracked separately in #617. The
+real-WebSocket `rpc-idle-admission.integration.test.ts` case pins this boundary to the pinned
+Pi SDK's public `AgentSession.clearQueue()` and `prompt()` lifecycle: clearing must retire both
+session- and Agent-level queue copies, and normal prompt admission must preserve the AgentSession
+run, transcript and terminal callbacks. Requalify this case on every Pi SDK upgrade.
 Extension commands are resolved before ordinary streaming rejection and still execute through
 Pi's prompt path. Tron registers its release-owned `ask_user` capability as one sequential
 semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
@@ -1696,11 +2047,11 @@ in `projection.test.ts` and `hook-projection.test.ts` cover these boundary cases
 
 Live and canonical transcript projections preserve the canonical tool name while optionally carrying the bounded human-readable `label` declared by the mounted Pi extension tool definition; native clients use that label for presentation and never derive extension titles from snake_case names. Project Resources exposes the same label beside the canonical name. Live tool projections may also carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
-Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires the finalized `npm:pi-subagents` package identity as well as matching path evidence, so a project or local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. The resolved `<tronHome>/internal/subagents/` root is scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. Project-local and temporary roots are accepted only by isolated pre-cutover fixtures, never as a second production authority. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction. Native `subagent_supervisor` receipts remain ordinary control-tool results: their `runId` references an existing execution and never creates a delegated activity or canonical launch-ownership claim. This applies equally to live admission and replay of existing session history; a supervisor reply cannot prevent the real launch's terminal artifact from settling. Distinct genuine launch calls claiming the same run still fail closed. The supervisor-reference regression in `runtime-registry.integration.test.ts` verifies completion and drain release.
+Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. The managed provider loads through a Tron-owned factory: initialization and every retained API function enter its build-bound producer owner, independent of the caller's async context. Its `sendMessage` action captures the owner on a fresh, SDK-valid content array retained by that exact message through stored, deferred, steering and follow-up queues. The weak association shares the message's lifetime, not a slot-wide ID map. String content has a non-enumerable serializer preserving the original canonical string representation; existing content arrays are cloned per send, so reuse cannot alias producer identity. At `message_start` the Gateway reads that captured producer, never inferring a managed producer from the running loop. A missing managed capture stays unknown. Generic extensions retain callback-bound attribution; the SDK does not carry their queued sender context, and their factory-time callbacks may remain ownerless. Callback and tool/command owner lookups resolve finalized package SourceInfo at invocation, not the provisional local source present during extension loading (`owner-attribution.test.ts`). The Gateway emits typed owner `kind` (`subagent` or `extension`) alongside build provenance. One canonical receipt-owner classifier also admits captured historical `npm:pi-subagents[@version]` and managed-build owners as subagents, independently of the current selected build. Consumers must use the classification, not parse npm source spellings. Retained widget/status owners carry it intact; captured component surfaces copy the same admitted owner kind into `provenance.kind` across render and resize (`remote-pi-extension-host.test.ts`). Native retained-content filtering uses those typed fields only, leaving absent/unknown producers visible. Managed incremental per-child notifications are always stored context, including paused and terminal-barrier notes; neither their text nor optional details decide delivery. The provider suppresses those turns before its idle-wake wrapper, and the managed Gateway boundary also forces stored admission. Parent action comes from its own typed source: async/detached workflow completion (`subagent-notify`), an async control notice or an expects-reply supervisor decision request. Foreground workflows continue from their tool result without a separate wake. Quiet scheduled completions suppress routine success only; failed, stopped and paused completions still wake. Supervisor progress is stored without a turn. The provider's `sendUserMessage` enters RuntimeSlot's normal prompt/steering admission as a `subagentWake` invocation with explicit managed origin, preserving `before_agent_start` and the provider's input text. Its Gateway invocation receipt binds the canonical user entry, so projection classifies it as a subagent-owned internal input rather than a maintainer prompt. Pending and queued wake inputs carry the same typed semantics; exact live presentation binding covers the interval before receipt I/O completes. Wake inputs project as `kind=prompt` with `hiddenInternal`/hidden and a `subagent` origin in pending, queued, live and canonical projections; the wire adds no semantic kind, because released protocol-7 iOS decodes `semantic.kind` as a closed enum and rejects the whole snapshot on an unknown value; the model still receives them, but ordinary chat has no wake row or pill. The factory-bound API records non-context-only custom messages in its current synchronous frame and consumes that frame on `sendUserMessage`; a microtask clears unused frames. RuntimeSlot stamps those message-local captures with the wake operation ID before awaiting admission. Their existing `tron.context-delivery.v4` receipts retain `wakeOperationId`; the canonical reader joins the exact `subagentWake` invocation binding and user entry to publish `delivery=triggeredTurn` plus `wakeEntryId`. Without a binding (handled, abandoned or not admitted input), delivery remains stored. Explicit context-only intent is one typed predicate shared by delivery and frame binding: incremental child notes and supervisor requests with `details.expectsReply === false`; missing/unknown fields are not context-only. Progress and per-child notes stay stored even when a decision in the same frame wakes the parent. No matching of text, second receipt or slot-wide correlation map is used. Native clients already exclude hiddenInternal and render one pill per visible subagent custom message. `managed-attribution.integration.test.ts` exercises real async completion, four-child workflow artifacts, a gated failed child with no interim turn and exactly one completion wake, waiting-child supervisor decision/reply and stored progress, foreground tool-result continuation, quiet scheduled failure completion, context-only child notes, idle/busy/racing wakes, historical receipt classification, detached sends and reused content arrays. Ownerless receipts remain unknown after reopen; attribution never uses a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires admission from the receipt-verified Tron-reserved closure and its build-bound owner, so a user npm package or a project/local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. The resolved `<tronHome>/internal/subagents/` root is scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. Project-local and temporary roots are accepted only by isolated pre-cutover fixtures, never as a second production authority. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction. Native `subagent_supervisor` receipts remain ordinary control-tool results: their `runId` references an existing execution and never creates a delegated activity or canonical launch-ownership claim. This applies equally to live admission and replay of existing session history; a supervisor reply cannot prevent the real launch's terminal artifact from settling. Distinct genuine launch calls claiming the same run still fail closed. The supervisor-reference regression in `runtime-registry.integration.test.ts` verifies completion and drain release.
 
 Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
-Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. Registration admission is the extension's own registration maps rather than a one-shot pass over the loader result: Pi permits an already-loaded extension to register tools, commands, handlers, shortcuts, and renderers at any time, so a load-time-only pass would let a later `registerTool` replace the admitted entry and lose producer identity or bypass a reserved first-party name. Load-time and late registration therefore share one policy path, and each callback is admitted once even when a handler list is re-set. Pi's markdown transformer is the one registration surface outside those maps (it is a plain property read live by the runner), so a transformer registered after load is not owner-attributed; nothing in Tron authorizes behavior from transformer provenance, so no gate is bypassed. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. Owner and reserved-name admission are resolved at invocation time, because the pinned SDK finalizes package `SourceInfo` after `extensionsOverride` returns. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Callbacks that originate outside a wrapped owner context—such as a package-owned long-lived timer created during extension initialization—remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
+Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. Registration admission is the extension's own registration maps rather than a one-shot pass over the loader result: Pi permits an already-loaded extension to register tools, commands, handlers, shortcuts, and renderers at any time, so a load-time-only pass would let a later `registerTool` replace the admitted entry and lose producer identity or bypass a reserved first-party name. Load-time and late registration therefore share one policy path, and each callback is admitted once even when a handler list is re-set. Pi's markdown transformer is the one registration surface outside those maps (it is a plain property read live by the runner), so a transformer registered after load is not owner-attributed; nothing in Tron authorizes behavior from transformer provenance, so no gate is bypassed. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. Owner and reserved-name admission are resolved at invocation time, because the pinned SDK finalizes package `SourceInfo` after `extensionsOverride` returns. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Generic extension callbacks that originate outside a wrapped owner context remain ownerless rather than being guessed. The managed provider's factory and retained API are owned before initialization, so its timers, watchers and worker ports do not depend on callback attribution. Protocol owner records are bounded at the store and native admission boundary.
 
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
@@ -1850,12 +2201,15 @@ No cancellation is inferred from the spinner, and a late Stop cannot cancel a su
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
 rather than serialized behind the first. An idle request starts canonical compaction immediately.
-A request accepted during an active agent run publishes `compactionQueued`, persists its own exact run marker,
-and keeps its command receipt pending until the exact compaction starts after final `agent_settled`
-and completes or fails. Handoff revalidates that no newer agent run owns the session, and queued
-completion awaits durable marker removal before publishing settled. Each preceding prompt retires
-its own marker independently, even if newer prompts defer the handoff; compaction never sweeps a
-successor's marker. Every successful or failed
+A request accepted during an active agent run publishes `compactionQueued` and persists its own exact
+run marker. The first SDK compaction that starts after the request was queued adopts it, regardless
+of whether its reason is manual, threshold, or overflow; the queued flag clears at that start, and
+the original command receipt settles with that compaction's result only after its exact marker is
+durably removed. If the adopting compaction fails or is cancelled, the queued request fails instead
+of launching another manual compaction. The enclosing prompt still owns and persists its own terminal
+receipt independently of adopted-marker cleanup. Each preceding prompt retires its own marker, and
+compaction never sweeps a successor's marker. A completed manual-reason compaction retires its exact
+compacting projection after marker cleanup, unless a successor already owns the slot. Every successful or failed
 `compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
 tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
 marker retires. Each terminal compaction is logged as `session.compaction.completed` with the exact
@@ -2213,6 +2567,16 @@ retains at most 25,001 canonical directories/8 MiB of traversal paths, and admit
 records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. Cold scans, live summaries, and appended metadata cap session names and first-message previews at 1,024 UTF-8 bytes, including the truncation marker, without splitting code points or modifying canonical JSONL. Oversized cached preview/name rows are discarded and rebuilt from canonical metadata; they cannot bypass the bound after restart. The pinned
 Gateway performs its own bounded direct-directory JSONL metadata scan for catalog rows, so catalog discovery does not construct the SDK's unused transcript-wide picker search text. One owner, `session-catalog.ts`, holds the index of every canonical row and is every reader's membership source: `session.list`, a cold open, attention resolution, automation admission, workspace lookup and storage maintenance read its rows, so no request walks the session folder. The owner keeps the index current from the Gateway's own commit points, the recursive folder watcher, and a whole-folder reconcile every `CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) that is the backstop for a dropped event or a stopped watcher; its passes run in bounded batches that yield to the background-work scheduler between them. A user-scoped read filters those same rows by each row's own delegated flag, and duplicate identities are quarantined from the whole index, so a concurrent child write cannot make an unchanged dashboard fail `session.list` and an ambiguous user ID never resolves to one of its files. The durable `gateway/catalog-metadata-v2.json` document is the owner's acceleration only — bounded identity/classification metadata, file identity, size/mtime/EOF and a tail-boundary hash, never transcript text — and only the owner writes it, debounced. JSONL remains authoritative: a missing, corrupt or foreign-root document leaves the index to rebuild every row from canonical files, and a pass that cannot prove a file keeps the row it already had and refuses retryably (`catalog_not_ready`) instead of answering membership from a cut that might be wrong. Live-only slots and revisioned summaries are overlaid on the rows per projection generation, so heartbeats never rebuild catalog metadata. Canonical path normalization runs with at most 16 concurrent filesystem operations.
 
+The folder watcher attaches to the canonical realpath root, including when the configured
+root traverses a filesystem alias (such as macOS `/var` and `/private/var`). File hints
+advance only the named row without a catalog walk; directory hints re-read the folder's
+transcripts, and unnamed hints request a debounced reconciliation. The event debounce
+ceiling bounds delay **after a hint arrives**, not operating-system delivery latency or
+reliability. Focused catalog and registry regressions inject `SessionCatalogWatchRequest`
+hints and advance the owned debounce deterministically. Real-backend coverage checks
+canonical-root attachment and canonical row repair, with reconciliation as the backstop;
+it does not impose an FSEvents delivery deadline.
+
 `RuntimeRegistry` derives membership from the index rows, not a second catalog: `catalogAcquisition` projects canonical ID/path/cwd, the structural user-versus-subagent classification and the ambiguous-ID set from the owner's rows, with no filesystem read of its own. The index is authoritative for cold open, attention resolution, automation admission, workspace lookup and delete. A Gateway-owned change reaches a row at its commit point but asynchronously, so a read that finds no row for a named session waits for the owner's queued changes and re-resolves before it may answer `not_found`; an ID the owner read a header for but could not prove refuses retryably. Ordinary message/tool appends do not change membership. Additions, removals, aliases, duplicate identities, or same-path header identity replacement do. A malformed file under the reserved `subagent-artifacts` diagnostic subtree is ignored as a non-session artifact and cannot poison the cut. Malformed files in canonical session locations still fail closed. An unfinished delegated append therefore cannot force unrelated cold opens into discovery or prevent a user dashboard from serving its rows. The selected cold file is checked before SDK open, which can repair incomplete tails; an unfinished selected file fails retryably without being rewritten. Changing, replaced, symlinked, duplicate, or header-rewritten files remain strict; append-only tail growth of the exact inode currently owned by a live RuntimeSlot remains permitted. Directories named `*.jsonl` are not file candidates.
 
 The exact opened manager must still reproduce the admitted ID and canonical cwd, and the fence reads only the target: the index must still claim this exact file, and that file's own stat and header must still be the ones the index admitted, so no request walks the tree. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. The owner's whole-folder scan reads canonical session headers with 512-byte first reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into the index. It reads only the canonical session header; later `session_info` and transcript appends do not change the structural identity. Gateway-owned mutations are generation-checked across an admission, so a catalog change that lands during one refuses retryably instead of committing stale membership. Mutable summary/attention overlays are captured per projection generation after the rows, so heartbeats cannot starve a list projection. Delete resolves membership from the index and re-proves the exact path, inode and user classification immediately before inode-safe quarantine, so a new parent file, duplicate ID, or topology change cannot commit stale deletion. A cut that cannot prove a file refuses retryably instead of publishing stale evidence. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Startup binds the HTTP listener before RuntimeRegistry recovery begins. RuntimeRegistry loads the bounded durable attention/marker inputs while health remains `starting`, waits for the catalog owner's first reconcile pass (`catalog-warming`), then reconciles attention and interrupted markers from that same cut (`attention-recovery`); blob storage follows as `storage-warming`. Storage warming loads durable stores without materializing the presentation catalog or treating an unavailable catalog as an empty membership set. Periodic attachment/display-artifact maintenance derives retention membership from the owner's reconciled cut plus live runtime slots, and never materializes transcript summaries. Ambiguous IDs still retain their artifacts; an unreconciled or incomplete cut refuses retryably instead of collecting orphans. Pending Knowledge observation recovery resolves membership from the owner's reconciled cut, rejects duplicate IDs, and re-reads and re-proves the row's exact file identity and manager header; incomplete or changed evidence leaves durable cuts pending instead of inventing a missing session. It does not start an agent runtime. Large previews or catalog presentation failures therefore cannot block storage initialization; canonical acquisition, catalog bounds, and artifact authorization remain enforced. Focused regressions in `runtime-registry.integration.test.ts`, `session-catalog.test.ts`, `catalog-metadata-index.test.ts`, and `summary-text.test.ts` cover cold scans, UTF-8 boundaries, cached/append metadata, storage readiness, and retained artifacts. Only after all startup phases succeed does GatewayServer publish `ok`. Catalog validation, SDK materialization, target manager open, runtime creation, attention resolution/persistence, and startup attention reconciliation are separately timed with privacy-safe stage records; they report only method/stage, outcome, and duration and never log IDs, paths, prompts, or parameters. Runtime snapshots reuse exact statistics/context and latest-cache derivation for an unchanged runtime revision, then invalidate naturally at canonical event, branch, compaction, or rebind revisions.
@@ -2437,10 +2801,17 @@ source is a Tron module, and a `top-level` `local`/`auto`/`cli` source is local.
 It is a separate key from Pi's `origin`, which keeps its `package`/`top-level`
 meaning. The same response lists available subagents (`name`, `description`,
 `model`, `thinking`, `source`, `distribution`) using the installed `pi-subagents`
-package's own discovery, loaded through its declared `jiti` dependency. Subagent
+Tron-reserved package's own discovery, loaded through its bundled `jiti` dependency from the same receipt-verified root as extension admission. Subagent
 discovery spawns nothing, is capped at 128 rows, is never cached across calls,
 and fails soft to an empty list plus one bounded `subagentDiagnostics` string
 when the package is absent, cannot load, or exposes an unexpected shape.
+The provider's own `agentDiagnostics` report is also projected into that existing
+string (at most 512 characters, count plus the first error), without discarding
+healthy catalog rows or revalidating definitions in Tron. Settings already
+presents it in the Subagents Diagnostics row. A count-only
+`pi-subagents.agent-definition-invalid` warning is emitted once per successful
+runtime load/reload or session-free extension load, never on resources reads.
+Repairing a definition clears the next discovery result; validity is not cached.
 `session.tree` returns the existing newest-first-selected, chronologically restored
 flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.
@@ -2589,9 +2960,20 @@ resource boundary; Tron does not pretend those SDK objects were explicitly dispo
 `gateway.drain.status` returns a bounded in-memory `AdministrativeDrainSnapshot` before
 and during a drain. The accepted `gateway.restart` response includes the same initial
 drain identity and revision while retaining its legacy fields; `{ commandId,
-restartNow: true }` can escalate an existing drain without waiting behind it. Because the
-drain has already closed ordinary work admission, its receipt write is admitted as derived
-settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
+restartNow: true }` can escalate an existing drain without waiting behind it. The
+authenticated `gateway.stop` request uses the same receipt, terminal-admission, and
+administrative-drain owners. It does not cancel accepted provider-login work: the
+login remains a blocker until its own response/completion settles. After the stop receipt
+settles, the process owner awaits the canonical drain and exits successfully only after
+an exact zero-blocker completion proof. While that proof is pending, status remains
+`preparing`/`waiting` and the app stays open; a rejected wait or failed final proof
+records `failed`, keeps work admission closed, and permits an explicit new stop or
+restart request. An explicit Restart Now retains restart's existing relaunch behavior;
+intentional stop itself never requests a restart. Intentional stop uses exit 0, while
+restart uses the relaunch code. The Stable LaunchAgent's `KeepAlive.SuccessfulExit=false`
+therefore suppresses relaunch only for intentional successful stop while retaining
+crash and restart recovery. Because the drain has already closed ordinary work
+admission, its receipt write is admitted as derived settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
 same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
 64 blocker summaries with session identity, category, state, age, and progress timestamp
 when available (plus the method for an `rpc-mutation`: a receipt-backed RPC still
@@ -2614,8 +2996,8 @@ when one blocker is stuck, and avoids waiting 180 s when only unresolved owners 
 Persistence retry, blocked and terminal-receipt failures are also written to
 `gateway.jsonl` with session identity. Active log rotation keeps the previous file
 within its one-MiB bound; fast successful RPCs are omitted.
-Live PTYs block restart because process replacement cannot preserve them. Restart closes
-terminal admission atomically only after proving no PTY is live, so an already-dispatched
+Live PTYs block restart and stop because process retirement cannot preserve them. Both
+close terminal admission atomically only after proving no PTY is live, so an already-dispatched
 `terminal.open` cannot resume across the cutoff and spawn a shell.
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
@@ -2922,12 +3304,16 @@ definitions, or workflow scripts to force-load
 `tron-core`, and must not claim automatic identity/workspace propagation to an
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing
 `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, preserving
-the task verbatim and never truncating it. Native tasks above 8,000 UTF-16 code
+the task verbatim and never truncating it. Direct execution selects `agent` and
+excludes `workflow`. `workflow: true` runs the single fenced JavaScript workflow
+block in the same assistant reply; a string containing `/` names a script path
+relative to the request cwd, and other strings select a named workflow resource.
+The hook never rewrites workflow source or mixed `agent`/`workflow` requests. Native tasks above 8,000 UTF-16 code
 units use the launcher's private task-file delivery; that is not a task rejection
 limit. Workflow/structured delegation stage limits remain runner-owned (1 MiB
 UTF-8 in the pinned native implementation).
 
-Workflow VM launches, slash/RPC/structured delegation, and further children do not
+Workflow child launches, slash/RPC/structured delegation, and further children do not
 emit this parent tool event: explicitly repeat identity, root, availability and
 ownership in every stage/task. The handoff does not grant authorization, change
 cwd, load extensions, or give a child parent tools. Explicitly configured child
@@ -3405,12 +3791,79 @@ contains child execution evidence. This keeps the composer activity overview con
 without treating labels or generic extension array positions as ownership.
 
 Async lifecycle artifacts use one canonical `status.json`; its first JSON property is the
-bounded `lifecycleProjection` header. RuntimeSlot reads only a 32 KiB prefix for modern
-artifacts, structurally locates and parses only a complete header value bounded to 30 KiB,
-and never searches later keys or parses report-bearing status. Header-less old
-artifacts retain the bounded legacy reader. If a modern header supplies `sessionId`,
-it must exactly match the canonical parent session opened by that RuntimeSlot; the
-producer preserves this original owner through legitimate resumes. A foreign session
+bounded `lifecycleProjection` header. RuntimeSlot structurally admits a complete header
+from a 32 KiB prefix (header value at most 30 KiB). Parent identity follows the provider's
+path-first rule: `sessionId` exactly matches the resolved canonical parent session file,
+or the session UUID only when the slot has no file. File identities have a 4096-byte bound,
+not a UUID-sized bound. The producer preserves this owner through legitimate resumes.
+Within the existing 256 KiB document bound, native presentation reads the full status
+steps in launch order, keeping agent-role titles, model/thinking, task, path/output,
+attention and counters with Gateway's 32-per-node and 64-total child caps. Released
+workflows keep detached execution details in child status files rather than copying
+them into root steps. The same read owner joins a bounded single-child execution
+through its reciprocal workflow run/key, run ID, parent session, session owner and
+validated session file. Only display facts cross that edge; identity and order remain
+root-owned. Child detail is optional hydration: missing, malformed, foreign or
+unavailable status never refuses root admission or lifecycle publication. Each
+unavailable child contributes to the existing `lifecycleOmissions.children` partial
+count while its authoritative root edge remains present. The root observation owns
+bounded child subscriptions, each filtering parent-tree events to its exact edge;
+they observe missing directories' creation and later child-only writes without a
+root event.
+Edges retire only when the root removes them or its observation retires. Child
+watcher errors stay local and never stop the independent root watcher.
+An explicitly empty recent-tools list with no total represents zero tools before the
+first tool event. The header supplies ownership, not the compact widget's labels,
+ordering or eight-child limit.
+Run/tool identity must agree between header, full status and canonical launch binding.
+
+`src/sessions/subagent-parity.integration.test.ts` compares the managed selection's
+real RuntimeRegistry projections to `test-support/subagent-parity-old.json`. The same
+faux-parent/loopback-child script runs an async single and a three-child failure,
+question/answer and success workflow with progress and idle completion wakes. The comparator visits mounted process rows in canonical launch and producer-child order
+(no value sorting), comparing state/attention/visibility/mode/source, displayed
+model/thinking, current tool/path, output/error tail and truncation, counters,
+parent/child/control identity shape and timing presence. The transport's recency
+ordering is not a launch order: its random-ID/time tie-breaks remain in raw snapshots.
+Child task/control and host-step fields are compared alongside those rows. Transcript
+content parts and details, semantic classification/delivery, retained content classification/visibility and app-visible widget/status contents
+and component frames are compared, not just category labels. Subagent-owned retained
+state is excluded by native `ExtensionRetainedContentPolicy.content`; its private
+bytes are retained as evidence, not compared as app text. Native active/recent/problem
+counts are compared independently of private provider-frame counters.
+Settings includes skill/prompt rows and diagnostics plus agent discovery before,
+during and after an invalid definition. An idle real wake is gated before binding;
+a separate factory-API steering probe compares displayed queued input with ordinary
+maintainer input while retaining hidden wake authority in evidence.
+Execution-specific identities, temporary roots, timestamps and elapsed intervals are
+normalized; launch/child/widget order and authored text remain meaningful. Transport
+revision counters are not presentation values. Finite label/delivery allowances and
+exact OLD/NEW upstream value pairs in `test-support/subagent-parity-approved.json`
+cover only the approved dependency changes (including notification guidance,
+resource wording/catalog additions and removed-field
+warnings). There is no process-field or blanket content exemption. Idle decision/
+completion delivery must match OLD's triggeredTurn, and no wake transcript row is
+allowed. The report retains raw statuses, snapshots and canonical entries.
+This verifies Gateway wire/projection parity, not Swift layout or pill labels.
+`TronSubagentParityUITests` separately exercises rendered message details, process
+metadata/tool/path/output, private-frame exclusion, Settings skills/prompts/definition
+diagnostics and pending/queued wake suppression on bounded hosted fixtures. Those
+fixtures are not live Gateway-to-phone or physical-device evidence.
+
+To regenerate OLD, use the pinned Node with isolated HOME/TMPDIR and run
+`bash scripts/regenerate-subagent-parity.sh <read-only-0.59.0-package> <private-evidence-dir>`
+from this Gateway directory under the bounded command runner. It creates and removes
+its own detached `1dc07c210` pre-cutover worktree, installs that revision's SDK and the
+OLD package's exact dependencies, copies the shared driver unchanged, loads OLD as a
+user package (no managed admission), and writes the baseline plus `parity-old.json`.
+Then run `TRON_PARITY_REPORT=<private-evidence-dir>/parity-report.json npx vitest run
+src/sessions/subagent-parity.integration.test.ts --maxWorkers=2` under the same runner
+and isolated environment. A normal focused test run also compares NEW to the committed
+baseline without requiring the OLD installation or a second worktree.
+Oversized modern documents retain the existing compact lifecycle fallback; detailed
+native coverage therefore remains bounded and may be reduced on overflow, explicitly
+marked by `lifecycleOmissions.byteLimitExceeded=true`. Header-less
+artifacts retain the bounded document reader. A foreign session
 header is an ownership mismatch even when run, tool-call, and artifact path match; it
 cannot update children or settle/receipt the activity. Headers without `sessionId`
 remain subject to the existing exact run/tool/path ownership proof. A malformed,

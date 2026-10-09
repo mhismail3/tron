@@ -27,6 +27,48 @@ Tron runs it through `scripts/tron work`.
 Agent shells can inherit a PATH without Homebrew, which is why step 3 exists.
 Authentication stays in gh's own credential store.
 
+## GitHub writes and the local audit
+
+Every GitHub mutation made by this tool uses `Gh`, which records the attempt
+before invoking `gh` and appends its terminal outcome afterwards. This covers
+all typed work commands (claim/status/comment, receipt publication, bootstrap,
+landing, handoff and cleanup-related reads/writes); callers do not construct an
+alternate `gh` writer. It is deliberately not a generic `work gh` passthrough.
+
+The append-only JSONL audit lives in the repository's private Git common
+metadata at `work/github-writes.jsonl`, shared safely by linked worktrees. A
+separate lock file serializes each append across threads and processes. Each
+mutation has a stable random ID, timestamp, operation class and an `attempt`
+record followed by `succeeded`, `failed` or `uncertain`; an interrupted command
+therefore remains visibly attempted, never silently successful. A single
+request rejected with HTTP 4xx is failed. Compound CLI operations that can
+commit a sub-write before a later rejection (including `issue close --comment`)
+are uncertain on any command failure; transport/opaque errors are also
+uncertain. No request body, credential, CLI arguments, response body, or issue
+text enters the audit. Files are owner-only, symlinks are refused, and history
+is capped at 16 MiB. Capacity is reserved for terminal outcomes before a
+mutation starts; a full, malformed, or unwritable audit refuses the GitHub
+mutation instead of dropping history.
+
+`scripts/tron work comment <issue> --body-file <markdown>` is the typed command
+for public progress/evidence comments. It bounds and privacy-checks the body
+with the configured scrub command before GitHub is called, and suppresses guard
+output so private offending text is not copied to the terminal. Read operations
+such as `work issues` remain reads and do not appear in the audit.
+
+### Failure modes
+
+`test_gh.py` runs the real CLI/GitHub boundary against an executable stand-in.
+It checks that reads are not audited, every CLI/REST/GraphQL mutation has
+attempt and outcome records, concurrent writers produce complete records,
+privacy refusal prevents a public write, rejected and ambiguous/partial errors
+remain distinct, payloads are absent, well-formed full and reservation-bearing
+audits refuse writes, and admitted records stay within the bound. A compound
+fixture commits a comment-like side effect before returning HTTP 422 and proves
+its result is `uncertain`, not `failed`. Malformed audit refusal is a separate
+case. The stand-in does not prove remote GitHub availability or server-side
+behavior.
+
 ## `bootstrap`
 
 Declares the tracking vocabulary, and converges GitHub to it when you pass
@@ -250,7 +292,7 @@ the GitHub side.
 
 ## `verify`
 
-`scripts/tron work verify [--post] [--evidence-manifest <json>]` validates the
+`scripts/tron work verify [--jobs N] [--post] [--evidence-manifest <json>]` validates the
 committed head of the current branch and writes a receipt for that exact commit.
 Before loading or selecting checks, it rejects inherited environment values that
 resolve into a live Tron home; the Gateway's shared path policy also guards its
@@ -271,8 +313,21 @@ Vitest configurations and Node test scripts.
 4. **Placeholders.** `{paths}` expands to the shell-quoted absolute paths of the
    changed files that matched this check and still exist at the head.
    `{merge_base}` expands to the merge-base commit.
-5. **Run.** Each required check runs in its own process group. Its combined
-   output goes to `<git-dir>/work/logs/<head>/<check>.log`, where `<git-dir>` is
+5. **Run.** Required, non-carried checks run concurrently. The default bound is
+   `max(1, min(4, host CPU count, physical RAM / 8 GiB rounded down))`; if RAM
+   cannot be determined, it uses one worker. `--jobs N` overrides this bound
+   with a positive integer; `--jobs 1` runs sequentially. The bound does not
+   replace the native tools' live-memory admission or leases: exit 73 remains
+   a refusal, never an automatic retry, and lease waits count in check time.
+   Checks sharing an optional `exclusiveGroup` name in `.github/work.json`
+   never overlap within one invocation. Optional nonempty `exclusivePaths`
+   restricts membership to diffs matching those globs (and requires a group).
+   Blocked checks do not occupy workers;
+   later independent checks can start. A failed check never cancels siblings.
+   Start lines follow eligible configuration order; the final result lines,
+   receipt and evidence table follow configuration order, not completion order.
+   Each check runs in its own process group, retired on settlement or interruption.
+   Its combined output goes to `<git-dir>/work/logs/<head>/<check>.log`, where `<git-dir>` is
    `git rev-parse --git-dir`, so every worktree keeps its own logs. The receipt
    is `<git-dir>/work/receipts/<head>.json`. It records the head, the base
    branch tip, the merge-base, the changed paths, a hash of the verify
@@ -284,7 +339,10 @@ Vitest configurations and Node test scripts.
    receipt whose commit `P` is an ancestor of the head and whose configuration
    hash is identical. A required check is carried from `P` instead of run when it
    passed there, it is not `always`, and none of the paths changed between `P`
-   and the head match its globs. Those paths include everything an update from
+   and the head match its globs. Workers run `scripts/tron work verify` at
+   their final commit, before handing off to `land`. A merge of the base carries
+   unaffected checks, including already-carried checks with their original
+   provenance; matching incoming paths rerun their checks. Those paths include everything an update from
    the base branch brought in. After a rebase `P` is no longer an ancestor, so
    nothing is carried. A check's globs must therefore cover everything its
    result depends on, including the scripts it calls.
@@ -442,8 +500,24 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   `test-without-building` for `TronMacTests`, as in the Mac development guide.
   Checks call the owning script directly rather than the `scripts/tron`
   dispatcher, so a dispatcher edit does not rebuild the Mac app. The isolated
-  Mac script fixtures that need no staged payload run as their own check.
-  Packaging checks that need a staged Gateway payload stay with the macOS CI job.
+  Mac script fixtures that need no staged payload run as `mac-scripts` on its
+  existing paths. `mac-bundle-rebuild` runs the real bundle rebuild/refusal test
+  only for packaging inputs: bundler/staging/verification helpers, launcher and
+  login-item resources, Node/npm/toolchain pins, dependency manifests, provider
+  artifacts/installers, and protocol/push/deploy/receipt helpers exercised by
+  the build. Ordinary Gateway sources and deployment tests do not select it.
+  Gateway, scale, provider verification, Mac and bundle-rebuild share the
+  `gateway-source-tree` exclusive group: `npm ci` and Xcode's bundle preparation
+  mutate dependencies/payloads, and the rebuild test temporarily changes a
+  provider installer. Native leases alone do not protect those shared inputs.
+  Ordinary iOS owns a separate simulator lane/admission and can run concurrently.
+  Its `exclusivePaths` join that group only for real Gateway fixture inputs:
+  those runners also install/build the in-place Gateway tree. A regression
+  compares the configured paths with the iOS selection owner's trigger list,
+  so adding a fixture trigger cannot silently bypass exclusion. Deploy and fast
+  Mac tests own temporary fixture trees; they do not mutate the source Gateway.
+  These groups serialize shared files, not all host work. Packaging coverage
+  also remains in the macOS CI job.
 - **Scripts** run their owning `scripts/test-*` suite where one exists. Scripts
   without an owner (`scripts/tron`, `scripts/tron-dev`, the hook installer and a
   few one-off tools) get a syntax check only.
@@ -452,7 +526,22 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 - The privacy guard, agent policy, documentation policy and `git diff --check`
   over the branch diff always run.
 
+To measure sequential versus default scheduling without carry-over, use two
+fresh worktrees at the same commit, running `verify --jobs 1` in one and `verify`
+in the other. Each worktree has its own Git-directory receipts, so neither run
+carries results from the other. This forces the checks required by that branch's
+diff, not unrelated checks. Do not delete evidence or alter check inputs just to
+force a measurement. Worker count is an execution choice, not a configuration
+hash input: changing `--jobs` does not invalidate already-passing receipts.
+
 ### Failure modes
+
+`ParallelCheckTests` in `test_verify.py` exercises real sleeping/failed subprocess
+checks and temporary Git histories: independent overlap, sequential override,
+exclusive-pair ordering without idle-worker blocking, aggregated failures
+(including exit 73), interruption disposal, configuration validation, carried
+provenance across a merge, and the Mac bundle/fast-script selection split. These
+protect the scheduling and selection boundaries without starting native builds.
 
 `test_verify.py` checks these against real temporary repositories, local bare
 remotes and a fake `gh` (`WORK_GH`) that records every call. The live E2E
@@ -715,6 +804,51 @@ lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
 52. **Success output is not pure JSON.** On success stderr is empty and stdout
     holds only the bounded corpus.
 
+## `issue` and `project` mutations
+
+Use these typed commands instead of direct `gh` writes:
+
+- `issue create --title <title> --body-file <md> --kind kind:* --visibility visibility:* --area area:* [--area area:* ...] [--type task|epic]` files a task with exactly one declared kind and visibility label and one or more declared area labels, plus `needs-triage`. Repeat `--area` for each affected area. An epic receives only the `epic` and `needs-triage` labels and no task taxonomy. Titles and bodies are bounded and scrubbed before creation. A newly filed issue is not implicitly approved or added to the Project.
+- `issue labels <issue> [--add <declared-label>] [--remove <label>]` changes classifications and triage labels. New labels must be declared. Issue-type labels are fixed at creation; non-epics must retain exactly one declared kind and visibility label plus one or more declared area labels. A stale undeclared label may be removed. Writes use GitHub's targeted add/remove endpoints rather than replacing a stale whole label set, so unrelated concurrent label changes are preserved. Taxonomy changes re-read under a private process lock shared by linked worktrees; ordinary flag changes can overlap safely.
+- `project add <issue>` adds the issue idempotently to the configured repository-linked work Project.
+- `project set <issue> [--status Proposed|Ready|Needs you|Blocked] [--priority P0|P1|P2|P3]` assigns only unclaimed statuses. `start` owns In progress, `land` owns In review and Done. Ready is only for maintainer-approved work inside approved scope after blockers close. Every requested live field and option is resolved before the first mutation; partial two-field updates report exactly which field succeeded if a request later fails, and rerunning is safe.
+- `issue parent <task> --epic <epic>` creates the native parent/sub-issue relationship after validating the labels. `issue block <issue> --blocked-by <blocker>` creates GitHub's native blocked-by relation. Both are idempotent.
+
+A new task normally follows this sequence: `issue create`, `project add`,
+`project set --status Proposed --priority P2`, and optional `issue parent` /
+`issue block`. Promotion to Ready is a separate, explicitly approved action.
+Triage changes the complete label classification in one `issue labels` call,
+then assigns Status/Priority with `project set`, and links the issue if needed.
+For a maintainer decision, add `needs-decision`, set Needs you and post the
+scrubbed question with `work comment`. Each GitHub mutation is individually
+audited; multi-request commands explain completed fields on partial failure.
+Each REST label delta and Project field mutation is audited separately; when a
+later request fails, the command identifies completed label deltas or fields.
+No generic argument passthrough is provided.
+
+`test_tracking.py` uses the real CLI boundary with an executable GitHub stand-in
+to exercise issue filing with multiple areas, taxonomy authorization, area
+preservation during unrelated flag changes, overlapping independent label
+additions, Project add and field selection, parent/blocker links, audit
+completeness, live-option preflight and partially completed Project updates.
+Controlled reads prove concurrent flags survive on the remote fixture, and
+schema drift proves no field is changed before validation completes. The
+stand-in does not substitute for live API/schema validation.
+
+## `comment`
+
+`scripts/tron work comment <issue> --body-file <markdown>` posts one public
+issue comment. It accepts only a positive issue number and a nonempty UTF-8 body
+up to 64 KiB. The configured privacy guard runs before any GitHub call; a
+refusal reports only that the guard refused, not the guard's potentially
+sensitive matching lines. The command requires `WORK_SESSION_ID` or
+`PI_SESSION_ID` and appends a work-session marker, so milestone comments retain
+agent attribution. The comment is sent on stdin rather than as a process
+argument. The common `Gh` boundary audits the operation without retaining its
+body. This is the supported agent path for reproduced, candidate, blocked and
+other milestone evidence; GitHub reads remain available through read-only
+commands.
+
 ## `land`
 
 `scripts/tron work land [--title <title>] [--summary-file <path>]
@@ -738,7 +872,15 @@ as does `acceptance` for the journeys it can run.
      `--irreducible` without `--needs-user-validation`;
    - `--acceptance` names no journeys, or an id the registry does not hold;
    - the scrub command (`verify.scrubCommand`) finds anything in the title,
-     the summary, the validation text or the acceptance evidence.
+     the summary, the validation text or the acceptance evidence;
+   - an issue labeled `kind:bug` has a Summary without exactly one non-empty,
+     top-level `## Repro`, `## Cause` and `## Fix` section in that order. Fenced
+     examples, nested headings and a user-authored `## Verification` do not
+     satisfy this contract. The separate `## Verification` section is generated
+     from the passing receipt. This is checked before publication, push or PR
+     create/edit; adopting an existing PR, resuming a merged PR and stewarding a
+     merge check the stored body too. Other issue kinds keep the existing freeform
+     summary contract.
 2. **Update.** It fetches the remote base branch and, when the branch does not
    contain its tip, merges it in. It merges rather than rebases, so the
    incremental re-verify can carry over checks whose inputs did not change. On
@@ -1065,6 +1207,26 @@ Project state and records every call. The live E2E covers GitHub itself.
     irreducible part and then the check, and the handoff comment carries both;
     a resumed land compares that whole section with the merged body, so a
     resume cannot quietly drop or change the irreducible part.
+79. **A malformed bug summary is published or merged.** `test_land.py` runs
+    the real `cli.py land` process against its isolated Git/fake-GitHub fixture.
+    It refuses missing or empty sections (including headings/content hidden in
+    comments, a sibling heading with no section body, empty fenced blocks,
+    unclosed comments/fences and fence trailers that are not valid closers),
+    reordered/nested/fenced headings, duplicate wrapper headings and a
+    user-supplied Verification heading before publication. It checks adopted
+    open and merged PR bodies as well. Only CR/LF Markdown line endings split
+    lines; Unicode separators remain text. ATX headings and fence delimiters
+    accept valid zero-to-three-space indentation only; four-space and
+    tab-indented code is never structural. Closing ATX hashes require preceding
+    whitespace, and raw `<pre>` blocks remain literal rather than supplying
+    sections. A closing fence may trail only ASCII spaces or tabs; other Unicode
+    whitespace is payload, not a delimiter. Raw `<pre>` blocks keep their
+    contents literal, and an unclosed raw block is rejected so it cannot hide
+    generated sections. Non-empty fenced evidence—including heading-shaped
+    literal output—and balanced harmless comments remain valid.
+    Valid non-bug summaries remain unchanged;
+    stewarding and merged-resume paths preserve the generated Verification and
+    Maintainer validation sections.
 
 ## `cleanup`
 

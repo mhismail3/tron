@@ -260,6 +260,9 @@ export type ChatDirection = "inboundContext" | "agentOutput" | "agentInvocation"
 export type ChatContextEffect = "none" | "modelInput" | "hiddenModelInput" | "toolResult";
 export type ChatDelivery = "stored" | "nextTurn" | "steer" | "followUp" | "triggeredTurn" | "continuedTurn" | "beforeAgentStart" | "toolResult" | "unknown";
 export type ChatOriginKind = "user" | "subagent" | "extension" | "process" | "gateway" | "assistant" | "unknown";
+// Released protocol-7 iOS clients decode this vocabulary as a closed enum and
+// reject the whole snapshot on an unknown value. Express new row classes through
+// existing axes (direction/visibility/origin) or a protocol version change.
 export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "unknown";
 
 export interface ChatOrigin {
@@ -288,6 +291,8 @@ export interface ChatSemanticMetadata {
 }
 
 export interface ContextDeliveryMetadata {
+  /** Exact canonical user entry of a receipt-bound internal wake, when present. */
+  wakeEntryId?: string;
   source: "extension";
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
@@ -680,6 +685,9 @@ export interface ExtensionOwner {
   id: string;
   title: string;
   source: string;
+  /** Gateway-classified capability, independent of the package source spelling.
+   * Canonical receipts written before classification may omit it. */
+  kind?: "extension" | "subagent";
 }
 
 export interface ExtensionWidget {
@@ -728,7 +736,7 @@ export interface ExtensionSurface {
   placement: ExtensionSurfacePlacement;
   lifecycle: "retained" | "blocking" | "transient" | "restored";
   targetId?: string;
-  provenance?: { source?: string; path?: string };
+  provenance?: { source?: string; path?: string; kind?: "subagent" | "extension" };
   revision: number;
   focused: boolean;
   inputMode: "none" | "keys" | "textAndKeys";
@@ -833,6 +841,8 @@ export interface ResourceInvocation {
 }
 
 export interface QueuedMessageState {
+  /** Internal producer inputs retain their invocation semantics before binding. */
+  semantic?: ChatSemanticMetadata;
   id: string;
   behavior: "steer" | "followUp";
   text: string;
@@ -848,6 +858,8 @@ export interface QueuedMessageState {
 /** A prompt admitted before its canonical user entry exists, usually while
  * Pi performs automatic compaction during prompt preflight. */
 export interface PendingPromptState {
+  /** Internal producer inputs retain their invocation semantics before binding. */
+  semantic?: ChatSemanticMetadata;
   id: string;
   createdAt?: string;
   behavior?: "steer" | "followUp";
@@ -1011,6 +1023,12 @@ export interface TronModuleSummary {
  * `resources` inventory stays authoritative for every resolved path — and each
  * kind is capped. A kind whose source failed to resolve is empty, and the
  * response carries one bounded `providesDiagnostic`. */
+/** A configured user package excluded from execution by Tron's managed owner. */
+export interface PackageConflict {
+  code: "managed-provider";
+  message: string;
+}
+
 export interface PackageProvides {
   skills: string[];
   prompts: string[];
@@ -1089,6 +1107,9 @@ export interface HomeOpen {
 }
 
 export interface HomeStatus {
+  /** Process-owned task recovery projection; refusal fences only task surfaces
+   * until the next Gateway start, never ordinary session readiness. */
+  taskRecovery?: { available: true } | { available: false; reason: string };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
@@ -1102,6 +1123,7 @@ export interface HomeStatus {
   sessionId?: string;
   bindingRevision?: number;
   generation?: number;
+  routeGeneration?: number;
   model?: ModelRef;
   chapter?: {
     count: number;

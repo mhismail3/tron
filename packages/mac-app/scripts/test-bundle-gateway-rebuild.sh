@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Two real builds, then refused runtime mutations. Runs in this checkout and
-# restores the valid published runtimes on every exit. The first build downloads
-# Node; --skip-download skips runtime downloads, not production npm installation.
+# Three real builds, stale-receipt refusal, then refused runtime mutations. Runs
+# in this checkout and restores the valid published runtimes on every exit. The
+# first build downloads Node; --skip-download skips downloads, not npm install.
 # Retains packages/mac-app/test-results/bundle-gateway-rebuild.log.
+# --cleanup-only exercises disposal without downloading or building a payload.
 set -euo pipefail
+cleanup_only=0
+if [[ "${1:-}" == --cleanup-only && $# == 1 ]]; then
+    cleanup_only=1
+elif (($#)); then
+    echo 'usage: test-bundle-gateway-rebuild.sh [--cleanup-only]' >&2
+    exit 64
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
@@ -18,6 +26,9 @@ source "$REPO_ROOT/config/ci-toolchain.env"
 mkdir -p "$RESULTS_DIR"
 : > "$LOG"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-bundle-rebuild.XXXXXX")"
+INSTALLER_SOURCE="$GATEWAY_DIR/scripts/install-pi-subagents.mjs"
+cp -p "$INSTALLER_SOURCE" "$TMP/install-pi-subagents.mjs"
+installer_dirty=0
 tampered=0
 restore_runtime() {
     chmod u+w "$PAYLOAD_DIR/runtime"
@@ -37,6 +48,7 @@ restore_runtime() {
 }
 restore() {
     local status=$?
+    if ((installer_dirty)); then cp -p "$TMP/install-pi-subagents.mjs" "$INSTALLER_SOURCE"; fi
     if ((tampered)); then restore_runtime; fi
     find "$TMP" -type d -exec chmod u+w {} +
     rm -rf "$TMP"
@@ -76,11 +88,80 @@ print(digest.hexdigest())
 PY
 }
 
+step "cleanup removes immutable nested trees without following symlinks or holding ancestor streams"
+fixture="$TMP/cleanup-repository"
+mkdir -p "$fixture/config" "$fixture/packages/mac-app/scripts"
+cp "$REPO_ROOT/.node-version" "$fixture/"
+cp "$REPO_ROOT/config/ci-toolchain.env" "$REPO_ROOT/config/GatewayProtocol.json" "$fixture/config/"
+cp "$SCRIPT_DIR/bundle-gateway.sh" "$fixture/packages/mac-app/scripts/"
+python3 - "$fixture" <<'PY'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+payload = root / 'packages/mac-app/Sources/Resources/Gateway'
+leaf = payload.joinpath(*(['nested'] * 64))
+leaf.mkdir(parents=True)
+(leaf / 'original').write_text('original')
+target = root / 'outside'
+target.mkdir()
+(target / 'sentinel').write_text('untouched')
+(payload / 'external-link').symlink_to(target, target_is_directory=True)
+for directory in [leaf, *leaf.parents]:
+    if directory == payload.parent:
+        break
+    directory.chmod(0o555)
+PY
+# Each directory used to retain a shell stream plus a producer subprocess until
+# every descendant finished. Disposal must not consume descriptors with depth.
+(ulimit -n 16; bash "$fixture/packages/mac-app/scripts/bundle-gateway.sh" --clean) >>"$LOG" 2>"$TMP/cleanup-errors" || { cat "$TMP/cleanup-errors" >>"$LOG"; fail "bounded-descriptor cleanup failed"; }
+cat "$TMP/cleanup-errors" >>"$LOG"
+[[ ! -s "$TMP/cleanup-errors" ]] || fail "cleanup emitted filesystem or descriptor errors"
+[[ ! -e "$fixture/packages/mac-app/Sources/Resources/Gateway" ]] || fail "cleanup left generated payload residue"
+[[ "$(cat "$fixture/outside/sentinel")" == untouched ]] || fail "cleanup followed an external symlink"
+if ((cleanup_only)); then
+    step "passed: bounded-descriptor immutable tree cleanup"
+    exit 0
+fi
+
 install_args=(--skip-install)
 [[ -d "$GATEWAY_DIR/node_modules" && -f "$GATEWAY_DIR/dist/index.js" ]] || install_args=()
 step "first build downloads the pinned runtimes"
 bundle ${install_args[@]+"${install_args[@]}"} || fail "first build failed"
 first_epoch="$(manifest_field runtimeEpoch)"
+
+step "read-only verify works without a source Node/npm toolchain"
+valid_payload_snapshot="$(snapshot)"
+valid_launcher_sha="$(sha "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")"
+set +e
+PATH="/usr/bin:/bin" HOME="$TMP/no-source-home" NVM_DIR="$TMP/no-source-nvm" \
+    TRON_NODE_BIN="$TMP/no-source-node/bin/node" \
+    "$SCRIPT_DIR/bundle-gateway.sh" --verify-only >"$TMP/verify-without-source-node.log" 2>&1
+verify_status=$?
+set -e
+cat "$TMP/verify-without-source-node.log" >> "$LOG"
+[[ "$verify_status" -eq 0 ]] || fail "read-only verification required an ambient/source Node/npm toolchain (status $verify_status)"
+[[ "$(snapshot)" == "$valid_payload_snapshot" ]] || fail "read-only verification changed the published tree"
+[[ "$(sha "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")" == "$valid_launcher_sha" ]] || fail "read-only verification changed the published launcher"
+[[ -z "$(leftovers)" ]] || fail "read-only verification left temporary publication roots: $(leftovers)"
+if grep -Eq 'installing locked gateway dependencies|downloading pinned Node' "$TMP/verify-without-source-node.log"; then
+    fail "read-only verification attempted an install or download"
+fi
+
+step "Mac verification refuses a receipt after its copied provider installer is reverted"
+chmod u+w "$INSTALLER_SOURCE"
+printf '\n// temporary receipt regression\n' >> "$INSTALLER_SOURCE"
+installer_dirty=1
+bundle --skip-install --skip-download || fail "dirty provider-helper build failed"
+dirty_payload_snapshot="$(snapshot)"
+cp -p "$TMP/install-pi-subagents.mjs" "$INSTALLER_SOURCE"
+installer_dirty=0
+set +e
+"$SCRIPT_DIR/bundle-gateway.sh" --verify-only >"$TMP/reverted-provider-input.log" 2>&1
+stale_receipt_status=$?
+set -e
+cat "$TMP/reverted-provider-input.log" >> "$LOG"
+[[ "$stale_receipt_status" -eq 78 ]] || fail "Mac verification accepted a receipt from a reverted provider helper (status $stale_receipt_status)"
+grep -q 'build-input receipt does not match current build inputs' "$TMP/reverted-provider-input.log" || fail "stale receipt refusal did not name changed provider build inputs"
+[[ "$(snapshot)" == "$dirty_payload_snapshot" ]] || fail "read-only stale receipt verification changed the published payload"
 
 step "second build reuses the published runtimes (--skip-install --skip-download)"
 bundle --skip-install --skip-download || fail "second build with --skip-download failed"
@@ -145,10 +226,13 @@ PY
     status=$?
     set -e
     cat "$attempt_log" >> "$LOG"
+    # Check owned resources before status so residue names the broken lifecycle
+    # even when cleanup has overwritten the intended refusal status.
+    [[ ! -e "$RESOURCES_DIR/.tron-gateway-bundle.lock" ]] || fail "$mutation refusal left its build lock"
+    [[ -z "$(leftovers)" ]] || fail "$mutation refusal left private roots: $(leftovers)"
     [[ $status -eq $expected_status ]] || fail "$mutation was not refused with status $expected_status (status $status)"
     grep -q "$diagnostic" "$attempt_log" || fail "$mutation refusal did not name its cause"
     [[ "$(snapshot)" == "$published_snapshot" ]] || fail "$mutation refusal changed the published tree"
-    [[ -z "$(leftovers)" ]] || fail "$mutation refusal left private roots: $(leftovers)"
     restore_runtime
 done
 bundle --verify-only || fail "restored payload does not verify"

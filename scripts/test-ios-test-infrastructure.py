@@ -3426,6 +3426,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         fixture (`Failed to load native module`, which hides the dlopen cause),
         so the toolchain failure is attributed to the fixture and no signal
         names the real error.
+    26. A fault proxy that exits during startup is reported only as a generic
+        message, without its process status or the tail of its stderr.
     """
 
     def setUp(self) -> None:
@@ -3503,6 +3505,11 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
 const http = require("node:http");
 process.title = `node ${{process.env.FAKE_E2E_NODE_ENTRY}}`;
 const controlFailure = "{self.fixture_knob("proxy-control-failure")}";
+const startupFailure = "{self.fixture_knob("proxy-startup-failure")}";
+if (fs.existsSync(startupFailure) && fs.readFileSync(startupFailure, "utf8").trim() === "1") {{
+  console.error("fixture proxy startup failure evidence");
+  process.exit(42);
+}}
 const server = http.createServer((request, response) => {{
   if (request.url === "/_fixture/control") {{
     // The harness reads the owned proxy's link statistics as journey evidence.
@@ -3709,7 +3716,8 @@ exec "{real_node}" "$@"
         # A fixture process inherits no case environment (#445): the two knobs its
         # fakes read become the files the generated sources read.
         for variable, knob in (("FAKE_E2E_GATEWAY_CONNECTIONS", "connection-counts"),
-                               ("FAKE_E2E_PROXY_CONTROL_FAILURE", "proxy-control-failure")):
+                               ("FAKE_E2E_PROXY_CONTROL_FAILURE", "proxy-control-failure"),
+                               ("FAKE_E2E_PROXY_STARTUP_FAILURE", "proxy-startup-failure")):
             if variable in extra:
                 self.fixture_knob(knob).write_text(extra.pop(variable) + "\n")
         environment.update(extra)
@@ -3740,6 +3748,14 @@ exec "{real_node}" "$@"
         except FileNotFoundError:
             return []
         return [line for line in lines if line.startswith("uninstall ")]
+
+    def test_proxy_startup_failure_reports_process_status_and_stderr_tail(self) -> None:
+        """Failure mode 26: proxy startup failure retains its actionable cause."""
+        environment = self.ui_environment(FAKE_E2E_PROXY_STARTUP_FAILURE="1")
+        result = self.e2e("prepare", environment=environment)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("owned fault proxy exited (exit code 42)", result.stderr)
+        self.assertIn("fixture proxy startup failure evidence", result.stderr)
 
     def test_run_ui_builds_the_ui_plan_and_patches_the_ui_target(self) -> None:
         """Failure modes 17 and 18: the UI runner, not the hosted unit runner,

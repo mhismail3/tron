@@ -287,7 +287,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
 
@@ -347,7 +347,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await home.writeLocked(authoritative);
     item.faux.setResponses([item.response("first reserved response")]);
     await firstSlot.prompt("first reserved prompt without operation permit");
-    await waitUntil(() => !firstSlot.isBusy);
+    await waitUntil(() => firstSlot.snapshot().configurationBlocker === null);
     expect(existsSync(firstSlot.sessionFile!)).toBe(true);
     expect(firstSlot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "user"))
       .toBe(true);
@@ -363,7 +363,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
     const unknownPath = join(dirname(item.slot.sessionFile!), "unreadable-candidate.jsonl");
@@ -388,7 +388,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       ...current,
       chapters: [
         { ...current.chapters[0]!, state: "sealed", sealedAt: new Date().toISOString() },
-        { sessionId: reservedId, ordinal: 2, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: reservedId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
     const refused = owner.recordReservedChapterPath.bind(owner);
@@ -404,7 +404,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("disabled-sealed-chapter", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);
     await item.slot.prompt("canonical baseline input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await item.registry.homeOwner().disable();
     const owner = item.registry.homeOwner() as unknown as { writeLocked(record: HomeRecord): Promise<void> };
     const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
@@ -414,7 +414,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
         ...current.chapters.map(chapter => chapter.sessionId === item.slot.id
           ? { ...chapter, state: "sealed" as const, sealedAt: new Date().toISOString() }
           : chapter),
-        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", createdAt: new Date().toISOString() },
+        { sessionId: "reserved-successor", ordinal: current.chapters.length + 1, state: "reserved", activationStarted: false, createdAt: new Date().toISOString() },
       ],
     });
     expect(item.registry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
@@ -452,7 +452,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("sealed-mutation-paths", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);
     await item.slot.prompt("canonical baseline input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
 
     const runtime = item.slot as unknown as {
       dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
@@ -543,7 +543,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("sealed-custom-entry", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);
     await item.slot.prompt("canonical baseline input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
 
     const runtime = item.slot as unknown as {
       dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
@@ -579,7 +579,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("staged-custom-entry-failure", { home: true });
     item.faux.setResponses([item.response("canonical baseline")]);
     await item.slot.prompt("canonical baseline input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
 
     const runtime = item.slot as unknown as {
       dependencies: { homeChapterState?: (sessionId: string) => { sessionId: string; sealed: boolean } };
@@ -622,7 +622,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       const text = `C21 image input blocked=${blocked}`;
       const before = item.requests.length;
       await item.slot.prompt(text, [image]);
-      await waitUntil(() => !item.slot.isBusy);
+      await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
       const requests = item.requests.slice(before);
       item.record("C21", { autoResize: false, blocked, requests, refusals: item.policy()!.refusalLog() });
       expect(requests).toHaveLength(1);
@@ -640,7 +640,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c22", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C22 prior input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const policy = item.policy()!;
     policy.admit("c22", null);
     const prepared = policy.wrapPrepareRequest(item.session, undefined);
@@ -684,14 +684,14 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       const homeStart = item.requests.length;
       item.faux.setResponses([item.response("home response")]);
       await item.slot.prompt(text, [image]);
-      await waitUntil(() => !item.slot.isBusy);
+      await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
       const homeRequests = item.requests.slice(homeStart);
       expect(homeRequests).toHaveLength(1);
       const homeRequest = homeRequests.at(-1);
       const ordinaryStart = item.requests.length;
       item.faux.setResponses([item.response("ordinary response")]);
       await ordinary.slot.prompt(text, [image]);
-      await waitUntil(() => !ordinary.slot.isBusy);
+      await waitUntil(() => ordinary.slot.snapshot().configurationBlocker === null);
       const ordinaryRequests = item.requests.slice(ordinaryStart);
       expect(ordinaryRequests).toHaveLength(1);
       const ordinaryRequest = ordinaryRequests.at(-1);
@@ -722,9 +722,9 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c1");
     item.faux.setResponses([item.response("first activation response"), item.response("second activation response")]);
     await item.slot.prompt("C1 first activation input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await item.slot.prompt("C1 second activation input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = {
       providerRequests: item.requests.length,
       roleSequences: item.requests.map((request) => request.roles),
@@ -742,13 +742,13 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c2", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C2 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     item.faux.setResponses([
       async (context) => { item.requests.push(record(context)); return fauxAssistantMessage(fauxToolCall("read", { path: "note.txt" })); },
       async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("after the tool"); },
     ]);
     await item.slot.prompt(longInput("C2 second activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const transformObservations = item.policy()?.transformLog() ?? [];
     const activationRequest = item.requests[1]!;
     const toolStepRequest = item.requests[2]!;
@@ -794,7 +794,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open(`home-identity-${enabled}`, { home: true });
     item.faux.setResponses([item.response("identity baseline")]);
     await item.slot.prompt("identity baseline input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     if (!enabled) await item.registry.homeOwner().disable();
     const manager = (item.slot as unknown as { sessionManager: AgentSession["sessionManager"] }).sessionManager;
     const originalId = item.slot.id;
@@ -851,7 +851,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c3", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C3 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let entered = false;
@@ -869,7 +869,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await item.slot.prompt("C3 steering text", [], "steer");
     release();
     await prompting;
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const finalRequest = item.requests.at(-1)!;
     const row = {
       providerRequests: item.requests.length,
@@ -891,7 +891,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c4", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C4 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let entered = false;
@@ -911,7 +911,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await item.slot.prompt("C4 follow-up text", [], "followUp");
     release();
     await prompting;
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const finalRequest = item.requests.at(-1)!;
     const row = {
       providerRequests: item.requests.length,
@@ -930,7 +930,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c14", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C14 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let entered = false;
@@ -950,7 +950,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await item.slot.prompt("C14 follow-up text", [], "followUp");
     release();
     await prompting;
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const policy = item.policy()!;
     const openAfterFollowUp = policy.currentOperationId() ?? null;
     const idleAfterFollowUp = item.slot.snapshot().phase === "idle";
@@ -960,7 +960,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       { customType: "idle-turn", content: "idle extension turn", display: false },
       { triggerTurn: true },
     ).catch(() => undefined);
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = {
       openActivationAfterFollowUp: openAfterFollowUp,
       idleAfterFollowUp,
@@ -980,13 +980,13 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c5", { home: true, memory: true, retryBaseDelayMs: 1 });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C5 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     item.faux.setResponses([
       async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" }); },
       async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("recovered after retry"); },
     ]);
     await item.slot.prompt(longInput("C5 second activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const last = item.requests.at(-1)!;
     const row = {
       providerRequests: item.requests.length,
@@ -1019,7 +1019,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     });
     item.faux.setResponses([item.response("first activation response")]);
     await item.slot.prompt(longInput("C7 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await item.memoryStatus()).blocked !== undefined);
     const requestsBefore = item.faux.state.callCount;
     const autoRetryStarts: Array<Record<string, unknown>> = [];
@@ -1031,7 +1031,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       () => ({ rejected: false, message: "" }),
       (error: unknown) => ({ rejected: true, message: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }),
     );
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const entries = await item.entries();
     const messages = entries.filter((entry) => (entry as { type?: string }).type === "message").map((entry) => (entry as { message?: Record<string, unknown> }).message!);
     const errorEntry = messages.find((message) => message.role === "assistant" && message.stopReason === "error");
@@ -1068,7 +1068,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       () => ({ rejected: false, message: "" }),
       (error: unknown) => ({ rejected: true, message: error instanceof Error ? `${error.name}: ${error.message}` : String(error) }),
     );
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = {
       providerRequests: item.faux.state.callCount,
       refusalReason: item.policy()?.refusalLog().at(-1)?.reason ?? null,
@@ -1093,7 +1093,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     );
     item.faux.setResponses([async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("must never be produced"); }]);
     await item.slot.prompt(longInput("C7c activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = { configureOutcome: outcome, providerRequests: item.faux.state.callCount, memoryStatus: await item.memoryStatus() };
     item.record("C7c", row);
     expect(outcome).toContain("virtual model");
@@ -1147,7 +1147,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c9", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C9 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const callsBefore = item.faux.state.callCount;
     // `sendCustomMessage(..., { triggerTurn: true })` is the SDK path an extension
     // uses: it starts a run without Tron's prompt admission.
@@ -1155,7 +1155,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       { customType: "idle-turn", content: "idle extension turn", display: false },
       { triggerTurn: true },
     );
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const entries = await item.entries();
     const messages = entries.filter((entry) => (entry as { type?: string }).type === "message").map((entry) => (entry as { message?: Record<string, unknown> }).message!);
     const row = {
@@ -1176,9 +1176,9 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const ordinary = await item.extra("ordinary");
     item.faux.setResponses([item.response("first activation response"), item.response("second activation response")]);
     await ordinary.slot.prompt("C11 first activation input");
-    await waitUntil(() => !ordinary.slot.isBusy);
+    await waitUntil(() => ordinary.slot.snapshot().configurationBlocker === null);
     await ordinary.slot.prompt("C11 second activation input");
-    await waitUntil(() => !ordinary.slot.isBusy);
+    await waitUntil(() => ordinary.slot.snapshot().configurationBlocker === null);
     const row = {
       providerRequests: item.requests.length,
       roleSequences: item.requests.map((request) => request.roles),
@@ -1198,7 +1198,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       () => "accepted",
       (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error),
     );
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = {
       providerRequests: item.faux.state.callCount,
       outcome,
@@ -1214,13 +1214,13 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c13", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
     await item.slot.prompt(longInput("C13 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await item.slot.reload();
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const requestsBefore = item.requests.length;
     item.faux.setResponses([item.response("after reload")]);
     await item.slot.prompt(longInput("C13 second activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const afterReload = item.requests.slice(requestsBefore);
     const row = {
       providerRequests: item.requests.length,
@@ -1246,7 +1246,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     } });
     item.faux.setResponses([item.response("must not reach provider")]);
     await item.slot.prompt("C16 input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = { contextCalls, providerCalls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
     item.record("C16", row);
     expect(contextCalls).toBe(1);
@@ -1282,7 +1282,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       return item.response("real stream response")(context);
     }]);
     await item.slot.prompt("C17 input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const row = { contextCalls, replay: await replay, calls: item.faux.state.callCount, refusal: item.policy()!.refusalLog().at(-1)?.reason };
     item.record("C17", row);
     expect(contextCalls).toBe(1);
@@ -1319,7 +1319,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       item.response("after date"),
     ]);
     await item.slot.prompt("D3 use date");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const messages = (persisted as Array<{ message?: { role: string; content: unknown } }>).flatMap((entry) => entry.message ?? []);
     item.record("D3", { toolCalls, rolesAtToolCall: messages.map((m) => m.role) });
     expect(toolCalls).toBe(1);
@@ -1342,7 +1342,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.session.sessionManager.appendMessage({ role: "user", content: "CANONICAL-ONLY " + "x".repeat(100_000), timestamp: 0 });
     item.faux.setResponses([item.response("usage response")]);
     await item.slot.prompt("usage current input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     item.record("usage", { tokens, requestBytes: request.length });
     expect(item.faux.state.callCount).toBe(1);
     expect(request).not.toContain("CANONICAL-ONLY");
@@ -1354,7 +1354,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c18", { home: true, memory: true, heldSummarizer: true });
     item.faux.setResponses([item.response("activation one response"), item.response("activation two response")]);
     await item.slot.prompt(longInput("C18 first activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     // The compactor is parked inside the first node build, so the memory cannot
     // cover anything yet.
     await waitUntil(() => item.compactor.entered > 0);
@@ -1372,7 +1372,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const requestsWhileWaiting = item.requests.length;
     item.compactor.release?.();
     await second;
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const sent = item.requests.at(-1)!;
     const row = {
       requestsWhileWaiting,
@@ -1397,7 +1397,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const item = await open("c19", { home: true, memory: true, heldSummarizer: true });
     item.faux.setResponses([item.response("C19 prior reply")]);
     await item.slot.prompt(longInput("C19 prior activation"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await waitUntil(() => item.compactor.entered > 0);
     const enteredBefore = item.compactor.entered;
 
@@ -1432,7 +1432,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const before = await item.extra("ordinary", item.cwd);
     item.faux.setResponses([item.response("before home")]);
     await before.slot.prompt("negative control input");
-    await waitUntil(() => !before.slot.isBusy);
+    await waitUntil(() => before.slot.snapshot().configurationBlocker === null);
     const modelRef = { provider: PROVIDER, id: MODEL_ID };
     await item.registry.homeOwner().designate({ model: modelRef }, () => modelRef);
     await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
@@ -1441,7 +1441,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const after = await item.extra("ordinary", item.cwd);
     item.faux.setResponses([item.response("after home")]);
     await after.slot.prompt("negative control input");
-    await waitUntil(() => !after.slot.isBusy);
+    await waitUntil(() => after.slot.snapshot().configurationBlocker === null);
     const requestsAfter = [...item.requests];
     const row = {
       requestsBefore: requestsBefore.map((request) => request.roles),
@@ -1468,7 +1468,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("must never be produced"); },
     ]);
     await item.slot.prompt(longInput("C6 activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const entries = await item.entries();
     const messages = entries.filter((entry) => (entry as { type?: string }).type === "message").map((entry) => (entry as { message?: Record<string, unknown> }).message!);
     const row = {
@@ -1505,13 +1505,13 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       return blob.length > 40_000 ? fauxAssistantMessage(large) : fauxAssistantMessage("Small response after compaction.");
     }));
     await item.slot.prompt("C10 home input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await ordinary.slot.prompt("C10 ordinary input");
-    await waitUntil(() => !ordinary.slot.isBusy);
+    await waitUntil(() => ordinary.slot.snapshot().configurationBlocker === null);
     await item.slot.prompt("C10 home follow-up input");
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await ordinary.slot.prompt("C10 ordinary follow-up input");
-    await waitUntil(() => !ordinary.slot.isBusy);
+    await waitUntil(() => ordinary.slot.snapshot().configurationBlocker === null);
     const homeEntries = await item.entries();
     const ordinaryEntries = await ordinary.entries();
     const row = {
@@ -1540,10 +1540,10 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     });
     item.faux.setResponses([item.response("Prior work ".repeat(8_000)), item.response("must never be produced")]);
     await item.slot.prompt(longInput("C15 activation input"));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const callsBefore = item.faux.state.callCount;
     const outcome = await item.slot.compact().then(() => "accepted", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-    await waitUntil(() => !item.slot.isBusy);
+    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const entries = await item.entries();
     const row = {
       compactOutcome: outcome,

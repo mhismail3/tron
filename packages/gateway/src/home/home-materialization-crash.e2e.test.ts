@@ -101,10 +101,10 @@ async function fixture() {
   await writeFile(recordPath, `${JSON.stringify({
     version: 2, homeId: "materialization-crash-home",
     chapters: [
-      { sessionId: "prior-session", ordinal: 1, state: "sealed", createdAt: timestamp, sealedAt: timestamp, sizeAtSeal: 1, entriesAtSeal: 1 },
-      { sessionId, ordinal: 2, state: "reserved", createdAt: timestamp },
+      { sessionId: "prior-session", ordinal: 1, state: "sealed", activationStarted: true, createdAt: timestamp, sealedAt: timestamp, sizeAtSeal: 1, entriesAtSeal: 1 },
+      { sessionId, ordinal: 2, state: "reserved", activationStarted: false, createdAt: timestamp },
     ],
-    bindingRevision: 1, generation: 2, policyRevision: 1, enabled: true, model, createdAt: timestamp, updatedAt: timestamp,
+    bindingRevision: 1, generation: 2, routeGeneration: 1, policyRevision: 1, enabled: true, model, createdAt: timestamp, updatedAt: timestamp,
   }, null, 2)}\n`, { mode: 0o600 });
   const manager = SessionManager.create(canonicalCwd, sessionDirectory);
   const expectedPath = manager.newSession({ id: sessionId })!;
@@ -307,7 +307,7 @@ describe("Home materialization crash recovery", () => {
       await registry.homeOwner().configureMemory({ model });
       const live = await registry.acquire(designation.sessionId);
       await live.prompt("persist one canonical Home response");
-      await waitFor(() => !live.isBusy, "canonical prompt settled", { boundMs: 5_000, intervalMs: 25 });
+      await waitFor(() => live.snapshot().configurationBlocker === null, "canonical prompt settled", { boundMs: 5_000, intervalMs: 25 });
       expect(liveRegistry.dispatches).toBe(1);
       const retire = live.retireAfterSettled.bind(live);
       vi.spyOn(live, "retireAfterSettled").mockImplementation(async () => { await held; await retire(); });

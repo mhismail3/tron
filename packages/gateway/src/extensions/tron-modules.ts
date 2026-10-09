@@ -34,6 +34,7 @@ export interface TronModuleHost {
   compactionPolicy: () => CompactionOperationPolicy | undefined;
   compactionStopped: (event: SessionBeforeCompactEvent) => boolean;
   compactionChanged: () => void;
+  joinTerminalReceiptWrites: () => Promise<void>;
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
@@ -46,6 +47,8 @@ export interface TronModuleHost {
    * here is what keeps the wiring honest: the only Home runtime is built by a
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
+  homeTask?: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -73,6 +76,22 @@ export interface TronModuleRegistration {
  * exactly this list for each session and `modules.list` reports it, so Settings
  * and sessions cannot drift. */
 export const TRON_MODULES: readonly TronModule[] = [
+  {
+    name: "tron-invocation-settlement",
+    purpose: "Keeps each chat's completion receipts in order before the next message",
+    tools: [],
+    commands: [],
+    factory: (host) => (pi) => {
+      // Pi awaits these public hooks before the next run/input can append.
+      // Join receipt I/O only: attention must not hold up accepted continuations.
+      pi.on("turn_start", async () => {
+        await host.joinTerminalReceiptWrites();
+      });
+      pi.on("message_end", async (event) => {
+        if (event.message.role === "user") await host.joinTerminalReceiptWrites();
+      });
+    },
+  },
   {
     name: "tron-context-window",
     purpose: "Keeps the session's model context window applied as the model changes.",
@@ -192,16 +211,23 @@ export const HOME_MODULE_NAMES: readonly string[] = [
 export const TRON_HOME_MODULE: TronModule = {
   name: "tron-home",
   purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-  tools: ["zoom", "date", "memory_search"],
+  tools: ["zoom", "date", "memory_search", "delegate", "task"],
   commands: [],
-  factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId())),
+  factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
+    request => {
+      if (!host.homeDelegate) throw new Error("Home dispatch is unavailable");
+      return host.homeDelegate(host.sessionId(), request);
+    }, request => {
+      if (!host.homeTask) throw new Error("Home task control is unavailable");
+      return host.homeTask(host.sessionId(), request);
+    }),
 };
 
 /** The executable tool ceiling for a Home runtime, passed to the SDK as its
  * registration allowlist. MCP is excluded structurally: no MCP extension is
  * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
  * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search"];
+export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task"];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */

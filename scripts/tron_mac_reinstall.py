@@ -404,6 +404,13 @@ def command(argv, category, timeout=1200, env=None, accepted=(0,)):
         return output.read()
 
 
+def stopped_launchd_job(output):
+    """True only for a top-level job that reports no process at all."""
+    lines = output.decode(errors='replace').splitlines()
+    states = [line for line in lines if re.fullmatch(r'\tstate = .+', line)]
+    return states == ['\tstate = not running'] and not any(re.fullmatch(r'\tpid = \d+', line) for line in lines)
+
+
 class MacPlatform:
     def __init__(self, home, installed=Path('/Applications/Tron.app')):
         self.home, self.installed = home, installed
@@ -442,7 +449,14 @@ class MacPlatform:
             result = subprocess.run(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}'],
                                     capture_output=True, timeout=15)
             if result.returncode == 0:
-                raise Stop(f'service-loaded: {label}; finish retirement/Pause in the owning app')
+                # Quit stops the Stable Gateway and the native host but keeps
+                # their approved registrations (the Gateway's exit policy
+                # prevents relaunch; the host starts only on demand). Offline
+                # means no running process, so only these stopped Release
+                # jobs pass; any legacy or Debug owner still refuses.
+                if label in ('com.tron.server', 'com.tron.mac.native-host') and stopped_launchd_job(result.stdout):
+                    continue
+                raise Stop(f'service-loaded: {label}; choose Quit Tron in the menu bar and wait for it to finish')
             require(b'Could not find service' in result.stderr,
                     'launchd-probe: could not distinguish absent service from inspection failure')
         for port in (9847, 9848):
@@ -1170,7 +1184,7 @@ class Reinstall:
     def offline_confirmation(self, args):
         if args.confirm_offline:
             return True
-        print('NEXT: In the old app, successfully Disable Helper for Update, Pause Tron, then quit.\n'
+        print('NEXT: In the old app, use Quit Tron and wait for its successful Gateway and native-helper retirement.\n'
               'Stop Debug, standalone clients, workers and package operations. Re-run with --confirm-offline.\n'
               'This flag attests to successful retirement and writer quiescence; process absence alone is insufficient.')
         return False
@@ -1185,10 +1199,10 @@ class Reinstall:
         self.before_activation(app_replaced=app_replaced)
         if app_replaced:
             self.save('awaiting-resume')
-            print('NEXT: Launch /Applications/Tron.app, choose Resume Tron, approve macOS prompts, then run with --verify.')
+            print('NEXT: Launch /Applications/Tron.app, approve any required Login Item prompts, then run with --verify.')
             return
         print(f'NEXT: In Finder replace /Applications/Tron.app with {self.receipt["app"]}.\n'
-              'Launch the replacement, choose Resume Tron and approve required prompts. Then re-run with --verify.\n'
+              'Launch the replacement and approve any required Login Item prompts. Then re-run with --verify.\n'
               f'Rollback app and verified data backups: {self.operation / "backups"}')
 
 

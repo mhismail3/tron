@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import importlib.util
 import json
 import os
 import subprocess
+import shlex
+import signal
+import time
 import sys
 import tempfile
 import textwrap
@@ -115,6 +119,33 @@ class VerifyFixture(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("TRON_HOME_NAME=/", result.stderr + result.stdout)
+
+    def test_pi_subagents_selector_covers_pin_packages_and_artifacts_not_runtime_sources(self):
+        root = Path(__file__).resolve().parents[2]
+        config = json.loads((root / ".github/work.json").read_text())
+        checks = verify.load_checks(config["verify"])
+        provider = next((check for check in checks if check.name == "pi-subagents"), None)
+        self.assertIsNotNone(provider, "provider pin changes must select offline verification")
+        for path in (
+            "packages/gateway/package.json",
+            "packages/gateway/package-lock.json",
+            "packages/gateway/pi-subagents-pin.json",
+            "packages/gateway/artifacts/pi-subagents-0.76.1-tron.3.tgz",
+            "packages/gateway/artifacts/pi-subagents-0.76.1-tron.3-package-lock.json",
+            "packages/gateway/scripts/update-pi-subagents.mjs",
+            "packages/gateway/scripts/build-pi-subagents-closure.py",
+            ".node-version",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(provider.matches(path))
+        for path in (
+            "packages/gateway/src/sessions/session-manager.ts",
+            "packages/gateway/README.md",
+            "packages/gateway/scripts/update-pi-sdk.mjs",
+            "packages/gateway/artifacts/unrelated.tgz",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(provider.matches(path))
 
     def test_scale_suite_selector_is_narrow(self):
         root = Path(__file__).resolve().parents[2]
@@ -266,6 +297,292 @@ class CheckSetTests(VerifyFixture):
         verify.verify(self.repo, config)
         lines = out.read_text().splitlines()
         self.assertEqual(lines, [str(self.repo / "app" / "new file.txt"), merge_base])
+
+
+class ParallelCheckTests(VerifyFixture):
+    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), delays=(0.8, 0.8, 0.1)):
+        self.commit(self.repo, "app/a.txt", "two\n")
+        checks = []
+        for name, group, code, delay in zip(("first", "second", "third"), groups, codes, delays):
+            script = self.tmp / f"{name}.py"
+            script.write_text(textwrap.dedent(f"""\
+                import os, pathlib, time, sys
+                output = pathlib.Path({str(self.counts / name)!r})
+                output.with_suffix('.pid').write_text(str(os.getpid()))
+                output.with_suffix('.group').write_text(str(os.getpgrp()))
+                started = time.time()
+                time.sleep({delay})
+                output.write_text(str(started) + ' ' + str(time.time()))
+                print({name!r})
+                sys.exit({code})
+            """))
+            check = {"name": name, "paths": ["app/**"],
+                     "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"}
+            if group:
+                check["exclusiveGroup"] = group
+            checks.append(check)
+        self.config["verify"]["checks"] = checks
+
+    def intervals(self):
+        return [tuple(map(float, (self.counts / name).read_text().split()))
+                for name in ("first", "second", "third")]
+
+    def test_independent_checks_finish_near_max_not_sum(self):
+        self.prepare_checks()
+        started = time.monotonic()
+        receipt = verify.verify(self.repo, self.config)
+        elapsed = time.monotonic() - started
+        first, second, _ = self.intervals()
+        self.assertLess(max(first[0], second[0]), min(first[1], second[1]))
+        self.assertLess(elapsed, 1.5, f"serialized check wall time: {elapsed}")
+        self.assertTrue(receipt["passed"])
+
+    def test_default_concurrency_is_bounded_by_cpu_and_physical_memory(self):
+        self.prepare_checks(delays=(0.2, 0.2, 0.2))
+        for raw in self.config["verify"]["checks"]:
+            raw["always"] = True
+        for cpus, gib, expected in ((1, 64, 1), (18, 16, 2), (18, 36, 3), (18, 0, 1)):
+            with self.subTest(cpus=cpus, gib=gib), \
+                    mock.patch.object(verify.os, "cpu_count", return_value=cpus), \
+                    mock.patch.object(verify, "_physical_memory", return_value=gib * 1024 ** 3):
+                self.verify()
+                intervals = self.intervals()
+                peak = max(sum(start <= point < end for start, end in intervals)
+                           for point, _ in intervals)
+                self.assertEqual(peak, expected)
+
+    def test_jobs_one_serializes_in_configuration_order(self):
+        self.prepare_checks(delays=(0.1, 0.1, 0.1))
+        verify.verify(self.repo, self.config, jobs=1)
+        first, second, third = self.intervals()
+        self.assertLessEqual(first[1], second[0])
+        self.assertLessEqual(second[1], third[0])
+
+    def test_failure_and_admission_refusal_do_not_cancel_passing_check(self):
+        self.prepare_checks(codes=(73, 9, 0), delays=(0.2, 0.1, 0.3))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            receipt = verify.verify(self.repo, self.config, jobs=3)
+        self.assertFalse(receipt["passed"])
+        self.assertEqual(list(receipt["checks"]), ["first", "second", "third"])
+        self.assertEqual([entry["exitCode"] for entry in receipt["checks"].values()], [73, 9, 0])
+        final_lines = [line.strip().split(":")[0] for line in output.getvalue().splitlines()
+                       if "in " in line]
+        self.assertEqual(final_lines, ["first", "second", "third"])
+        for name, entry in receipt["checks"].items():
+            self.assertIn(name, Path(entry["log"]).read_text())
+            self.assertGreaterEqual(entry["seconds"], 0.1)
+        stored = json.loads((self.receipts() / f"{receipt['head']}.json").read_text())
+        self.assertEqual(stored, receipt)
+
+    def test_exclusive_pair_does_not_overlap_but_independent_check_runs(self):
+        self.prepare_checks(groups=("shared-tree", "shared-tree", None))
+        verify.verify(self.repo, self.config, jobs=2)
+        first, second, third = self.intervals()
+        self.assertLessEqual(first[1], second[0])
+        self.assertLess(max(first[0], third[0]), min(first[1], third[1]))
+
+    def test_conditional_group_only_serializes_selected_gateway_fixture_paths(self):
+        self.prepare_checks(groups=("gateway-source-tree", "gateway-source-tree", None),
+                            delays=(0.3, 0.3, 0.1))
+        for raw in self.config["verify"]["checks"]:
+            raw["always"] = True
+        second = self.config["verify"]["checks"][1]
+        second["paths"].append("lib/**")
+        second["exclusivePaths"] = ["lib/**"]
+        verify.verify(self.repo, self.config, jobs=2)
+        first, second_interval, _ = self.intervals()
+        self.assertLess(max(first[0], second_interval[0]), min(first[1], second_interval[1]))
+        self.commit(self.repo, "lib/b.txt", "fixture selected\n")
+        verify.verify(self.repo, self.config, jobs=2)
+        first, second_interval, _ = self.intervals()
+        self.assertLessEqual(first[1], second_interval[0])
+
+    def test_ios_exclusive_paths_track_the_selection_owner(self):
+        root = Path(__file__).resolve().parents[2]
+        spec = importlib.util.spec_from_file_location("ios_selection", root / "scripts/ios_verify_test_selection.py")
+        owner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(owner)
+        settings = json.loads((root / ".github/work.json").read_text())["verify"]
+        ios = next(raw for raw in settings["checks"] if raw["name"] == "ios")
+        self.assertEqual(set(ios["exclusivePaths"]),
+                         {path for path, (runner, _) in owner.FIXTURE_RUNNER_INPUTS.items()
+                          if runner == "scripts/ios-gateway-e2e-test"})
+
+    def test_invalid_jobs_and_groups_refuse_before_launch(self):
+        self.prepare_checks()
+        for jobs in (0, -1, True, 1.5):
+            with self.subTest(jobs=jobs), self.assertRaises(verify.VerifyError):
+                verify.verify(self.repo, self.config, jobs=jobs)
+        for group in ("", "Bad group", 3, []):
+            self.config["verify"]["checks"][0]["exclusiveGroup"] = group
+            with self.subTest(group=group), self.assertRaises(verify.VerifyError):
+                self.verify()
+        self.config["verify"]["checks"][0]["exclusiveGroup"] = "shared-tree"
+        for paths in ([], "app/**", [3], [""]):
+            self.config["verify"]["checks"][0]["exclusivePaths"] = paths
+            with self.subTest(paths=paths), self.assertRaises(verify.VerifyError):
+                self.verify()
+        del self.config["verify"]["checks"][0]["exclusiveGroup"]
+        self.config["verify"]["checks"][0]["exclusivePaths"] = ["app/**"]
+        with self.assertRaises(verify.VerifyError):
+            self.verify()
+        self.assertEqual(list(self.counts.iterdir()), [])
+
+    def test_abort_retires_all_running_process_groups_without_receipt(self):
+        self.prepare_checks(delays=(5, 5, 5))
+        processes = []
+        popen = subprocess.Popen
+
+        def dispose(process):
+            if process.poll() is not None:
+                return
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+
+        def launch(*args, **kwargs):
+            process = popen(*args, **kwargs)
+            if kwargs.get("start_new_session"):
+                processes.append(process)
+                self.addCleanup(dispose, process)
+            return process
+
+        sleep = time.sleep
+        interrupted = False
+
+        def interrupt(seconds):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt
+            sleep(seconds)
+
+        with mock.patch.object(verify.subprocess, "Popen", side_effect=launch), \
+                mock.patch.object(verify.time, "sleep", side_effect=interrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                verify.verify(self.repo, self.config, jobs=2)
+        self.assertEqual(len(processes), 2)
+        self.assertTrue(all(process.poll() is not None for process in processes))
+        self.assertEqual(list(self.receipts().glob("*.json")), [])
+
+    def test_termination_retires_check_groups_before_exiting(self):
+        self.prepare_checks(delays=(5, 5, 5))
+        config = self.tmp / "config.json"
+        config.write_text(json.dumps(self.config))
+        code = (f"import sys, json; sys.path.insert(0, {str(Path(verify.__file__).parent)!r}); "
+                f"from pathlib import Path; import verify; "
+                f"verify.verify(Path({str(self.repo)!r}), json.loads(Path({str(config)!r}).read_text()), jobs=2)")
+        process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(100):
+                if all((self.counts / f"{name}.pid").exists() for name in ("first", "second")):
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("checks never started")
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=5)
+            self.assertNotEqual(process.returncode, 0)
+            for name in ("first", "second"):
+                pid = int((self.counts / f"{name}.pid").read_text())
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(pid, 0)
+            self.assertEqual(list(self.receipts().glob("*.json")), [])
+        finally:
+            # Own cleanup even for the negative control, which deliberately
+            # leaves the independently-sessioned checks alive.
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=2)
+            for name in ("first", "second"):
+                path = self.counts / f"{name}.group"
+                if path.exists():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(int(path.read_text()), signal.SIGKILL)
+
+    def test_carried_result_survives_unrelated_merge_with_original_provenance(self):
+        first = self.commit(self.repo, "app/a.txt", "two\n")
+        self.verify()
+        self.commit(self.repo, "README.md", "two\n")
+        self.verify()  # app is already carried here
+        self.advance_base("lib/c.txt")
+        git(self.repo, "fetch", "-q", REMOTE)
+        git(self.repo, "merge", "-q", "--no-edit", f"{REMOTE}/{BASE}")
+        receipt = self.verify()
+        self.assertEqual(receipt["checks"]["app"]["carriedFrom"], first)
+        self.assertEqual(self.runs("app"), 1)
+        self.assertTrue(receipt["passed"])
+
+    def test_bundle_rebuild_selection_preserves_fast_script_scope(self):
+        root = Path(__file__).resolve().parents[2]
+        settings = json.loads((root / ".github/work.json").read_text())["verify"]
+        checks = verify.load_checks(settings)
+        fast = next(check for check in checks if check.name == "mac-scripts")
+        rebuild = next(check for check in checks if check.name == "mac-bundle-rebuild")
+        for path in ("scripts/gateway-payload-deploy.test.mjs", "scripts/tron-dev",
+                     "packages/mac-app/scripts/test-push-product-config.sh"):
+            with self.subTest(path=path):
+                self.assertTrue(fast.matches(path))
+                self.assertFalse(rebuild.matches(path))
+        for path in ("packages/mac-app/scripts/bundle-gateway.sh",
+                     "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",
+                     "packages/mac-app/scripts/stage-gateway-app.sh",
+                     "packages/mac-app/scripts/ensure-gateway-bundle.sh",
+                     "packages/mac-app/scripts/verify-gateway-payload.sh",
+                     "packages/mac-app/scripts/tron-gateway-launcher.c",
+                     "packages/mac-app/scripts/verify-macho-architectures.sh",
+                     "scripts/hash-npm-runtime.py", "scripts/gateway-install-inputs.mjs",
+                     "packages/gateway/scripts/install-pi-subagents.mjs",
+                     "packages/gateway/scripts/check-pi-subagents.mjs",
+                     "packages/gateway/scripts/ensure-node-pty-helper.mjs",
+                     "packages/gateway/pi-subagents-pin.json",
+                     "packages/gateway/artifacts/pi-subagents-current.tgz",
+                     "packages/gateway/package-lock.json", "packages/gateway/package.json",
+                     "config/GatewayProtocol.json", "config/PushService.xcconfig",
+                     "scripts/gateway-payload-deploy.mjs", "scripts/install-ci-tools.sh",
+                     "scripts/verify-gateway-protocol-contract.py", "scripts/gateway_protocol_contract.py",
+                     ".node-version", "config/ci-toolchain.env"):
+            with self.subTest(path=path):
+                self.assertTrue(rebuild.matches(path), path)
+        self.assertFalse(rebuild.matches("packages/gateway/src/sessions/session-manager.ts"))
+        # Exercise selected commands, not just globs: deployment-only edits must
+        # still run fast scripts but never launch the real rebuild script.
+        calls = self.tmp / "selected"
+        # Keep the actual fast/rebuild command chains and substitute executable
+        # fixtures at their boundaries. Selecting fast must not secretly build.
+        for command in [*fast.command.split(" && "), rebuild.command]:
+            args = shlex.split(command)
+            path = args[-1]
+            label = "mac-bundle-rebuild" if path.endswith("test-bundle-gateway-rebuild.sh") else "fast-script"
+            if args[:2] == ["node", "--test"]:
+                content = ("import { appendFileSync } from 'node:fs';\n"
+                           f"appendFileSync({json.dumps(str(calls))}, 'fast-script\\n');\n")
+            else:
+                content = f"#!/bin/sh\necho {label} >> {shlex.quote(str(calls))}\n"
+            self.write(self.seed, path, content)
+            (self.seed / path).chmod(0o755)
+        git(self.seed, "add", "-A")
+        git(self.seed, "commit", "-q", "-m", "script fixture base")
+        git(self.seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
+        git(self.repo, "fetch", "-q", REMOTE)
+        git(self.repo, "merge", "-q", "--ff-only", f"{REMOTE}/{BASE}")
+        for raw in settings["checks"]:
+            if raw["name"] not in ("mac-scripts", "mac-bundle-rebuild"):
+                raw["command"] = f"echo {raw['name']} >> {calls}"
+        config = {"claim": self.config["claim"], "verify": settings}
+        self.commit(self.repo, "scripts/gateway-payload-deploy.test.mjs", "// test\n")
+        receipt = verify.verify(self.repo, config)
+        self.assertTrue(receipt["passed"])
+        self.assertIn("mac-scripts", receipt["required"])
+        self.assertIn("fast-script", calls.read_text().splitlines())
+        self.assertNotIn("mac-bundle-rebuild", calls.read_text().splitlines())
+        self.commit(self.repo, "packages/mac-app/scripts/stage-gateway-app.sh", "# stage\n")
+        receipt = verify.verify(self.repo, config)
+        self.assertTrue(receipt["passed"])
+        self.assertIn("mac-bundle-rebuild", receipt["required"])
+        self.assertIn("mac-bundle-rebuild", calls.read_text().splitlines())
 
 
 class PostFixture(VerifyFixture):

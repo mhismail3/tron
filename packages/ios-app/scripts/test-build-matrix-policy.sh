@@ -83,6 +83,7 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
         document = plistlib.loads(entitlement_text.encode())
         assert document.get("aps-environment") == entitlements[1], name
         assert document.get("com.apple.developer.devicecheck.appattest-environment") == entitlements[2], name
+        assert document.get("com.apple.developer.usernotifications.time-sensitive") is True, name
     else:
         assert 'CODE_SIGN_ENTITLEMENTS: ""' in source[source.index("        Test:", source.index("  TronMobile:")):source.index("  TronShareExtension:")], name
 info_plist = (root / "Sources/Info.plist").read_text()
