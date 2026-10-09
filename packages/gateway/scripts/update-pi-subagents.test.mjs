@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -25,7 +27,8 @@ function fixture(run, usable = false) {
     symlinkSync(join(gateway, "node_modules"), join(target, "node_modules"));
     for (const file of ["check-pi-subagents.mjs", "build-pi-subagents-closure.py"]) copyFileSync(join(gateway, "scripts", file), join(target, "scripts", file));
     // Ambient-env calls merge onto this base, so npm's compile cache (written under TMPDIR) must be disabled here.
-    const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: usable ? "https://registry.npmjs.org/" : "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1", NODE_DISABLE_COMPILE_CACHE: "1" };
+    // Detached auto-GC or maintenance started by a fixture commit can still write into .git while the fixture is removed.
+    const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: usable ? "https://registry.npmjs.org/" : "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1", NODE_DISABLE_COMPILE_CACHE: "1", GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "gc.auto", GIT_CONFIG_VALUE_0: "0", GIT_CONFIG_KEY_1: "maintenance.auto", GIT_CONFIG_VALUE_1: "false" };
     const git = (cwd, ...args) => command("git", ["-C", cwd, ...args], { env });
     for (const repo of [target, fork]) {
       git(repo, "init", "-q"); git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "fixture@example.invalid");
@@ -223,3 +226,34 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
     }, failure === "late-check" || failure === "rollback" || failure === "join");
   });
 }
+
+// Git's auto-GC threshold counts loose objects in one objects/NN directory; two of them
+// make gc.auto=1 eligible.
+function writeLooseBlobs(gitDir, prefix, count) {
+  const dir = join(gitDir, "objects", prefix);
+  mkdirSync(dir, { recursive: true });
+  for (let written = 0, index = 0; written < count; index++) {
+    const content = Buffer.from(`auto-gc probe ${index}\n`);
+    const header = Buffer.from(`blob ${content.length}\0`);
+    const oid = createHash("sha1").update(header).update(content).digest("hex");
+    if (!oid.startsWith(prefix)) continue;
+    writeFileSync(join(dir, oid.slice(prefix.length)), deflateSync(Buffer.concat([header, content])));
+    written++;
+  }
+}
+
+test("fixture Git children never start automatic maintenance", () => {
+  fixture(({ target, env, git, root }) => {
+    const hooks = join(root, "hooks"); mkdirSync(hooks);
+    const marker = join(root, "auto-gc.marker");
+    // Foreground auto-GC (autoDetach=false) runs this hook before git commit returns, so the marker is deterministic.
+    writeFileSync(join(hooks, "pre-auto-gc"), `#!/bin/sh\n: > ${JSON.stringify(marker)}\n`, { mode: 0o755 });
+    git(target, "config", "gc.auto", "1"); git(target, "config", "gc.autoDetach", "false"); git(target, "config", "core.hooksPath", hooks);
+    writeLooseBlobs(join(target, ".git"), "17", 2);
+    git(target, "commit", "--allow-empty", "-qm", "guarded");
+    assert.equal(existsSync(marker), false, "fixture commit started automatic GC");
+    // Negative control: the same eligible repository, without the fixture configuration, runs the hook.
+    command("git", ["-C", target, "commit", "--allow-empty", "-qm", "unguarded"], { env: { PATH: env.PATH, HOME: env.HOME, TMPDIR: env.TMPDIR } });
+    assert.equal(existsSync(marker), true, "eligible auto-GC did not run its hook");
+  });
+});
