@@ -50,7 +50,6 @@ interface Report {
   usage: { totalTokensUsed: number; summedUsageUsed: number };
   oversized: { recordChars: number; capped: boolean; headKept: boolean; tailKept: boolean; blockedOnLineBound: string | null };
   blocked: Array<{ reason: string; resumed: boolean; nodesAtBlock: number }>;
-  recordedOnce: { negativeControl: string };
 }
 
 const report: Report = {
@@ -67,9 +66,6 @@ const report: Report = {
   usage: { totalTokensUsed: 0, summedUsageUsed: 0 },
   oversized: { recordChars: 0, capped: false, headKept: false, tailKept: false, blockedOnLineBound: null },
   blocked: [],
-  recordedOnce: {
-    negativeControl: "Recorded once before this test was removed: an oracle whose due weight dropped the level term (due = T - start) diverged from the view at step 8 of a 300-message run, while a uniform exponent shift (2^(level+3)) provably cannot diverge.",
-  },
 };
 
 const roots: string[] = [];
@@ -122,13 +118,9 @@ function partBytes(part: Part, nodes: Map<string, OracleNode>): number {
   return node ? Buffer.byteLength(node.text, "utf8") : PLACEHOLDER_BYTES;
 }
 
-/** gist §5.2 `fit`. `weight` is the real rule; a wrong weight is what the
- * recorded one-time negative control used. */
-const GIST_WEIGHT = (level: number): number => 2 ** (level + 2);
-
 /** The view's fit (gist §5.2) as #491 batches it: nothing until the view passes
  * its budget, then merges down to seven eighths of it. */
-function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>, weight = GIST_WEIGHT): void {
+function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>): void {
   const size = () => view.reduce((sum, part) => sum + partBytes(part, nodes), 0);
   if (size() <= budget) return;
   const target = budget - Math.floor(budget / 8);
@@ -140,7 +132,7 @@ function fit(view: Part[], count: number, budget: number, nodes: Map<string, Ora
       const b = view[position + 1]!;
       if (a.level !== b.level || a.index % 2 !== 0 || b.index !== a.index + 1) continue;
       if (!nodes.has(address(a.level + 1, a.index / 2))) continue;
-      const due = (count - a.start) / weight(a.level);
+      const due = (count - a.start) / 2 ** (a.level + 2);
       if (!best || due > best.due) best = { position, due };
     }
     if (!best) return;
@@ -287,9 +279,6 @@ interface Fixture {
   sessionId: string;
   manager: SessionManager;
   workspace: TronWorkspace;
-  modelRuntime: ModelRuntime;
-  model: ReturnType<ReturnType<typeof fauxProvider>["getModel"]>;
-  faux: ReturnType<typeof fauxProvider>;
   limits: EpisodicLimits;
   catalogPath: string;
   nodesPath: string;
@@ -370,7 +359,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
     }
   };
   return {
-    root, home, sessionFile, sessionId, manager, workspace, modelRuntime, model, faux, limits, gate,
+    root, home, sessionFile, sessionId, manager, workspace, limits, gate,
     catalogPath: join(home, "workspace", "state", "episodic", sessionId, "catalog.jsonl"),
     nodesPath: join(home, "workspace", "state", "episodic", sessionId, "nodes.jsonl"),
     compactor, summarizer,
@@ -382,11 +371,8 @@ async function openMemory(fx: Fixture, summarizer?: EpisodicSummarizer): Promise
     workspace: fx.workspace,
     sessionId: fx.sessionId,
     sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile),
-    modelRuntime: fx.modelRuntime,
-    model: fx.model,
     limits: fx.limits,
     summarizer: summarizer ?? fx.summarizer,
-    sleep: async () => {},
   });
 }
 
@@ -431,7 +417,7 @@ function sha(value: string): string {
 
 describe("episodic memory end to end", () => {
   it("keeps the view equal to the durable record fold while ingesting, editing and invalidating", async () => {
-    const fx = await fixture("e2e", { viewBytes: 4_096, jobs: 4, retryMs: 1, maxRetries: 2 });
+    const fx = await fixture("e2e", { viewBytes: 4_096, jobs: 4, retryMs: 0, maxRetries: 2 });
     report.limits = { ...fx.limits };
     const memory = await openMemory(fx);
     const nodeWrites: Array<Record<string, unknown>> = [];
@@ -601,7 +587,7 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 
   it("serializes concurrent commits: unique contiguous indices and no duplicate view parts", async () => {
-    const fx = await fixture("concurrent", { viewBytes: 4_096, jobs: 4, retryMs: 1 });
+    const fx = await fixture("concurrent", { viewBytes: 4_096, jobs: 4, retryMs: 0 });
     const memory = await openMemory(fx);
     for (let index = 0; index < 40; index += 1) {
       fx.manager.appendMessage(userMessage(`concurrent prompt ${index} ${"c".repeat(700)}`));
@@ -636,7 +622,7 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 
   it("discards a build whose inputs an invalidation revoked while it was in flight", async () => {
-    const fx = await fixture("in-flight", { viewBytes: 4_096, jobs: 4, retryMs: 1 });
+    const fx = await fixture("in-flight", { viewBytes: 4_096, jobs: 4, retryMs: 0 });
     const memory = await openMemory(fx);
     const nodeWrites: Array<Record<string, unknown>> = [];
     const storeOwner = memory as unknown as { store: { appendNode(record: unknown): Promise<void> } };
@@ -711,7 +697,7 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 
   it("blocks on a permanent refusal and exhausted retries, and resumes", async () => {
-    const fx = await fixture("blocked", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxRetries: 2 });
+    const fx = await fixture("blocked", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 2 });
     for (let index = 0; index < 12; index += 1) {
       fx.manager.appendMessage(userMessage(`blocked case message ${index} ${"b".repeat(600)}`));
       fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"a".repeat(600)}`)]));
@@ -734,18 +720,19 @@ describe("episodic memory end to end", () => {
     expect(calls).toBe(callsAtBlock);
     await expect(refused.whenReady(refusedStatus.messages)).rejects.toBeInstanceOf(EpisodicMemoryError);
     await refused.dispose();
-    // The blocked state survives a restart, and resume() with a working
+    // The blocked state survives a restart, and an operator resume with a working
     // compactor recovers it.
     const recovered = await openMemory(fx);
     expect(recovered.status().blocked?.reason).toBe("permanent-failure");
-    await recovered.resume();
+    await recovered.resumeIngested();
+    await recovered.entriesCommitted(fx.sessionId);
     expect(recovered.status().blocked).toBeNull();
     expect(recovered.status().nodes.total).toBeGreaterThan(nodesWhenBlocked);
     report.blocked.push({ reason: "permanent-failure", resumed: true, nodesAtBlock: nodesWhenBlocked });
     await recovered.dispose();
 
     // 2. An auth or configuration error is permanent, not retried.
-    const authFixture = await fixture("auth", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxRetries: 3 });
+    const authFixture = await fixture("auth", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 3 });
     for (let index = 0; index < 4; index += 1) authFixture.manager.appendMessage(userMessage(`auth case message ${index} ${"x".repeat(600)}`));
     let authAttempts = 0;
     const unauthorized: EpisodicSummarizer = async () => {
@@ -760,8 +747,8 @@ describe("episodic memory end to end", () => {
     await unauthorizedMemory.dispose();
 
     // 3. A transient failure that never succeeds exhausts its retries; once the
-    // provider recovers, resume() restarts the pump on the same memory.
-    const retryFixture = await fixture("retries", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxRetries: 2 });
+    // provider recovers, an operator resume restarts the pump on the same memory.
+    const retryFixture = await fixture("retries", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 2 });
     for (let index = 0; index < 4; index += 1) retryFixture.manager.appendMessage(userMessage(`retry case message ${index} ${"c".repeat(600)}`));
     let attempts = 0;
     const flaky: EpisodicSummarizer = async (request) => {
@@ -774,7 +761,8 @@ describe("episodic memory end to end", () => {
     expect(retried.status().blocked?.reason).toBe("retries-exhausted");
     expect(attempts).toBe(3);
     report.blocked.push({ reason: "retries-exhausted", resumed: false, nodesAtBlock: retried.status().nodes.total });
-    await retried.resume();
+    await retried.resumeIngested();
+    await retried.entriesCommitted(retryFixture.sessionId);
     expect(retried.status().blocked).toBeNull();
     expect(retried.status().nodes.total).toBeGreaterThan(0);
     await retried.dispose();
@@ -783,7 +771,7 @@ describe("episodic memory end to end", () => {
 
   it("charges the provider's total usage when it reports one and every bucket otherwise", async () => {
     const fixtureFor = async (label: string, usage: Usage): Promise<{ fx: Fixture; used: number }> => {
-      const fx = await fixture(label, { viewBytes: 1_024, jobs: 1, retryMs: 1 });
+      const fx = await fixture(label, { viewBytes: 1_024, jobs: 1, retryMs: 0 });
       fx.manager.appendMessage(userMessage(`usage case message ${"u".repeat(600)}`));
       // The reply's usage is what the memory records as spend, so the real
       // faux reply is returned with the injected usage.
@@ -809,7 +797,7 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 
   it("caps a 1.5 MB paste below the store's line bound and blocks visibly when it cannot", async () => {
-    const fx = await fixture("oversized", { viewBytes: 1_024, jobs: 2, retryMs: 1 });
+    const fx = await fixture("oversized", { viewBytes: 1_024, jobs: 2, retryMs: 0 });
     const paste = `start-of-paste ${"z".repeat(1_500_000)} end-of-paste`;
     fx.manager.appendMessage(userMessage(paste));
     const memory = await openMemory(fx);
@@ -839,7 +827,7 @@ describe("episodic memory end to end", () => {
 
     // A store bound the projection cannot respect is a visible blocked state,
     // never a silent throw with a stalled cursor.
-    const tight = await fixture("oversized-blocked", { viewBytes: 1_024, jobs: 2, retryMs: 1, maxStoreLineBytes: 4_096, recordCapChars: 1_000_000 });
+    const tight = await fixture("oversized-blocked", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxStoreLineBytes: 4_096, recordCapChars: 1_000_000 });
     tight.manager.appendMessage(userMessage(`start ${"q".repeat(200_000)}`));
     const tightMemory = await openMemory(tight);
     await tightMemory.entriesCommitted(tight.sessionId);
@@ -852,7 +840,7 @@ describe("episodic memory end to end", () => {
     // The request layer's cut (gist §6): how many summarized messages a turn
     // starting at one canonical entry covers. A turn sends the view up to that
     // cut and nothing after it, so the render must stop there.
-    const fx = await fixture("cut", { viewBytes: 4_096, jobs: 2, retryMs: 1 });
+    const fx = await fixture("cut", { viewBytes: 4_096, jobs: 2, retryMs: 0 });
     const memory = await openMemory(fx);
     await memory.entriesCommitted(fx.sessionId);
     const first = fx.manager.getBranch()[0]!;

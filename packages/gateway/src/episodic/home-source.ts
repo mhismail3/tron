@@ -6,7 +6,7 @@ import {
   EpisodicMemoryError, type EpisodicChapterSourceCursor, type EpisodicLimits, type EpisodicSourceCursor,
 } from "./episodic-contract.js";
 import {
-  COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, projectBranch,
+  COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, projectBranch, sameSnapshot,
   type EpisodicCanonicalEntry, type EpisodicProjectedMessage, type EpisodicSourceDelta,
 } from "./episodic-source.js";
 
@@ -26,10 +26,6 @@ function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
     && info.mtimeMs === cursor.mtimeMs && info.ctimeMs === cursor.ctimeMs;
 }
 function fail(message: string): never { throw new EpisodicMemoryError("source", message); }
-
-function sameFile(a: Stats, b: Stats): boolean {
-  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
-}
 
 /** One line at a time. No batch of raw strings survives a parse/project step. A
  * line can be tens of megabytes (an inline image), so its reads are kept as pieces
@@ -67,8 +63,8 @@ async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, e
   // once complete, as the episodic reader does.
 }
 
-function singleProjection(entry: EpisodicCanonicalEntry, limits: EpisodicLimits): EpisodicProjectedMessage | undefined {
-  return projectBranch([entry], limits)[0];
+function singleProjection(entry: EpisodicCanonicalEntry, limits: EpisodicLimits, sourceSessionId: string): EpisodicProjectedMessage | undefined {
+  return projectBranch([entry], limits, sourceSessionId)[0];
 }
 
 /** Raw payloads are projected immediately. Retained state is ID/parent topology,
@@ -123,9 +119,9 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
         leaf = entry.id; leafDigest = episodicDigest(line);
         const compact: CompactEntry = { id: entry.id, parentId: entry.parentId };
         if (!exact) {
-          const projected = singleProjection(entry, limits);
+          const projected = singleProjection(entry, limits, chapter.sessionId);
           if (projected) {
-            compact.projected = { ...projected, sourceSessionId: chapter.sessionId };
+            compact.projected = projected;
             const message = entry.raw.message as Record<string, unknown> | undefined;
             compact.shape = { ...entry, line: "", raw: entry.type === "message"
               ? { message: { role: message?.role, toolName: message?.toolName } }
@@ -134,8 +130,8 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
           if (entry.type === "context_edit" && typeof entry.raw.targetId === "string") {
             const target = entries.get(entry.raw.targetId);
             if (target?.shape && target.projected) {
-              const edited = projectBranch([target.shape, { ...entry, line: "" }], limits)[0];
-              if (edited) compact.edit = { targetId: target.id, projected: { ...edited, sourceDigest: target.projected.sourceDigest, sourceSessionId: chapter.sessionId } };
+              const edited = projectBranch([target.shape, { ...entry, line: "" }], limits, chapter.sessionId)[0];
+              if (edited) compact.edit = { targetId: target.id, projected: { ...edited, sourceDigest: target.projected.sourceDigest } };
             }
           }
         }
@@ -147,7 +143,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
       // it again. Only a stable malformed chapter, or an exact cursor read, refuses.
       if (!exact && error instanceof EpisodicMemoryError && error.kind === "source") {
         const now = await handle.stat().catch(() => undefined);
-        if (!now || !sameFile(start, now)) throw new EpisodicSourceChangedError();
+        if (!now || !sameSnapshot(start, now)) throw new EpisodicSourceChangedError();
       }
       throw error;
     }
@@ -158,8 +154,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
     }
     if (!headerSeen) fail("Home canonical source is empty");
     const end = await handle.stat();
-    if (end.dev !== start.dev || end.ino !== start.ino || end.size < endBytes
-      || end.size !== start.size || end.mtimeMs !== start.mtimeMs || end.ctimeMs !== start.ctimeMs) throw new EpisodicSourceChangedError();
+    if (!sameSnapshot(start, end) || end.size < endBytes) throw new EpisodicSourceChangedError();
     if (exact && (prefix !== previous!.completePrefixDigest || leaf !== previous!.leafEntryId)) fail("Home canonical prefix changed since ingestion");
     const branch: CompactEntry[] = [];
     if (incremental) for (const entry of entries.values()) branch.push(entry);
@@ -231,15 +226,13 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
     const next = aggregate(snapshot, chapters);
     acknowledged = next;
     yield { sessionId: snapshot.homeId, projected: [...projected.values()],
-      scopeSessionId: chapter.sessionId, completeBytes: next.completeBytes,
-      leafEntryId: next.leafEntryId, cursor: next, incremental: cut.incremental };
+      scopeSessionId: chapter.sessionId, cursor: next, incremental: cut.incremental };
   }
   // Even no-op ingestion acknowledges a ledger-only transition (seal/roll).
   const next = aggregate(snapshot, chapters);
   if (acknowledged?.completePrefixDigest === next.completePrefixDigest
     && acknowledged?.home?.ledgerRevision === next.home!.ledgerRevision) return;
-  yield { sessionId: snapshot.homeId, projected: [], completeBytes: next.completeBytes,
-    leafEntryId: next.leafEntryId, cursor: next, incremental: true };
+  yield { sessionId: snapshot.homeId, projected: [], cursor: next, incremental: true };
 }
 
 /** Exact frozen cuts are not delta reads. Stream a compact index through each

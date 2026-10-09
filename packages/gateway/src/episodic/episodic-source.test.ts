@@ -13,7 +13,7 @@ import { readCanonicalSession, visitCanonicalSessionEntries } from "./episodic-s
 import { EpisodicStore } from "./episodic-store.js";
 
 /*
- * The read-only canonical reader (departure 2): it must never repair, migrate
+ * The read-only canonical reader: it must never repair, migrate
  * or rewrite the file, must not parse a trailing partial line, must follow the
  * branch from the last complete entry, and must refuse a file it cannot read
  * whole rather than silently dropping data.
@@ -65,9 +65,8 @@ function memoryFor(fx: SourceFixture, limits: { maxSourceLineBytes?: number } = 
     sessionId: fx.sessionId,
     sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile),
     summarizer: stubSummarizer,
-    limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, ...limits },
+    limits: { viewBytes: 4_096, jobs: 2, retryMs: 0, ...limits },
     ...(diagnostic ? { diagnostic } : {}),
-    sleep: async () => {},
   });
 }
 
@@ -103,7 +102,7 @@ describe("episodic canonical source reader", () => {
     owners.push(workspace);
     const memory = await EpisodicMemory.open({
       workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer: stubSummarizer,
-      limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+      limits: { viewBytes: 4_096, jobs: 2, retryMs: 0 },
     });
     await memory.entriesCommitted(sessionId);
     expect(memory.status().messages).toBe(0);
@@ -156,7 +155,7 @@ describe("episodic canonical source reader", () => {
     const stableInvalidMemory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, broken),
       summarizer: stubSummarizer,
-      limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+      limits: { viewBytes: 4_096, jobs: 2, retryMs: 0 },
       diagnostic: record => stableInvalidDiagnostics.push(record),
     });
     await stableInvalidMemory.entriesCommitted(fx.sessionId);
@@ -171,7 +170,7 @@ describe("episodic canonical source reader", () => {
     const memory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, oversized),
       summarizer: stubSummarizer,
-      limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, maxSourceLineBytes: 1_024 }, sleep: async () => {},
+      limits: { viewBytes: 4_096, jobs: 2, retryMs: 0, maxSourceLineBytes: 1_024 },
     });
     await memory.entriesCommitted(fx.sessionId);
     expect(memory.status().blocked?.reason).toBe("source-unavailable");
@@ -302,7 +301,7 @@ describe("episodic canonical source reader", () => {
     const memory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, join(fx.root, "absent.jsonl")),
       summarizer: stubSummarizer,
-      limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+      limits: { viewBytes: 4_096, jobs: 2, retryMs: 0 },
     });
     await memory.entriesCommitted(fx.sessionId);
     expect(memory.status().blocked?.reason).toBe("source-unavailable");

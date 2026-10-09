@@ -132,7 +132,6 @@ describe("the episodic summarizer on a reasoning model", () => {
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
       summarizer: createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!),
-      sleep: async () => {},
     });
     cleanups.push(async () => { await memory.dispose(); });
     await memory.entriesCommitted(manager.getSessionId());

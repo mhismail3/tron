@@ -83,7 +83,7 @@ export const COMPACTOR_MAX_TOKENS = 8_192;
  * runs at its lowest level. Measured on #467: with reasoning off,
  * DeepSeek v4 Flash finished the size loop in 3-5 s, while v4.1 Flash, which
  * has no off, reasoned through its whole output at low. */
-export const COMPACTOR_REASONING: ModelThinkingLevel = "off";
+const COMPACTOR_REASONING: ModelThinkingLevel = "off";
 
 /** Why a reply wrote no line: a reasoning model that stopped on the output
  * ceiling with only reasoning gets a reason that names it. */
@@ -101,7 +101,7 @@ export function emptyReplyDetail(message: AssistantMessage): string {
 const SCALE_SAMPLE = "user: asked to keep the nightly reconcile off the request path, said the 2026-09-23 stall started when the catalog walk ran inside a prompt; decided the watcher stays and the reconcile moves to the maintenance slice. echo: read packages/gateway/src/sessions/session-catalog.ts, it holds the reconcile loop and its 30-minute interval; the durable row index lives beside it. talk: moved the reconcile to the background scheduler, 12 rows rebuilt, no failure; left the startup pass unchanged. user: correction - the interval is a ceiling, not a schedule, and a pause must not delay a due slice past five minutes";
 
 /** Exactly `nodeBytes` bytes of that sample, never splitting a character. */
-export function scaleLine(nodeBytes: number): string {
+function scaleLine(nodeBytes: number): string {
   const sample = SCALE_SAMPLE;
   if (Buffer.byteLength(sample, "utf8") >= nodeBytes) return cutBytes(sample, nodeBytes);
   const repeated = `${sample} ${sample}`;
@@ -197,10 +197,10 @@ export function summarizerText(message: AssistantMessage): string {
   return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("").trim();
 }
 
-export type EpisodicReplyClass = "ok" | "transient" | "permanent";
+type EpisodicReplyClass = "ok" | "transient" | "permanent";
 
 /**
- * Classify one compactor reply (departure 5). A provider error the pinned
+ * Classify one compactor reply. A provider error the pinned
  * classifier calls transient is retried; anything else — an empty reply, a
  * refusal, a permanent provider error — blocks immediately.
  */

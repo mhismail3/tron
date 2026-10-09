@@ -2,16 +2,15 @@ import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import { maximumPromptLineBytes } from "../machine/upload-store.js";
 import { PROMPT_TEXT_MAX_BYTES } from "../sessions/resource-invocation.js";
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 /*
  * The episodic memory is the projected-summary tree of the OptChat recipe: a
  * binary tree of one-line summaries over one source session, a soft-budgeted
  * view of the tree, and a background pump that builds nodes. The recipe's
  * sections are cited as "gist §N" throughout this module. This file owns the
- * values and shapes shared by its parts. The recipe's constants are the
- * production defaults; every one of them is injectable because the tests need a
- * small tree and a fast retry.
+ * values and shapes shared by its parts. The limits in `EpisodicLimits` are the
+ * production defaults that tests shrink (tree size, view budget, retry wait);
+ * the recipe's remaining constants are exported as fixed values.
  */
 
 /** The kinds Tron projects into the memory. They are the compactor prompt's
@@ -25,12 +24,6 @@ export interface EpisodicLimits {
   viewBytes: number;
   /** Compactor calls in flight at once (gist `JOBS`). */
   jobs: number;
-  /** Attempts per node to get its line under `nodeBytes` (gist `TRIES`). */
-  tries: number;
-  /** Max characters of one projected tool result (gist `CAP`). */
-  capChars: number;
-  /** Characters of the tail kept when a text is capped; the head keeps the rest. */
-  capTailChars: number;
   /** Max characters of one projected user, assistant or event text. The recipe
    * sends those whole; a memory record must still fit its store's line, so this
    * is the store bound, not a model-input bound (a JSON string can expand to
@@ -40,13 +33,13 @@ export interface EpisodicLimits {
   retryMs: number;
   /** Transient retries per compactor call before the node blocks. The recipe
    * retries forever because its next turn waits on the summary; here a blocked
-   * memory is visible state and `resume()` restarts it, so the retries are
-   * bounded. */
+   * memory is visible state and an operator resume restarts it, so the retries
+   * are bounded. */
   maxRetries: number;
   /** Bound on one compactor call before it is abandoned as transient. A call
    * that never returns would hold its build slot forever: the pump would neither
    * block nor retry, and every turn waiting on that node would wait for the life
-   * of the process. 0 disables the bound (tests that drive the pump by hand). */
+   * of the process. Always positive. */
   compactorTimeoutMs: number;
   /** One canonical JSONL line larger than this refuses the read. Home's sources
    * hold every line the prompt path writes, so this is at least that producer's
@@ -61,9 +54,6 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   nodeBytes: 512,
   viewBytes: 128_000,
   jobs: 8,
-  tries: 5,
-  capChars: 30_000,
-  capTailChars: 4_000,
   // 128 Ki characters: six bytes per character of JSON escaping plus the record
   // around it stays under the one-megabyte store line bound.
   recordCapChars: 128 * 1_024,
@@ -77,6 +67,13 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   maxSourceLineBytes: maximumPromptLineBytes(DEFAULT_MAX_UPLOAD_BYTES, PROMPT_TEXT_MAX_BYTES),
   maxStoreLineBytes: 1_024 * 1_024,
 };
+
+/** Attempts per node to get its line under `nodeBytes` (gist `TRIES`). */
+export const EPISODIC_TRIES = 5;
+/** Max characters of one projected tool result (gist `CAP`). */
+export const EPISODIC_CAP_CHARS = 30_000;
+/** Characters of the tail kept when a text is capped; the head keeps the rest. */
+export const EPISODIC_CAP_TAIL_CHARS = 4_000;
 
 /** Each strict Home cursor fits 640 bytes including its nested JSON indentation.
  * This covers the pinned SDK UUID/entry IDs, two SHA-256 digests, file
@@ -119,7 +116,7 @@ export interface EpisodicBlocked {
   detail?: string;
 }
 
-export type EpisodicErrorKind =
+type EpisodicErrorKind =
   | "paused"
   | "blocked"
   | "closed"
@@ -140,8 +137,8 @@ export class EpisodicMemoryError extends Error {
 }
 
 /**
- * One canonical session entry, projected (departure 1 of the brief): the
- * memory never holds canonical text, only this bounded projection.
+ * One canonical session entry, projected: the memory never holds canonical text,
+ * only this bounded projection.
  */
 export interface EpisodicMessageRecord {
   /** Store-wide monotonic sequence; the latest record for an index wins. */
@@ -210,10 +207,6 @@ export interface EpisodicInvalidationRecord {
 
 export type EpisodicNodeLogRecord = EpisodicNodeRecord | EpisodicInvalidationRecord;
 
-export function isInvalidationRecord(record: EpisodicNodeLogRecord): record is EpisodicInvalidationRecord {
-  return (record as EpisodicInvalidationRecord).nodes !== undefined;
-}
-
 /** Where the canonical reader stopped, and the identity of the file it read, so
  * the next read can continue at the offset when the file only grew. */
 export interface EpisodicChapterSourceCursor {
@@ -263,7 +256,7 @@ export interface EpisodicViewPartStatus {
   built: boolean;
 }
 
-/** The bounded status query (departure 6). `view.parts` is capped and reports
+/** The bounded status query. `view.parts` is capped and reports
  * how many it left out, so the object cannot grow with the history. */
 export interface EpisodicMemoryStatus {
   sourceSessionId: string;
@@ -322,57 +315,35 @@ export interface EpisodicDiagnostic {
   reason?: string;
 }
 
-/** Either the caller injects its own compactor, or it names the model and
- * runtime the default compactor runs on. There is no default model. */
-export type EpisodicCompactorDependency =
-  | { summarizer: EpisodicSummarizer; modelRuntime?: never; model?: never }
-  | { summarizer?: undefined; modelRuntime: ModelRuntime; model: Model<Api> };
-
 /** Delta ingestion and frozen historical lookup are deliberately distinct. */
 export interface EpisodicSessionSource {
   read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicSourceDelta>;
   branchAtCursor(cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }>;
 }
 
-export type EpisodicMemoryDependencies = {
+export interface EpisodicMemoryDependencies {
   workspace: import("../workspace/tron-workspace.js").TronWorkspace;
   /** The canonical session this memory is over; also its store namespace. */
   sessionId: string;
   /** The ordered canonical chapters this memory reads. Read only, never repaired. */
   sessionSource: EpisodicSessionSource;
+  /** The compactor. The caller names the model it runs on; there is no default model. */
+  summarizer: EpisodicSummarizer;
   /** Optional admission authority owned by Home, never persisted in this store. */
   isPaused?: () => boolean;
   limits?: Partial<EpisodicLimits>;
   /** Where this module raises its bounded records; the caller (gateway-main)
    * decides whether to persist them. */
   diagnostic?: (record: EpisodicDiagnostic) => void;
-  /** Injectable wait, so tests do not sleep through the retry delay. */
-  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
-} & EpisodicCompactorDependency;
+}
 
 export function resolveLimits(overrides?: Partial<EpisodicLimits>): EpisodicLimits {
   const limits = { ...EPISODIC_DEFAULTS, ...overrides };
   for (const [name, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value < 0) throw new EpisodicMemoryError("invalid-request", `Episodic limit ${name} must be a non-negative integer`);
   }
-  for (const name of ["nodeBytes", "viewBytes", "jobs", "tries", "recordCapChars", "maxSourceLineBytes", "maxStoreLineBytes"] as const) {
+  for (const name of ["nodeBytes", "viewBytes", "jobs", "recordCapChars", "compactorTimeoutMs", "maxSourceLineBytes", "maxStoreLineBytes"] as const) {
     if (limits[name] === 0) throw new EpisodicMemoryError("invalid-request", `Episodic limit ${name} must be positive`);
   }
   return limits;
-}
-
-/** The one wait used by the retry loop; the injected one is for tests. */
-export function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(new EpisodicMemoryError("closed", "Episodic memory is closing"));
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new EpisodicMemoryError("closed", "Episodic memory is closing"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

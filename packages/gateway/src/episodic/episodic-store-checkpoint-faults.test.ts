@@ -48,7 +48,7 @@ async function replaceCanonicalContent(fx: Awaited<ReturnType<typeof fixture>>, 
 }
 
 async function fixture(label: string, content = "checkpoint review source") {
-  const root = await mkdtemp(join(tmpdir(), `tron-episodic-review-${label}-`));
+  const root = await mkdtemp(join(tmpdir(), `tron-episodic-faults-${label}-`));
   roots.push(root);
   const cwd = join(root, "project");
   const sessions = join(root, "sessions");
@@ -60,7 +60,7 @@ async function fixture(label: string, content = "checkpoint review source") {
   return { root, manager, workspace, sessionFile: manager.getSessionFile()!, sessionId: manager.getSessionId(), home: join(root, "home") };
 }
 
-describe("episodic checkpoint review regressions", () => {
+describe("episodic store checkpoint faults and reconciliation", () => {
   it("preserves built nodes and ordered state transitions across checkpoint faults", async () => {
     const points = [
       "staging-catalog-write", "staging-catalog-sync", "staging-node-write", "staging-node-sync", "staging-state-write", "staging-state-sync",
@@ -77,7 +77,7 @@ describe("episodic checkpoint review regressions", () => {
       }
       const memory = await EpisodicMemory.open({
         workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize,
-        limits: { nodeBytes: 512, viewBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {},
+        limits: { nodeBytes: 512, viewBytes: 512, jobs: 4, retryMs: 0 },
       });
       await memory.entriesCommitted(fx.sessionId);
       await memory.whenReady(memory.status().messages);
@@ -208,7 +208,7 @@ describe("episodic checkpoint review regressions", () => {
       for (let opener = 0; opener < 2; opener += 1) {
         const reopened = await EpisodicMemory.open({
           workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize,
-          limits: { nodeBytes: 512, viewBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {},
+          limits: { nodeBytes: 512, viewBytes: 512, jobs: 4, retryMs: 0 },
         });
         const status = reopened.status();
         expect(status.messages).toBe(expectedMessages.size);
@@ -347,35 +347,6 @@ describe("episodic checkpoint review regressions", () => {
     await memory.dispose();
   });
 
-  it("reconciles a full refresh before adding a missing persisted prefix digest", async () => {
-    const fx = await fixture("missing-prefix-digest", "same-size-old");
-    fx.manager.appendMessage(fauxAssistantMessage("middle entry"));
-    fx.manager.appendMessage({ role: "user", content: "last source entry", timestamp: Date.now() });
-    const first = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize });
-    await first.entriesCommitted(fx.sessionId);
-    const target = fx.manager.getBranch().find(entry => entry.type === "message")!;
-    await first.dispose();
-
-    const store = new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
-    const state = await store.readState();
-    expect(state?.cursor?.completePrefixDigest).toBeTypeOf("string");
-    const cursor = { ...state!.cursor! };
-    delete cursor.completePrefixDigest;
-    await store.saveState({ ...state!, cursor });
-    await replaceCanonicalContent(fx, target.id, "same-size-old", "same-size-new");
-
-    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize });
-    await memory.entriesCommitted(fx.sessionId);
-
-    expect(memory.zoomLines(0, 1)?.[0]).toContain("same-size-new");
-    expect(memory.zoomLines(0, 1)?.[0]).not.toContain("same-size-old");
-    expect(memory.searchMessages("same-size-old", 0, 1).matches).toBe(0);
-    expect(memory.searchMessages("same-size-new", 0, 1).matches).toBe(1);
-    expect(await memory.cutAtEntry(target.id)).toBe(1);
-    expect((await store.readState())?.cursor?.completePrefixDigest).toBeTypeOf("string");
-    await memory.dispose();
-  });
-
   it("refuses a cut after an earlier same-size source-prefix rewrite", async () => {
     const fx = await fixture("prefix-fence", "first prefix entry");
     fx.manager.appendMessage(fauxAssistantMessage("middle entry"));
@@ -440,7 +411,7 @@ describe("episodic checkpoint review regressions", () => {
     };
     const memory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer,
-      limits: { nodeBytes: 256, viewBytes: 256, jobs: 4, retryMs: 1 }, sleep: async () => {},
+      limits: { nodeBytes: 256, viewBytes: 256, jobs: 4, retryMs: 0 },
     });
     await memory.entriesCommitted(fx.sessionId);
     await memory.whenReady(memory.status().messages);
@@ -506,7 +477,7 @@ describe("episodic checkpoint review regressions", () => {
     };
     const memory = await EpisodicMemory.open({
       workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer,
-      limits: { ...EPISODIC_DEFAULTS, retryMs: 1, nodeBytes: 512 }, sleep: async () => {},
+      limits: { ...EPISODIC_DEFAULTS, retryMs: 0, nodeBytes: 512 },
     });
     const owner = memory as unknown as {
       store: { shouldCheckpoint: (...args: unknown[]) => Promise<boolean> };

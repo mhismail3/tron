@@ -6,7 +6,7 @@ import { setFlagsFromString } from "node:v8";
 import { expect, it } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { EPISODIC_DEFAULTS, type EpisodicLimits } from "./episodic-contract.js";
+import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_DEFAULTS, type EpisodicLimits } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex, type HomeSourceChapter } from "./home-source.js";
 
@@ -57,7 +57,7 @@ async function measureHomeHeap(root: string, chapters: HomeSourceChapter[], opti
       // A provider's reply is a fresh string. A slice of the prompt would keep the
       // whole prompt (here the 128 KB context block) alive with each node's summary.
       summarizer: async request => fauxAssistantMessage(Buffer.from(request.turns.at(-1)!.text.slice(-100), "utf8").toString("utf8")),
-      limits: options.limits, sleep: async () => {},
+      limits: options.limits,
     });
     await memory.entriesCommitted("home");
     const messages = memory.status().messages;
@@ -77,7 +77,7 @@ it("bounds live raw-source heap independently of aggregate Home chapter bytes", 
   try {
     const chapters = await writeChapters(root, 4, 64, (chapter, index) => `fact ${chapter}-${index} ` + "x".repeat(256 * 1024));
     const { messages, samples, retained } = await measureHomeHeap(root, chapters, {
-      ledgerRevision: 4, limits: { recordCapChars: 256, viewBytes: 4096, jobs: 2, retryMs: 1 },
+      ledgerRevision: 4, limits: { recordCapChars: 256, viewBytes: 4096, jobs: 2, retryMs: 0 },
     });
     expect(messages).toBe(256);
     const report = { chapters: 4, canonicalBytesAtLeast: 64 * 1024 * 1024, messages, samples, retained, bound: 32 * 1024 * 1024 };
@@ -102,7 +102,7 @@ it("measures retained Home heap at production record caps for a 2k-message histo
     const report = {
       chapters: 4, messages, retainedBytes: retained, retainedBytesPerMessage: Math.round(retained / messages),
       peakSampleBytes: Math.max(...samples), production: {
-        recordCapChars: EPISODIC_DEFAULTS.recordCapChars, capChars: EPISODIC_DEFAULTS.capChars, viewBytes: EPISODIC_DEFAULTS.viewBytes,
+        recordCapChars: EPISODIC_DEFAULTS.recordCapChars, capChars: EPISODIC_CAP_CHARS, viewBytes: EPISODIC_DEFAULTS.viewBytes,
       },
     };
     await reportFile("heap-production.json", report);
@@ -125,7 +125,7 @@ it("retains at most the capped text of each over-cap message at production caps"
     const retainedPerMessage = Math.round(retained / messages);
     await reportFile("heap-over-cap.json", {
       chapters: 2, messages, sourceBytesPerMessage: sourceBytes, retainedBytes: retained, retainedBytesPerMessage: retainedPerMessage,
-      production: { recordCapChars: EPISODIC_DEFAULTS.recordCapChars, capTailChars: EPISODIC_DEFAULTS.capTailChars },
+      production: { recordCapChars: EPISODIC_DEFAULTS.recordCapChars, capTailChars: EPISODIC_CAP_TAIL_CHARS },
     });
     // The capped text is about 128 Ki characters, two bytes each (its marker is not
     // ASCII): about 256 KB per message. A retained source would be 2 MB per message.

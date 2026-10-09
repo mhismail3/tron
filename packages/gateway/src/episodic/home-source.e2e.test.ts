@@ -42,7 +42,7 @@ async function fixture() {
   const open = async (sessionSource = source) => {
     const memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource,
       summarizer: async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)),
-      limits: { viewBytes: 4096, jobs: 2, retryMs: 1 }, sleep: async () => {},
+      limits: { viewBytes: 4096, jobs: 2, retryMs: 0 },
     }); memories.push(memory); return memory;
   };
   return { root, chapters, open, workspace, source };
