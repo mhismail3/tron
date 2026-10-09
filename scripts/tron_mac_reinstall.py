@@ -1064,6 +1064,28 @@ class Reinstall:
         # while the new operation takes a fresh inventory after restart.
         self.begin(Path(previous['app']), predecessor=previous, bundled_selection=carried_selection)
 
+    def abandon(self):
+        """Archive a superseded active operation without touching its evidence or services.
+
+        Refused after an irreversible step (Stable-channel retirement, or a replacement
+        already recorded as awaiting-resume) unless the installed app is this operation's
+        candidate. The artifact path is not consulted: a superseded candidate may be gone.
+        """
+        require(self.receipt['phase'] != 'verified', 'abandon-verified: use --finish to archive a verified operation')
+        installed = self.platform.validate_app(self.platform.installed, current_contract=False)
+        require(installed in (self.receipt['original'], self.receipt['candidate']),
+                'abandon-installed-app: installed app is neither the recorded original nor candidate; preserve operation for review')
+        candidate_installed = installed == self.receipt['candidate']
+        irreversible = 'bundledSelection' in self.receipt or self.receipt['phase'] == 'awaiting-resume'
+        require(candidate_installed or not irreversible,
+                'abandon-irreversible: an irreversible step has passed; resume or roll back this operation instead')
+        # Recorded before archiving the pointer: an interrupted archive reruns with the same evidence.
+        self.receipt['abandonment'] = {'installedApp': 'candidate' if candidate_installed else 'original'}
+        self.save()
+        rename_exclusive(self.store / 'active.json', self.operation / 'abandoned-active.json')
+        print(f'Abandoned operation {self.operation.name} at phase {self.receipt["phase"]}. Its receipt, backups and retired '
+              'payloads are retained; no app or service changed. Begin the replacement with --app <Release.app>.')
+
     def backup(self):
         sources = self.sources()
         backups = private_dir(self.operation / 'backups', create=True)
@@ -1132,11 +1154,17 @@ class Reinstall:
 
     def run(self, args):
         actions = [args.status, args.verify, args.finish, getattr(args, 'restart', False),
-                   getattr(args, 'select_bundled_offline', False)]
+                   getattr(args, 'select_bundled_offline', False), getattr(args, 'abandon', False)]
         actions.extend(getattr(args, name, False) for name in self.confirmation_options)
         require(sum(bool(value) for value in actions) <= 1,
                 'arguments: choose exactly one action or offline confirmation')
         with exclusive(self.store):
+            if getattr(args, 'abandon', False):
+                require(exists(self.store / 'active.json'), 'abandon-absent: no active maintenance operation')
+                self.load()
+                require(not args.app, 'arguments: --abandon cannot be combined with --app; begin the new operation afterwards')
+                self.abandon()
+                return
             if exists(self.store / 'active.json'):
                 self.load()
                 if args.app:
@@ -1217,6 +1245,8 @@ def parser(description=__doc__, confirmation_options=None):
     result.add_argument('--verify', action='store_true', help='verify user-installed and resumed app')
     result.add_argument('--finish', action='store_true', help='archive verified operation; retain all backups')
     result.add_argument('--restart', action='store_true', help='start a fresh operation when no incomplete step or irreversible transition remains')
+    result.add_argument('--abandon', action='store_true',
+                        help='archive a superseded active operation before an irreversible step, or when its candidate is installed; keeps all evidence')
     result.add_argument('--recovery-verify', action='store_true',
                         help='read-only verify a registered completed recovery archive')
     result.add_argument('--recovery-relocate', action='store_true',
@@ -1238,7 +1268,7 @@ def main(workflow=Reinstall, arguments=None):
         if recovery_action:
             require(workflow is Reinstall, 'arguments: recovery commands belong to mac reinstall')
             require(not any((args.app, args.confirm_offline, args.select_bundled_offline,
-                             args.status, args.verify, args.finish)),
+                             args.status, args.verify, args.finish, args.abandon)),
                     'arguments: recovery action cannot be combined with reinstall options')
             require(args.operation_id is not None, 'arguments: recovery archive requires --operation-id')
             store = private_dir(home / '.tron-maintenance')

@@ -455,6 +455,7 @@ class Platform:
         self.required_bundled = False
 
     def validate_app(self, app, current_contract=True):
+        reinstall.require(app.is_dir(), 'app-missing: provide the prepared signed Release Tron.app')
         return {'team': 'EXAMPLE123', 'cdhash': (app / 'identity').read_text(), 'resources': 'fixture'}
 
     def offline(self):
@@ -491,7 +492,8 @@ class Fixture:
         self.workflow = reinstall.Reinstall(self.home, self.platform)
 
     def args(self, **kwargs):
-        values = dict(app=None, confirm_offline=False, verify=False, status=False, finish=False, restart=False)
+        values = dict(app=None, confirm_offline=False, verify=False, status=False, finish=False, restart=False,
+                      abandon=False)
         values.update(kwargs)
         return argparse.Namespace(**values)
 
@@ -1003,6 +1005,159 @@ class ReinstallTests(Fixture, unittest.TestCase):
         commands = [list(map(str, call.args[0])) for call in calls.call_args_list]
         self.assertIn(["/bin/bash", str(reinstall.REPO / 'scripts/verify-mac-install.sh'), '--artifact-only'], commands)
         self.assertFalse(any('launchctl' in command[0] for command in commands))
+
+
+class AbandonSupersededOperationTests(Fixture, unittest.TestCase):
+    def stop_in_backing_up(self):
+        """Reproduce the incident: the operation stopped while copying backups."""
+        original = reinstall.copy_tree
+        count = 0
+        def interrupt(*args):
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise KeyboardInterrupt()
+            return original(*args)
+        with patch.object(reinstall, 'copy_tree', side_effect=interrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_workflow(app=self.app, confirm_offline=True)
+        self.assertEqual(self.workflow.receipt['phase'], 'backing-up')
+
+    def maintainer_installs_candidate_and_removes_artifact(self):
+        (self.installed / 'identity').write_text('new')
+        shutil.rmtree(self.app)
+
+    def next_app(self):
+        app = self.root / 'next.app'
+        app.mkdir()
+        (app / 'identity').write_text('newer')
+        return app
+
+    def evidence(self, operation):
+        # The abandonment record and archived pointer are the only permitted additions.
+        return {name: item for name, item in reinstall.tree_manifest(operation).items()
+                if name not in ('receipt.json', 'abandoned-active.json')}
+
+    def test_superseded_operation_is_abandoned_and_a_new_app_operation_begins(self):
+        self.stop_in_backing_up()
+        superseded = self.workflow.operation
+        receipt_before = reinstall.read_json(superseded / 'receipt.json')
+        evidence_before = self.evidence(superseded)
+        self.maintainer_installs_candidate_and_removes_artifact()
+        with patch.object(self.platform, 'offline', side_effect=AssertionError('abandon changed services')), \
+                patch.object(self.platform, 'verify_installed', side_effect=AssertionError('abandon verified app')):
+            self.run_workflow(abandon=True)
+        self.assertFalse((self.workflow.store / 'active.json').exists())
+        self.assertEqual(reinstall.read_json(superseded / 'abandoned-active.json'),
+                         {'schema': 1, 'id': superseded.name})
+        receipt_after = reinstall.read_json(superseded / 'receipt.json')
+        self.assertEqual(receipt_after.pop('abandonment'), {'installedApp': 'candidate'})
+        self.assertEqual(receipt_after, receipt_before)
+        self.assertEqual(self.evidence(superseded), evidence_before)
+        self.assertEqual((self.installed / 'identity').read_text(), 'new')
+
+        self.run_workflow(app=self.next_app())
+        self.assertNotEqual(self.workflow.operation, superseded)
+        self.assertEqual(reinstall.read_json(self.workflow.store / 'active.json')['id'], self.workflow.operation.name)
+        self.assertEqual(self.workflow.receipt['candidate']['cdhash'], 'newer')
+        self.assertEqual(self.workflow.receipt['original']['cdhash'], 'new')
+        self.assertNotIn('abandonment', self.workflow.receipt)
+
+    def test_abandon_refuses_after_an_irreversible_step_and_changes_nothing(self):
+        source = self.home / '.tron/gateway/payloads/stable'
+        source.mkdir(parents=True, mode=0o700)
+        (source / 'current.json').write_text('selection evidence')
+        self.run_workflow(app=self.app)
+        self.run_workflow(select_bundled_offline=True)
+        operation = self.workflow.operation
+        receipt_before = (operation / 'receipt.json').read_bytes()
+        with self.assertRaisesRegex(reinstall.Stop, 'abandon-irreversible'):
+            self.run_workflow(abandon=True)
+        self.assertEqual((operation / 'receipt.json').read_bytes(), receipt_before)
+        self.assertTrue((self.workflow.store / 'active.json').exists())
+        self.assertFalse((operation / 'abandoned-active.json').exists())
+
+    def test_abandon_refuses_after_replacement_even_if_the_original_app_is_back(self):
+        self.run_workflow(app=self.app, confirm_offline=True)
+        (self.installed / 'identity').write_text('new')
+        self.run_workflow(confirm_offline=True)
+        self.assertEqual(self.workflow.receipt['phase'], 'awaiting-resume')
+        (self.installed / 'identity').write_text('old')
+        operation = self.workflow.operation
+        with self.assertRaisesRegex(reinstall.Stop, 'abandon-irreversible'):
+            self.run_workflow(abandon=True)
+        self.assertTrue((self.workflow.store / 'active.json').exists())
+        self.assertFalse((operation / 'abandoned-active.json').exists())
+
+    def test_abandon_allowed_after_replacement_when_candidate_is_installed(self):
+        self.run_workflow(app=self.app, confirm_offline=True)
+        (self.installed / 'identity').write_text('new')
+        self.run_workflow(confirm_offline=True)
+        self.assertEqual(self.workflow.receipt['phase'], 'awaiting-resume')
+        superseded = self.workflow.operation
+        self.run_workflow(abandon=True)
+        self.assertEqual(reinstall.read_json(superseded / 'receipt.json')['abandonment'], {'installedApp': 'candidate'})
+        self.assertEqual(reinstall.read_json(superseded / 'abandoned-active.json'), {'schema': 1, 'id': superseded.name})
+        self.assertEqual((self.installed / 'identity').read_text(), 'new')
+
+    def test_abandon_refuses_when_installed_app_is_neither_recorded_app(self):
+        self.stop_in_backing_up()
+        operation = self.workflow.operation
+        receipt_before = (operation / 'receipt.json').read_bytes()
+        (self.installed / 'identity').write_text('third')
+        with self.assertRaisesRegex(reinstall.Stop, 'abandon-installed-app'):
+            self.run_workflow(abandon=True)
+        self.assertEqual((operation / 'receipt.json').read_bytes(), receipt_before)
+        self.assertTrue((self.workflow.store / 'active.json').exists())
+
+    def test_verified_operation_is_finished_not_abandoned(self):
+        self.run_workflow(app=self.app, confirm_offline=True)
+        (self.installed / 'identity').write_text('new')
+        self.run_workflow(confirm_offline=True)
+        self.run_workflow(verify=True)
+        self.assertEqual(self.workflow.receipt['phase'], 'verified')
+        with self.assertRaisesRegex(reinstall.Stop, 'abandon-verified: use --finish'):
+            self.run_workflow(abandon=True)
+        self.assertTrue((self.workflow.store / 'active.json').exists())
+
+    def test_interrupted_archive_resumes_without_losing_the_pointer(self):
+        self.stop_in_backing_up()
+        superseded = self.workflow.operation
+        self.maintainer_installs_candidate_and_removes_artifact()
+        with patch.object(reinstall, 'rename_exclusive', side_effect=OSError(5, 'fixture interruption')):
+            with self.assertRaises(OSError):
+                self.run_workflow(abandon=True)
+        self.assertEqual(reinstall.read_json(self.workflow.store / 'active.json'), {'schema': 1, 'id': superseded.name})
+        self.assertEqual(reinstall.read_json(superseded / 'receipt.json')['abandonment']['installedApp'], 'candidate')
+        self.run_workflow(abandon=True)
+        self.assertFalse((self.workflow.store / 'active.json').exists())
+        self.assertTrue((superseded / 'abandoned-active.json').exists())
+
+    def test_abandon_requires_an_active_operation_and_no_other_action(self):
+        with self.assertRaisesRegex(reinstall.Stop, 'abandon-absent'):
+            self.run_workflow(abandon=True)
+        self.stop_in_backing_up()
+        with self.assertRaisesRegex(reinstall.Stop, 'arguments: --abandon cannot be combined with --app'):
+            self.run_workflow(abandon=True, app=self.app)
+        with self.assertRaisesRegex(reinstall.Stop, 'arguments: choose exactly one'):
+            self.run_workflow(abandon=True, status=True)
+        self.assertTrue((self.workflow.store / 'active.json').exists())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'main() admits only the Darwin login user')
+    def test_cli_abandon_then_app_begins_a_new_operation(self):
+        self.stop_in_backing_up()
+        superseded = self.workflow.operation
+        self.maintainer_installs_candidate_and_removes_artifact()
+        next_app = self.next_app()
+        with patch.object(reinstall, 'MacPlatform', return_value=self.platform), \
+                patch.dict(os.environ, {'HOME': str(self.home)}), \
+                patch.object(reinstall.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(reinstall.main(arguments=['--abandon']), 0)
+            self.assertEqual(reinstall.main(arguments=['--app', str(next_app)]), 0)
+        active = reinstall.read_json(self.workflow.store / 'active.json')
+        self.assertNotEqual(active['id'], superseded.name)
+        self.assertTrue((superseded / 'abandoned-active.json').exists())
 
 
 class FilesystemTests(unittest.TestCase):
