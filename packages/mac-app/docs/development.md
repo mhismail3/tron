@@ -612,6 +612,19 @@ Use the same command with `--status` for its saved checkpoint. `--finish` is
 accepted only after successful installed verification and removes only the active
 operation pointer; all receipts and backups remain. No retention cleanup runs.
 
+`--abandon` archives a superseded active operation so that `--app <new>` can begin
+again, for example when the maintainer installed the candidate by other means and
+its artifact path is gone. It requires the installed app to be the operation's
+recorded original or candidate. It is refused for a verified operation (use
+`--finish`), and after an irreversible step (a recorded bundled-selection
+retirement, or a replacement recorded as `awaiting-resume`) unless the installed
+app is that operation's candidate. The artifact path is not consulted. It records
+the abandonment in the operation receipt and moves the active pointer to
+`abandoned-active.json`; receipts, backups and retired payloads stay in place. It
+stops no process and changes no app, LaunchAgent or Gateway. Run it alone, then
+start the replacement with `--app`. An interrupted abandonment is completed by
+rerunning `--abandon`.
+
 `--verify` runs `scripts/tron mac verify`, checks the exact replacement identity
 and rejects loaded agent-directory overrides. A failure leaves the checkpoint
 unfinished. Success verifies app/supervision/runtime identity, **not** complete
