@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { gatewayBuildInputFingerprint, verifyGatewayBuildInputReceipt } from "./gateway-install-inputs.mjs";
 
 import {
@@ -226,11 +226,34 @@ function selection(version, payloadFingerprint = "a".repeat(64)) {
   return { schema: 1, kind: "tron-gateway-selection", channel: "stable", version, payloadFingerprint };
 }
 
+// One chmod process per tree: a per-entry walk of a fixture's ~9k npm files
+// costs more than the test it cleans up after.
 async function makeTreeWritable(root) {
-  const info = await lstat(root).catch(() => undefined);
-  if (!info || info.isSymbolicLink()) return;
-  await chmod(root, info.isDirectory() ? 0o755 : ((info.mode & 0o111) !== 0 ? 0o755 : 0o644));
-  if (info.isDirectory()) for (const entry of await readdir(root)) await makeTreeWritable(join(root, entry));
+  await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 30_000 }).catch(() => {});
+}
+
+// Fixture bases are built once per file and never handed to a test. Each test
+// receives a copy-on-write clone (`cp -c` keeps modes and relative symlinks), so
+// one test's mutation cannot reach a later test or the base.
+let fixtureBaseRootPromise;
+const fixtureBases = new Map();
+after(async () => {
+  if (fixtureBaseRootPromise) await rm(await fixtureBaseRootPromise, { recursive: true, force: true });
+});
+
+async function cloneFixture(name, root, build) {
+  if (!fixtureBases.has(name)) {
+    fixtureBaseRootPromise ??= mkdtemp(join(tmpdir(), "tron-payload-fixture-bases-"));
+    fixtureBases.set(name, (async () => {
+      const base = join(await fixtureBaseRootPromise, name);
+      await build(base);
+      return base;
+    })());
+  }
+  const base = await fixtureBases.get(name);
+  await mkdir(root, { recursive: true });
+  await runBounded("/bin/cp", ["-c", "-R", join(base, "payload"), join(root, "payload")], { timeoutMs: 120_000 });
+  return join(root, "payload");
 }
 
 let pinnedNpmRootPromise;
@@ -290,7 +313,7 @@ async function addRuntimeNodeAliases(root) {
     const directory = join(root, "runtime", `bin-${architecture}`);
     const npmRoot = join(root, "runtime", `npm-${architecture}`);
     await mkdir(directory, { recursive: true });
-    await cp(officialNpmRoot, npmRoot, { recursive: true });
+    await runBounded("/bin/cp", ["-c", "-R", officialNpmRoot, npmRoot], { timeoutMs: 120_000 });
     await symlink(`../node-${architecture}`, join(directory, "node"));
     await symlink(`../npm-${architecture}/bin/npm-cli.js`, join(directory, "npm"));
     await symlink("../../app/node_modules/.bin/pi", join(directory, "pi"));
@@ -985,6 +1008,10 @@ test("source builds reject compiled imports that are not shipped before publicat
 });
 
 async function makePreflightFixture(root) {
+  return cloneFixture("preflight", root, buildPreflightFixture);
+}
+
+async function buildPreflightFixture(root) {
   const payload = join(root, "payload");
   await mkdir(join(payload, "app", "dist"), { recursive: true });
   await mkdir(join(payload, "app", "scripts"), { recursive: true });
@@ -1245,7 +1272,7 @@ test("dev empty push configuration cannot be promoted into Stable", async () => 
       /stable payload PushService.xcconfig requires a non-empty origin/,
     );
   } finally {
-    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1284,7 +1311,7 @@ test("tron-dev candidate source stages through the real payload manifest validat
       assert.equal(staged.version, version);
     }
   } finally {
-    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1858,7 +1885,7 @@ test("Debug handoff copies exact bytes only after post-proof and leaves Stable i
       readFile(join(racedStableHome, "gateway", "payloads", "stable", "deployment-state.json")), /ENOENT/,
     );
   } finally {
-    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1973,6 +2000,10 @@ const nativeStageFiles = [
 ];
 
 async function makeNativeStageFixture(root, signature) {
+  return cloneFixture(`native-${signature}`, root, (base) => buildNativeStageFixture(base, signature));
+}
+
+async function buildNativeStageFixture(root, signature) {
   const payload = await makePreflightFixture(root);
   const packages = { "": {} };
   for (const [path, magic] of nativeStageFiles) {
