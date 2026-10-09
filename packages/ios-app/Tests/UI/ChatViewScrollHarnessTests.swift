@@ -1168,7 +1168,8 @@ final class ChatViewScrollHarness {
         installsSubscribedSnapshot: Bool = true,
         scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
         mediaFetch: ChatMediaFetch? = nil,
-        orientation: ChatTranscriptOrientation = .newestAtOrigin
+        orientation: ChatTranscriptOrientation = .newestAtOrigin,
+        reduceMotionEnabled: Bool = false
     ) throws {
         let dependencies = try Self.makeDependencies(
             enablesComposerSubmission: false,
@@ -1182,7 +1183,8 @@ final class ChatViewScrollHarness {
             installsSubscribedSnapshot: installsSubscribedSnapshot,
             enablesPresentationCover: enablesPresentationCover,
             scrollCallbackMode: scrollCallbackMode,
-            orientation: orientation
+            orientation: orientation,
+            reduceMotionEnabled: reduceMotionEnabled
         )
     }
 
@@ -1194,7 +1196,8 @@ final class ChatViewScrollHarness {
         usesRealOpening: Bool = false,
         unansweredRPCMethods: Set<String> = [],
         mediaFetch: ChatMediaFetch? = nil,
-        orientation: ChatTranscriptOrientation = .newestAtOrigin
+        orientation: ChatTranscriptOrientation = .newestAtOrigin,
+        reduceMotionEnabled: Bool = false
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(
             enablesComposerSubmission: true,
@@ -1217,7 +1220,8 @@ final class ChatViewScrollHarness {
                 installsSubscribedSnapshot: true,
                 enablesPresentationCover: enablesPresentationCover,
                 usesRealOpening: usesRealOpening,
-                orientation: orientation
+                orientation: orientation,
+                reduceMotionEnabled: reduceMotionEnabled
             )
             if usesRealOpening { await harness.startRPCResponder(unansweredMethods: unansweredRPCMethods) }
             return harness
@@ -1299,7 +1303,8 @@ final class ChatViewScrollHarness {
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
         scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
-        orientation: ChatTranscriptOrientation = .newestAtOrigin
+        orientation: ChatTranscriptOrientation = .newestAtOrigin,
+        reduceMotionEnabled: Bool = false
     ) throws {
         self.snapshot = snapshot
         self.orientation = orientation
@@ -1354,6 +1359,7 @@ final class ChatViewScrollHarness {
             }
             .environment(model)
             .environment(\.hostedToolActionProbe, toolActionProbe)
+            .environment(\._accessibilityReduceMotion, reduceMotionEnabled)
         )
         hostingController = UIHostingController(rootView: enablesPresentationCover
             ? AnyView(HarnessManagedSurface(content: root, cover: cover))

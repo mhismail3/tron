@@ -543,8 +543,8 @@ struct ChatRowStabilityTests {
         }
         .frame(width: size.width, height: size.height, alignment: .top)
         let image = try renderHostedView(content, size: size)
-        let drawn = try #require(pixel(of: image, at: CGPoint(x: 100, y: 80)))
-        let overflow = try #require(pixel(of: image, at: CGPoint(x: 100, y: 300)))
+        let drawn = try #require(sampledPixel(of: image, at: CGPoint(x: 100, y: 80)))
+        let overflow = try #require(sampledPixel(of: image, at: CGPoint(x: 100, y: 300)))
         print("ROW-STABILITY-SETTLED-CLIP drawn=\(drawn) overflow=\(overflow)"
             + " settledOverflow=\(rowStabilityNumber(ChatEntranceGrowthPolicy.settledOverflow))")
         #expect(
@@ -1204,37 +1204,6 @@ private func renderHostedView<Content: View>(_ content: Content, size: CGSize) t
 /// background.
 private func isRed(_ pixel: (red: Int, green: Int, blue: Int, alpha: Int)) -> Bool {
     pixel.alpha > 200 && pixel.red > 200 && pixel.green < 120 && pixel.blue < 120
-}
-
-/// One rendered pixel in device RGB, given in points of the rendered view, with
-/// the Core Graphics buffer's bottom-up rows resolved to a top-left origin.
-private func pixel(of image: UIImage, at point: CGPoint) -> (red: Int, green: Int, blue: Int, alpha: Int)? {
-    guard let cgImage = image.cgImage else { return nil }
-    let x = Int((point.x * image.scale).rounded())
-    let y = Int((point.y * image.scale).rounded())
-    guard x >= 0, y >= 0, x < cgImage.width, y < cgImage.height else { return nil }
-    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4)
-    defer { buffer.deallocate() }
-    buffer.initialize(repeating: 0, count: 4)
-    guard let context = CGContext(
-        data: buffer,
-        width: 1,
-        height: 1,
-        bitsPerComponent: 8,
-        bytesPerRow: 4,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return nil }
-    context.draw(
-        cgImage,
-        in: CGRect(
-            x: -CGFloat(x),
-            y: -(CGFloat(cgImage.height) - CGFloat(y) - 1),
-            width: CGFloat(cgImage.width),
-            height: CGFloat(cgImage.height)
-        )
-    )
-    return (Int(buffer[0]), Int(buffer[1]), Int(buffer[2]), Int(buffer[3]))
 }
 
 /// The oversized inline display's own rows: one finalized PDF display above the
@@ -2309,12 +2278,14 @@ private func writeInlineDisplayReport(
 @MainActor
 private func withStabilityHarness(
     snapshot: SessionSnapshot,
+    reduceMotionEnabled: Bool = false,
     operation: @escaping @MainActor (ChatViewScrollHarness) async throws -> Void
 ) async throws {
     let harness = try ChatViewScrollHarness(
         snapshot: snapshot,
         displayFrameScheduler: .displayLink,
-        scrollCallbackMode: .native
+        scrollCallbackMode: .native,
+        reduceMotionEnabled: reduceMotionEnabled
     )
     do {
         try await operation(harness)
@@ -2330,11 +2301,13 @@ private func withStabilityHarness(
 @MainActor
 private func withComposerSubmissionHarness(
     snapshot: SessionSnapshot,
+    reduceMotionEnabled: Bool = false,
     operation: @escaping @MainActor (ChatViewScrollHarness) async throws -> Void
 ) async throws {
     let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
         snapshot: snapshot,
-        displayFrameScheduler: .displayLink
+        displayFrameScheduler: .displayLink,
+        reduceMotionEnabled: reduceMotionEnabled
     )
     do {
         try await operation(harness)
@@ -2394,4 +2367,488 @@ private func settledHeight(
 private func detachToOldestAndReturn(harness: ChatViewScrollHarness) async throws {
     try await harness.detachReaderByRealScroll()
     try await harness.returnReaderToPinnedTail()
+}
+
+@MainActor
+@Suite("Chat motion conformance", .serialized, .enabled(if: UIValidationTier.isActive))
+struct ChatMotionConformanceTests {
+    @Test("hosted transition frame metrics", arguments: ChatMotionScenario.allCases)
+    func transitionFrameMetrics(_ scenario: ChatMotionScenario) async throws {
+        let fixture = try motionFixture(scenario)
+        if scenario == .replace {
+            try await withComposerSubmissionHarness(snapshot: fixture.initial) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try await driveBoundaries(3, harness: harness)
+                let prepared = try await prepareMotionReplacement(initial: fixture.initial, harness: harness)
+                let transition = ChatMotionFixture(initial: fixture.initial, updated: prepared.updated, rowID: prepared.semanticID)
+                try await recordMotionMetrics(
+                    scenario, fixture: transition, physicalID: prepared.physicalID, harness: harness
+                )
+            }
+        } else {
+            try await withStabilityHarness(snapshot: fixture.initial) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try await driveBoundaries(3, harness: harness)
+                try await recordMotionMetrics(scenario, fixture: fixture, physicalID: nil, harness: harness)
+            }
+        }
+    }
+
+    @Test("Reduce Motion installs arrive, replace and resize without intermediate frames")
+    func reduceMotionAtomicInstalls() async throws {
+        for scenario in [ChatMotionScenario.arrive, .replace, .resize] {
+            let fixture = try motionFixture(scenario)
+            if scenario == .replace {
+                try await withComposerSubmissionHarness(snapshot: fixture.initial, reduceMotionEnabled: true) { harness in
+                    try await recordReduceMotionScenario(scenario, fixture: fixture, harness: harness)
+                }
+            } else {
+                try await withStabilityHarness(snapshot: fixture.initial, reduceMotionEnabled: true) { harness in
+                    try await recordReduceMotionScenario(scenario, fixture: fixture, harness: harness)
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+private func recordMotionMetrics(
+    _ scenario: ChatMotionScenario,
+    fixture: ChatMotionFixture,
+    physicalID: String?,
+    harness: ChatViewScrollHarness
+) async throws {
+    if scenario != .arrive {
+        _ = try await harness.recorder.waitUntil {
+            $0.nativeRows.contains { row in
+                (physicalID.map { row.physicalID == $0 } ?? false)
+                    || row.semanticID == fixture.rowID || row.physicalID == fixture.rowID
+            }
+        }
+    }
+    let before = try #require(harness.recorder.samples.last)
+    let initialTarget = before.nativeRows.first { row in
+        (physicalID.map { row.physicalID == $0 } ?? false)
+            || row.semanticID == fixture.rowID || row.physicalID == fixture.rowID
+    }
+    let trackedPhysicalID = physicalID ?? initialTarget?.physicalID ?? fixture.rowID
+    let initialFrame = initialTarget?.windowFrame
+    let initialSemanticID = initialTarget?.semanticID ?? fixture.rowID
+    let initialGeometryFrame = before.observation.rowFrames[initialSemanticID]
+    let belowSemanticID = before.observation.rowFrames
+        .filter { key, frame in
+            guard key != initialSemanticID, let initialGeometryFrame else { return false }
+            return frame.minY >= initialGeometryFrame.maxY
+        }
+        .min { $0.value.minY < $1.value.minY }?.key
+    harness.replaceAuthoritativeSnapshot(fixture.updated)
+
+    var samples: [ChatMotionFrameSample] = []
+    var previousTransitionFrame = initialFrame
+    var previousBelowFrame = belowSemanticID.flatMap { before.observation.rowFrames[$0] }
+    var maxTransitionStep: CGFloat = 0
+    var maxBelowStep: CGFloat = 0
+    var maxTail: CGFloat = 0
+    for frame in 0..<24 {
+        try await harness.driveFrameBoundary()
+        guard let sample = harness.recorder.samples.last else { continue }
+        let observation = sample.observation
+        let currentTransitionFrame = sample.nativeRows.first { $0.physicalID == trackedPhysicalID }?.windowFrame
+        let currentBelowFrame = belowSemanticID.flatMap { observation.rowFrames[$0] } ?? previousBelowFrame
+        if let previousTransitionFrame {
+            let step = currentTransitionFrame.map {
+                scenario == .move
+                    ? geometryStep(previousTransitionFrame, $0)
+                    : geometrySizeStep(previousTransitionFrame, $0)
+            } ?? abs(previousTransitionFrame.height)
+            maxTransitionStep = max(maxTransitionStep, step)
+        }
+        if let previousBelowFrame, let currentBelowFrame {
+            maxBelowStep = max(maxBelowStep, geometryStep(previousBelowFrame, currentBelowFrame))
+        }
+        maxTail = max(maxTail, abs(observation.geometry.distanceFromBottom))
+        samples.append(ChatMotionFrameSample(
+            frame: frame,
+            transitioningHeight: currentTransitionFrame.map { Double($0.height) },
+            rowBelowHeight: currentBelowFrame.map { Double($0.height) },
+            transitioningFrame: currentTransitionFrame.map(frameValues),
+            rowBelowFrame: currentBelowFrame.map(frameValues),
+            tailDistance: Double(observation.geometry.distanceFromBottom)
+        ))
+        if let currentTransitionFrame {
+            previousTransitionFrame = currentTransitionFrame
+        } else if previousTransitionFrame != nil {
+            previousTransitionFrame = .zero
+        }
+        previousBelowFrame = currentBelowFrame
+    }
+    let nativeInstances = Set(harness.recorder.samples.compactMap { sample in
+        sample.nativeRows.first { $0.physicalID == trackedPhysicalID }?.instance
+    }).count
+    let probeInstances = harness.probeObservation.rowIdentityInstanceCounts[trackedPhysicalID] ?? 0
+    let identityCount = max(nativeInstances, probeInstances)
+    let metrics = ChatMotionCaseMetrics(
+        name: scenario.rawValue,
+        maximumTransitioningRowStep: Double(maxTransitionStep),
+        maximumRowBelowStep: Double(maxBelowStep),
+        maximumTailDistance: Double(maxTail),
+        pixelChangingFrames: nil,
+        rowIdentityInstances: identityCount,
+        samples: samples
+    )
+    try writeMotionMetrics(metrics)
+    print("CHAT-MOTION-CONFORMANCE \(scenario.rawValue) transitionStep=\(maxTransitionStep) belowStep=\(maxBelowStep) tail=\(maxTail) identity=\(identityCount)")
+
+    if scenario.isKnownUnanimated {
+        let unanimatedStep = max(maxTransitionStep, maxBelowStep)
+        withKnownIssue(Comment(rawValue: scenario.knownIssue)) {
+            #expect(unanimatedStep <= ChatMotionConformanceBounds.maximumGeometryStep,
+                    "single-frame geometry step of \(unanimatedStep) pt")
+        }
+    } else {
+        #expect(maxTransitionStep <= ChatMotionConformanceBounds.maximumGeometryStep,
+                "single-frame geometry step of \(maxTransitionStep) pt")
+        #expect(maxTail <= ChatMotionConformanceBounds.maximumTailDistance,
+                "pinned tail moved \(maxTail) pt")
+        #expect(identityCount <= 1, "the physical row remounted \(identityCount) times")
+        if scenario == .replace || scenario == .resize {
+            let heights = samples.compactMap(\.transitioningHeight)
+            let changed = zip(heights, heights.dropFirst()).filter { abs($0 - $1) > 0.5 }.count
+            #expect(changed >= ChatMotionConformanceBounds.minimumAnimatedFrames,
+                    "transition produced only \(changed) geometry-changing frames")
+        }
+    }
+}
+
+@MainActor
+private func recordReduceMotionScenario(
+    _ scenario: ChatMotionScenario,
+    fixture: ChatMotionFixture,
+    harness: ChatViewScrollHarness
+) async throws {
+    _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+    try await driveBoundaries(3, harness: harness)
+    var updated = fixture.updated
+    var targetSemanticID = fixture.rowID
+    var physicalID: String?
+    if scenario == .replace {
+        let prepared = try await prepareMotionReplacement(initial: fixture.initial, harness: harness)
+        updated = prepared.updated
+        targetSemanticID = prepared.semanticID
+        physicalID = prepared.physicalID
+    }
+    if scenario != .arrive {
+        _ = try await harness.recorder.waitUntil {
+            $0.nativeRows.contains { row in
+                (physicalID.map { row.physicalID == $0 } ?? false)
+                    || row.semanticID == targetSemanticID || row.physicalID == targetSemanticID
+            }
+        }
+    }
+    let initialTarget = harness.recorder.samples.last?.nativeRows.first { row in
+        (physicalID.map { row.physicalID == $0 } ?? false)
+            || row.semanticID == targetSemanticID || row.physicalID == targetSemanticID
+    }
+    let trackedPhysicalID = physicalID ?? initialTarget?.physicalID ?? targetSemanticID
+    let initialHeight = initialTarget?.windowFrame.height
+    harness.replaceAuthoritativeSnapshot(updated)
+    var previous = initialHeight
+    var intermediateChanges = 0
+    for _ in 0..<8 {
+        try await harness.driveFrameBoundary()
+        let height = harness.recorder.samples.last?.nativeRows.first {
+            $0.physicalID == trackedPhysicalID
+        }?.windowFrame.height
+        if let previous, let height, abs(height - previous) > 0.5 { intermediateChanges += 1 }
+        previous = height
+    }
+    if scenario == .replace || scenario == .resize {
+        withKnownIssue(Comment(rawValue: "Negative control: the animated assertion must reject a Reduce Motion atomic install for \(scenario.rawValue).")) {
+            #expect(intermediateChanges >= ChatMotionConformanceBounds.minimumAnimatedFrames,
+                    "atomic \(scenario.rawValue) install produced only \(intermediateChanges) intermediate frames")
+        }
+    } else {
+        #expect(intermediateChanges <= 1,
+                "Reduce Motion arrival produced \(intermediateChanges) intermediate geometry frames")
+        #expect(harness.recorder.samples.last?.nativeRows.contains {
+            $0.physicalID == trackedPhysicalID || $0.semanticID == targetSemanticID
+        } == true, "Reduce Motion arrival never installed its final row")
+    }
+}
+
+enum ChatMotionScenario: String, CaseIterable {
+    case arrive, replace, resize, depart, move, stopTwoSteers, control
+
+    var isKnownUnanimated: Bool { self == .depart || self == .move || self == .stopTwoSteers || self == .control }
+    var isAnimated: Bool { self == .arrive || self == .replace || self == .resize }
+    var knownIssue: String {
+        switch self {
+        case .depart: "MO-5 adds departing rows to the spine; current row disappearance is atomic."
+        case .move: "MO-6 animates queue reorder; current physical row order changes atomically."
+        case .stopTwoSteers: "MO-5 retains the departing queue rows during the Stop redelivery sequence."
+        case .control: "MO-4 (#274, row motion owner) must animate the tool-capsule row resize; current install steps by 37.7 pt."
+        default: ""
+        }
+    }
+}
+
+private struct ChatMotionFixture {
+    let initial: SessionSnapshot
+    let updated: SessionSnapshot
+    let rowID: String
+}
+
+private struct PreparedMotionReplacement {
+    let updated: SessionSnapshot
+    let semanticID: String
+    let physicalID: String
+}
+
+/// Reproduce the real composer → queue-alias → emptied-queue acknowledgement
+/// sequence used by the #624 regression; a hand-built canonical snapshot alone
+/// cannot create the retained physical presentation alias.
+@MainActor
+private func prepareMotionReplacement(
+    initial: SessionSnapshot,
+    harness: ChatViewScrollHarness
+) async throws -> PreparedMotionReplacement {
+    let promptText = "Second steer, redelivered after Stop."
+    try harness.setComposerDraftText(promptText)
+    harness.submitPrompt()
+
+    var queued = initial
+    queued.queueRevision += 1
+    queued.queuedItems.append(.init(
+        id: harnessHostedPromptOperationID,
+        behavior: .steer,
+        text: promptText,
+        attachmentCount: 0
+    ))
+    harness.replaceAuthoritativeSnapshot(queued)
+    let outgoing = try await harness.recorder.waitUntil {
+        $0.nativeRows.contains { $0.semanticID.hasPrefix("outgoing-submission:") && $0.isOnScreen }
+    }
+    try await driveBoundaries(10, harness: harness)
+    let outgoingRow = try #require(harness.recorder.samples.last?.nativeRows.first {
+        $0.semanticID.hasPrefix("outgoing-submission:")
+    } ?? outgoing.nativeRows.first { $0.semanticID.hasPrefix("outgoing-submission:") })
+
+    var redelivered = queued
+    redelivered.phase = .running
+    redelivered.queueRevision += 1
+    redelivered.queuedItems = []
+    redelivered.transcript.append(try decodeTranscriptFixture(
+        TranscriptItem.self,
+        from: try JSONSerialization.data(withJSONObject: [
+            "id": "canonical-motion-replacement",
+            "parentId": NSNull(),
+            "presentationId": harnessHostedPromptOperationID,
+            "timestamp": "2026-01-01T00:01:00Z",
+            "kind": "message",
+            "role": "user",
+            "content": [["id": "canonical-motion-replacement-text", "ordinal": 0, "type": "text", "text": promptText]],
+        ])
+    ))
+    redelivered.transcriptTotal = redelivered.transcript.count
+    redelivered.revision += 1
+    redelivered.eventSequence += 1
+    return PreparedMotionReplacement(
+        updated: redelivered,
+        semanticID: outgoingRow.semanticID,
+        physicalID: outgoingRow.physicalID
+    )
+}
+
+private func motionFixture(_ scenario: ChatMotionScenario) throws -> ChatMotionFixture {
+    switch scenario {
+    case .arrive:
+        let initial = try rowStabilitySnapshot()
+        return ChatMotionFixture(initial: initial, updated: try insertingEntranceRow(into: initial), rowID: RowStabilityFixture.entranceRowID)
+    case .resize:
+        let initial = try streamingTraceSnapshot(lineCount: 1)
+        var updated = initial
+        updated.streaming = try harnessRichAssistantMessage(
+            id: RowStabilityFixture.traceMotionReplyID,
+            presentationID: RowStabilityFixture.traceMotionReplyID,
+            thinkingLines: traceMotionLines(4),
+            text: "The trace above is still arriving."
+        )
+        updated.revision += 1
+        updated.eventSequence += 1
+        return ChatMotionFixture(initial: initial, updated: updated, rowID: RowStabilityFixture.traceMotionReplyID)
+    case .replace, .depart, .move, .stopTwoSteers:
+        var initial = try SessionScenarioBuilder(seed: 1_329).openingTail(targetEncodedBytes: 10_000)
+        initial.phase = .running
+        initial.acceptsQueuedPrompts = true
+        initial.queueRevision = 1
+        initial.queuedItems = scenario == .replace
+            ? [.init(id: "motion-steer-a", behavior: .steer, text: "First steer.", attachmentCount: 0)]
+            : [
+                .init(id: "motion-steer-a", behavior: .steer, text: "First steer.", attachmentCount: 0),
+                .init(id: "motion-steer-b", behavior: .steer, text: "Second steer.", attachmentCount: 0),
+            ]
+        if scenario == .depart {
+            initial.queuedItems = [.init(id: "motion-steer-a", behavior: .steer, text: "First steer.", attachmentCount: 0)]
+        }
+        var updated = initial
+        updated.queueRevision = 2
+        switch scenario {
+        case .move:
+            updated.queuedItems.reverse()
+        case .depart:
+            updated.queuedItems = []
+        case .replace:
+            updated.queuedItems = []
+            updated.transcript.append(try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: try JSONSerialization.data(withJSONObject: [
+                    "id": "motion-canonical", "parentId": NSNull(), "presentationId": "motion-steer-b",
+                    "timestamp": "2026-01-01T00:01:00Z", "kind": "message", "role": "user",
+                    "content": [["id": "motion-canonical-text", "ordinal": 0, "type": "text", "text": "Second steer."]],
+                ])
+            ))
+            updated.transcriptTotal = updated.transcript.count
+        case .stopTwoSteers:
+            updated.queuedItems = []
+            for (id, presentationID, text) in [
+                ("motion-canonical-a", "motion-steer-a", "First steer."),
+                ("motion-canonical-b", "motion-steer-b", "Second steer."),
+            ] {
+                updated.transcript.append(try decodeTranscriptFixture(
+                    TranscriptItem.self,
+                    from: try JSONSerialization.data(withJSONObject: [
+                        "id": id, "parentId": NSNull(), "presentationId": presentationID,
+                        "timestamp": "2026-01-01T00:01:00Z", "kind": "message", "role": "user",
+                        "content": [["id": "\(id)-text", "ordinal": 0, "type": "text", "text": text]],
+                    ])
+                ))
+            }
+            updated.transcriptTotal = updated.transcript.count
+        default: break
+        }
+        updated.revision += 1
+        updated.eventSequence += 1
+        let rowID = scenario == .replace ? "queued-message-motion-steer-b"
+            : scenario == .depart ? "queued-message-motion-steer-a"
+            : "queued-message-motion-steer-b"
+        return ChatMotionFixture(initial: initial, updated: updated, rowID: rowID)
+    case .control:
+        var initial = try toolDetailSnapshot()
+        guard let first = initial.toolExecutions.first else { throw HarnessError.missingTranscript }
+        var updated = initial
+        updated.toolExecutions = [harnessRuntimeTool(id: first.id, order: 0, status: .running)]
+        updated.revision += 1
+        updated.eventSequence += 1
+        initial.phase = .running
+        return ChatMotionFixture(initial: initial, updated: updated, rowID: RowStabilityFixture.groupedRunRowID)
+    }
+}
+
+private func frameValues(_ frame: CGRect) -> [Double] {
+    [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)]
+}
+
+private func geometryStep(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+    zip(frameValues(lhs), frameValues(rhs)).map { abs($0 - $1) }.max() ?? 0
+}
+
+private func geometrySizeStep(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+    max(abs(lhs.width - rhs.width), abs(lhs.height - rhs.height))
+}
+
+private func writeMotionMetrics(_ metrics: ChatMotionCaseMetrics) throws {
+    let directory = URL(fileURLWithPath: "/tmp/tron-fix-batch/270/mo3", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appending(path: "motion-conformance.json")
+    let existing = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+    var payload = existing
+    payload[metrics.name] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(metrics))
+    try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]).write(to: url)
+}
+
+@MainActor
+@Suite("Chat motion pixel evidence", .serialized, .enabled(if: UIValidationTier.isActive))
+struct ChatMotionPixelConformanceTests {
+    @Test("pixel evidence is sampled separately for cross-fade-capable transitions", arguments: [ChatMotionScenario.arrive, .replace, .depart])
+    func pixelFrameChanges(_ scenario: ChatMotionScenario) async throws {
+        let fixture = try motionFixture(scenario)
+        if scenario == .replace {
+            try await withComposerSubmissionHarness(snapshot: fixture.initial) { harness in
+                try await recordMotionPixels(scenario, fixture: fixture, harness: harness)
+            }
+        } else {
+            try await withStabilityHarness(snapshot: fixture.initial) { harness in
+                try await recordMotionPixels(scenario, fixture: fixture, harness: harness)
+            }
+        }
+    }
+}
+
+@MainActor
+private func recordMotionPixels(
+    _ scenario: ChatMotionScenario,
+    fixture: ChatMotionFixture,
+    harness: ChatViewScrollHarness
+) async throws {
+    _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+    try await driveBoundaries(3, harness: harness)
+    var updated = fixture.updated
+    var targetSemanticID = fixture.rowID
+    var physicalID: String?
+    if scenario == .replace {
+        let prepared = try await prepareMotionReplacement(initial: fixture.initial, harness: harness)
+        updated = prepared.updated
+        targetSemanticID = prepared.semanticID
+        physicalID = prepared.physicalID
+    }
+    if scenario != .arrive {
+        _ = try await harness.recorder.waitUntil {
+            $0.nativeRows.contains { row in
+                (physicalID.map { row.physicalID == $0 } ?? false)
+                    || row.semanticID == targetSemanticID || row.physicalID == targetSemanticID
+            }
+        }
+    }
+    let initialTarget = harness.recorder.samples.last?.nativeRows.first { row in
+        (physicalID.map { row.physicalID == $0 } ?? false)
+            || row.semanticID == targetSemanticID || row.physicalID == targetSemanticID
+    }
+    let trackedPhysicalID = physicalID ?? initialTarget?.physicalID ?? targetSemanticID
+    var previousFrame = initialTarget?.windowFrame
+    var previousImage: UIImage? = try ChatMotionPixelSupport.captureWindow(harness: harness)
+    harness.replaceAuthoritativeSnapshot(updated)
+    var changedFrames = 0
+    for _ in 0..<20 {
+        try await harness.driveFrameBoundary()
+        let current = try ChatMotionPixelSupport.captureWindow(harness: harness)
+        let currentFrame = harness.recorder.samples.last?.nativeRows.first {
+            $0.physicalID == trackedPhysicalID
+        }?.windowFrame
+        if let previousImage {
+            let region = previousFrame.map { prior in
+                currentFrame.map { prior.union($0) } ?? prior
+            } ?? currentFrame
+            if let region, ChatMotionPixelSupport.changedPixels(previousImage, current, in: region) {
+                changedFrames += 1
+            }
+        }
+        previousImage = current
+        previousFrame = currentFrame ?? previousFrame
+    }
+    try writeMotionPixelMetric(scenario.rawValue, changedFrames: changedFrames)
+    print("CHAT-MOTION-PIXELS \(scenario.rawValue) changedFrames=\(changedFrames)")
+    if scenario != .depart {
+        #expect(changedFrames >= ChatMotionConformanceBounds.minimumPixelChangingFrames,
+                "pixel change occupied only \(changedFrames) frames")
+    }
+}
+
+private func writeMotionPixelMetric(_ name: String, changedFrames: Int) throws {
+    let url = URL(fileURLWithPath: "/tmp/tron-fix-batch/270/mo3/motion-conformance.json")
+    guard let data = try? Data(contentsOf: url),
+          var payload = try JSONSerialization.jsonObject(with: data) as? [String: [String: Any]],
+          var row = payload[name] else { return }
+    row["pixelChangingFrames"] = changedFrames
+    payload[name] = row
+    try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]).write(to: url)
 }
