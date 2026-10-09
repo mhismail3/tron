@@ -28,6 +28,14 @@ enum HomeSheetDestination: Identifiable {
 
 }
 
+/// A Home sheet the chat presents for one profile. Choosing another destination
+/// for that profile replaces the open sheet; a different profile dismisses it.
+struct HomeSheetRoute: Identifiable {
+    let profileID: String
+    let destination: HomeSheetDestination
+    var id: String { "home.\(profileID).\(destination.id)" }
+}
+
 private struct HomeSheetRequest: Hashable {
     var id = UUID()
     let query: HomeSheetReadQuery

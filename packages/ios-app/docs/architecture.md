@@ -1504,6 +1504,11 @@ is Working, `ready` is Ready, `paused` is Paused, `blocked` distinguishes missin
 configuration from Memory blocked, and `rollover-pending` is Recovery needed.
 No task or preparing state is guessed from unrelated runtime fields. An active
 response can remain Working while the independent memory projection is paused.
+Home sheets are presented by `ChatRoutes` from a `HomeSheetRoute` that `ChatView`
+holds, not by the header: a connection change clears the Home projection, which
+removes the header, but a presented sheet stays with the chat and re-reads from
+its profile/connection identity when the connection returns. Selecting another
+profile dismisses it. The header only requests a destination.
 Stop response and the composer invoke the same `ChatView.abortCurrentOperation`
 using the current canonical operation ID; Pause/Resume never substitute for Stop.
 Pause memory, Resume memory and Disable Home use `HomeMutationCoordinator` and

@@ -61,6 +61,7 @@ struct ChatView: View {
     /// reconciliation callbacks. They share this identity so physical evidence
     /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
+    @State private var homeSheet: HomeSheetRoute?
 
     #if HOSTED_TEST
     init(
@@ -157,7 +158,8 @@ struct ChatView: View {
                         status: status,
                         profileID: profileID,
                         canStop: admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil,
-                        onStop: abortCurrentOperation
+                        onStop: abortCurrentOperation,
+                        onPresent: { homeSheet = HomeSheetRoute(profileID: profileID, destination: $0) }
                     )
                 }
             }
@@ -229,7 +231,8 @@ struct ChatView: View {
             onKeepEditorRequest: { request in
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
-            }
+            },
+            homeSheet: $homeSheet
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in

@@ -337,6 +337,84 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Step 8 cross-surface proof, one hosted run: the header control menu and all four
+    /// Home sheets in light/dark at normal and accessibility Dynamic Type; background and
+    /// a hosted reconnect on the tasks sheet, each requiring a fresh authoritative read;
+    /// and the capability-off ordinary-session baseline. Captures are private xcresult attachments.
+    @MainActor
+    func testHomeCrossSurfaceProofMatrix() {
+        continueAfterFailure = false
+        let sheets: [(menu: String, doneID: String, content: String, name: String)] = [
+            ("Memory settings", "settings", "home-memory-model-row", "memory-settings"),
+            ("Home context", "context", "Effective activation context", "home-context"),
+            ("Browse memory", "memory", "Projected user memory", "memory-browser"),
+            ("Tasks and permissions", "tasks", "home-task-active", "tasks"),
+        ]
+        for appearance in ["light", "dark"] {
+            for type in ["normal", "accessibility"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-header-state-paused"]
+                if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
+                app.launch()
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+                app.buttons["home-pinned-row"].tap()
+                XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["home-header-state"].label.contains("Paused"))
+                for (index, sheet) in sheets.enumerated() {
+                    app.buttons["home-controls"].tap()
+                    XCTAssertTrue(app.buttons[sheet.menu].waitForExistence(timeout: 3), app.debugDescription)
+                    if index == 0 {
+                        XCTAssertTrue(app.buttons["Resume memory"].exists)
+                        keepScreenshot(named: "proof-\(appearance)-\(type)-header-menu")
+                    }
+                    app.buttons[sheet.menu].tap()
+                    XCTAssertTrue(app.descendants(matching: .any)[sheet.content].waitForExistence(timeout: 5), app.debugDescription)
+                    keepScreenshot(named: "proof-\(appearance)-\(type)-\(sheet.name)")
+                    app.buttons["home-sheet-done-\(sheet.doneID)"].tap()
+                    XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
+                }
+                app.terminate()
+            }
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-reconnect-after-task-list"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        app.buttons["home-controls"].tap()
+        app.buttons["Tasks and permissions"].tap()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
+        let reads = app.staticTexts["fixture.home-task-list-reads"]
+        // The fixture reconnects once after the first read, which can settle before this
+        // test observes it; the mounted sheet must then re-read the new connection (2 reads).
+        XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:2", timeout: 10), "Mounted sheet did not re-read after reconnect")
+        XCTAssertTrue(app.buttons["home-task-active"].exists)
+        keepScreenshot(named: "proof-reconnected-tasks")
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 3))
+        app.activate()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:3", timeout: 10), "Foreground did not start a fresh tasks read")
+        keepScreenshot(named: "proof-background-foreground-tasks")
+        app.buttons["home-sheet-done-tasks"].tap()
+        app.terminate()
+
+        // Capability-off baseline: no pinned row or Home header; the ordinary session opens unchanged.
+        let baseline = XCUIApplication()
+        baseline.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
+        baseline.launch()
+        let ordinary = baseline.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), baseline.debugDescription)
+        XCTAssertFalse(baseline.buttons["home-pinned-row"].exists)
+        ordinary.tap()
+        XCTAssertTrue(baseline.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
+        XCTAssertFalse(baseline.buttons["home-controls"].exists)
+        keepScreenshot(named: "proof-capability-off-ordinary-chat")
+        baseline.terminate()
+    }
+
     @MainActor
     func testHomeHeaderStatesAndStopOwner() {
         for (phase, label) in [("ready", "Ready"), ("active", "Working"), ("paused", "Paused"),

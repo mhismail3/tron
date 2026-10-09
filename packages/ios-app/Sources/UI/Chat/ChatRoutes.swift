@@ -56,11 +56,19 @@ struct ChatRoutes: ViewModifier {
     @Binding var displaySheet: DisplayRoute?
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
+    @Binding var homeSheet: HomeSheetRoute?
     @Environment(AppModel.self) private var model
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     func body(content: Content) -> some View {
         content
+            .tronManagedSheet(item: $homeSheet, identity: { $0.id }) { route in
+                HomeSheet(destination: route.destination, profileID: route.profileID)
+            }
+            // A Home sheet belongs to the profile that opened it; switching profiles dismisses it.
+            .onChange(of: model.profiles.selected?.id) { _, selected in
+                if homeSheet?.profileID != selected { homeSheet = nil }
+            }
             .tronManagedSheet(
                 isPresented: $showContext,
                 identity: "chat.\(sessionID).context",

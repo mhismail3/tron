@@ -103,7 +103,10 @@ struct HostedHomeDashboardFixture: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var homeStatusCount = 0
+    @State private var taskListReads = 0
+    @State private var reconnectRequested = false
     @State private var configuredModel = "none"
     @State private var controlCount = 0
     @State private var abortCount = 0
@@ -156,6 +159,8 @@ struct HostedHomeDashboardFixture: View {
                             Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
                             Text("home-status-count:\(homeStatusCount)")
                                 .accessibilityIdentifier("fixture.home-status-count")
+                            Text("task-list-reads:\(taskListReads)")
+                                .accessibilityIdentifier("fixture.home-task-list-reads")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.isCapabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -188,6 +193,16 @@ struct HostedHomeDashboardFixture: View {
         }
         .preferredColorScheme(arguments.contains("-home-dark") ? .dark : .light)
         .dynamicTypeSize(arguments.contains("-home-accessibility-type") ? .accessibility3 : .large)
+        // Forward scene transitions as production does: background retires the
+        // connection that a mounted Home sheet's identity names, and foreground reconnects.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .inactive: model.becameInactive()
+            case .background: model.enteredBackground()
+            case .active: model.becameActive()
+            @unknown default: break
+            }
+        }
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
@@ -202,8 +217,16 @@ struct HostedHomeDashboardFixture: View {
             guard ready else { return }
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
+                taskListReads = await gateway.taskListReadCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
                 configuredModel = await gateway.configuredModelIdentity()
+                // A hosted reconnect is a new connection identity, which the mounted
+                // Home sheet must observe by re-reading. Requested once, after its first read.
+                if !reconnectRequested, arguments.contains("-home-reconnect-after-task-list"), taskListReads > 0 {
+                    reconnectRequested = true
+                    do { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
+                    catch { self.error = error.localizedDescription }
+                }
                 do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             }
         }
@@ -324,6 +347,7 @@ private actor HostedHomeShellGateway {
     private let emptyContext: Bool
     private let sheetState: String?
     private var browserReads = 0
+    private var taskListReads = 0
     private var configuredModel: ModelRef?
     private var taskStopped = false
     private var taskRedelivered = false
@@ -344,6 +368,7 @@ private actor HostedHomeShellGateway {
         self.delayed = delayed
     }
     func statusCount() -> Int { homeStatusCount }
+    func taskListReadCount() -> Int { taskListReads }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
@@ -364,6 +389,7 @@ private actor HostedHomeShellGateway {
                 model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "home.taskList":
+            taskListReads += 1
             return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
         case "home.taskStatus":
             guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }

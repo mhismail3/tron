@@ -62,6 +62,34 @@ copy, and checks menu/composer reachability. Export its attachments with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
 These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
 
+`testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
+hosted run it mounts the production chat in light and dark, at normal and accessibility
+Dynamic Type, opens the header menu and each Home sheet from it (memory settings, Home
+context, browse memory, tasks and permissions) and captures each. It proves background
+and a hosted reconnect on the tasks sheet each start a fresh authoritative read:
+`fixture.home-task-list-reads` counts the Gateway's `home.taskList` calls. The Home
+fixture forwards scene transitions to the lifecycle as production does, and
+`-home-reconnect-after-task-list` reconnects the hosted lifecycle once after the sheet's
+first read. The same run covers the capability-off ordinary session. The header state,
+background and task journeys run with it:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeCrossSurfaceProofMatrix \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderStatesAndStopOwner \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderAcceptedControlContinuesInBackground \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderBackgroundReconnectAndUnresolvedCompletion \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence
+```
+
+Matrix attachments are named `proof-<appearance>-<type>-<item>` and retained in the
+result bundle; export them with `xcrun xcresulttool export attachments` into private
+evidence. Simulator stills do not prove VoiceOver, live Gateway semantics, real
+reconnect after a dropped transport, or physical-iPhone behavior.
+
 The three Home sheets are covered by `HomeSheetTests` (bounded DTOs, exact
 canonical evidence identity/offsets, latest-request and managed-lifecycle
 publication) and these focused hosted journeys:

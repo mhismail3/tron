@@ -9,9 +9,11 @@ struct HomeChatHeader: View {
     let profileID: String
     let canStop: Bool
     let onStop: () -> Void
+    /// The chat presents Home sheets: this header is removed while the projection
+    /// is cleared (a connection change), and a sheet must outlive that.
+    let onPresent: (HomeSheetDestination) -> Void
     @Environment(AppModel.self) private var model
     @State private var failure: String?
-    @State private var sheet: HomeSheetDestination?
     #if HOSTED_TEST
     @Environment(\.hostedHomeHeaderActionProbe) private var hostedActionProbe
     #endif
@@ -51,13 +53,13 @@ struct HomeChatHeader: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Menu {
-                Button("Memory settings", systemImage: "cpu") { sheet = .settings }
+                Button("Memory settings", systemImage: "cpu") { onPresent(.settings) }
                 if status.taskRecovery != nil {
-                    Button("Tasks and permissions", systemImage: "checklist") { sheet = .tasks }
+                    Button("Tasks and permissions", systemImage: "checklist") { onPresent(.tasks) }
                 }
-                Button("Home context", systemImage: "doc.text.magnifyingglass") { sheet = .context }
+                Button("Home context", systemImage: "doc.text.magnifyingglass") { onPresent(.context) }
                 if model.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true {
-                    Button("Browse memory", systemImage: "brain") { sheet = .memory }
+                    Button("Browse memory", systemImage: "brain") { onPresent(.memory) }
                 }
                 Button("Stop response", systemImage: "stop.fill", action: onStop)
                     .disabled(!canStop)
@@ -90,9 +92,6 @@ struct HomeChatHeader: View {
         .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14)
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .tronManagedSheet(item: $sheet, identity: { "home.\(profileID).\($0.id)" }) { destination in
-            HomeSheet(destination: destination, profileID: profileID)
-        }
         .alert("Home change", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK", role: .cancel) { failure = nil }
         } message: { Text(failure ?? "") }
