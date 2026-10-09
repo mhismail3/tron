@@ -79,6 +79,28 @@ describe("CommandReceiptStore", () => {
     expect(resolveCount).toBe(1);
   });
 
+  it("does not hold the shared inventory while a Home route resolves", async () => {
+    const root = await temporaryRoot("tron-receipts-route-lane-");
+    const store = new CommandReceiptStore(root);
+    const binding = { homeId: "home-slow", bindingRevision: 1, physicalSessionId: "chapter-one" };
+    let releaseRoute!: () => void;
+    const routeGate = new Promise<void>((resolve) => { releaseRoute = resolve; });
+    const routed = store.execute("device", "home.prompt", "home-slow-route", async () => ({ accepted: true }), {
+      resolveBinding: async () => { await routeGate; return binding; },
+    });
+    // An unrelated command must complete while another command's route is still resolving.
+    const ordinary = store.execute("device", "session.prompt", "ordinary-while-route", async () => ({ accepted: true }));
+    let blockedTimer: NodeJS.Timeout | undefined;
+    const outcome = await Promise.race([
+      ordinary.then(() => "completed" as const),
+      new Promise<"blocked">((resolve) => { blockedTimer = setTimeout(() => resolve("blocked"), 2_000); }),
+    ]);
+    clearTimeout(blockedTimer);
+    releaseRoute();
+    await Promise.all([routed, ordinary]);
+    expect(outcome).toBe("completed");
+  });
+
   it("allows distinct commands to execute concurrently", async () => {
     const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);

@@ -366,20 +366,25 @@ export class CommandReceiptStore {
         // per-command lane's own slow step and runs outside it. Holding the
         // process-wide mutex across the fsync serialized every other command's
         // receipt write behind one command's disk write.
-        const admission = await stage("receipt.inventory-admission", () => this.inventoryMutex.run(async () => {
+        const replay = await stage("receipt.inventory-admission", () => this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
           const existing = await this.readReceipt(path);
-          if (existing) {
-            if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
-              throw outcomeUnknown("Idempotency receipt identity mismatch; refresh authoritative state instead of replaying");
-            }
-            if (existing.status === "completed") {
-              if (existing.binding) options.onRouteBound?.("replay");
-              return { exists: true, result: existing.result ?? null } as const;
-            }
-            throw new GatewayError("conflict", "Previous command outcome is uncertain; refresh authoritative state instead of replaying", false, { outcomeUnknown: true });
+          if (!existing) return undefined;
+          if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
+            throw outcomeUnknown("Idempotency receipt identity mismatch; refresh authoritative state instead of replaying");
           }
-          const binding = await options.resolveBinding?.();
+          if (existing.status === "completed") {
+            if (existing.binding) options.onRouteBound?.("replay");
+            return { result: existing.result ?? null } as const;
+          }
+          throw new GatewayError("conflict", "Previous command outcome is uncertain; refresh authoritative state instead of replaying", false, { outcomeUnknown: true });
+        }));
+        if (replay) return replay.result;
+        // Route resolution can read a chapter or wait on a session serializer,
+        // so it runs under this command's lane alone. The lane keeps the
+        // decision for this key single-flight; other commands keep admitting.
+        const binding = await options.resolveBinding?.();
+        await stage("receipt.inventory-admission", () => this.inventoryMutex.run(async () => {
           pending = {
             version: binding ? 2 : 1,
             identityHash,
@@ -412,9 +417,7 @@ export class CommandReceiptStore {
           // released only with the completed receipt, which may be larger.
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
-          return { exists: false } as const;
         }));
-        if (admission.exists) return admission.result;
         if (!pending) throw new Error("Command receipt pending record was not prepared");
         // This write's accounting is the only step that adds its bytes to the
         // totals, so the lane reports it as unaccounted before the publication
