@@ -253,6 +253,77 @@ struct ChatRowStabilityTests {
         }
     }
 
+    /// Stop with two queued steers (#624): the Gateway redelivers both and the
+    /// queue empties in the same snapshot that commits the canonical prompts.
+    /// The second steer's queued card is replaced by its canonical bubble while
+    /// the installed queue is already empty, so its retained overlay must not read
+    /// the new projection's queue.
+    @Test("a queued steer behind another is replaced by its canonical row after the queue empties")
+    func queuedSteerReplacementSurvivesEmptiedQueue() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            let promptText = "Second steer, redelivered after Stop."
+            var initial = try SessionScenarioBuilder(seed: 1_329).openingTail(targetEncodedBytes: 10_000)
+            initial.phase = .running
+            initial.acceptsQueuedPrompts = true
+            initial.queueRevision = 1
+            initial.queuedItems = [
+                .init(id: "earlier-steer", behavior: .steer, text: "First steer.", attachmentCount: 0),
+            ]
+            let snapshot = initial
+            try await withComposerSubmissionHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try await driveBoundaries(3, harness: harness)
+                try harness.setComposerDraftText(promptText)
+                harness.submitPrompt()
+
+                var queued = snapshot
+                queued.queueRevision = 2
+                queued.queuedItems.append(.init(
+                    id: harnessHostedPromptOperationID,
+                    behavior: .steer,
+                    text: promptText,
+                    attachmentCount: 0
+                ))
+                harness.replaceAuthoritativeSnapshot(queued)
+                _ = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains {
+                        $0.semanticID.hasPrefix("outgoing-submission:") && $0.isOnScreen
+                    }
+                }
+                try await driveBoundaries(10, harness: harness)
+
+                var redelivered = queued
+                redelivered.phase = .running
+                redelivered.queueRevision = 3
+                redelivered.queuedItems = []
+                for (id, presentationID, text) in [
+                    ("canonical-first", "earlier-steer", "First steer."),
+                    ("canonical-second", harnessHostedPromptOperationID, promptText),
+                ] {
+                    redelivered.transcript.append(try decodeTranscriptFixture(
+                        TranscriptItem.self,
+                        from: try JSONSerialization.data(withJSONObject: [
+                            "id": id,
+                            "parentId": NSNull(),
+                            "presentationId": presentationID,
+                            "timestamp": "2026-01-01T00:01:00Z",
+                            "kind": "message",
+                            "role": "user",
+                            "content": [["id": "\(id)-text", "ordinal": 0, "type": "text", "text": text]],
+                        ])
+                    ))
+                }
+                redelivered.transcriptTotal = redelivered.transcript.count
+                harness.replaceAuthoritativeSnapshot(redelivered)
+                _ = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "canonical-second" && $0.isOnScreen }
+                }
+                try await driveBoundaries(40, harness: harness)
+                #expect(harness.probeObservation.rowIdentityInstanceCounts["canonical-second"] == 1)
+            }
+        }
+    }
+
     @Test("a streaming thinking trace grows and slides its tail in animation frames")
     func thinkingTraceGrowthMotionMatchesTheFrameAndOffsetAnimation() async throws {
         try await withTestWatchdog(timeout: .seconds(240)) {
