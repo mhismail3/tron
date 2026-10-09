@@ -80,25 +80,32 @@ for (const transition of ["already zombie", "zombie during signal", "reaped duri
     // on every failure path.
     const python = `import os, signal, time, faulthandler
 faulthandler.enable()
-faulthandler.dump_traceback_later(7)
+host = os.getppid()
+parent = os.getpid()
+def publish(path, text):
+ # The host polls existence, so a file must appear only after its bytes exist.
+ tmp = path + '.tmp'
+ with open(tmp, 'w') as out: out.write(text)
+ os.replace(tmp, path)
 pid = os.fork()
 if pid == 0:
  os.setsid()
- with open(${JSON.stringify(pidFile)}, 'w') as out: out.write(str(os.getpid()))
- deadline = time.monotonic() + 8
- while not os.path.exists(${JSON.stringify(releaseFile)}) and time.monotonic() < deadline: time.sleep(.01)
+ publish(${JSON.stringify(pidFile)}, str(os.getpid()))
+ # The child stays live until its release file or its parent's join; no clock
+ # can expire while the owner is still inspecting it.
+ while not os.path.exists(${JSON.stringify(releaseFile)}) and os.getppid() == parent: time.sleep(.01)
  os._exit(0)
 def finish(signum, frame):
- deadline = time.monotonic() + 6
- while ${JSON.stringify(transition)} in ['zombie during signal', 'reaped during signal'] and not os.path.exists(${JSON.stringify(signalFile)}) and time.monotonic() < deadline: time.sleep(.01)
+ signal.signal(signal.SIGTERM, signal.SIG_IGN)
+ while ${JSON.stringify(transition)} in ['zombie during signal', 'reaped during signal'] and not os.path.exists(${JSON.stringify(signalFile)}) and os.getppid() == host: time.sleep(.01)
  try: os.kill(pid, signal.SIGKILL)
  except (ProcessLookupError, PermissionError): pass
  os.waitpid(pid, 0)
  os._exit(0)
 signal.signal(signal.SIGTERM, finish)
-with open(${JSON.stringify(readyFile)}, 'w') as out: out.write('ready')
-deadline = time.monotonic() + 9
-while time.monotonic() < deadline: time.sleep(.01)
+publish(${JSON.stringify(readyFile)}, 'ready')
+# Lifetime ends only by the owner's TERM or by orphaning, never by a clock.
+while os.getppid() == host: time.sleep(.01)
 finish(None, None)
 `;
     const host = spawn(process.execPath, ["--import", preload, "--input-type=module", "-e", `

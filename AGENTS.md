@@ -219,6 +219,8 @@ When closing an incident, name the signal that would have diagnosed it in one
 step. If that signal was missing, add it at the right level, with its test and
 its row in `packages/gateway/docs/observability.md`, in the same change.
 
+From an agent shell, prefix focused Node tests with the pinned runtime, or `npx` is missing and the Stable Gateway's `node` shadows it: `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH"`.
+
 ```bash
 # Gateway
 cd packages/gateway
