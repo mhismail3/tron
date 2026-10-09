@@ -525,7 +525,7 @@ from the root of the same worktree:
 
 ```bash
 scripts/tron mac reinstall --app packages/mac-app/build/DerivedData-Release/Build/Products/Release/Tron.app
-# After successful old-helper retirement, Pause/quit, and stopping all writers:
+# After Quit Tron succeeds in the old app and all other writers are stopped:
 scripts/tron mac reinstall --confirm-offline
 # After the user replaces the app in Finder, launches it and chooses Resume:
 scripts/tron mac reinstall --verify
@@ -539,6 +539,12 @@ or approves macOS permissions. Repository agents may test them on isolated
 fixtures, but must not execute a live cutover or confirm the operator's offline
 attestation. A missing helper retirement control still requires the reviewed
 maintainer procedure above; an empty process list never substitutes for it.
+
+The offline checkpoint accepts the Release Gateway (`com.tron.server`) and native
+host (`com.tron.mac.native-host`) only as registered but stopped jobs: `launchctl
+print` must report a single top-level `state = not running` and no `pid`, which is
+what Quit leaves behind. A running Release job, or any loaded Debug, Preview or
+takeover job, refuses with `service-loaded`.
 
 Container permissions and data privacy are distinct: `~/.tron` may retain `0755`
 when it is a real, user-owned directory with owner read/write/search access,
