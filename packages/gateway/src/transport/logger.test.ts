@@ -40,6 +40,38 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject(evidence);
   });
 
+  it("persists the home.task fields the observability catalog names, bounded by kind", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    const taskHash = "a1b2c3d4e5f60718";
+    const operationHash = "0f1e2d3c4b5a6978";
+    logger.log("info", "Home task lifecycle", { event: "home.task.transition", source: "home", taskHash, operationHash,
+      revision: 3, transition: "active", reason: "operation-bound" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash, spendReference: "9a8b7c6d5e4f3a2b",
+      inputTokens: 1200, outputTokens: 40, unpriced: true });
+    logger.log("warning", "Home task lifecycle", { event: "home.task.runaway-stop", source: "home", taskHash, operationHash,
+      elapsedMs: 86_400_123.4, cancelAndJoin: "failed", spendReference: "9a8b7c6d5e4f3a2b" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.inbox", source: "home", eventHash: "1122334455667788",
+      state: "admitted", reason: "canonical-admission" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.control", source: "home", taskHash, operationHash,
+      action: "stop", disposition: "persisted", controllerGeneration: 2 });
+    logger.log("info", "Home task lifecycle", { event: "home.task.authorization", source: "home", outcome: "refused",
+      reason: "grant-required", referenceHash: "5566778899aabbcc" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash: "x".repeat(400),
+      revision: -1, inputTokens: 1.5, outputTokens: Number.MAX_SAFE_INTEGER + 1 });
+    const [transition, spend, stop, inbox, control, authorization, unbounded] = lines(path);
+    expect(transition).toMatchObject({ taskHash, operationHash, revision: 3, transition: "active", reason: "operation-bound" });
+    expect(spend).toMatchObject({ taskHash, spendReference: "9a8b7c6d5e4f3a2b", inputTokens: 1200, outputTokens: 40, unpriced: true });
+    expect(stop).toMatchObject({ elapsedMs: 86_400_123, cancelAndJoin: "failed" });
+    expect(inbox).toMatchObject({ eventHash: "1122334455667788", state: "admitted" });
+    expect(control).toMatchObject({ action: "stop", disposition: "persisted", controllerGeneration: 2 });
+    expect(authorization).toMatchObject({ referenceHash: "5566778899aabbcc" });
+    expect(unbounded.taskHash).toHaveLength(64);
+    expect(unbounded).not.toHaveProperty("revision");
+    expect(unbounded).not.toHaveProperty("inputTokens");
+    expect(unbounded).not.toHaveProperty("outputTokens");
+  });
+
   it("does not persist invalid Home counters or unbounded category values", () => {
     const path = logPath();
     const logger = new GatewayLogger(path);

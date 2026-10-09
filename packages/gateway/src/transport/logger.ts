@@ -85,6 +85,23 @@ export interface LogRecord {
   /** Named counters for one record (a reconcile's files and rows): the writer
    * bounds how many, their names and their values. */
   counts?: Record<string, number>;
+  /** Home task diagnostics: bounded hashes and approved tokens, never IDs or text. */
+  taskHash?: string;
+  operationHash?: string;
+  eventHash?: string;
+  referenceHash?: string;
+  spendReference?: string;
+  revision?: number;
+  controllerGeneration?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  unpriced?: true;
+  elapsedMs?: number;
+  transition?: string;
+  state?: string;
+  action?: string;
+  disposition?: string;
+  cancelAndJoin?: string;
   error?: LogError;
 }
 
@@ -131,6 +148,23 @@ export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | 
   silentMs?: number;
   /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
   counts?: Readonly<Record<string, number>>;
+  taskHash?: string;
+  /** Null when no operation is bound; the writer omits it. */
+  operationHash?: string | null;
+  eventHash?: string;
+  referenceHash?: string;
+  spendReference?: string;
+  revision?: number;
+  controllerGeneration?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  unpriced?: true;
+  elapsedMs?: number;
+  transition?: string;
+  state?: string;
+  action?: string;
+  disposition?: string;
+  cancelAndJoin?: string;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
 }
@@ -212,6 +246,12 @@ function boundedDiagnosticID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, MAX_FIELD_CHARS);
 }
 
+/** A hash or enum token a diagnostic names: escaped like an ID and short enough
+ * that it cannot carry a payload. */
+function boundedToken(value: unknown): string | undefined {
+  return typeof value === "string" ? boundedDiagnosticID(value).slice(0, 64) : undefined;
+}
+
 /** The stage breakdown keeps its `=`, `;`, `×` and `/` separators, so it is
  * bounded by bytes and redacted like a message, not diagnostic-ID-escaped. */
 function boundedStages(value: string): string {
@@ -271,6 +311,17 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   const handshakeMs = durationField(value.handshakeMs);
   const helloMs = durationField(value.helloMs);
   const silentMs = durationField(value.silentMs);
+  const elapsedMs = durationField(value.elapsedMs);
+  const taskHash = boundedToken(value.taskHash);
+  const operationHash = boundedToken(value.operationHash);
+  const eventHash = boundedToken(value.eventHash);
+  const referenceHash = boundedToken(value.referenceHash);
+  const spendReference = boundedToken(value.spendReference);
+  const transition = boundedToken(value.transition);
+  const state = boundedToken(value.state);
+  const action = boundedToken(value.action);
+  const disposition = boundedToken(value.disposition);
+  const cancelAndJoin = boundedToken(value.cancelAndJoin);
   return {
     ...(typeof value.event === "string" ? { event: boundedMessage(value.event).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.source === "string" ? { source: boundedMessage(value.source).slice(0, 64) } : {}),
@@ -310,6 +361,22 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
     ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
+    ...(taskHash !== undefined ? { taskHash } : {}),
+    ...(operationHash !== undefined ? { operationHash } : {}),
+    ...(eventHash !== undefined ? { eventHash } : {}),
+    ...(referenceHash !== undefined ? { referenceHash } : {}),
+    ...(spendReference !== undefined ? { spendReference } : {}),
+    ...(counterField(value.revision) !== undefined ? { revision: value.revision } : {}),
+    ...(counterField(value.controllerGeneration) !== undefined ? { controllerGeneration: value.controllerGeneration } : {}),
+    ...(counterField(value.inputTokens) !== undefined ? { inputTokens: value.inputTokens } : {}),
+    ...(counterField(value.outputTokens) !== undefined ? { outputTokens: value.outputTokens } : {}),
+    ...(value.unpriced === true ? { unpriced: true as const } : {}),
+    ...(elapsedMs !== undefined ? { elapsedMs } : {}),
+    ...(transition !== undefined ? { transition } : {}),
+    ...(state !== undefined ? { state } : {}),
+    ...(action !== undefined ? { action } : {}),
+    ...(disposition !== undefined ? { disposition } : {}),
+    ...(cancelAndJoin !== undefined ? { cancelAndJoin } : {}),
     ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),
   };
