@@ -4622,6 +4622,7 @@ export class RuntimeSlot {
   private async readWorkflowChildDetails(asyncDir: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (status.mode !== "workflow" || typeof status.runId !== "string" || !Array.isArray(status.steps)) return status;
     const directories: string[] = [];
+    let unavailableChildren = 0;
     const steps: unknown[] = [];
     for (const value of status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN)) {
       if (!value || typeof value !== "object" || Array.isArray(value)) { steps.push(value); continue; }
@@ -4632,7 +4633,12 @@ export class RuntimeSlot {
         || typeof edge.workflowKey !== "string" || typeof edge.sessionOwnerId !== "string"
         || typeof edge.sessionFile !== "string") continue;
       const directory = join(dirname(asyncDir), edge.runId);
-      const child = await this.readExtensionStatusArtifact(directory, false);
+      if (dirname(directory) !== dirname(asyncDir) || directory === asyncDir) continue;
+      // Observation follows the root edge, never the optional read result.
+      // Even an absent directory must remain subscribed for its first status.
+      directories.push(directory);
+      unavailableChildren += 1;
+      const child = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
       if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
         || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
         || child.mode !== "single" || !Array.isArray(child.steps) || child.steps.length !== 1) continue;
@@ -4641,7 +4647,7 @@ export class RuntimeSlot {
       const source = detail as Record<string, unknown>;
       if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
         || !this.validateChildSessionFile(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
-      directories.push(directory);
+      unavailableChildren -= 1;
       // Do not copy child identity, declarations or control authority. Only
       // provider-authored display facts cross this already verified edge.
       const projected = { ...edge };
@@ -4654,7 +4660,15 @@ export class RuntimeSlot {
       if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
       steps[steps.length - 1] = projected;
     }
-    return Object.assign({ ...status, steps: [...steps, ...status.steps.slice(MAX_EXTENSION_RUN_CHILDREN)] }, { [WORKFLOW_CHILD_ARTIFACT_DIRECTORIES]: directories });
+    const omission = status.lifecycleOmissions as { children?: number; byteLimitExceeded?: boolean } | undefined;
+    const omittedChildren = typeof omission?.children === "number" && Number.isSafeInteger(omission.children) && omission.children >= 0
+      ? omission.children : 0;
+    return Object.assign({ ...status, steps: [...steps, ...status.steps.slice(MAX_EXTENSION_RUN_CHILDREN)],
+      ...(unavailableChildren > 0 ? { lifecycleOmissions: {
+        children: omittedChildren + unavailableChildren,
+        byteLimitExceeded: omission?.byteLimitExceeded === true,
+      } } : {}),
+    }, { [WORKFLOW_CHILD_ARTIFACT_DIRECTORIES]: directories });
   }
 
   private syncWorkflowChildArtifactWatchers(toolCallId: string, value: Record<string, unknown>): void {
@@ -4667,9 +4681,23 @@ export class RuntimeSlot {
       tracked.children.delete(directory);
     }
     for (const directory of next) if (!tracked.children.has(directory)) {
-      const watcher = watch(directory, tracked.onChange);
-      watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
-      tracked.children.set(directory, watcher);
+      try {
+        // Observe from the admitted parent's tree so a not-yet-created child
+        // directory and later atomic status writes share one edge subscription.
+        const childName = basename(directory);
+        const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
+          const path = filename?.toString();
+          if (path === undefined || path === childName || path === join(childName, "status.json")) {
+            tracked.onChange(eventType, "status.json");
+          }
+        });
+        // Failure stays local to this child's observation. Neither the root
+        // watcher nor its other authoritative edges are retired by that error.
+        watcher.on("error", () => tracked.onChange("change", "status.json"));
+        tracked.children.set(directory, watcher);
+      } catch {
+        // Optional observation cannot refuse otherwise valid root evidence.
+      }
     }
   }
 

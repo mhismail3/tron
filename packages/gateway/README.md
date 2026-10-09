@@ -3687,8 +3687,15 @@ workflows keep detached execution details in child status files rather than copy
 them into root steps. The same read owner joins a bounded single-child execution
 through its reciprocal workflow run/key, run ID, parent session, session owner and
 validated session file. Only display facts cross that edge; identity and order remain
-root-owned. The root's existing watcher owns and retires its exact child-directory
-subscriptions, so child activity updates do not wait for a root status change.
+root-owned. Child detail is optional hydration: missing, malformed, foreign or
+unavailable status never refuses root admission or lifecycle publication. Each
+unavailable child contributes to the existing `lifecycleOmissions.children` partial
+count while its authoritative root edge remains present. The root observation owns
+bounded child subscriptions, each filtering parent-tree events to its exact edge;
+they observe missing directories' creation and later child-only writes without a
+root event.
+Edges retire only when the root removes them or its observation retires. Child
+watcher errors stay local and never stop the independent root watcher.
 An explicitly empty recent-tools list with no total represents zero tools before the
 first tool event. The header supplies ownership, not the compact widget's labels,
 ordering or eight-child limit.
