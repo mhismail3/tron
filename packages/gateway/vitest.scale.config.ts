@@ -7,6 +7,6 @@ export default defineConfig({
     pool: "forks",
     isolate: true,
     testTimeout: 60_000,
-    setupFiles: ["test-support/tron-home-environment-guard.ts"],
+    setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },
 });
