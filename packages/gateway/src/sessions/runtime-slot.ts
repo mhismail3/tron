@@ -907,6 +907,8 @@ export class RuntimeSlot {
   private suppressQueueEvents = false;
   /** Abort intent is recorded before SDK cancellation can synchronously settle. */
   private readonly abortedOperations = new Set<string>();
+  /** Retirement waiters parked until this slot may have settled. */
+  private readonly settleWaiters = new Set<() => void>();
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
@@ -1380,6 +1382,7 @@ export class RuntimeSlot {
   }
 
   private settleOperationWork(operationId: string | undefined): void {
+    this.releaseSettleWaiters();
     if (!operationId) return;
     this.lifecycle.cancelPreflight(operationId);
     // PendingPrompt is a provisional projection, not independent ownership.
@@ -3354,9 +3357,11 @@ export class RuntimeSlot {
     this.pendingReceiptWrites.add(write);
     void write.then(() => {
       this.pendingReceiptWrites.delete(write);
+      this.releaseSettleWaiters();
       if (derived) work.settle();
     }, error => {
       this.pendingReceiptWrites.delete(write);
+      this.releaseSettleWaiters();
       // A confirmed contradictory identity rejects before any new write. Only
       // an unresolved persistence outcome keeps the derived owner admitted.
       if (derived && !isUncertainOutcome(error)) work.settle();
@@ -3748,6 +3753,7 @@ export class RuntimeSlot {
       this.startPendingManualCompaction();
     })().finally(() => {
       this.pendingReceiptWrites.delete(operation);
+      this.releaseSettleWaiters();
       if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
       this.settleRetiredOperationWork();
     });
@@ -7378,6 +7384,7 @@ export class RuntimeSlot {
   }
 
   publishSnapshot(): void {
+    this.releaseSettleWaiters();
     if (this.disposed || this.trustReloadPending) return;
     // This publication already carries every change a pending coalesced frame
     // was scheduled for; letting that timer fire would rebroadcast the same
@@ -9754,10 +9761,37 @@ export class RuntimeSlot {
   }
 
   /** Queue a retirement barrier behind admitted lane work without disposing the
-   * slot. The Registry remains the sole owner of disposal and publication. Work
-   * running on this lane must never await this barrier. */
+   * slot, then wait (bounded by the ownership grace) until the admitted operation
+   * has settled. The lane alone releases while a run is still in flight, and the
+   * Gateway settles its terminal after the SDK idles, so eligibility checked
+   * earlier would refuse a runtime about to become idle. On timeout the caller's
+   * own eligibility check still refuses retryably. The Registry remains the sole
+   * owner of disposal and publication. Work running on this lane must never await
+   * this barrier. */
   async retireAfterSettled(): Promise<void> {
-    await this.lane.run(() => {});
+    const deadline = performance.now() + DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
+    for (;;) {
+      await this.lane.run(() => {});
+      // The same predicate disposeIf enforces: canonical receipt writes gate
+      // disposal as well as busy state.
+      if (!this.isBusy && this.pendingReceiptWrites.size === 0) return;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) return;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => wake(), remaining);
+        const wake = () => {
+          clearTimeout(timer);
+          this.settleWaiters.delete(wake);
+          resolve();
+        };
+        this.settleWaiters.add(wake);
+      });
+    }
+  }
+
+  /** Wakes `retireAfterSettled` waiters so each rechecks settled state. */
+  private releaseSettleWaiters(): void {
+    for (const wake of [...this.settleWaiters]) wake();
   }
 
   async dispose(exceptWorkToken?: string): Promise<void> {

@@ -705,6 +705,35 @@ describe("Home task cold reconciliation", () => {
     expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "admitted" } });
   }, 60_000);
 
+  it("retires an uncertain Home runtime only after its in-flight operation settles", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the in-flight run");
+    let release!: () => void; let entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage("Finished after the uncertain publication"); }]);
+    const running = home.prompt("Mid-run"); void running.catch(() => {});
+    await waitFor(() => entered, "Home run in flight");
+    // Stands in for the fence an uncertain ledger publication sets.
+    (f.registry as any).homePublicationUncertain = true;
+    const live = () => (f.registry as any).slots.has(f.home.sessionId) as boolean;
+    let retired = false;
+    const retirement = (f.registry as any).retireUncertainHomeRuntimes(true).then(() => { retired = true; });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(retired).toBe(false);
+      expect(live()).toBe(true);
+    } finally {
+      release();
+    }
+    await retirement;
+    expect(live()).toBe(false);
+    await running;
+  }, 60_000);
+
   it("removes a crash-leftover task temporary at the next start, and Home activates", async () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
