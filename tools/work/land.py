@@ -25,6 +25,8 @@ _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-ap
                 ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
 # How often land re-reads a pull request GitHub has just merged before giving up.
 _MERGE_CONFIRMATIONS = 5
+# verify's check set comes from this file, so a change to it can change any check.
+_VERIFY_CONFIG = ".github/work.json"
 
 _STEWARD_PULLS = """
 query($owner: String!, $name: String!, $cursor: String) {
@@ -115,6 +117,33 @@ def update_from_base(root: Path, remote: str, base: str) -> bool:
         raise LandError(f"merging {remote}/{base} stopped; {detail}. Resolve and commit the merge, "
                         "then run land again. Nothing new was pushed.")
     return True
+
+
+def _moved_base_is_disjoint(root: Path, config: dict, receipt: dict, tip: str) -> bool:
+    """Whether a base that moved during the wait merges without another round (README.md, `land` step 7).
+
+    Checks the branch's receipt requires keep the inputs they verified, since no
+    incoming path matches them. Checks it does not require had inputs the branch
+    left untouched, and they already passed on the base. Always-run checks look
+    at the branch diff only, and it is unchanged. The head must also merge into
+    the new tip without a textual conflict, so GitHub's squash composes the
+    trees the checks did not see. A change to the verify configuration can alter
+    any of this, so it always rounds.
+    """
+    head = receipt["head"]
+    common = _git(root, "merge-base", head, tip, check=False)
+    if common.returncode != 0:
+        return False
+    incoming = [path for path in _git(root, "diff", "-z", "--name-only", "--no-renames",
+                                      common.stdout.strip(), tip).stdout.split("\0") if path]
+    if _VERIFY_CONFIG in incoming:
+        return False
+    required = set(receipt["required"])
+    shared = [check for check in verify.load_checks(config["verify"])
+              if not check.always and check.name in required]
+    if any(check.matches(path) for check in shared for path in incoming):
+        return False
+    return _git(root, "merge-tree", "--write-tree", head, tip, check=False).returncode == 0
 
 
 # ------------------------------------------------------------ GitHub state
@@ -792,10 +821,19 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
 
         _wait(gh, config, pull["number"], head, base, sleep, clock)
         # Without a branch rule that requires up-to-date branches, only this
-        # check keeps a head that lacks the latest base from being merged.
-        if not _is_ancestor(root, _fetch_base(root, remote, base), head):
-            print(f"moved:    {remote}/{base} moved during round {round_number}; updating again")
-            continue
+        # check keeps a head that lacks the latest base from being merged. A
+        # move that shares no required check with the branch is merged as is:
+        # the required checks ran on their unchanged inputs, and the rest are
+        # not affected (_moved_base_is_disjoint).
+        tip = _fetch_base(root, remote, base)
+        if not _is_ancestor(root, tip, head):
+            # Acceptance journeys are cross-area end-to-end runs whose inputs no
+            # check glob describes, so a requested journey always reruns on the new base.
+            if journeys or not _moved_base_is_disjoint(root, config, receipt, tip):
+                print(f"moved:    {remote}/{base} moved during round {round_number}; updating again")
+                continue
+            print(f"moved:    {remote}/{base} moved; incoming paths share no check with this branch; "
+                  f"merging verified {head[:12]} without another round")
         # Checked again here: a claim may have started from this branch during the wait.
         _refuse_stacked(gh, root, config, owner, name, branch)
         merge_sha = merge(gh, pull["number"], title, number, head, keyword, base, sleep, settings["pollSeconds"])
