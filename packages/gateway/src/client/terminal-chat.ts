@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
-import { homedir } from "node:os";
 import { resolveBindHost } from "../config.js";
 import { resolveTronHome } from "../tron-home.js";
 import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
