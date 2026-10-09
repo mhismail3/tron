@@ -1284,7 +1284,8 @@ class RequiredCheckTests(LandFixture):
 class BaseMoveTests(LandFixture):
     # Failure mode 36.
     def test_base_move_during_the_wait_starts_another_round(self):
-        moved = self.base_commit("lib/new.txt", "from base\n")
+        # app/base.txt is a path the branch's app check covers, so that check must run again.
+        moved = self.base_commit("app/base.txt", "from base\n")
         self.set_state(pendingViews=1, baseMoves={"1": moved})
         self.assertEqual(self.land(), 0)
         head = git(self.repo, "rev-parse", "HEAD")
@@ -1294,17 +1295,68 @@ class BaseMoveTests(LandFixture):
         self.assertEqual(self.writes().count("pr create"), 1)
         self.assertEqual(self.writes().count("pr edit"), 1)
         self.assertIn(f"`{head}`", self.state()["pulls"][0]["body"])
-        self.assertEqual(self.counts.read_text().count("run"), 1, "the unchanged check was carried, not rerun")
+        self.assertEqual(self.counts.read_text().count("run"), 2, "the check whose input moved reran")
+
+    def land_output(self, **kwargs) -> str:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.land(**kwargs)
+        return output.getvalue()
+
+    # Failure mode 81.
+    def test_disjoint_base_move_merges_without_another_round(self):
+        # The branch changes app/** only; the base moves lib/**, which no check the branch needs covers.
+        head = git(self.repo, "rev-parse", "HEAD")
+        moved = self.base_commit("lib/new.txt", "from base\n")
+        self.set_state(pendingViews=1, baseMoves={"1": moved})
+        output = self.land_output()
+        self.assertEqual(self.writes().count("pr create") + self.writes().count("pr edit"), 1, "one round")
+        self.assertEqual(self.writes().count("pr edit"), 0)
+        self.assertIn(f"moved:    {REMOTE}/{BASE} moved; ", output)
+        self.assertIn(f"merging verified {head[:12]} without another round", output)
+        [merge] = self.merges()
+        self.assertEqual(merge[merge.index("--match-head-commit") + 1], head)
+        self.assertEqual(self.state()["pulls"][0]["headRefOid"], head, "the verified head is the merged head")
+        git(self.repo, "fetch", "-q", REMOTE)
+        self.assertEqual(git(self.repo, "show", f"{REMOTE}/{BASE}:lib/new.txt"), "from base")
+        self.assertEqual(git(self.repo, "show", f"{REMOTE}/{BASE}:app/a.txt"), "two")
+
+    def test_base_move_touching_verify_configuration_starts_another_round(self):
+        # No check the branch requires covers .github/work.json; only the configuration rule keeps this from merging.
+        self.config["verify"]["checks"].append({"name": "config", "paths": [".github/work.json"], "command": "true"})
+        moved = self.base_commit(".github/work.json", "{}\n")
+        self.set_state(pendingViews=1, baseMoves={"1": moved})
+        output = self.land_output()
+        self.assertEqual(self.writes().count("pr create"), 1)
+        self.assertEqual(self.writes().count("pr edit"), 1, "a second round")
+        self.assertNotIn("without another round", output)
+        self.assertEqual(len(self.merges()), 1)
+
+    def test_base_move_textually_conflicting_with_an_always_check_path_starts_another_round(self):
+        # notes/** is always-run, so the branch's receipt does not require it and the base move
+        # shares no required check with the branch; only the textual conflict keeps this from merging.
+        self.config["verify"]["checks"].append({"name": "notes", "always": True, "paths": ["notes/**"],
+                                                "command": "true"})
+        self.commit(self.repo, "notes/a.txt", "branch\n")
+        moved = self.base_commit("notes/a.txt", "base\n")
+        self.set_state(pendingViews=1, baseMoves={"1": moved})
+        with self.assertRaises(land.LandError) as raised:
+            self.land()
+        self.assertIn("conflicts in: notes/a.txt", str(raised.exception))
+        self.assertTrue((Path(git(self.repo, "rev-parse", "--absolute-git-dir")) / "MERGE_HEAD").exists())
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.writes().count("pr create"), 1)
+        self.assertEqual(self.writes().count("pr edit"), 0, "the second round stopped at its merge")
 
     def test_rounds_are_bounded(self):
         self.config["land"]["maxRounds"] = 2
-        # Each round's single view moves the base again.
+        # Each round's single view moves the base again, into a path the branch's app check covers.
         chained = {}
         git(self.seed, "fetch", "-q", REMOTE)
         parent = git(self.seed, "rev-parse", f"{REMOTE}/{BASE}")
         for view in ("1", "2"):
             git(self.seed, "checkout", "-q", "--detach", parent)
-            parent = self.commit(self.seed, f"lib/{view}.txt", "x\n")
+            parent = self.commit(self.seed, f"app/{view}.txt", "x\n")
             git(self.seed, "push", "-q", REMOTE, f"{parent}:refs/heads/chain-{view}")
             chained[view] = parent
         self.set_state(baseMoves=chained)
@@ -1718,7 +1770,8 @@ class AcceptanceLandingTests(LandFixture):
 
     def test_the_journeys_run_against_the_head_that_is_pushed_after_a_base_move(self):
         before = git(self.repo, "rev-parse", "HEAD")
-        moved = self.base_commit("lib/new.txt", "from base\n")
+        # app/** is the branch's own check path, so this move starts another round.
+        moved = self.base_commit("app/base.txt", "from base\n")
         self.set_state(pendingViews=1, baseMoves={"1": moved})
         self.assertEqual(self.land(acceptance=PAIR), 0)
         head = git(self.repo, "rev-parse", "HEAD")
