@@ -73,7 +73,7 @@ enum ChatEntranceGrowthPolicy {
     }
 }
 
-enum ChatIncrementalContentGrowthPolicy {
+enum ChatRowMotionPolicy {
     /// A large accumulated network backlog installs atomically instead of
     /// interpolating an unbounded row. Ordinary line and chip growth remains
     /// well below this limit.
@@ -96,119 +96,6 @@ enum ChatIncrementalContentGrowthPolicy {
             && !reduceMotion
             && surfaceActive
             && targetHeight - currentHeight <= maximumAnimatedGrowth
-    }
-}
-
-private struct ChatIncrementalContentMeasurement<Identity: Equatable & Sendable>: Equatable, Sendable {
-    let identity: Identity
-    let width: CGFloat
-    let height: CGFloat
-}
-
-/// Owns only the presentation height of an already-mounted streaming message.
-/// Canonical text and controls are installed immediately at natural size, then
-/// clipped by one local height while ordinary additions expand. Width changes,
-/// replacement/shrink, covered surfaces, and large backlogs install atomically.
-///
-/// A settled row owns no height here at all: pinning one would lay the row out at
-/// a stale height whenever its width, Dynamic Type or document changed, and would
-/// write state on every mount for nothing. The pinned height is released when a
-/// stream ends, after any growth animation still in flight completes.
-struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content: View>: View {
-    let identity: Identity
-    let streaming: Bool
-    @ViewBuilder let content: Content
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var presentedHeight: CGFloat?
-    @State private var measuredIdentity: Identity?
-    @State private var measuredWidth: CGFloat?
-    @State private var isAnimatingGrowth = false
-
-    init(
-        identity: Identity,
-        streaming: Bool,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.identity = identity
-        self.streaming = streaming
-        self.content = content()
-    }
-
-    var body: some View {
-        let measurementIdentity = identity
-        return content
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: ChatIncrementalContentMeasurement<Identity>.self) { geometry in
-                ChatIncrementalContentMeasurement(
-                    identity: measurementIdentity,
-                    width: geometry.size.width,
-                    height: geometry.size.height
-                )
-            } action: { measurement in
-                install(measurement)
-            }
-            .frame(height: presentedHeight, alignment: .top)
-            .chatIncrementalVerticalClip()
-            .onChange(of: streaming) { _, isStreaming in
-                if !isStreaming { releaseSettledHeight() }
-            }
-            .onChange(of: isAnimatingGrowth) { _, isAnimating in
-                if !isAnimating { releaseSettledHeight() }
-            }
-    }
-
-    @MainActor
-    private func install(_ measurement: ChatIncrementalContentMeasurement<Identity>) {
-        guard measurement.width.isFinite,
-              measurement.height.isFinite,
-              measurement.height >= 0 else { return }
-        let contentChanged = measuredIdentity.map { $0 != measurement.identity } ?? false
-        let layoutStable = measuredWidth.map { abs($0 - measurement.width) <= 0.5 } ?? false
-        let animates = ChatIncrementalContentGrowthPolicy.shouldAnimate(
-            currentHeight: presentedHeight,
-            targetHeight: measurement.height,
-            contentChanged: contentChanged && layoutStable,
-            streaming: streaming,
-            reduceMotion: reduceMotion,
-            surfaceActive: presentationActivity.allowsContinuousAnimation
-        )
-        measuredIdentity = measurement.identity
-        measuredWidth = measurement.width
-        guard streaming || isAnimatingGrowth else {
-            releaseSettledHeight()
-            return
-        }
-        if animates {
-            let animation = ChatMotion.streamingResize
-            isAnimatingGrowth = true
-            withAnimation(animation, completionCriteria: .logicallyComplete) {
-                // The growth marker travels with the height write itself:
-                // `chatStableTranscriptUpdates` reads it to keep a projection
-                // change in the same update from erasing this animation.
-                var transaction = Transaction(animation: animation)
-                transaction.admitsChatIncrementalGrowthAnimation = true
-                withTransaction(transaction) { presentedHeight = measurement.height }
-            } completion: {
-                isAnimatingGrowth = false
-            }
-        } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { presentedHeight = measurement.height }
-        }
-    }
-
-    /// A settled row keeps no pinned height. `onChange` re-enters through a fresh
-    /// body, so this reads the current `streaming` and animation state rather
-    /// than the values captured when an animation started.
-    @MainActor
-    private func releaseSettledHeight() {
-        guard !streaming, !isAnimatingGrowth, presentedHeight != nil else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { presentedHeight = nil }
     }
 }
 
@@ -298,7 +185,7 @@ private struct ChatEntranceGrowthClipShape: Shape {
     }
 }
 
-private extension View {
+extension View {
     /// Clips only the animated vertical admission. Horizontal overflow remains
     /// available to native text and glass effects throughout incremental growth.
     func chatIncrementalVerticalClip() -> some View {

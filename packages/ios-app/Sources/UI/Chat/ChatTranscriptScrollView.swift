@@ -319,11 +319,21 @@ enum ChatPromptReplacementHeightPolicy {
     static func animates(from: CGFloat, to: CGFloat, surfaceActive: Bool, reduceMotion: Bool) -> Bool {
         guard from.isFinite, to.isFinite, surfaceActive, !reduceMotion else { return false }
         let delta = abs(to - from)
-        return delta > 0.5 && delta <= ChatIncrementalContentGrowthPolicy.maximumAnimatedGrowth
+        return delta > 0.5 && delta <= ChatRowMotionPolicy.maximumAnimatedGrowth
     }
 }
 
 private extension ChatPhysicalTranscriptRow {
+    var isAssistantMessage: Bool {
+        guard case .transcript(.message(let message)) = content else { return false }
+        return message.item.role == .assistant
+    }
+
+    var isStreamingMessage: Bool {
+        guard case .transcript(.message(let message)) = content else { return false }
+        return message.streaming
+    }
+
     /// True only while the row renders the taller `ChatPromptCard` visual, which
     /// is the one lifecycle appearance that differs from the canonical user
     /// row. An ordinary outgoing or pending row renders the same Liquid Glass
@@ -371,6 +381,12 @@ private extension ChatTranscriptRenderItem {
         guard case .message(let message) = self else { return false }
         return message.streaming
     }
+}
+
+private struct ChatRowMotionMeasurement: Equatable {
+    let row: ChatPhysicalTranscriptRow
+    let width: CGFloat
+    let height: CGFloat
 }
 
 /// A unified ForEach preserves this host while runtime/local content becomes
@@ -440,6 +456,17 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
 
     @ViewBuilder
     private var renderedContent: some View {
+        if row.isAssistantMessage {
+            ChatRowStreamingContentOwner(row: row, streaming: row.isStreamingMessage) {
+                entranceWrappedContent
+            }
+        } else {
+            entranceWrappedContent
+        }
+    }
+
+    @ViewBuilder
+    private var entranceWrappedContent: some View {
         if let entrance = retainedPromptEntrance {
             ChatOutgoingSubmissionEntranceRow(
                 reduceMotion: reduceMotion,
@@ -457,6 +484,7 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
             replacementContent
         }
     }
+
 
     /// The canonical row and, only while a queued card is handing off, that card.
     /// `ReplacementHeightLayout` measures both in the pass that places them, so
@@ -539,6 +567,99 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 outgoingPrompt = nil
                 promptReplacementProgress = 1
             }
+        }
+    }
+}
+
+/// Keeps streaming height state below the physical row identity host so each
+/// animation frame does not re-evaluate the row's content closure.
+private struct ChatRowStreamingContentOwner<Content: View>: View {
+    let row: ChatPhysicalTranscriptRow
+    let streaming: Bool
+    @ViewBuilder let content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var presentedHeight: CGFloat?
+    @State private var lastMeasurement: ChatRowMotionMeasurement?
+    @State private var isAnimatingGrowth = false
+
+    init(
+        row: ChatPhysicalTranscriptRow,
+        streaming: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.row = row
+        self.streaming = streaming
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: ChatRowMotionMeasurement.self) { geometry in
+                ChatRowMotionMeasurement(
+                    row: row,
+                    width: geometry.size.width,
+                    height: geometry.size.height
+                )
+            } action: { measurement in
+                install(measurement)
+            }
+            .frame(height: presentedHeight, alignment: .top)
+            .chatIncrementalVerticalClip()
+            .onChange(of: streaming) { _, active in
+                if !active { releaseHeight() }
+            }
+    }
+
+    @MainActor
+    private func install(_ measurement: ChatRowMotionMeasurement) {
+        guard streaming,
+              measurement.width.isFinite,
+              measurement.height.isFinite,
+              measurement.height >= 0 else { return }
+        let previous = lastMeasurement
+        let contentChanged = previous.map { $0.row != measurement.row } ?? false
+        let widthStable = previous.map { abs($0.width - measurement.width) <= 0.5 } ?? false
+        lastMeasurement = measurement
+        guard let previous else { return }
+        let currentHeight = presentedHeight ?? previous.height
+        let animates = contentChanged && widthStable
+            && ChatRowMotionPolicy.shouldAnimate(
+                currentHeight: currentHeight,
+                targetHeight: measurement.height,
+                contentChanged: true,
+                streaming: true,
+                reduceMotion: reduceMotion,
+                surfaceActive: presentationActivity.allowsContinuousAnimation
+            )
+        guard animates else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedHeight = nil }
+            return
+        }
+        let animation = ChatMotion.streamingResize
+        isAnimatingGrowth = true
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            var transaction = Transaction(animation: animation)
+            transaction.admitsChatIncrementalGrowthAnimation = true
+            withTransaction(transaction) { presentedHeight = measurement.height }
+        } completion: {
+            isAnimatingGrowth = false
+            if !streaming { releaseHeight() }
+        }
+    }
+
+    @MainActor
+    private func releaseHeight() {
+        guard presentedHeight != nil else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            presentedHeight = nil
+            lastMeasurement = nil
         }
     }
 }

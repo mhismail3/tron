@@ -1,41 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-private struct ChatMessageGrowthIdentity: Equatable, Sendable {
-    let partCount: Int
-    let lastPartID: String?
-    let textUTF16Length: Int
-    let thinkingSegmentCount: Int
-    let errorUTF16Length: Int
-    let showsFooter: Bool
-
-    init(parts: [ChatMessagePart], errorMessage: String?, showsFooter: Bool) {
-        partCount = parts.count
-        lastPartID = parts.last?.id
-        textUTF16Length = parts.reduce(into: 0) { total, part in
-            let addition = switch part {
-            case .content(let content):
-                content.text?.utf16.count ?? 0
-            case .thinking(let run):
-                run.segments.reduce(into: 0) { count, segment in
-                    count = Self.addingWithoutOverflow(count, segment.text.utf16.count)
-                }
-            }
-            total = Self.addingWithoutOverflow(total, addition)
-        }
-        thinkingSegmentCount = parts.reduce(into: 0) { total, part in
-            guard case .thinking(let run) = part else { return }
-            total = Self.addingWithoutOverflow(total, run.segments.count)
-        }
-        errorUTF16Length = errorMessage?.utf16.count ?? 0
-        self.showsFooter = showsFooter
-    }
-
-    private static func addingWithoutOverflow(_ lhs: Int, _ rhs: Int) -> Int {
-        lhs > Int.max - rhs ? Int.max : lhs + rhs
-    }
-}
-
 enum UserPromptPresentationPolicy {
     /// Display only: invocation arguments retain the user's original text even
     /// after the runtime expands a template. Never infer or strip template
@@ -121,20 +86,7 @@ struct TranscriptRow: View, Equatable {
         VStack(alignment: isTrailingSessionMessage ? .trailing : .leading, spacing: 4) {
             switch item.kind {
             case .message:
-                if item.role == .assistant {
-                    ChatIncrementalContentGrowthHost(
-                        identity: ChatMessageGrowthIdentity(
-                            parts: displayedMessageParts,
-                            errorMessage: item.errorMessage,
-                            showsFooter: showsMessageFooter
-                        ),
-                        streaming: streaming
-                    ) {
-                        message
-                    }
-                } else {
-                    message
-                }
+                message
             case .bash:
                 ToolCard(data: ChatToolPresentation(
                     id: item.id,
