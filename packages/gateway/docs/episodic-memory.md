@@ -26,6 +26,20 @@ it the commits the runtime reports, and sends each activation the view it render
   Ingestion, invalidation and `resume()` are serialized behind one mutex; the
   pump is not, so a build may still be running when the next commit invalidates
   nodes (see **Concurrency** below).
+- `ingestForRead(sessionId)` refreshes only the catalog/cursor through that same
+  ingestion mutex, without admitting compactor work. Home's native browser uses
+  it so opening a paused or disabled Home's memory cannot create provider spend.
+  `withBrowserRead` shares the mutex through canonical proof, preventing a reader
+  from copying a partially appended catalog/invalidation batch. The pump can
+  still settle; the Home binding fences the exact committed revision afterwards.
+  Catalog equality includes canonical line digest, timestamp and omission
+  attribution, not only projected text: same-text canonical revisions still
+  refresh evidence references and dates. Text-identical nodes are retained,
+  so metadata-only changes do not cause new summary spend.
+  Browser page identity/data are derived from this memory's current catalog,
+  nodes and chapter cursor, not from tool-output strings or a second cache. The
+  typed formats, bounds and exact-history distinction are owned by
+  [Home's browser contract](home.md#typed-memory-browser).
 - `dispose()` sets this memory closed, aborts in-flight compactor calls, **waits
   for the mutex** — so an ingest already appending to the store finishes before
   the opener is released — then awaits the pump, releases the waiter list and
@@ -187,7 +201,7 @@ holds only the projection, never canonical text:
 | `message` role `assistant` | `talk` | text parts, plus `[call <name> <JSON args>]` per tool call; thinking parts are excluded and recorded as an omission |
 | `message` role `toolResult` | `echo` | `tool <name>: <content>`, capped at `CAP` characters with head and tail kept |
 | `custom_message` with `display: true` | `event` | its text |
-| `context_edit` | — | not a message: it replaces its target's content, or makes it `[omitted]` when the replacement is null |
+| `context_edit` | — | not a message: it replaces its target's content (with a `context-edit` omission marker), or makes it `[omitted]` when the replacement is null |
 
 Everything else — a `custom_message` with `display: false`, a system message, a
 `model_change`, a `thinking_level_change`, a label, a `custom` bookkeeping entry
@@ -439,6 +453,31 @@ whose due weight dropped the level term (`due = T - start`) diverged from the
 view at step 8 of a 300-message run. A uniform exponent shift provably cannot
 diverge — `(T-s1)/2^(l1+e) > (T-s2)/2^(l2+e)` is independent of `e` — which is
 why that control was removed rather than kept as a permanent test.
+
+## Home operator pause
+
+Home's durable ledger owns operator pause, not `state.json` and not a runtime
+slot. Home supplies the memory a live `isPaused` admission authority; reopening
+or replacing a store cannot lose it. Ingestion and cursor publication continue
+while paused, but the pump admits no new nodes. Already-started nodes finish
+bounded compactor tries/retries and publish valid results. Pause is therefore not
+an immediate cancellation or zero-spend promise, and it does not invalidate a
+node generation or discard results that resume would have to summarize again.
+
+Home notifies the memory at durable pause publication to reject all outstanding
+`whenReady` waits with the typed `paused` error. New waits reject even when their
+cut is already covered: a paused memory cannot admit a new activation's view.
+An activation already holding a frozen view belongs to HomeRequestPolicy, not
+the pump, and continues. Resume re-reads canonical deltas and drains the same
+single-flight pump; a resume joining a retiring pump drains remaining work once
+that exact pump retires. Disposal alone aborts accepted compactor work.
+
+Nodes and spend remain durable across pause/restart/resume. The store cannot
+promise exactly-once external provider calls if a process crashes before their
+result is committed. `home-activation.e2e.test.ts`'s pause contract covers a gated
+readiness wait and compactor, resume before node settlement and after restart,
+and retention of committed nodes without duplicate compaction. The retained
+report is `test-results/home-activation/report.json`.
 
 ## Retries, spend and blocked states
 

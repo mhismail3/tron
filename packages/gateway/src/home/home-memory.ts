@@ -6,6 +6,7 @@ import {
 } from "../episodic/episodic-contract.js";
 import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable } from "./home-memory-browser.js";
 import { localTimestampText } from "../util/timestamp.js";
 import type { HomeMemoryStatus, ModelRef } from "../protocol/types.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -127,6 +128,8 @@ export interface HomeMemoryOptions {
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
   diagnostic?: (record: HomeMemoryDiagnostic) => void;
   limits?: Partial<EpisodicLimits>;
+  /** Home ledger is the single pause authority, including across store replacement. */
+  isPaused?: () => boolean;
 }
 
 interface MemoryBinding {
@@ -232,11 +235,15 @@ export class HomeMemory {
    * `home.resumeMemory`. The re-read and the pump start happen under the lock;
    * the drain does not.
    */
-  async resumeBlock(): Promise<void> {
-    const binding = await this.mutex.run(() => this.bindingForViewLocked());
-    if (!binding.memory.status().blocked) return;
-    await binding.memory.resumeIngested();
+  async resume(): Promise<void> {
+    // Configuration opens an existing canonical source. An empty new Home has
+    // no store to resume yet; removing its ledger pause is sufficient.
+    const binding = await this.mutex.run(async () => this.binding);
+    await binding?.memory.resumeIngested();
   }
+
+  /** Notify existing waiters only; no copied pause state or store opening. */
+  notePause(): void { this.binding?.memory.notePause(); }
 
   /** The persisted state of this memory's store, without opening it: its recorded
    * spend and the block that refuses every activation. */
@@ -293,6 +300,7 @@ export class HomeMemory {
   /** HomeOwner qualifies a not-started chapter with no prior history. The
    * memory must still be configured; no store/source is manufactured. */
   emptyChapterView(signal?: AbortSignal): HomeActivationView {
+    if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     if (!this.config || !this.summarizer) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     if (signal?.aborted) throw new HomeMemoryRefusal("memory-wait-cancelled", "Chapter activation was cancelled");
     const { pieces } = viewPieces("", undefined);
@@ -310,6 +318,7 @@ export class HomeMemory {
   }
 
   private async viewAtBoundary(activation: HomeActivationIdentity | undefined, signal: AbortSignal | undefined): Promise<HomeActivationView> {
+    if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     const binding = await this.mutex.run(() => this.bindingForViewLocked());
     try {
       // Ingest only: the wait below is for the lines this activation will send,
@@ -345,6 +354,7 @@ export class HomeMemory {
       await binding.memory.whenReady(cut, signal ? { signal } : {});
     } catch (error) {
       if (signal?.aborted) throw new HomeMemoryRefusal("memory-wait-cancelled", "the activation's wait for the Home memory was cancelled");
+      if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory was paused while preparing this activation");
       const blocked = binding.memory.status().blocked;
       if (blocked) throw this.blockedRefusal(blocked);
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not cover the activation start: ${messageOf(error)}`);
@@ -385,6 +395,28 @@ export class HomeMemory {
     await this.mutex.run(() => this.closeLocked());
     this.config = undefined;
     this.summarizer = undefined;
+  }
+
+  /** Browser reads share the binding's lifetime, but never wait for summaries.
+   * Ingestion stays with its existing owner; canonical proof happens before the
+   * final exact revision fence, so a concurrent commit cannot publish old data. */
+  async browserRead<T>(read: (memory: EpisodicMemory) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.mutex.run(async () => {
+      signal?.throwIfAborted();
+      const binding = await this.bindingForViewLocked();
+      signal?.throwIfAborted();
+      await binding.memory.ingestForRead(this.options.sessionId, signal);
+      signal?.throwIfAborted();
+      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable();
+      return binding.memory.withBrowserRead(async () => {
+        signal?.throwIfAborted();
+        const revision = binding.memory.browserRevision();
+        const result = await read(binding.memory);
+        signal?.throwIfAborted();
+        if (this.binding !== binding || revision !== binding.memory.browserRevision()) throw homeMemoryRevisionChanged();
+        return result;
+      }, signal);
+    }, signal);
   }
 
   // ---- the agent-facing tools (docs/home.md) -----------------------------------
@@ -542,6 +574,7 @@ export class HomeMemory {
         sessionFile,
         ...(this.options.sessionSource ? { sessionSource: this.options.sessionSource } : {}),
         summarizer,
+        ...(this.options.isPaused ? { isPaused: this.options.isPaused } : {}),
         ...(this.options.limits ? { limits: this.options.limits } : {}),
         ...(this.options.diagnostic ? { diagnostic: this.options.diagnostic } : {}),
       });

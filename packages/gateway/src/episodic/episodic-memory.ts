@@ -1,4 +1,7 @@
 import { join } from "node:path";
+import { GatewayError } from "../errors.js";
+import type { HomeMemoryEvidence, HomeMemoryPage } from "../protocol/types.js";
+import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryRevisionChanged, type HomeMemoryPageRequest } from "../home/home-memory-browser.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -245,13 +248,19 @@ export class EpisodicMemory {
    * not need its output.
    */
   async entriesIngested(sessionId: string): Promise<void> {
+    await this.ingestForRead(sessionId);
+    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
+  }
+
+  /** Projection refresh without admitting compactor work. Native reads must
+   * not create provider spend merely by opening a browser (including disabled Home). */
+  async ingestForRead(sessionId: string, signal?: AbortSignal): Promise<void> {
     this.assertOpen();
     if (sessionId !== this.dependencies.sessionId) throw new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session");
     await this.mutex.run(async () => {
       if (this.blocked) return;
       await this.ingest();
-    });
-    void this.drain().then(() => this.checkpointIfNeeded()).catch(() => {});
+    }, signal);
   }
 
   /** Resolves when every part of the view covering messages before `cut` is a
@@ -263,6 +272,7 @@ export class EpisodicMemory {
     if (!Number.isSafeInteger(cut) || cut < 0) throw new EpisodicMemoryError("invalid-request", "whenReady cut must be a non-negative integer");
     const signal = options.signal;
     if (signal?.aborted) throw new EpisodicMemoryError("closed", "whenReady wait was cancelled");
+    if (this.dependencies.isPaused?.()) throw new EpisodicMemoryError("paused", "Episodic memory is paused");
     if (this.blocked) throw this.blockedError();
     if (cut > this.messages.size) throw new EpisodicMemoryError("invalid-request", `whenReady cut ${cut} is beyond the ${this.messages.size} messages this memory holds`);
     if (this.viewReady(cut)) return;
@@ -347,6 +357,55 @@ export class EpisodicMemory {
     const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${viewLine(this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
     const text = lines.join("\n");
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
+  }
+
+  /** A browser cannot observe a partly appended catalog/invalidation batch.
+   * The pump may settle concurrently; HomeMemory fences that node revision. */
+  async withBrowserRead<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.mutex.run(read, signal);
+  }
+
+  /** Content-derived page identity belongs to this memory, not an RPC cache.
+   * No await separates copying a row, its summary and the cursor revision. */
+  browserRevision(): string {
+    this.assertOpen();
+    return episodicDigest(JSON.stringify([this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor]));
+  }
+
+  browserCursor(): EpisodicSourceCursor | null {
+    this.assertOpen();
+    return this.sourceCursor ? structuredClone(this.sourceCursor) : null;
+  }
+
+  browserEvidence(evidence: HomeMemoryEvidence): EpisodicMessageRecord {
+    this.assertOpen();
+    const message = this.messages.get(evidence.index);
+    if (!message || message.sessionId !== evidence.sessionId || message.entryId !== evidence.entryId
+      || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
+    return { ...message, omissions: [...message.omissions] };
+  }
+
+  browserPage(request: HomeMemoryPageRequest): HomeMemoryPage {
+    this.assertOpen();
+    const revision = this.browserRevision();
+    if (request.cursor && request.cursor.revision !== revision) throw homeMemoryRevisionChanged();
+    const offset = request.cursor?.offset ?? 0;
+    if (offset > this.messages.size || request.cursor && offset === this.messages.size) throw homeMemoryRevisionChanged();
+    const result: HomeMemoryPage = { homeId: this.dependencies.sessionId, revision, totalItems: this.messages.size, items: [] };
+    let position = offset;
+    // Leave room for the largest cursor and page metadata. Each row is bounded
+    // independently, so one row always fits and no cursor can strand a row.
+    let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
+    for (; position < this.messages.size && result.items.length < request.limit; position += 1) {
+      const message = this.messages.get(position)!;
+      const item = homeMemoryItem(message, this.nodes.get(nodeAddress(0, position)));
+      const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+      if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
+      bytes += size; result.items.push(item);
+    }
+    if (!result.items.length && position < this.messages.size) throw new GatewayError("unsupported", "Home memory row exceeds the browser bound");
+    if (position < this.messages.size) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: position, limit: request.limit });
+    return result;
   }
 
   /**
@@ -461,11 +520,15 @@ export class EpisodicMemory {
       if (this.blocked) {
         this.blocked = null;
         await this.saveState();
-        await this.ingest();
       }
+      await this.ingest();
     });
     void this.drain().catch(() => {});
   }
+
+  /** Pause authority already committed by Home; release disposable waits while
+   * accepted node work retains its result and bounded spend. */
+  notePause(): void { this.settleWaiters(); }
 
   status(): EpisodicMemoryStatus {
     const byLevel = new Map<number, number>();
@@ -622,14 +685,19 @@ export class EpisodicMemory {
           await this.block("source-unavailable", "Canonical entry ID belongs to another physical chapter");
           return;
         }
-        if (current && current.text === message.text && current.omitted === message.omitted && current.kind === message.kind) continue;
+        const sameContent = current?.text === message.text && current.omitted === message.omitted && current.kind === message.kind;
+        // Canonical identity/date and omission attribution can change without
+        // changing projected text. Keep the catalog's evidence current while
+        // retaining text-identical summary nodes (no new provider spend).
+        if (sameContent && current.sourceDigest === message.sourceDigest && current.timestamp === message.timestamp
+          && JSON.stringify(current.omissions) === JSON.stringify(message.omissions)) continue;
         const record: EpisodicMessageRecord = {
           revision: this.takeRevision(), index: existing, ...message,
           sessionId: message.sourceSessionId ?? this.dependencies.sessionId,
         };
         await this.appendCatalog(record);
         this.setMessage(record);
-        changed.push(existing);
+        if (!sameContent) changed.push(existing);
       }
 
       if (!cut.incremental) {
@@ -864,29 +932,36 @@ export class EpisodicMemory {
   // ---- the pump (gist §4.1) ------------------------------------------------------
 
   private async drain(): Promise<void> {
-    if (this.closed || this.blocked) return;
-    if (!this.draining) {
-      this.draining = (async () => {
-        try {
-          await this.pump();
-        } catch (error) {
-          // The pump handles every failure it can classify; anything that
-          // escapes it (a store append that fails on I/O, say) would otherwise
-          // leave the pump dead, the memory unblocked and every waiter waiting
-          // for a node that can never come. For a caller that never awaits the
-          // drain — the turn loop, which only waits on `whenReady` — an
-          // unexpected failure of the owner's own loop is a permanent failure,
-          // so it blocks with the reason and releases the waiters. The
-          // settlement runs in a `finally`: a block that cannot be persisted
-          // still must not strand a waiter.
-          try {
-            await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
-          } finally {
-            this.settleWaiters();
-          }
-        }
-      })().finally(() => { this.draining = null; });
+    if (this.closed || this.blocked || this.dependencies.isPaused?.()) return;
+    const draining = this.draining;
+    if (draining) {
+      await draining;
+      // A joining resume/ingest may arrive while this pump retires its paused
+      // exit. That admission starts remaining work after the exact pump retires;
+      // a pump's own completion never schedules itself again without admission.
+      if (!this.closed && !this.blocked && !this.dependencies.isPaused?.() && this.nextStartable()) await this.drain();
+      return;
     }
+    this.draining = (async () => {
+      try {
+        await this.pump();
+      } catch (error) {
+        // The pump handles every failure it can classify; anything that
+        // escapes it (a store append that fails on I/O, say) would otherwise
+        // leave the pump dead, the memory unblocked and every waiter waiting
+        // for a node that can never come. For a caller that never awaits the
+        // drain — the turn loop, which only waits on `whenReady` — an
+        // unexpected failure of the owner's own loop is a permanent failure,
+        // so it blocks with the reason and releases the waiters. The
+        // settlement runs in a `finally`: a block that cannot be persisted
+        // still must not strand a waiter.
+        try {
+          await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
+        } finally {
+          this.settleWaiters();
+        }
+      }
+    })().finally(() => { this.draining = null; });
     await this.draining;
   }
 
@@ -898,7 +973,7 @@ export class EpisodicMemory {
     try {
       for (;;) {
         if (this.closed || this.blocked) break;
-        while (running.size < this.limits.jobs) {
+        while (!this.dependencies.isPaused?.() && running.size < this.limits.jobs) {
           const next = this.nextStartable();
           if (!next) break;
           const key = nodeAddress(next.level, next.index);
@@ -1166,6 +1241,11 @@ export class EpisodicMemory {
     if (this.waiters.length === 0) return;
     const remaining: Waiter[] = [];
     for (const waiter of this.waiters) {
+      if (this.dependencies.isPaused?.()) {
+        if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
+        waiter.reject(new EpisodicMemoryError("paused", "Episodic memory is paused"));
+        continue;
+      }
       if (this.blocked) {
         if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
         waiter.reject(this.blockedError());

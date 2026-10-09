@@ -495,8 +495,9 @@ package enum GatewayResponseDecoding {
 
 package actor GatewayClient {
     #if HOSTED_TEST
-    // A run-local gate exercises the real actor-hop race without production hooks.
+    // Run-local gates exercise actor-hop races without production hooks.
     @TaskLocal static var hostedEventAdmissionGate: (@Sendable () async -> (@Sendable (GatewayEventAdmission) -> Void))?
+    @TaskLocal static var hostedQueuedSendGate: (@Sendable () async -> Void)?
     #endif
 
     private struct PendingRequest {
@@ -2006,7 +2007,10 @@ package actor GatewayClient {
         connection = epoch
     }
 
-    private func claimSend(id: String, epochID: Int) -> Bool {
+    private func claimSend(id: String, epochID: Int) async -> Bool {
+        #if HOSTED_TEST
+        await Self.hostedQueuedSendGate?()
+        #endif
         guard var epoch = connection, epoch.id == epochID,
               var request = epoch.pending[id], request.transmission == .queued else { return false }
         request.transmission = .sending

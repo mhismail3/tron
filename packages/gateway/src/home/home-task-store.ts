@@ -6,6 +6,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
+import type { HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -17,6 +18,8 @@ export interface HomeTaskRecord {
   version: 1;
   taskId: string;
   revision: number;
+  createdAt: number;
+  updatedAt: number;
   homeId: string;
   generation: number;
   routeGeneration: number;
@@ -50,6 +53,8 @@ export interface HomeTaskRecord {
     reason: string;
   } | null;
 }
+
+export type HomeTaskWrite = Omit<HomeTaskRecord, "createdAt" | "updatedAt">;
 
 export type HomeTaskStoreCode = "not-initialized" | "missing-state" | "unsafe-state" | "invalid-record"
   | "revision-conflict" | "write-failed" | "publication-uncertain";
@@ -128,7 +133,7 @@ export class HomeTaskStore {
    * Restart and atomic file replacement retain it; directory recreation does not. */
   async restoreEpoch(): Promise<string> {
     return this.run(async () => {
-      if (!(await this.inspect())) throw new HomeTaskStoreError("not-initialized");
+      if (!(await this.inspectAuthority())) throw new HomeTaskStoreError("not-initialized");
       const info = await lstat(this.directory, { bigint: true });
       if (!info.isDirectory() || info.isSymbolicLink() || info.birthtimeNs <= 0n) throw new HomeTaskStoreError("unsafe-state");
       return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
@@ -152,11 +157,10 @@ export class HomeTaskStore {
     for await (const entry of directory) {
       if (entry.name === "authorization.json") continue;
       const task = await this.run(async () => {
-        const match = /^(.+)\.json$/u.exec(entry.name);
-        if (!match || !identifier(match[1]) || match[1] === "authorization") throw new HomeTaskStoreError("invalid-record");
+        const name = parseTaskName(entry.name);
         const authority = await this.inspectAuthority();
         if (!authority) throw new HomeTaskStoreError("missing-state");
-        const current = await this.readTask(match[1]!);
+        const current = await this.readTask(name.taskId);
         if (!current) throw new HomeTaskStoreError("missing-state");
         validateAuthorityReferences(current, authority);
         return current;
@@ -175,16 +179,23 @@ export class HomeTaskStore {
     });
   }
 
-  async put(record: HomeTaskRecord, expectedRevision: number | null): Promise<void> {
+  async put(record: HomeTaskWrite, expectedRevision: number | null): Promise<HomeTaskRecord> {
     // Snapshot at the command boundary: a queued caller cannot mutate its
     // accepted command while an earlier durable write owns the mutex.
-    const next = structuredClone(record);
-    await this.run(async () => {
+    const input = structuredClone(record);
+    return this.run(async () => {
       const authorization = await this.inspect();
       if (!authorization) throw new HomeTaskStoreError("not-initialized");
+      if (!identifier(input.taskId) || input.taskId === "authorization") invalid();
+      const current = await this.readTask(input.taskId);
+      // Creation is strictly monotonic even within one wall-clock millisecond.
+      // The filename owns ordering across reopen; no clock/index state survives.
+      let creationTime = Date.now();
+      if (!current) for await (const name of this.taskNames()) creationTime = Math.max(creationTime, name.createdAt + 1);
+      const createdAt = current?.createdAt ?? creationTime;
+      const next: HomeTaskRecord = { ...input, createdAt, updatedAt: Math.max(Date.now(), current?.updatedAt ?? createdAt) };
       validateTask(next);
       validateAuthorityReferences(next, authorization);
-      const current = await this.readTask(next.taskId);
       if ((current?.revision ?? null) !== expectedRevision
         || next.revision !== (expectedRevision ?? 0) + 1) throw new HomeTaskStoreError("revision-conflict");
       if (current?.lifecycle === "terminal") throw new HomeTaskStoreError("invalid-record");
@@ -193,7 +204,8 @@ export class HomeTaskStore {
         || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
         || ((current.grantRef !== null || current.scopeRef !== null)
           && (current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef)))) throw new HomeTaskStoreError("invalid-record");
-      await this.publish(join(this.directory, `${next.taskId}.json`), next, TASK_BYTES);
+      await this.publish(this.taskPath(next), next, TASK_BYTES);
+      return next;
     });
   }
 
@@ -209,6 +221,7 @@ export class HomeTaskStore {
       const next = structuredClone(change(structuredClone(current)));
       if (JSON.stringify(next) === JSON.stringify(current)) return current;
       next.revision = current.revision + 1;
+      next.updatedAt = Math.max(Date.now(), current.updatedAt);
       validateTask(next);
       validateAuthorityReferences(next, authorization);
       if (current.lifecycle === "terminal" || immutableTask(current) !== immutableTask(next)
@@ -217,7 +230,7 @@ export class HomeTaskStore {
         || current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef
         || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
         || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))) throw new HomeTaskStoreError("invalid-record");
-      await this.publish(join(this.directory, `${taskId}.json`), next, TASK_BYTES);
+      await this.publish(this.taskPath(next), next, TASK_BYTES);
       return next;
     });
   }
@@ -234,9 +247,9 @@ export class HomeTaskStore {
       if (JSON.stringify(wake) === JSON.stringify(current.wake)) return current;
       if (wake.eventId !== current.wake.eventId || wake.createdAt !== current.wake.createdAt
         || current.wake.state === "acknowledged" || (current.wake.push === "decided" && wake.push !== "decided")) throw new HomeTaskStoreError("invalid-record");
-      const next = { ...current, revision: current.revision + 1, wake };
+      const next = { ...current, revision: current.revision + 1, updatedAt: Math.max(Date.now(), current.updatedAt), wake };
       validateTask(next);
-      await this.publish(join(this.directory, `${taskId}.json`), next, TASK_BYTES);
+      await this.publish(this.taskPath(next), next, TASK_BYTES);
       return next;
     });
   }
@@ -294,9 +307,8 @@ export class HomeTaskStore {
     const directory = await opendir(this.directory, { bufferSize: 32 });
     for await (const entry of directory) {
       if (entry.name === "authorization.json") continue;
-      const match = /^(.+)\.json$/u.exec(entry.name);
-      if (!match || !identifier(match[1]) || match[1] === "authorization") throw new HomeTaskStoreError("invalid-record");
-      const task = await this.readTask(match[1]);
+      const name = parseTaskName(entry.name);
+      const task = await this.readTask(name.taskId);
       if (!task) throw new HomeTaskStoreError("missing-state");
       validateAuthorityReferences(task, state);
       visit?.(task);
@@ -304,13 +316,80 @@ export class HomeTaskStore {
     return state;
   }
 
+  private taskPath(task: Pick<HomeTaskRecord, "createdAt" | "taskId">): string {
+    return join(this.directory, `${String(task.createdAt).padStart(13, "0")}-${task.taskId}.json`);
+  }
+
+  private async *taskNames(): AsyncGenerator<TaskName> {
+    for await (const entry of await opendir(this.directory, { bufferSize: 32 })) {
+      if (entry.name !== "authorization.json") yield parseTaskName(entry.name);
+    }
+  }
+
   private async readTask(taskId: string): Promise<HomeTaskRecord | undefined> {
-    const read = await readSecureJson<unknown>(join(this.directory, `${taskId}.json`), TASK_BYTES);
-    if (!read.present) return undefined;
+    let name: TaskName | undefined;
+    for await (const candidate of this.taskNames()) {
+      if (candidate.taskId === taskId) {
+        if (name) invalid();
+        name = candidate;
+      }
+    }
+    if (!name) return undefined;
+    const read = await readSecureJson<unknown>(this.taskPath(name), TASK_BYTES);
+    if (!read.present) throw new HomeTaskStoreError("missing-state");
     const task = validateTask(read.value);
-    if (task.taskId !== taskId) throw new HomeTaskStoreError("invalid-record");
+    if (task.taskId !== taskId || task.createdAt !== name.createdAt) invalid();
     return task;
   }
+
+  /** Maintainer list reads only the selected records, never report bodies.
+   * A continuation is bound to the physical namespace, not installation text. */
+  async page(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
+    return this.run(async () => {
+      const limit = input.limit ?? 20;
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) invalid();
+      const authority = await this.inspectAuthority();
+      if (!authority) {
+        if (input.cursor) invalid();
+        return { items: [] };
+      }
+      const info = await lstat(this.directory, { bigint: true });
+      const epoch = createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
+      let after: TaskName | undefined;
+      if (input.cursor) {
+        try {
+          const value = JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8"));
+          if (!keys(value, ["epoch", "createdAt", "taskId"]) || value.epoch !== epoch
+            || !timestamp(value.createdAt) || !identifier(value.taskId)) invalid();
+          after = { createdAt: value.createdAt as number, taskId: value.taskId as string };
+        } catch { invalid(); }
+      }
+      const selected: TaskName[] = [];
+      for await (const name of this.taskNames()) {
+        if (after && compareTaskNames(name, after) <= 0) continue;
+        selected.push(name);
+        selected.sort(compareTaskNames);
+        if (selected.length > limit + 1) selected.pop();
+      }
+      const items: HomeTaskSummary[] = [];
+      for (const name of selected.slice(0, limit)) {
+        const task = (await this.readTask(name.taskId))!;
+        validateAuthorityReferences(task, authority);
+        items.push({ taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt,
+          title: [...task.intent.text].slice(0, 160).join(""), target: task.target, lifecycle: task.lifecycle,
+          outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
+          attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
+          pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
+            && pending.request.intentRevision === task.intent.revision && pending.request.target === task.target
+            && pending.request.workerProfile === task.workerProfile && pending.request.policyRevision === task.policyRevision
+            && !authority.decisions.some(decision => decision.requestId === pending.id)) });
+      }
+      const last = selected[Math.min(limit, selected.length) - 1];
+      return { items, ...(selected.length > limit && last
+        ? { nextCursor: Buffer.from(JSON.stringify({ epoch, createdAt: last.createdAt, taskId: last.taskId })).toString("base64url") } : {}) };
+    });
+  }
+
 }
 
 async function directoryPresent(path: string): Promise<boolean> {
@@ -344,7 +423,7 @@ function timestamp(value: unknown): boolean { return typeof value === "number" &
 function unique(records: Record<string, unknown>[]): boolean { return new Set(records.map(record => record.id)).size === records.length; }
 function invalid(): never { throw new HomeTaskStoreError("invalid-record"); }
 function immutableTask(task: HomeTaskRecord): string {
-  return JSON.stringify([task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.revision, task.intent.text, task.intentDigest,
+  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.revision, task.intent.text, task.intentDigest,
     task.target, task.workerProfile, task.policyRevision]);
 }
 
@@ -354,9 +433,11 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 }
 
 function validateTask(value: unknown): HomeTaskRecord {
-  if (!keys(value, ["version", "taskId", "revision", "homeId", "generation", "intent", "intentDigest", "target", "workerProfile",
+  if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target", "workerProfile",
     "policyRevision", "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "controllerGeneration", "stopIntent", "spend", "reportRefs", "terminalEvidence", "routeGeneration", "wake"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
+    || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
+    || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
     || !identifier(value.homeId) || !positive(value.generation) || !positive(value.routeGeneration)
     || !keys(value.intent, ["revision", "text"]) || !positive(value.intent.revision) || !text(value.intent.text, 64 * 1_024)
     || value.intentDigest !== createHash("sha256").update(JSON.stringify({ revision: value.intent.revision, text: value.intent.text })).digest("hex")
@@ -452,4 +533,14 @@ function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
 function validAuthorizationBinding(value: Record<string, unknown>): boolean {
   return positive(value.intentRevision) && text(value.intentDigest, 128) && text(value.target, 4_096) && isAbsolute(value.target as string)
     && identifier(value.authorizationScope) && identifier(value.workerProfile) && positive(value.policyRevision) && identifier(value.restoreEpoch);
+}
+
+interface TaskName { createdAt: number; taskId: string }
+function parseTaskName(value: string): TaskName {
+  const match = /^(\d{13})-(.+)\.json$/u.exec(value);
+  if (!match || !identifier(match[2]) || match[2] === "authorization") invalid();
+  return { createdAt: Number(match[1]), taskId: match[2] };
+}
+function compareTaskNames(a: TaskName, b: TaskName): number {
+  return b.createdAt - a.createdAt || (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0);
 }

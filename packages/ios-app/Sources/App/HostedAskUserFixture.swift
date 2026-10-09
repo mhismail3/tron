@@ -25,6 +25,7 @@ struct HostedAskUserFixtureView: View {
     @State private var filesPresented = false
     @State private var editorRequest: ComposerEditorRequest?
     @State private var displaySheet: DisplayRoute?
+    @State private var homeSheet: HomeSheetRoute?
     @State private var presentationActivity = PresentationActivityCoordinator()
     @State private var bootstrapError: String?
 
@@ -107,7 +108,8 @@ struct HostedAskUserFixtureView: View {
                 editorRequest: $editorRequest,
                 displaySheet: $displaySheet,
                 onUseEditorRequest: { _ in },
-                onKeepEditorRequest: { _ in }
+                onKeepEditorRequest: { _ in },
+                homeSheet: $homeSheet
             ))
         }
         .environment(model)

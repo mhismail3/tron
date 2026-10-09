@@ -16,6 +16,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } f
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { once } from "node:events";
+import WebSocket from "ws";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -63,11 +64,13 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import { EpisodicMemory } from "../episodic/episodic-memory.js";
+import * as homeSource from "../episodic/home-source.js";
 import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
-import type { HomeContextProjection, HomeMemoryStatus, HomeStatus } from "../protocol/types.js";
+import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryPage, HomeMemoryEvidencePage } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { DeviceStore } from "../security/device-store.js";
@@ -339,6 +342,8 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
 /** Dispose the Gateway and open a new one over the same installation: the same
  * thing a Gateway restart does. */
 async function restart(f: Fixture): Promise<void> {
+  f.service.dispose();
+  await f.receipts.dispose();
   await f.registry.dispose();
   const registeredIndex = registries.indexOf(f.registry);
   if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
@@ -1360,6 +1365,347 @@ describe("Tron Home activations end to end", () => {
     expect(beforeRequests).toHaveLength(1);
   });
 
+  describe("memory browser contract", () => {
+    async function browserFixture(label: string) {
+      const f = await fixture(`browser-${label}`);
+      disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+      const old = await designateHome(f, `browser-${label}-designate`);
+      f.faux.setResponses([fauxAssistantMessage("first chapter reply")]);
+      await old.prompt("first chapter fact");
+      await waitUntil(() => !old.isBusy);
+      await f.service.invoke(client, "home.pauseMemory", { commandId: `browser-${label}-pause` });
+      const owner = f.registry.homeOwner() as unknown as {
+        options: { sessions: { chapterMetrics?: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
+        chapterQuiescent(id: string): Promise<void>;
+      };
+      const metrics = owner.options.sessions.chapterMetrics!;
+      owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
+      try { await owner.chapterQuiescent(old.id); } finally { owner.options.sessions.chapterMetrics = metrics; }
+      // Logical Home materializes the next chapter, but paused memory refuses dispatch.
+      await f.service.invoke(client, "home.prompt", { commandId: `browser-${label}-next`, text: "second chapter fact" });
+      const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+      const current = await f.registry.acquire(status.sessionId!);
+      await waitUntil(async () => !current.isBusy &&
+        (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).chapter?.recoveryDecision === "none");
+      const canonical = `head Bearer fixture-token-123456789 ${"💡canonical body ".repeat(4000)} tail`;
+      const entryId = current.sessionManager.appendMessage({ role: "toolResult", toolCallId: "browser-call", toolName: "read",
+        content: [{ type: "text", text: canonical }], isError: false, timestamp: Date.now() });
+      return { f, old, current, canonical, entryId };
+    }
+    const page = async (f: Fixture, params: Record<string, unknown> = {}) =>
+      await f.service.invoke(client, "home.memory.page", params) as unknown as HomeMemoryPage;
+
+    it("bounds and replays pages across chapters, separating projection from exact canonical evidence", async () => {
+      const { f, old, current, canonical, entryId } = await browserFixture("pages");
+      const before = [await readFile(old.sessionFile!, "utf8"), await readFile(current.sessionFile!, "utf8")];
+      const first = await page(f, { limit: 2 });
+      expect(first.nextCursor).toBeDefined();
+      const continuationBeforeRestart = await page(f, { limit: 2, cursor: first.nextCursor });
+      const items = [...first.items];
+      let next = first.nextCursor;
+      for (let step = 0; next && step < 30; step += 1) {
+        const result = await page(f, { limit: 2, cursor: next });
+        expect(await page(f, { limit: 2, cursor: next })).toEqual(result);
+        expect(result.items.length).toBeLessThanOrEqual(2);
+        expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(128 * 1024);
+        expect(result.revision).toBe(first.revision);
+        items.push(...result.items); next = result.nextCursor;
+      }
+      expect(next).toBeUndefined();
+      expect(new Set(items.map(item => item.index)).size).toBe(items.length);
+      expect(items).toHaveLength(first.totalItems);
+      expect(new Set(items.map(item => item.evidence.sessionId))).toEqual(new Set([old.id, current.id]));
+      const projected = items.find(item => item.evidence.entryId === entryId)!;
+      expect(projected).toMatchObject({ kind: "echo", attribution: "tool", projection: { format: "memory-projection" } });
+      expect(projected.timestamp).toEqual(expect.any(String));
+      expect(projected.projection.omissions).toEqual(expect.arrayContaining(["credentials", "capped", "browser-cap"]));
+      expect(projected.projection.text).not.toContain("fixture-token");
+      expect(projected.projection.text.length).toBeLessThanOrEqual(4096);
+      let exact = "";
+      let offset = 0;
+      for (let step = 0; step < 30; step += 1) {
+        const evidence = await f.service.invoke(client, "home.memory.evidence", { evidence: projected.evidence, offset }) as unknown as HomeMemoryEvidencePage;
+        expect(evidence.format).toBe("canonical-history");
+        expect(evidence.evidence).toEqual(projected.evidence);
+        expect(evidence.text.length).toBeLessThanOrEqual(24 * 1024);
+        exact += evidence.text;
+        if (evidence.nextOffset === undefined) break;
+        offset = evidence.nextOffset;
+      }
+      expect(exact).toBe(canonical);
+      await expect(f.service.invoke(client, "home.memory.evidence", { evidence: projected.evidence, offset: canonical.length + 1 })).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(page(f, { limit: 1, cursor: first.nextCursor })).rejects.toMatchObject({ code: "invalid_request" });
+      const outOfRange = Buffer.from(JSON.stringify({ revision: first.revision, offset: first.totalItems + 1, limit: 2 })).toString("base64url");
+      await expect(page(f, { limit: 2, cursor: outOfRange })).rejects.toMatchObject({ code: "conflict" });
+      for (const invalid of [ { ...projected.evidence, sessionId: old.id }, { ...projected.evidence, entryId: "missing" },
+        { ...projected.evidence, sourceDigest: "0".repeat(64) } ]) {
+        await expect(f.service.invoke(client, "home.memory.evidence", { evidence: invalid })).rejects.toMatchObject({ code: "conflict" });
+      }
+      expect([await readFile(old.sessionFile!, "utf8"), await readFile(current.sessionFile!, "utf8")]).toEqual(before);
+      await restart(f);
+      expect(await page(f, { limit: 2 })).toEqual(first);
+      expect(await page(f, { limit: 2, cursor: first.nextCursor })).toEqual(continuationBeforeRestart);
+      report.cases.push({ case: "memory-browser-pages-and-evidence", chapters: 2, items: items.length,
+        projectionOmissions: projected.projection.omissions, exactCharacters: exact.length, canonicalUnchanged: true });
+    });
+
+    it("invalidates continuation on append and context edit, and refuses partial source failure", async () => {
+      const { f, old, current, entryId } = await browserFixture("invalidation");
+      const first = await page(f, { limit: 1 });
+      current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: "edited projection" }] });
+      await expect(page(f, { limit: 1, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict", details: { reason: "home-memory-revision-changed" } });
+      const edited = await page(f, { limit: 50 });
+      const item = edited.items.find(candidate => candidate.evidence.entryId === entryId)!;
+      expect(item.projection.text).toContain("edited projection");
+      expect(item.projection.omissions).toContain("context-edit");
+      const continued = await page(f, { limit: 1 });
+      current.sessionManager.appendMessage({ role: "user", content: "new appended evidence", timestamp: Date.now() });
+      await expect(page(f, { limit: 1, cursor: continued.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+      current.sessionManager.appendContextEdit(entryId, null);
+      const omitted = (await page(f, { limit: 50 })).items.find(candidate => candidate.evidence.entryId === entryId)!;
+      expect(omitted).toMatchObject({ index: item.index, projection: { omitted: true, text: "[omitted]" } });
+      expect(omitted.projection.omissions).toContain("context-edit");
+      // Evidence stays canonical even after a projected context edit/exclusion.
+      const evidence = await f.service.invoke(client, "home.memory.evidence", { evidence: item.evidence }) as unknown as HomeMemoryEvidencePage;
+      expect(evidence.text).toContain("fixture-token");
+      await rm(current.sessionFile!);
+      for (const [method, params] of [["home.memory.page", {}], ["home.memory.evidence", { evidence: first.items[0]!.evidence }]] as const) {
+        const error = await f.service.invoke(client, method, params).then(() => undefined, error => error);
+        expect(error).toMatchObject({ code: "busy", diagnosticReason: "home-memory-source-unavailable" });
+        expect(error.details).toEqual({ reason: "home-memory-source-unavailable" });
+        expect(error.message).not.toContain(".jsonl");
+      }
+      report.cases.push({ case: "memory-browser-revision-and-source-failure", editsInvalidate: true, appendInvalidates: true, partialSuccess: false });
+    });
+
+    it("revises evidence identity and date when canonical bytes change without changing projected text", async () => {
+      const { f, current, entryId, canonical } = await browserFixture("canonical-revision");
+      await f.service.invoke(client, "home.resumeMemory", { commandId: "browser-canonical-build" });
+      await waitUntil(async () => {
+        const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+        return status.memory.episodic?.pump.busy === 0 && status.memory.episodic?.view.unbuilt === 0;
+      });
+      await f.service.invoke(client, "home.pauseMemory", { commandId: "browser-canonical-freeze" });
+      const calls = f.compactor.calls;
+      const first = await page(f, { limit: 50 });
+      const original = first.items.find(item => item.evidence.entryId === entryId)!;
+      expect(original.summary).not.toBeNull();
+      const lines = (await readFile(current.sessionFile!, "utf8")).trimEnd().split("\n");
+      const timestamp = "2024-01-01T12:00:00.000Z";
+      await writeFile(current.sessionFile!, lines.map(line => {
+        const entry = JSON.parse(line);
+        return entry.id === entryId ? JSON.stringify({ ...entry, timestamp }) : line;
+      }).join("\n") + "\n");
+      const revised = await page(f, { limit: 50 });
+      const updated = revised.items.find(item => item.evidence.entryId === entryId)!;
+      expect(updated.projection.text).toBe(original.projection.text);
+      expect(updated.timestamp).toBe(timestamp);
+      expect(updated.evidence.sourceDigest).not.toBe(original.evidence.sourceDigest);
+      expect(revised.revision).not.toBe(first.revision);
+      await expect(f.service.invoke(client, "home.memory.evidence", { evidence: original.evidence })).rejects.toMatchObject({ code: "conflict" });
+      expect((await f.service.invoke(client, "home.memory.evidence", { evidence: updated.evidence }) as unknown as HomeMemoryEvidencePage).metadata.timestamp).toBe(timestamp);
+      current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: canonical }] });
+      const sameTextEdited = (await page(f, { limit: 50 })).items.find(item => item.evidence.entryId === entryId)!;
+      expect(sameTextEdited.projection.text).toBe(updated.projection.text);
+      expect(sameTextEdited.projection.omissions).toContain("context-edit");
+      expect(sameTextEdited.summary).toEqual(original.summary);
+      await f.service.invoke(client, "home.resumeMemory", { commandId: "browser-canonical-resume" });
+      await waitUntil(async () => {
+        const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+        return status.memory.episodic?.pump.busy === 0 && status.memory.episodic?.view.unbuilt === 0;
+      });
+      expect(f.compactor.calls).toBe(calls);
+      report.cases.push({ case: "memory-browser-canonical-only-revision", updatedDateAndDigest: true, sameTextEditAttributed: true, summaryRetained: true });
+    });
+
+    it("enforces encoded byte bounds without losing rows containing JSON escapes", async () => {
+      const { f, current } = await browserFixture("byte-bound");
+      for (let index = 0; index < 60; index += 1) {
+        current.sessionManager.appendMessage({ role: "user", content: `row ${index}: ${"\u0001".repeat(5000)}`, timestamp: Date.now() });
+      }
+      let result = await page(f, { limit: 50 });
+      const count = result.totalItems;
+      const indexes = new Set<number>();
+      let byteLimited = false;
+      for (let step = 0; step < 100; step += 1) {
+        expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(128 * 1024);
+        expect(result.items.length).toBeLessThanOrEqual(50);
+        for (const item of result.items) { expect(indexes.has(item.index)).toBe(false); indexes.add(item.index); }
+        if (!result.nextCursor) break;
+        byteLimited ||= result.items.length < 50;
+        result = await page(f, { limit: 50, cursor: result.nextCursor });
+      }
+      expect(result.nextCursor).toBeUndefined();
+      expect(indexes.size).toBe(count);
+      expect(byteLimited).toBe(true);
+      report.cases.push({ case: "memory-browser-byte-bound", rows: count, escapedText: true, byteLimited });
+    });
+
+    it("invalidates placeholders when summaries settle without replaying a prompt", async () => {
+      const { f } = await browserFixture("summaries");
+      f.compactor.gate = new Promise<void>(resolve => { f.compactor.release = resolve; });
+      try {
+        const initial = await page(f, { limit: 1 });
+        await f.service.invoke(client, "home.resumeMemory", { commandId: "browser-summaries-resume" });
+        await waitUntil(async () => {
+          const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+          const memory = status.memory.episodic;
+          return f.compactor.entered > 0 && memory !== undefined
+            && memory.coverage.summarized + memory.pump.busy === memory.coverage.admitted;
+        });
+        const pending = await page(f, { limit: 1 });
+        f.compactor.release?.();
+        await waitUntil(async () => {
+          const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+          return status.memory.episodic?.pump.busy === 0 && status.memory.episodic?.view.unbuilt === 0;
+        });
+        await expect(page(f, { limit: 1, cursor: pending.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+        const built = await page(f, { limit: 50 });
+        expect(built.revision).not.toBe(initial.revision);
+        expect(built.items.some(item => item.summary?.text.includes(SUMMARY_MARKER))).toBe(true);
+        expect(f.faux.state.callCount).toBe(1);
+        report.cases.push({ case: "memory-browser-summary-settlement", revisionChanged: true, providerReplay: false });
+      } finally { f.compactor.release?.(); }
+    });
+
+    it("refuses publication when a summary settles during canonical proof, and retires cancelled reads", async () => {
+      const { f } = await browserFixture("read-fence");
+      f.compactor.gate = new Promise<void>(resolve => { f.compactor.release = resolve; });
+      await f.service.invoke(client, "home.resumeMemory", { commandId: "browser-read-fence-resume" });
+      await waitUntil(() => f.compactor.entered > 0);
+      let releaseProof!: () => void;
+      const gate = new Promise<void>(resolve => { releaseProof = resolve; });
+      const original = homeSource.readCanonicalHomeIndex;
+      let entered = false;
+      const spy = vi.spyOn(homeSource, "readCanonicalHomeIndex").mockImplementation(async function* (...args) {
+        yield* original(...args);
+        entered = true;
+        await gate;
+      });
+      const reading = page(f, { limit: 1 }).then(value => ({ value, error: undefined }), error => ({ value: undefined, error }));
+      try {
+        await waitUntil(() => entered);
+        const queuedController = new AbortController();
+        const queued = f.service.invoke({ ...client, signal: queuedController.signal }, "home.memory.page", {})
+          .then(() => undefined, error => error);
+        // The first read keeps its proof gate. Cancellation must remove this
+        // queued read without waiting for that unrelated request to settle.
+        queuedController.abort();
+        expect(await awaitsWithin(queued, "cancelled queued browser read")).toBeDefined();
+        f.compactor.release?.();
+        await waitUntil(async () => {
+          const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+          return status.memory.episodic?.pump.busy === 0;
+        });
+        releaseProof();
+        expect((await reading).error).toMatchObject({ code: "conflict", diagnosticReason: "home-memory-revision-changed" });
+      } finally { releaseProof(); f.compactor.release?.(); await reading; spy.mockRestore(); }
+      const controller = new AbortController();
+      controller.abort();
+      await expect(f.service.invoke({ ...client, signal: controller.signal }, "home.memory.page", {})).rejects.toBeDefined();
+      expect((await page(f)).items.length).toBeGreaterThan(0);
+      report.cases.push({ case: "memory-browser-read-fence", stalePublication: false, cancelledReadRetired: true });
+    });
+
+    it("reads a disabled Home after restart without starting compactor or chat work", async () => {
+      const f = await fixture("browser-disabled");
+      disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+      const slot = await designateHome(f, "browser-disabled-designate");
+      f.faux.setResponses([fauxAssistantMessage("baseline reply")]);
+      await slot.prompt("baseline input");
+      await waitUntil(() => !slot.isBusy);
+      await f.service.invoke(client, "home.disable", { commandId: "browser-disabled-disable" });
+      slot.sessionManager.appendMessage({ role: "user", content: "unbuilt input ".repeat(500), timestamp: Date.now() });
+      await restart(f);
+      const calls = f.compactor.calls;
+      const result = await page(f, { limit: 50 });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(f.compactor.calls).toBe(calls);
+      expect(f.faux.state.callCount).toBe(1);
+      expect(result.items.some(item => item.projection.text.includes("unbuilt input") && item.summary === null)).toBe(true);
+      const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+      expect(status).toMatchObject({ enabled: false, memory: { episodic: { pump: { busy: 0 } } } });
+      report.cases.push({ case: "memory-browser-disabled-restart", noCompactorAdmission: true, noChatReplay: true });
+    });
+
+    it("cancels both real browser RPCs over the wire and logs only coded evidence failures", async () => {
+      const { f } = await browserFixture("wire-cancel");
+      const first = await page(f);
+      const devices = new DeviceStore(join(f.root, "browser-device"), "browser-fixture");
+      await devices.initialize();
+      const enrollment = await devices.ensureEnrollment();
+      const paired = await devices.pair(enrollment.code, "browser fixture");
+      const records: Array<Record<string, unknown>> = [];
+      const server = new GatewayServer({
+        host: "127.0.0.1", port: 0, maxFrameBytes: 1024 * 1024,
+        devices, sessions: f.registry, service: f.service, uploads: {} as never,
+        auth: { detachClient: () => {}, cancelOwner: () => {} } as never,
+        logger: { log: (_level: string, _message: string, fields: Record<string, unknown>) => { records.push(fields); } } as never,
+        disposableReadDeadlinesMs: new Map(), // Only explicit cancellation owns this held read.
+      });
+      const releases: Array<() => void> = [];
+      let socket: WebSocket | undefined;
+      disposals.push(async () => { for (const release of releases) release(); socket?.terminate(); await server.close(); });
+      await server.listen();
+      const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
+      socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
+      const frames: Array<Record<string, any>> = [];
+      socket.on("message", raw => { frames.push(JSON.parse(raw.toString())); });
+      await awaitsWithin(once(socket, "open"), "browser wire connection");
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: (f.service.info() as unknown as { protocolVersion: number }).protocolVersion }));
+      await waitUntil(() => frames.some(frame => frame.type === "hello"));
+      const original = homeSource.readCanonicalHomeIndex;
+      let started = 0;
+      const spy = vi.spyOn(homeSource, "readCanonicalHomeIndex").mockImplementation(async function* (...args) {
+        yield* original(...args); // Proof uses real sources; only its completion is gated.
+        const signal = args[3]!;
+        await new Promise<void>((resolve, reject) => {
+          releases.push(resolve);
+          const aborted = () => { signal.removeEventListener("abort", aborted); reject(signal.reason); };
+          signal.addEventListener("abort", aborted, { once: true });
+          releases[releases.length - 1] = () => { signal.removeEventListener("abort", aborted); resolve(); };
+          started += 1;
+        });
+      });
+      try {
+        for (const [index, method] of ["home.memory.page", "home.memory.evidence"].entries()) {
+          const id = `browser-cancel-${index}`;
+          socket.send(JSON.stringify({ type: "request", id, method,
+            params: method === "home.memory.page" ? {} : { evidence: first.items[0]!.evidence } }));
+          await waitUntil(() => started === index + 1);
+          socket.send(JSON.stringify({ type: "cancel", id }));
+          await waitUntil(() => records.some(record => record.event === "rpc.cancelled" && record.requestID === id));
+          expect(frames.some(frame => frame.id === id)).toBe(false);
+        }
+      } finally { for (const release of releases) release(); spy.mockRestore(); }
+      const wrong = { ...first.items[0]!.evidence, sourceDigest: "0".repeat(64) };
+      socket.send(JSON.stringify({ type: "request", id: "wrong-evidence", method: "home.memory.evidence", params: { evidence: wrong } }));
+      await waitUntil(() => frames.some(frame => frame.id === "wrong-evidence"));
+      expect(frames.find(frame => frame.id === "wrong-evidence")!.error).toMatchObject({ code: "conflict" });
+      expect(records.find(record => record.event === "rpc.error" && record.requestID === "wrong-evidence"))
+        .toMatchObject({ method: "home.memory.evidence", reason: "home-memory-revision-changed" });
+      const logged = JSON.stringify(records);
+      expect(logged).not.toContain(wrong.entryId);
+      expect(logged).not.toContain(wrong.sourceDigest);
+      expect(logged).not.toContain("first chapter fact");
+      report.cases.push({ case: "memory-browser-wire-cancel-and-diagnostic", methodsCancelled: 2, payloadLogged: false });
+    });
+
+    it("rejects malformed bounds, continuation and evidence identity at RPC admission", async () => {
+      const f = await fixture("browser-malformed");
+      disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+      for (const params of [{ limit: 0 }, { limit: 51 }, { limit: 1.5 }, { limit: "2" }, { cursor: "invalid" },
+        { cursor: "x".repeat(1025) }, { limit: 2, unknown: true }]) {
+        await expect(f.service.invoke(client, "home.memory.page", params)).rejects.toMatchObject({ code: "invalid_request" });
+      }
+      for (const params of [{}, { evidence: {} }, { evidence: { index: -1 } }, { evidence: null },
+        { evidence: {}, offset: -1 }, { evidence: {}, offset: 0.5 }, { evidence: {}, extra: true }]) {
+        await expect(f.service.invoke(client, "home.memory.evidence", params)).rejects.toMatchObject({ code: "invalid_request" });
+      }
+      report.cases.push({ case: "memory-browser-malformed-input", rejected: 14 });
+    });
+  });
+
   // progress.md C12 (#466), the property Home exists for: the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.
@@ -1402,6 +1748,160 @@ describe("Tron Home activations end to end", () => {
     // Every request, estimated at four characters a token, is a small fraction of the window.
     expect(row.maxRequestChars / 4).toBeLessThan(WINDOW / 4);
   }, 300_000);
+
+  describe("memory pause contract", () => {
+    async function pausedFixture(label: string) {
+      const f = await fixture(`pause-${label}`);
+      disposals.push(async () => {
+        f.compactor.release?.();
+        f.service.dispose();
+        await f.receipts.dispose();
+        await f.registry.dispose();
+        await rm(f.root, { recursive: true, force: true });
+      });
+      const slot = await designateHome(f, `pause-designate-${label}`);
+      return { f, slot };
+    }
+    const pause = (f: Fixture, commandId = "pause-command") => f.service.invoke(client, "home.pauseMemory", { commandId });
+    const resume = (f: Fixture, commandId = "resume-command") => f.service.invoke(client, "home.resumeMemory", { commandId });
+
+    it("persists pause through configuration, profile transitions and restart without replaying input", async () => {
+      const { f, slot } = await pausedFixture("idle");
+      f.faux.setResponses([fauxAssistantMessage("pause durable baseline")]);
+      await slot.prompt("pause baseline canonical flush");
+      await waitUntil(() => !slot.isBusy);
+      await pause(f);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
+        phase: "paused", readiness: { ready: false, gaps: ["memory-paused"] },
+        recovery: { action: "resume-memory" }, memory: { paused: true },
+      });
+      await f.service.invoke(client, "home.configureMemory", { commandId: "pause-configure", model: OTHER_MEMORY_MODEL });
+      await f.registry.homeOwner().disable();
+      await f.registry.homeOwner().designate({}, () => MODEL);
+      await restart(f);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: true, open: false } });
+      const reopened = await f.registry.acquire(slot.id);
+      f.faux.setResponses([fauxAssistantMessage("must not be dispatched")]);
+      await f.service.invoke(client, "home.prompt", { commandId: "pause-input", text: "pause input retained and explicitly refused" });
+      await waitUntil(() => !reopened.isBusy);
+      expect(f.faux.state.callCount).toBe(1);
+      expect(await sessionJsonl(reopened)).toContain("pause input retained and explicitly refused");
+      expect(f.registry.homeOwner().contextStatus()).toMatchObject({ lastRefusalReason: "memory-paused" });
+      await resume(f);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: false } });
+      expect(f.faux.state.callCount).toBe(1);
+      const record = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8"));
+      expect(record.memory.paused).toBeUndefined();
+      report.cases.push({ case: "pause-idle-restart-input", inputRetained: true, explicitRefusal: true, automaticReplay: false });
+    }, 60_000);
+
+    it("resumes an idle pause before any canonical file exists", async () => {
+      const { f } = await pausedFixture("no-source");
+      await pause(f);
+      await expect(resume(f)).resolves.toMatchObject({ configured: true, open: false, paused: false });
+      expect(f.compactor.calls).toBe(0);
+      report.cases.push({ case: "pause-no-source", resumedWithoutStore: true });
+    });
+
+    it("lets an activation with a frozen view finish its tool loop while paused", async () => {
+      const { f, slot } = await pausedFixture("active");
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      let entered = false;
+      const requests: CapturedRequest[] = [];
+      f.faux.setResponses([
+        async context => { requests.push(record(context)); entered = true; await gate; return fauxAssistantMessage(fauxToolCall("read", { path: "note.txt" })); },
+        responsesOf(f, requests)("finished while memory paused"),
+      ]);
+      const running = slot.prompt("pause active input");
+      try {
+        await waitUntil(() => entered);
+        await pause(f);
+        expect(slot.isBusy).toBe(true);
+      } finally { release(); }
+      await running;
+      await waitUntil(() => !slot.isBusy);
+      expect(requests).toHaveLength(2);
+      expect(viewOf(requests[1]!)).toBe(viewOf(requests[0]!));
+      expect(await sessionJsonl(slot)).toContain("finished while memory paused");
+      expect(f.registry.homeOwner().contextStatus()).not.toHaveProperty("lastRefusalReason");
+      report.cases.push({ case: "pause-frozen-activation", toolLoopCompleted: true, viewUnchanged: true });
+    }, 60_000);
+
+    it.each(["before-settlement", "after-restart"] as const)("releases a readiness wait and resumes %s without duplicate summarization", async ordering => {
+      const { f, slot } = await pausedFixture("wait-pump");
+      f.compactor.gate = new Promise<void>(resolve => { f.compactor.release = resolve; });
+      f.faux.setResponses([fauxAssistantMessage(longInput("pause first reply"))]);
+      await slot.prompt(longInput("pause first input"));
+      await waitUntil(() => !slot.isBusy && f.compactor.entered > 0);
+      let waitingForMemory = false;
+      const whenReady = EpisodicMemory.prototype.whenReady;
+      vi.spyOn(EpisodicMemory.prototype, "whenReady").mockImplementation(function (cut, options) {
+        if (cut > 0) waitingForMemory = true;
+        return whenReady.call(this, cut, options);
+      });
+      const waiting = slot.prompt("pause readiness input");
+      await waitUntil(() => waitingForMemory);
+      await pause(f);
+      await awaitsWithin(waiting, "pause readiness settlement");
+      await waitUntil(() => !slot.isBusy);
+      expect(f.registry.homeOwner().contextStatus()).toMatchObject({ lastRefusalReason: "memory-paused" });
+      expect(f.faux.state.callCount).toBe(1);
+      if (ordering === "before-settlement") await resume(f);
+      f.compactor.release?.();
+      await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).episodic?.pump.busy === 0);
+      if (ordering === "after-restart") {
+        expect(f.compactor.calls).toBe(1);
+        expect((await f.registry.homeOwner().memoryStatus()).episodic?.coverage.summarized).toBe(1);
+        await restart(f);
+        await resume(f);
+      }
+      await waitUntil(async () => ((await f.registry.homeOwner().memoryStatus()).episodic?.view.unbuilt ?? 1) === 0);
+      // Only the long first input and reply require compactor calls; the committed input leaf is not rebuilt.
+      expect(f.compactor.calls).toBe(2);
+      expect(f.faux.state.callCount).toBe(1);
+      report.cases.push({ case: "pause-wait-pump-restart", ordering, waitRefused: true, committedLeafRetained: true, totalCompactorCalls: f.compactor.calls });
+    }, 60_000);
+
+    it.each(["before-effect", "after-effect"] as const)("keeps a pause receipt unresolved across the %s crash boundary", async boundary => {
+      const { f } = await pausedFixture(boundary);
+      const store = f.receipts as unknown as { writeReceipt(path: string, receipt: { status: string }): Promise<void> };
+      const write = store.writeReceipt.bind(store);
+      const fault = vi.spyOn(store, "writeReceipt").mockImplementation(async (path, receipt) => {
+        if (boundary === "before-effect" && receipt.status === "pending") {
+          await write(path, receipt);
+          throw new Error("simulated process exit after pending publication");
+        }
+        if (boundary === "after-effect" && receipt.status === "completed") throw new Error("simulated process exit before completion publication");
+        return write(path, receipt);
+      });
+      try { await expect(pause(f)).rejects.toThrow("simulated process exit"); }
+      finally { fault.mockRestore(); }
+      await restart(f);
+      expect(await f.receipts.status(client.identity, "home.pauseMemory", "pause-command")).toMatchObject({ status: "pending" });
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: boundary === "after-effect" } });
+      await expect(pause(f)).rejects.toMatchObject({ code: "conflict", details: { outcomeUnknown: true } });
+      report.cases.push({ case: "pause-receipt-crash-cut", boundary, receipt: "pending", effectObserved: boundary === "after-effect" });
+    }, 60_000);
+
+    it("replays completed pause receipts without repeating effect and reports sanitized control outcomes", async () => {
+      const { f } = await pausedFixture("receipt");
+      const accepted = await pause(f);
+      await expect(pause(f)).resolves.toEqual(accepted);
+      await resume(f);
+      await expect(pause(f)).resolves.toEqual(accepted);
+      expect(await f.service.invoke(client, "home.status", {})).toMatchObject({ memory: { paused: false } });
+      await expect(resume(f, "resume-not-stopped")).rejects.toMatchObject({ code: "conflict" });
+      const signals = f.homeLogger.recent(100).filter(row => row.event === "home.client-control");
+      expect(new GatewayLogger(join(f.root, "home-signals.jsonl")).recent(100).filter(row => row.event === "home.client-control")).toEqual(signals);
+      expect(signals.filter(row => row.operation === "pauseMemory")).toHaveLength(1);
+      expect(signals.filter(row => row.operation === "resumeMemory")).toHaveLength(2);
+      expect(signals.some(row => row.level === "warning" && row.reason === "conflict")).toBe(true);
+      expect(JSON.stringify(signals)).not.toContain("pause-command");
+      expect(JSON.stringify(signals)).not.toContain(MEMORY_MODEL_ID);
+      report.cases.push({ case: "pause-receipt-replay-signal", effectRepeated: false, sanitizedSignals: signals.length });
+    }, 60_000);
+  });
 
   it("runs activation two on the view of activation one, frozen across its tool loop", async () => {
     const f = await fixture("view");
@@ -1595,7 +2095,7 @@ describe("Tron Home activations end to end", () => {
       configured: status.memory,
     };
     report.cases.push({ case: "configure", ...row });
-    expect(row.unconfiguredMemory).toEqual({ configured: false, open: false });
+    expect(row.unconfiguredMemory).toEqual({ configured: false, open: false, paused: false });
     expect(row.providerRequestsWhileUnconfigured).toBe(0);
     expect(row.refusalReasons).toContain("memory-not-configured");
     // The refusal is the activation's own evidence, even though it never
@@ -2437,9 +2937,9 @@ describe("Tron Home activations end to end", () => {
       unknownField: "invalid_request",
       missingModel: "invalid_request",
     });
-    expect(status.memory).toEqual({ configured: false, open: false });
+    expect(status.memory).toEqual({ configured: false, open: false, paused: false });
     expect(accepted).toBe("accepted");
-    expect(after.memory).toEqual({ configured: true, open: false, model: MEMORY_MODEL });
+    expect(after.memory).toEqual({ configured: true, open: false, model: MEMORY_MODEL, paused: false });
   }, 60_000);
 
   it("refuses a blocked memory with zero provider requests and reports the blocked reason", async () => {

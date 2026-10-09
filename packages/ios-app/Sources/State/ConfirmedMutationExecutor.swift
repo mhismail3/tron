@@ -40,12 +40,14 @@ final class ConfirmedMutationExecutor {
         method: String,
         commandID: String,
         replayAdmission: @escaping @MainActor () -> Bool = { true },
+        replayMissingReceipt: Bool = true,
         send: () async throws -> Response
     ) async throws -> Response {
         let value = try await performValue(
             method: method,
             commandID: commandID,
-            replayAdmission: replayAdmission
+            replayAdmission: replayAdmission,
+            replayMissingReceipt: replayMissingReceipt
         ) {
             try JSONValue.encode(try await send())
         }
@@ -56,6 +58,7 @@ final class ConfirmedMutationExecutor {
         method: String,
         commandID: String,
         replayAdmission: @escaping @MainActor () -> Bool = { true },
+        replayMissingReceipt: Bool = true,
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
@@ -65,12 +68,12 @@ final class ConfirmedMutationExecutor {
             until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
             admission: admission
         ) else {
-            throw GatewayFailure(
+            throw GatewayDefinitelyNotSentError(failure: GatewayFailure(
                 code: "disconnected",
                 message: "The Mac gateway is still reconnecting. Your change was not sent.",
                 retryable: true,
                 details: nil
-            )
+            ))
         }
 
         var retriedBeforeTransmission = false
@@ -170,6 +173,13 @@ final class ConfirmedMutationExecutor {
                                     method: method,
                                     commandID: commandID,
                                     lastFailure: lastFailure
+                                )
+                            }
+                            guard replayMissingReceipt else {
+                                throw Self.uncertainMutationOutcome(
+                                    method: method,
+                                    commandID: commandID,
+                                    lastFailure: GatewayFailure(code: "receipt_missing", message: "The original command has no receipt. Do not submit a replacement.", retryable: false, details: nil)
                                 )
                             }
                             guard replayAdmission() else {

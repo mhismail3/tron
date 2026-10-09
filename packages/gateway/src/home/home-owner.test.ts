@@ -562,7 +562,7 @@ describe("Tron Home record", () => {
     await owner.initialize();
     expect(owner.profileFor("session-1")).toBe("home");
     const status = await owner.status();
-    expect(status.memory).toEqual({ configured: false, open: false });
+    expect(status.memory).toEqual({ configured: false, open: false, paused: false });
     expect(status).toMatchObject({
       phase: "blocked", activation: { available: false },
       readiness: { ready: false, gaps: ["memory-not-configured"] },

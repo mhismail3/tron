@@ -195,7 +195,7 @@ export interface HistoryEntryPage {
   totalCharacters: number; metadata: Record<string, JsonValue>;
 }
 
-export function historyEntry(manager: SessionManager, runtimeGeneration: string, entryId: string, offset: number): HistoryEntryPage {
+export function historyEntry(manager: Pick<SessionManager, "getEntry">, runtimeGeneration: string, entryId: string, offset: number): HistoryEntryPage {
   const entry = manager.getEntry(entryId);
   if (!entry) throw new GatewayError("not_found", "History entry no longer exists");
   if (!Number.isSafeInteger(offset) || offset < 0) throw new GatewayError("invalid_request", "Invalid entry content position");

@@ -14,7 +14,8 @@ export type GatewayDiagnosticReason =
   | "viewer_capacity" | "viewer_retired" | "viewer_identity_in_use"
   | "catalog_capacity" | "catalog_headers_unavailable" | "catalog_changed"
   | `session_configuration_${"running" | "queued" | "settling" | "mutation" | "interaction" | "unavailable"}`
-  | "catalog_identity_ambiguous" | "catalog_not_ready" | "session_operation_busy" | "attention-pending";
+  | "catalog_identity_ambiguous" | "catalog_not_ready" | "session_operation_busy" | "attention-pending"
+  | "home-memory-revision-changed" | "home-memory-source-unavailable";
 
 export class GatewayError extends Error {
   constructor(

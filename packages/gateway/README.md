@@ -1078,7 +1078,13 @@ last activation — its start entry id, whether it is open, its view line and by
 counts, effective tokens, model window and its own refusal reason (the sizes are
 absent when it was refused before it prepared a request), and never a message
 body — and
-`home.v1` is advertised in `hello`/`system.info`. There are no memory defaults:
+`home.v1` is advertised in `hello`/`system.info`. `home-memory-browser.v1`
+additionally gates `home.memory.page` (bounded summaries/projections with physical
+source references) and `home.memory.evidence` (paged canonical history content,
+not projected text). Both are disposable no-compactor-admission reads; formats,
+revision/continuation semantics and bounds are owned by
+[the memory browser contract](docs/home.md#typed-memory-browser).
+There are no memory defaults:
 Home refuses its activations until `home.configureMemory` records a physical
 model; there is no budget to manage (memory spend is bounded by construction and reported). Home runs in the neutral
 `<tronHome>/gateway/home/workspace` with an explicit untrusted decision, a
@@ -1117,7 +1123,7 @@ revoked scopes or one-use grants. Maintainer-only `home.taskPermissions`,
 and revoke authority or approve/deny an exact durable request with one-use
 expiry-bound permission. Terminal `/home permissions`, `/home revoke-scope`,
 `/home revoke-grant`, `/home approve-grant` and `/home deny-grant` route through
-command receipts; Home cannot approve its own requests. `home.taskStatus`, `home.steerTask` and
+command receipts; Home cannot approve its own requests. `home.taskList`, `home.taskStatus`, `home.steerTask` and
 `home.stopTask` expose durable spend and shared control; terminal `/home task`,
 `/home steer` and `/home stop` target one task. Steering shares the session lane;
 Stop persists exact intent and cancels outside blocked admission. Canonical usage
@@ -1712,16 +1718,18 @@ A client that stops waiting for a disposable read sends `{type:"cancel",id}` and
 receives no answer: the Gateway abandons that request's work and records
 `rpc.cancelled` with the stage it interrupted. Cancellation applies only to
 `session.open`, `session.list`, `session.transcript`, `session.history.list`,
-`session.history.entry`, `session.search`, `model.list`, `provider.list` and
-`provider.usage`; a cancel for any other method is ignored. An accepted mutation
+`session.history.entry`, `home.memory.page`, `home.memory.evidence`,
+`session.search`, `model.list`, `provider.list` and `provider.usage`; a cancel for
+any other method is ignored. An accepted mutation
 or admitted prompt is never cancelled, and neither is a `session.sync`
 acknowledgement: their owners settle them durably whatever the client does with
 their wait.
-Five of those nine methods have server-side deadlines
+Seven of those eleven methods have server-side deadlines
 (`DISPOSABLE_READ_DEADLINES_MS` in `packages/gateway/src/transport/server.ts`):
 10 s for `session.open`, whose cold load may parse a large transcript before its
 subscription commits, and 5 s for `session.list` and the transcript pages
-(`session.transcript`, `session.history.list`, `session.history.entry`). A read
+(`session.transcript`, `session.history.list`, `session.history.entry`) and the
+Home browser (`home.memory.page`, `home.memory.evidence`). A read
 that outlives its deadline is aborted, answered `busy` with
 `details.retryAfterMs`, and recorded once as `gateway.shed` with
 `reason=deadline`; the phone waits that hint (bounded to 10 s), retries the read
