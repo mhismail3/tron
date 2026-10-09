@@ -126,7 +126,13 @@ finish(None, None)
         if (target === -parent.pid && value === 'SIGTERM' && !['zombie during signal', 'reaped during signal'].includes(${JSON.stringify(transition)})) {
           // Delay only this fixture's parent until the synchronous send pass
           // ends, so the child cannot disappear before it is inspected.
-          setImmediate(() => { if (parent.exitCode === null) nativeKill(target, value); });
+          setImmediate(() => {
+            if (parent.exitCode !== null) return;
+            // The parent group can already be exiting: ESRCH (gone) or EPERM
+            // (zombie-only group on macOS) both mean the delayed signal is moot.
+            try { nativeKill(target, value); }
+            catch (error) { if (error.code !== 'ESRCH' && error.code !== 'EPERM') throw error; }
+          });
           return true;
         }
         if (target === -pid && value === 'SIGTERM') {
