@@ -1374,8 +1374,11 @@ it does not assume the host samples a particular intermediate animation instant.
 `ChatSurfaceMotionConformanceTests` separately measures the floating window's token-driven arrival,
 programmatic settle and dismissal frames, pixels and stable marker identity; gesture-driven moves remain
 user-owned. The same suite samples catch-up affordance appearance and disappearance; the scroll command
-remains owned by `ChatScrollCoordinator` and is not routed through row motion. Streaming
-continuity exercises the existing admission/opacity policies with virtual-time schedules (including
+remains owned by `ChatScrollCoordinator` and is not routed through row motion. The opening progress
+cover uses the same 160 ms smooth/100 ms Reduce Motion opacity transition as the queued-prompt token;
+the existing failed-state fade is unchanged. Failure/retry overlay frame conformance remains a known
+issue: the current hosted opening setup does not emit `session.open`, so it cannot drive those phases.
+Streaming continuity exercises the existing admission/opacity policies with virtual-time schedules (including
 restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
 requires bounded fractional opacity throughout the policy's linear fade, strict progression, and a
 slope bounded by the fade duration. Representative early/middle/late samples around simulated
@@ -1928,7 +1931,8 @@ last installed height, so an identity read that precedes the new measured height
 transition. Reduce Motion makes that transition atomic. `ChatSurfaceMotionConformanceTests` samples the
 attachment-strip insertion and removal at hosted display boundaries, enforcing a 20 pt maximum frame
 step and a 12 pt pinned-tail bound. A hosted-only chip marker measures the
-50-to-100 percent attachment transition and removal without adding production layout state. With the
+50-to-100 percent attachment transition and removal without adding production layout state. Composer
+send/stop and process-orb mode frame conformance remains unimplemented. With the
 keyboard visible, the panel list caps at three
 internally scrolling rows and the native editor at four visible lines. Every outgoing prompt uses one full-height straight fade/slide entrance; prompt length and optional chip content do not select another animation path.
 A mounted retained snapshot remains readable during reconnect, but command

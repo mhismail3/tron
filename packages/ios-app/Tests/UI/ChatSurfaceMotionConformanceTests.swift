@@ -141,6 +141,27 @@ struct ChatSurfaceMotionConformanceTests {
         await harness.close()
     }
 
+    @Test("failed and retry opening overlay motion awaits a hosted failure driver")
+    func openingFailureAndRetryOverlayMotionAwaitHostedDriver() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 2_775).openingTail(targetEncodedBytes: 10_000)
+        let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+            snapshot: snapshot,
+            displayFrameScheduler: .displayLink,
+            usesRealOpening: true,
+            unansweredRPCMethods: ["session.open"]
+        )
+        do {
+            for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            withKnownIssue(Comment(rawValue: "The hosted opening harness did not emit session.open, so it cannot drive failed/retry overlay phases. Do not count this as motion conformance until a test-owned failure driver is available.")) {
+                #expect(harness.rpcMethods.contains("session.open"))
+            }
+        } catch {
+            await harness.close()
+            throw error
+        }
+        await harness.close()
+    }
+
     @Test("Reduce Motion installs composer attachment strip height atomically")
     func composerAttachmentReduceMotion() async throws {
         let snapshot = try SessionScenarioBuilder(seed: 2_771).openingTail(targetEncodedBytes: 10_000)

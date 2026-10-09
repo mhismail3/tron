@@ -1841,6 +1841,9 @@ struct ChatView: View {
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Opening conversation")
+            .transition(.opacity.animation(
+                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
+            ))
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
