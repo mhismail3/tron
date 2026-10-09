@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { PackageService } from "../admin/package-service.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
+import { subagentProcessesFromActivity } from "./process-activity.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -18,6 +19,12 @@ import { waitFor } from "../../test-support/wait-for.js";
 // package selection and the released workflow input spelling vary by leg.
 const old = process.env.TRON_PARITY_LEG === "old";
 const baseline = fileURLToPath(new URL("../../test-support/subagent-parity-old.json", import.meta.url));
+type ParityResourceRow = { name: string; path?: string; [key: string]: unknown };
+type ParitySettings = {
+  skills: ParityResourceRow[]; prompts: ParityResourceRow[];
+  skillDiagnostics: unknown; promptDiagnostics: unknown;
+  subagents: Record<string, ParityResourceRow>; subagentDiagnostics: string | null;
+};
 const gate = () => {
   let release!: () => void;
   const promise = new Promise<void>(resolve => { release = resolve; });
@@ -31,7 +38,8 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   const tronHome = join(root, "tron");
   const envNames = ["PI_CODING_AGENT_DIR", "PI_SUBAGENTS_TEMP_ROOT", "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT", "NODE_OPTIONS", "TRON_TEST_PROCESS_OWNER", "TRON_TEST_PROCESS_OWNER_FAILURE"];
   const previous = envNames.map(name => process.env[name]);
-  const gates = { single: gate(), workflow: gate(), answer: gate(), finish: gate() };
+  const gates = { single: gate(), workflow: gate(), answer: gate(), finish: gate(), preflight: gate(), busy: gate() };
+  const globals = globalThis as unknown as { parityPreflight?: () => Promise<void>; parityPi?: import("@earendil-works/pi-coding-agent").ExtensionAPI };
   const prototype = ChildProcess.prototype as ChildProcess & { spawn(options: unknown): unknown };
   const spawn = prototype.spawn;
   const children = new Set<ChildProcess>();
@@ -43,6 +51,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   try {
     await mkdir(agentDir, { recursive: true });
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
+    await writeFile(join(agentDir, "parity-input.mjs"), `export default pi => { globalThis.parityPi = pi; pi.on("input", async event => { if (event.text === "Subagent updates above." && globalThis.parityPreflight) await globalThis.parityPreflight(); return {action:"continue"}; }); };`);
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.TRON_TEST_PROCESS_OWNER = root;
     process.env.TRON_TEST_PROCESS_OWNER_FAILURE = join(root, "join-failure.jsonl");
@@ -54,19 +63,24 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     if (old) {
       const packageRoot = join(agentDir, "npm", "node_modules", "pi-subagents");
       if (!process.env.TRON_PARITY_OLD_PACKAGE) throw new Error("TRON_PARITY_OLD_PACKAGE must name the read-only 0.59.0 source");
-      await cp(process.env.TRON_PARITY_OLD_PACKAGE, packageRoot, { recursive: true });
+      await cp(process.env.TRON_PARITY_OLD_PACKAGE, packageRoot, { recursive: true,
+        // Source installations may be read-only. Fixture directories must stay
+        // writable for dependency links, loader caches and owner cleanup.
+        filter: async (source, target) => { if ((await stat(source)).isDirectory()) await mkdir(target, { recursive: true, mode: 0o700 }); return true; },
+      });
       const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
       if (manifest.name !== "pi-subagents" || manifest.version !== "0.59.0") throw new Error("The parity baseline requires pi-subagents 0.59.0");
       report.providerVersion = manifest.version;
       await symlink(join(process.cwd(), "node_modules"), join(packageRoot, "node_modules"), "dir");
       await writeFile(join(agentDir, "npm", "package.json"), JSON.stringify({ dependencies: { "pi-subagents": "0.59.0" } }));
-      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-subagents@0.59.0"] }));
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-subagents@0.59.0"], extensions: ["./parity-input.mjs"] }));
     } else {
       const modulePath = "./managed-subagents.js";
       const { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } = await import(modulePath);
       managedSubagents = ManagedSubagents.activateForStartup(tronHome);
       managedSource = MANAGED_SUBAGENTS_SOURCE;
       report.providerVersion = JSON.parse(await readFile(join(managedSubagents.verify(), "package.json"), "utf8")).version;
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["./parity-input.mjs"] }));
     }
     const requested = new Set<string>();
     let requests = 0;
@@ -153,26 +167,105 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         }
       }
       const snapshot = slot.snapshot();
-      const processes = (snapshot.processActivities ?? []).filter(row => row.kind === "subagent").map(row => ({
-        title: row.title, state: row.lifecycle.state, visibility: row.visibility, executionMode: row.executionMode,
-        model: row.model?.split("/").at(-1) ?? null, thinking: row.thinking ?? null, started: Boolean(row.startedAt && Number.isFinite(Date.parse(row.startedAt))),
-        toolCount: row.toolCount ?? null, turnCount: row.turnCount ?? null, childCount: row.childCount ?? null,
-      })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      // Normalize execution identities before visiting values; never sort process
+      // or child arrays, whose producer launch order is user-visible.
+      const identities = new Map<string, string>();
+      for (const entry of launches()) if (entry.type === "message" && entry.message.role === "toolResult") {
+        const status = (report.statuses as Record<string, { runId: string; steps?: Array<{ runId?: string; sessionOwnerId?: string; label?: string }> }>)[`${name}:${entry.message.toolCallId}`];
+        if (!status) continue;
+        identities.set(status.runId, `<${entry.message.toolCallId}:run>`);
+        for (const [index, step] of (status.steps ?? []).entries()) {
+          if (step.runId) identities.set(step.runId, `<${entry.message.toolCallId}:child:${step.label ?? index}>`);
+          if (step.sessionOwnerId) identities.set(step.sessionOwnerId, `<${entry.message.toolCallId}:session:${step.label ?? index}>`);
+        }
+      }
+      const normalize = (value: unknown, key = ""): unknown => {
+        if (Array.isArray(value)) return value.map(item => normalize(item));
+        if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([field, item]) => [field, normalize(item, field)]));
+        if (typeof value === "number" && /(?:At|timestamp|durationMs|elapsedMs|remainingMs)$/.test(key)) return Number.isFinite(value) && value >= 0 ? "<time>" : value;
+        if (typeof value !== "string") return value;
+        if (/(?:At|Until|timestamp)$/.test(key) && Number.isFinite(Date.parse(value))) return "<time>";
+        if (key === "sessionOwnerId" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return "<session-owner>";
+        if (key === "id" && /^(?:extension:|[0-9a-f]{8}:\d+)/.test(value)) return value.startsWith("extension:") ? "extension:<owner>" : `<entry>:${value.split(":")[1]}`;
+        let text = value;
+        // Canonical session layout and temporary/verified installation roots
+        // vary per execution, but file names and provider-authored text do not.
+        text = text.split(dirname(sessionFile!)).join("<sessions>");
+        text = text.split(root).join("<fixture>").split(root.replace(/^\/tmp\//, "/private/tmp/")).join("<fixture>");
+        text = text.replace(/(?:<fixture>\/agent\/npm\/node_modules\/pi-subagents|<fixture>\/tron\/internal\/[^\s"']*?\/root)(?=\/|$)/g, "<provider>");
+        for (const [id, label] of identities) text = text.split(id).join(label);
+        return text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<uuid>")
+          .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, "<time>")
+          .replace(/\b\d+(?:\.\d+)?(?:ms|s)\b/g, "<elapsed>");
+      };
+      (report.snapshots as Record<string, unknown> ??= {})[name] = snapshot;
+      // The transport bounds rows by recency (ties include random process IDs).
+      // Compare the actual mounted rows in canonical launch/producer-child order,
+      // not that time-dependent eviction order. Missing/extra rows still fail.
+      const mounted = (snapshot.processActivities ?? []).filter(row => row.kind === "subagent");
+      const rows = launches().flatMap(entry => {
+        if (entry.type !== "message" || entry.message.role !== "toolResult") return [];
+        const activity = snapshot.extensionActivities?.find(item => item.toolCallId === entry.message.toolCallId);
+        if (!activity) return [];
+        return subagentProcessesFromActivity(slot.id, activity).map(expected => {
+          const actual = mounted.find(item => item.processId === expected.processId);
+          if (!actual) throw new Error(`Missing mounted process ${expected.processId}`);
+          return actual;
+        });
+      });
+      expect(rows.length, "all mounted subagent rows participate in parity").toBe(mounted.length);
+      rows.forEach((row, index) => identities.set(row.processId, `process:subagent:<row:${index}>`));
+      const processes = rows.map(row => normalize({
+        ...row, model: row.model?.split("/").at(-1),
+        lifecycle: { ...row.lifecycle, sequence: "<revision>" },
+      }));
+      // Native process rows above own activity facts/timing. These additional
+      // child fields own task and exact child/control admission; aggregate
+      // extension counters are not consumed by the native process renderer.
+      const childIdentity = (child: import("../protocol/types.js").ExtensionRunChild): unknown => normalize({
+        id: child.id, producerId: child.producerId, label: child.label,
+        task: child.task, childSessionRef: child.childSessionRef,
+        sessionOwnerId: child.sessionOwnerId,
+        children: child.children?.map(childIdentity), hostStep: child.hostStep,
+      });
+      const activities = (snapshot.extensionActivities ?? []).map(activity => normalize({
+        toolCallId: activity.toolCallId, runId: activity.runId,
+        children: activity.children.map(childIdentity),
+      }));
       const transcript = snapshot.transcript.filter(row => row.semantic?.direction !== "hiddenInternal").filter(row => row.kind === "customMessage" && ["subagent-notify", "subagent_supervisor_request", "subagent-incremental-child-notify"].includes(row.customType)
         || row.kind === "message" && row.role === "user").map(row => {
           const details = row.kind === "customMessage" ? row.details as { reason?: string } : undefined;
           const category = row.kind === "customMessage" ? details?.reason ?? row.customType : row.semantic?.kind === "subagentWake" ? "wake" : "prompt";
-          const pill = category === "prompt" ? null : category === "need_decision" ? "Needs Attention" : category === "progress_update" ? "Progress Update"
-            : category === "subagent-notify" ? "Result Received" : category === "subagent-incremental-child-notify" ? "Child Update" : "Update";
           return { category, origin: row.semantic?.origin.kind ?? "unknown", title: row.semantic?.origin.title ?? null, classification: row.semantic?.kind ?? null,
-            direction: row.semantic?.direction ?? null, delivery: row.semantic?.delivery ?? null, visibility: row.semantic?.visibility ?? null, pill };
-        }).sort((a, b) => a.category.localeCompare(b.category));
+            direction: row.semantic?.direction ?? null, contextEffect: row.semantic?.contextEffect ?? null, confidence: row.semantic?.origin.confidence ?? null,
+            lifecycle: row.semantic?.lifecycle ?? null, resourceInvocation: normalize(row.semantic?.resourceInvocation ?? null), submittedText: row.semantic?.submittedText ?? null, delivery: row.semantic?.delivery ?? null, visibility: row.semantic?.visibility ?? null,
+            content: normalize(row.content), details: normalize(row.kind === "customMessage" ? row.details ?? null : null) };
+        });
       const semantic = snapshot.extensionPresentation.semanticState;
-      const retained = [...semantic.widgets.map(widget => ({ type: "widget", key: widget.key, owner: widget.owner })),
-        ...Object.keys(semantic.statuses).map(key => ({ type: "status", key, owner: semantic.statusOwners[key] }))]
-        .map(value => ({ type: value.type, key: value.key, source: value.owner?.source ?? null, title: value.owner?.title ?? null, kind: (value.owner as { kind?: string })?.kind ?? null,
-          privateSubagent: old ? value.owner?.source?.startsWith("npm:pi-subagents") === true : (value.owner as { kind?: string })?.kind === "subagent" }))
-        .sort((a, b) => a.key.localeCompare(b.key));
+      const retained = [...semantic.widgets.map(widget => ({ type: "widget", key: widget.key, owner: widget.owner,
+          contents: { lines: widget.lines, placement: widget.placement } })),
+        ...Object.keys(semantic.statuses).sort().map(key => ({ type: "status", key, owner: semantic.statusOwners[key], contents: semantic.statuses[key] }))]
+        .map(value => {
+          const privateSubagent = old ? value.owner?.source?.startsWith("npm:pi-subagents") === true : value.owner?.kind === "subagent";
+          return { type: value.type, key: value.key, source: value.owner?.source ?? null, title: value.owner?.title ?? null, kind: value.owner?.kind ?? null,
+            privateSubagent, nativeVisibility: privateSubagent ? "hidden" : "visible", contents: privateSubagent ? null : normalize(value.contents) };
+        });
+      // ExtensionRetainedContentPolicy.content excludes subagent widgets,
+      // statuses and surfaces before every native consumer (Swift lines 100,
+      // 112 and 124). Private frames are not app text; compare ownership and
+      // hidden visibility, retaining their raw bytes in report.snapshots only.
+      const surfaces = snapshot.extensionPresentation.surfaces.map(surface => {
+        const privateSubagent = old ? surface.provenance?.source?.startsWith("npm:pi-subagents") === true : surface.provenance?.kind === "subagent";
+        const presentable = surface.kind === "widget" && surface.lifecycle !== "blocking" && surface.frame.lines.length > 0;
+        return normalize({ ...surface, revision: "<revision>", privateSubagent,
+          nativeVisibility: privateSubagent || !presentable ? "hidden" : "visible", frame: privateSubagent ? null : surface.frame });
+      });
+      const input = (item: typeof snapshot.pendingPrompt | typeof snapshot.queuedItems[number]) => item ? normalize({
+        ...item, id: "<input>", semantic: item.semantic ? { ...item.semantic, origin: { ...item.semantic.origin, ownerId: item.semantic.origin.ownerId ? "<owner>" : undefined } } : undefined,
+      }) : null;
+      const inputs = { pending: input(snapshot.pendingPrompt), queued: snapshot.queuedItems.map(input),
+        displayedPending: snapshot.pendingPrompt?.semantic?.direction === "hiddenInternal" ? null : input(snapshot.pendingPrompt),
+        displayedQueued: snapshot.queuedItems.filter(item => item.semantic?.direction !== "hiddenInternal").map(input) };
       const transcriptByCategory: Record<string, typeof transcript> = {};
       for (const row of transcript) (transcriptByCategory[row.category] ??= []).push(row);
       const deliveries: Record<string, unknown[]> = {};
@@ -184,12 +277,24 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         (deliveries[category] ??= []).push({ display: entry.display, delivery: receipt?.delivery ?? null,
           source: receipt?.origin?.source ?? null, title: receipt?.origin?.owner?.title ?? null });
       }
-      (report.checkpoints as Record<string, unknown>)[name] = { processes, transcript: transcriptByCategory, retained, deliveries };
+      (report.checkpoints as Record<string, unknown>)[name] = { processes, nativeCounts: { active: snapshot.processOverview?.activeCount, recent: snapshot.processOverview?.recentCount, problem: snapshot.processOverview?.problemCount }, activities, transcript: transcriptByCategory, retained, surfaces, inputs, deliveries };
     };
     await slot.prompt("Launch the single child");
     await waitFor(() => requested.has("SINGLE") && parentIdle(), "single is running with idle parent");
     await capture("single-running");
+    let preflightStarted = false;
+    globals.parityPreflight = async () => { preflightStarted = true; await gates.preflight.promise; };
     gates.single.release();
+    if (!old) {
+      await waitFor(() => preflightStarted && Boolean(slot.snapshot().pendingPrompt), "idle wake pending preflight");
+      const pending = slot.snapshot().pendingPrompt!;
+      expect(pending.semantic).toMatchObject({ kind: "subagentWake", direction: "hiddenInternal", visibility: "hidden" });
+      report.pendingWakeAuthority = pending;
+      report.inputPresentation = { pending: pending.semantic?.direction === "hiddenInternal" ? null : pending.text };
+    }
+    if (old) report.inputPresentation = { pending: null };
+    gates.preflight.release();
+    delete globals.parityPreflight;
     await waitFor(() => acknowledged === 1 && parentIdle(), "single completion wakes idle parent");
     await capture("single-completed");
     action = "workflow";
@@ -238,19 +343,72 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     gates.finish.release();
     await waitFor(() => acknowledged === 2 && parentIdle(), "workflow completion wakes idle parent");
     await capture("workflow-completed");
-    const resources = await slot.resources() as { skills: { skills: Array<{ name: string; source: string; distribution?: string }> } };
-    report.skills = resources.skills.skills.filter(skill => ["pi-subagents", "council-mode"].includes(skill.name)).map(skill => ({ name: skill.name, source: skill.source, distribution: skill.distribution })).sort((a, b) => a.name.localeCompare(b.name));
-    const inventory = await new PackageService(agentDir, trust, () => {}, undefined, managedSubagents).list(cwd) as { packages: Array<{ source: string; provides: { skills: string[] } }> };
-    report.packages = inventory.packages.filter(value => value.provides.skills.includes("pi-subagents")).map(value => ({ source: value.source, skills: value.provides.skills })).sort((a, b) => a.source.localeCompare(b.source));
+    // A factory-bound API probe covers the racing steer lifetime separately
+    // from the unchanged released-provider scenario above. OLD had only a
+    // custom-message turn here; NEW retains its typed, hidden normal-input wake.
+    const api = globals.parityPi!;
+    const sender = old ? api : await (async () => {
+      const { managedProducerAPI } = await import("../extensions/managed-producer.js");
+      const owner = { id: "parity-managed-owner", source: managedSource!, title: "Subagents", kind: "subagent" as const };
+      return managedProducerAPI(api, owner, (...args) => slot.admitSubagentWake(...args));
+    })();
+    let busyStarted = false;
+    faux.setResponses([async () => { busyStarted = true; await gates.busy.promise; return fauxAssistantMessage("PARITY_BUSY"); },
+      ...Array.from({ length: 8 }, () => fauxAssistantMessage("PARITY_PARENT_IDLE"))]);
+    await slot.prompt("Maintainer continues after workflow");
+    await waitFor(() => busyStarted, "maintainer model gate");
+    if (old) sender.sendMessage({ customType: "parity-wake-probe", content: "Queued context", display: false }, { triggerTurn: true });
+    else sender.sendUserMessage("PARITY_QUEUED_WAKE", { deliverAs: "steer" });
+    await slot.prompt("Queued maintainer input", [], "steer");
+    await waitFor(() => slot.snapshot().queuedItems.length === (old ? 1 : 2), "racing internal and maintainer steering inputs");
+    const queued = slot.snapshot().queuedItems;
+    if (!old) expect(queued.find(item => item.text === "PARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "subagentWake", direction: "hiddenInternal", visibility: "hidden" });
+    report.queuedWakeAuthority = queued;
+    (report.inputPresentation as Record<string, unknown>).queued = queued.filter(item => item.semantic?.direction !== "hiddenInternal").map(item => ({ ...item, id: "<input>" }));
+    gates.busy.release();
+    await waitFor(parentIdle, "queued inputs bind and settle");
+    const settings = async (): Promise<ParitySettings> => {
+      const resources = await slot.resources() as {
+        skills: { skills: ParityResourceRow[]; diagnostics: unknown };
+        prompts: { prompts: ParityResourceRow[]; diagnostics: unknown };
+        subagents: ParityResourceRow[]; subagentDiagnostics?: string;
+      };
+      const resourceRow = (row: ParityResourceRow) => ({ ...row, ...(row.path ? {
+        path: row.path.split(root.replace(/^\/tmp\//, "/private/tmp/")).join("<fixture>").split(root).join("<fixture>"),
+      } : {}) });
+      return {
+        skills: resources.skills.skills.filter((row: ParityResourceRow) => ["pi-subagents", "council-mode"].includes(row.name)).map(resourceRow),
+        prompts: resources.prompts.prompts.map(resourceRow),
+        skillDiagnostics: resources.skills.diagnostics, promptDiagnostics: resources.prompts.diagnostics,
+        subagents: Object.fromEntries(resources.subagents.map((row: ParityResourceRow) => [row.name, row])),
+        subagentDiagnostics: resources.subagentDiagnostics?.split(cwd.replace(/^\/tmp\//, "/private/tmp/")).join("<workspace>").split(cwd).join("<workspace>") ?? null,
+      };
+    };
+    const resourceStates = { healthy: await settings(), invalid: undefined as ParitySettings | undefined, repaired: undefined as ParitySettings | undefined };
+    report.settings = resourceStates;
+    const invalid = join(cwd, ".pi", "agents", "parity-invalid.md");
+    await writeFile(invalid, "---\nname: parity-invalid\ndescription: Invalid parity definition\nfallbackModels: [parity-child/child]\n---\nRead only.\n");
+    resourceStates.invalid = await settings();
+    if (!old) {
+      expect(resourceStates.invalid.subagentDiagnostics).toContain("fallbackModels");
+      expect(resourceStates.invalid.subagents["parity-invalid"]).toBeUndefined();
+    }
+    await rm(invalid);
+    resourceStates.repaired = await settings();
+    expect(resourceStates.healthy.subagentDiagnostics).toBeNull();
+    expect(resourceStates.repaired.subagentDiagnostics).toBeNull();
+    const inventory = await new PackageService(agentDir, trust, () => {}, undefined, managedSubagents).list(cwd) as { packages: Array<{ source: string; provides: { skills: string[]; prompts: string[] } }> };
+    report.packages = inventory.packages.filter(value => value.provides.skills.includes("pi-subagents")).map(value => ({ source: value.source, skills: value.provides.skills, prompts: value.provides.prompts }));
     report.entries = entries();
-    report.schemaVersion = 1;
+    report.schemaVersion = 2;
     if (old && process.env.TRON_PARITY_BASELINE_OUTPUT) {
-      const { checkpoints, skills, packages, schemaVersion } = report;
-      await writeFile(process.env.TRON_PARITY_BASELINE_OUTPUT, JSON.stringify({ schemaVersion, checkpoints, skills, packages }, null, 2) + "\n");
+      const { checkpoints, settings, packages, inputPresentation, schemaVersion } = report;
+      await writeFile(process.env.TRON_PARITY_BASELINE_OUTPUT, JSON.stringify({ schemaVersion, checkpoints, settings, packages, inputPresentation }, null, 2) + "\n");
     }
     if (!old) {
       const before = JSON.parse(await readFile(baseline, "utf8"));
-      const differences = compareParity(before, report, managedSource!);
+      const approved = JSON.parse(await readFile(fileURLToPath(new URL("../../test-support/subagent-parity-approved.json", import.meta.url)), "utf8"));
+      const differences = compareParity(before, report, managedSource!, approved);
       report.differences = differences;
       expect(differences.filter(diff => !diff.approved), JSON.stringify(differences, null, 2)).toEqual([]);
     }
@@ -260,6 +418,8 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     report.failure = inspectFailure?.();
     throw error;
   } finally {
+    delete globals.parityPreflight;
+    delete globals.parityPi;
     Object.values(gates).forEach(value => value.release());
     let cleanupError: unknown;
     try { await registry?.dispose(); } catch (error) { cleanupError = error; }
@@ -284,20 +444,23 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   }
 }, 60_000);
 
-// Finite allowances from #611's binding decisions. No native process field is
-// ignored; additions must be exact typed notes at the expected checkpoint.
-function compareParity(before: Record<string, unknown>, after: Record<string, unknown>, managedSource: string) {
+// Finite allowances from #611: this compares deterministic Gateway projections,
+// not Swift rendering or absolute timing. Arrays retain meaningful launch order.
+function compareParity(before: Record<string, unknown>, after: Record<string, unknown>, managedSource: string, upstream: Array<{ path: string; old: unknown; new: unknown; approved: string }>) {
   const differences: Array<{ path: string; old: unknown; new: unknown; approved: string | null }> = [];
   const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
   function approval(a: unknown, b: unknown, path: string): string | null {
+    // Upstream changes accepted in decisions.md are exact value pairs, not
+    // exemptions for content, details, or resource fields.
+    const expected = upstream.find(change => change.path === path && JSON.stringify(change.old) === JSON.stringify(a ?? null) && JSON.stringify(change.new) === JSON.stringify(b ?? null));
+    if (expected) return expected.approved;
     if (path.endsWith(".source") && (a === "npm:pi-subagents@0.59.0" || a === null) && b === managedSource) return path.startsWith("skills.") || path.startsWith("packages.") ? "skills listed under the managed package" : "source and title label change (admitted producer attribution)";
     if (path.endsWith(".title") && (a === "Pi Subagents" || a === null) && b === "Subagents") return "source and title label change";
-    if (/\.retained\.\d+\.kind$/.test(path) && a === null && b === "subagent") return "source and title label change (typed retained provider classification)";
+    if (/\.(?:retained\.\d+\.kind|surfaces\.\d+\.provenance\.kind)$/.test(path) && (a === null || a === undefined) && b === "subagent") return "source and title label change (typed retained provider classification)";
     if (/\.transcript\.(need_decision|progress_update|subagent-notify)\.\d+\.origin$/.test(path) && a === "extension" && b === "subagent") return "source and title label change (typed producer classification)";
     if (/\.(transcript|deliveries)\.progress_update\.\d+\.delivery$/.test(path) && a === "triggeredTurn" && b === "stored") return "progress stored with no turn";
     if (a === undefined && Array.isArray(b)) {
       const checkpoint = path.split(".")[1];
-      if (path.endsWith(".transcript.subagent-incremental-child-notify") && checkpoint === "workflow-completed" && b.length === 1 && b.every(row => record(row) && JSON.stringify(row) === JSON.stringify({ category: "subagent-incremental-child-notify", origin: "subagent", title: "Subagents", classification: "message", direction: "inboundContext", delivery: "stored", visibility: "visible", pill: "Child Update" }))) return "per-child notes stored; independent question/barrier owns turns";
       if (path.endsWith(".deliveries.subagent-incremental-child-notify") && ["workflow-question", "workflow-completed"].includes(checkpoint!) && b.length === (checkpoint === "workflow-question" ? 1 : 3) && b.every(row => record(row) && row.delivery === "stored" && row.source === managedSource && row.title === "Subagents" && typeof row.display === "boolean")) return "per-child notes stored; independent question/barrier owns turns";
     }
     return null;
@@ -313,7 +476,8 @@ function compareParity(before: Record<string, unknown>, after: Record<string, un
     } else differences.push({ path, old: a ?? null, new: b ?? null, approved: null });
   }
   visit(before.checkpoints, after.checkpoints, "checkpoints");
-  visit(before.skills, after.skills, "skills");
+  visit(before.settings, after.settings, "settings");
   visit(before.packages, after.packages, "packages");
+  visit(before.inputPresentation, after.inputPresentation, "inputPresentation");
   return differences;
 }

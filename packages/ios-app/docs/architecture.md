@@ -1486,7 +1486,9 @@ admitted active/recent process rows, and Activity shows **Running subagents** an
 native row drill-in. Private provider widgets, statuses and frames never substitute
 for those rows. `TronSubagentParityUITests` exercises light/dark composer, Activity,
 child transcript and each pill/details journey plus historic classified receipts,
-idle preflight wakes, queued steer wakes and visible maintainer queue input;
+idle preflight wakes, queued steer wakes and visible maintainer queue input,
+process tool/path/output metadata, retained private-frame exclusion, and Project
+Resources skill/prompt rows with the invalid-definition diagnostic;
 its xcresult attachments (and optional `TEST_RUNNER_TRON_SUBAGENT_CAPTURE_DIR` PNG
 export) are simulator evidence, not physical-device acceptance.
 

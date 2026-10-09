@@ -3704,13 +3704,35 @@ Run/tool identity must agree between header, full status and canonical launch bi
 `src/sessions/subagent-parity.integration.test.ts` compares the managed selection's
 real RuntimeRegistry projections to `test-support/subagent-parity-old.json`. The same
 faux-parent/loopback-child script runs an async single and a three-child failure,
-question/answer and success workflow with progress and idle completion wakes. Native
-row title/state/mode, displayed model/thinking, started presence and counters are
-compared without exemptions. Transcript/pill semantics, canonical context delivery,
-retained provider classification and package skills have finite approved delivery/
-identity allowances (producer label/source/kind, stored progress, stored per-child notes, and skills under the managed package); other differences print their checkpoint and exact field. Idle decision/completion delivery must match OLD's triggeredTurn, and no wake transcript row is allowed.
-The fixture preserves raw statuses/entries in its private report. Pill labels describe
-the native consumer contract; native rendering is separately tested on iOS.
+question/answer and success workflow with progress and idle completion wakes. The comparator visits mounted process rows in canonical launch and producer-child order
+(no value sorting), comparing state/attention/visibility/mode/source, displayed
+model/thinking, current tool/path, output/error tail and truncation, counters,
+parent/child/control identity shape and timing presence. The transport's recency
+ordering is not a launch order: its random-ID/time tie-breaks remain in raw snapshots.
+Child task/control and host-step fields are compared alongside those rows. Transcript
+content parts and details, semantic classification/delivery, retained content classification/visibility and app-visible widget/status contents
+and component frames are compared, not just category labels. Subagent-owned retained
+state is excluded by native `ExtensionRetainedContentPolicy.content`; its private
+bytes are retained as evidence, not compared as app text. Native active/recent/problem
+counts are compared independently of private provider-frame counters.
+Settings includes skill/prompt rows and diagnostics plus agent discovery before,
+during and after an invalid definition. An idle real wake is gated before binding;
+a separate factory-API steering probe compares displayed queued input with ordinary
+maintainer input while retaining hidden wake authority in evidence.
+Execution-specific identities, temporary roots, timestamps and elapsed intervals are
+normalized; launch/child/widget order and authored text remain meaningful. Transport
+revision counters are not presentation values. Finite label/delivery allowances and
+exact OLD/NEW upstream value pairs in `test-support/subagent-parity-approved.json`
+cover only the approved dependency changes (including notification guidance,
+resource wording/catalog additions and removed-field
+warnings). There is no process-field or blanket content exemption. Idle decision/
+completion delivery must match OLD's triggeredTurn, and no wake transcript row is
+allowed. The report retains raw statuses, snapshots and canonical entries.
+This verifies Gateway wire/projection parity, not Swift layout or pill labels.
+`TronSubagentParityUITests` separately exercises rendered message details, process
+metadata/tool/path/output, private-frame exclusion, Settings skills/prompts/definition
+diagnostics and pending/queued wake suppression on bounded hosted fixtures. Those
+fixtures are not live Gateway-to-phone or physical-device evidence.
 
 To regenerate OLD, use the pinned Node with isolated HOME/TMPDIR and run
 `bash scripts/regenerate-subagent-parity.sh <read-only-0.59.0-package> <private-evidence-dir>`

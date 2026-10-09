@@ -37,7 +37,8 @@ struct HostedSubagentParityFixture: View {
         let startedAt = ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-10))
         let process = SessionProcessActivity(processId: "worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: .init(state: .running, sequence: 1, observedAt: startedAt), visibility: .active,
-            startedAt: startedAt, title: "Worker", model: "fixture/model", toolCallId: "launch", runId: "run-worker")
+            startedAt: startedAt, title: "Worker", currentTool: "read", currentPathBasename: "parity.txt",
+            model: "fixture/model", thinking: "medium", outputTail: "PARITY_CHILD_COMPLETE", toolCount: 2, turnCount: 1, toolCallId: "launch", runId: "run-worker")
         var snapshot = SessionSnapshot(sessionId: "parity", runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
             phase: .idle, name: historic ? "Historical subagents" : "Subagents", cwd: "/workspace", parentSessionId: nil, model: nil,
             thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
@@ -47,7 +48,9 @@ struct HostedSubagentParityFixture: View {
             transcriptTotal: 4, streaming: nil, leafEntryId: nil, operation: nil, retry: nil, toolExecutions: [],
             processActivities: historic ? [] : [process],
             extensionPresentation: .init(version: 3, hostEpoch: "fixture-host", revision: 1, capabilities: [], diagnostics: [],
-                semanticState: semantic, surfaces: [], pendingInteractions: []), diagnostics: [])
+                semanticState: semantic, surfaces: try! JSONDecoder.gateway.decode([ExtensionSurface].self, from: Data(#"""
+                    [{"id":"provider-frame","kind":"widget","placement":"aboveEditor","lifecycle":"retained","revision":1,"focused":false,"inputMode":"none","provenance":{"source":"tron:pi-subagents@fixture#build","kind":"subagent"},"frame":{"width":80,"height":1,"plainText":"PRIVATE PROVIDER FRAME","lines":[{"plainText":"PRIVATE PROVIDER FRAME","runs":[{"text":"PRIVATE PROVIDER FRAME","style":{}}]}]}}]
+                    """#.utf8)), pendingInteractions: []), diagnostics: [])
         snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Self.transcript)
         // Hold the wire projection before canonical binding to exercise the
         // two runtime-owned input lifetimes, not the canonical wake filter.
@@ -89,7 +92,10 @@ struct HostedSubagentParityFixture: View {
 
     var body: some View {
         NavigationStack {
-            if ready { ChatView(sessionID: snapshot.sessionId, hostedProbe: probe) }
+            if ready {
+                if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
+                else { ChatView(sessionID: snapshot.sessionId, hostedProbe: probe) }
+            }
             else if let error { Text(error) }
         }
         .environment(model)
@@ -127,8 +133,14 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
     func send(_ data: Data) async throws {
         let request = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
         guard let object = request.objectValue, let id = object["id"]?.stringValue,
-              object["method"]?.stringValue == "session.processTranscript.open" else { return }
-        let result: JSONValue = .object([
+              let method = object["method"]?.stringValue else { return }
+        let result: JSONValue
+        if method == "session.resources" {
+            result = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
+            {"skills":{"skills":[{"name":"pi-subagents","description":"Technical guidance for operator-requested delegation","path":"/provider/skills/pi-subagents/SKILL.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"prompts":{"prompts":[{"name":"council","description":"Run a bounded supervisor-mediated council of advisors and write a decision memo","argumentHint":"<question>","path":"/provider/prompts/council.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"subagents":[{"name":"parity-worker","description":"Read-only parity child","model":"parity-child/child","source":"project","distribution":"local"}],"subagentDiagnostics":"1 invalid subagent definition(s): Agent 'parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.","commands":[]}
+            """#.utf8))
+        } else if method == "session.processTranscript.open" {
+            result = .object([
             "leaseId": object["params"]?.objectValue?["viewerId"] ?? .string("lease-worker"),
             "processId": .string("worker"), "childSessionRef": .string("child-worker"), "revision": .string("child-1"),
             "page": .object(["items": .array([.object([
@@ -137,6 +149,7 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
                 "content": .array([.object(["id": .string("child-text"), "ordinal": .number(0), "type": .string("text"), "text": .string("Child transcript reached through the native row.")])])
             ])]), "start": .number(0), "end": .number(1), "total": .number(1), "nextEntryId": .null, "leafEntryId": .string("child-entry")])
         ])
+        } else { return }
         let response = try JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
         if let receiver { self.receiver = nil; receiver.resume(returning: response) }
         else { pending.append(response) }
