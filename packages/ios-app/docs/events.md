@@ -220,7 +220,12 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   persists synthesized envelope text. `automaticCompactionEnabled` reports runtime truth rather than a mobile inference.
   Transcript projection captures the authoritative snapshot and composer handoff
   as one immutable commit; pending/outgoing rows render only from installed
-  handoff state, while canonical reconciliation installs handoff `none`. A
+  handoff state, while canonical reconciliation installs handoff `none`.
+  Pending and queued input DTOs retain optional semantic metadata: explicit
+  `direction=hiddenInternal` is excluded at pending-handoff admission and the
+  displayed-queue projection, never from the authoritative pending/queue state.
+  This applies before canonical binding as well as after it; ordinary maintainer
+  prompts remain visible. A
   frame gate retains the previous complete commit until the replacement is ready;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads

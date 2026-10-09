@@ -37,6 +37,42 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
+    func testPendingWakePreflightJourney() throws {
+        try verifyRuntimeWake(stage: "pending-wake")
+    }
+
+    @MainActor
+    func testQueuedWakeSteerJourney() throws {
+        try verifyRuntimeWake(stage: "queued-wake")
+    }
+
+    @MainActor
+    private func verifyRuntimeWake(stage: String) throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = launch(scheme: scheme, inputStage: stage)
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Subagent, Needs Attention"].waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertFalse(app.staticTexts["Subagent updates above."].exists,
+                "An internal input must have no user-position bubble before canonical binding: \(stage)")
+            XCTAssertFalse(app.buttons["Subagent, Update"].exists, "A hidden wake must not gain a pill")
+            try capture("\(stage)-\(scheme)")
+        }
+    }
+
+    @MainActor
+    func testQueuedMaintainerRemainsVisible() throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = launch(scheme: scheme, inputStage: "queued-wake", queuedMaintainer: true)
+            defer { app.terminate() }
+            XCTAssertTrue(app.staticTexts["Maintainer queued message"].waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertFalse(app.staticTexts["Subagent updates above."].exists)
+            try capture("queued-maintainer-\(scheme)")
+        }
+    }
+
+    @MainActor
     private func verifyPills(_ app: XCUIApplication, scheme: String) throws {
         XCTAssertFalse(app.buttons["Subagent, Update"].exists, "Internal wake must not add a pill")
         for (label, body, name) in [
@@ -59,9 +95,11 @@ final class TronSubagentParityUITests: XCTestCase {
     }
 
     @MainActor
-    private func launch(scheme: String, historical: Bool = false) -> XCUIApplication {
+    private func launch(scheme: String, historical: Bool = false, inputStage: String? = nil, queuedMaintainer: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-subagent-parity-fixture", "-\(scheme)"] + (historical ? ["-historical"] : [])
+        if let inputStage { app.launchArguments.append("-\(inputStage)") }
+        if queuedMaintainer { app.launchArguments.append("-queued-maintainer") }
         app.launch()
         return app
     }

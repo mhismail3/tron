@@ -49,6 +49,32 @@ struct HostedSubagentParityFixture: View {
             extensionPresentation: .init(version: 3, hostEpoch: "fixture-host", revision: 1, capabilities: [], diagnostics: [],
                 semanticState: semantic, surfaces: [], pendingInteractions: []), diagnostics: [])
         snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Self.transcript)
+        // Hold the wire projection before canonical binding to exercise the
+        // two runtime-owned input lifetimes, not the canonical wake filter.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-pending-wake") || arguments.contains("-queued-wake") {
+            let wake = snapshot.transcript.removeLast()
+            let input: [String: JSONValue] = [
+                "id": .string("wake"), "createdAt": .string(wake.timestamp),
+                "text": .string("Subagent updates above."), "attachmentCount": .number(0),
+                "behavior": arguments.contains("-pending-wake") ? .null : .string("steer"),
+                "semantic": try! JSONValue.encode(wake.semantic!)
+            ]
+            let data = try! JSONEncoder.gateway.encode(JSONValue.object(input))
+            snapshot.transcriptTotal = snapshot.transcript.count
+            if arguments.contains("-pending-wake") {
+                snapshot.phase = .compacting
+                snapshot.pendingPrompt = try! JSONDecoder.gateway.decode(SessionSnapshot.PendingPrompt.self, from: data)
+            } else {
+                snapshot.phase = .running
+                snapshot.queuedItems = [try! JSONDecoder.gateway.decode(SessionSnapshot.QueuedMessage.self, from: data)]
+            }
+        }
+        if arguments.contains("-queued-maintainer") {
+            snapshot.phase = .running
+            snapshot.queuedItems.append(.init(id: "maintainer", behavior: .steer,
+                text: "Maintainer queued message", attachmentCount: 0))
+        }
         self.snapshot = snapshot
     }
 

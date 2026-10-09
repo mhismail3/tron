@@ -1469,7 +1469,14 @@ keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent �
 Child Update**, and other admitted subagent messages use **Subagent · Update**.
 The canonical user-role `subagentWake` is an internal provider input with
 `direction=hiddenInternal` and hidden visibility. The existing transcript kernel
-excludes it: it has no row, pill or user bubble. Its model input and raw canonical
+excludes it: it has no row, pill or user bubble. Pending and queued DTOs retain
+that same optional semantic metadata. The pending-handoff owner rejects hidden
+input before constructing a user presentation, and `displayedQueuedMessages`
+filters hidden input only from the disposable row projection. Authoritative
+`queuedItems`, queue revision and queue admission/counting remain intact, including
+when the hidden input is the only queued item. Ordinary maintainer input stays
+visible; absent metadata and unknown semantic kinds do not imply hidden input.
+Its model input and raw canonical
 identity remain intact; the delivering custom message alone owns the visible pill
 and triggered-turn details. Live and cold/historical assembly retain its typed
 semantics without a separate wake renderer or grouping path.
@@ -1478,7 +1485,8 @@ retain ordinary prompt behavior. The existing composer orb is driven solely by
 admitted active/recent process rows, and Activity shows **Running subagents** and
 native row drill-in. Private provider widgets, statuses and frames never substitute
 for those rows. `TronSubagentParityUITests` exercises light/dark composer, Activity,
-child transcript and each pill/details journey plus historic classified receipts;
+child transcript and each pill/details journey plus historic classified receipts,
+idle preflight wakes, queued steer wakes and visible maintainer queue input;
 its xcresult attachments (and optional `TEST_RUNNER_TRON_SUBAGENT_CAPTURE_DIR` PNG
 export) are simulator evidence, not physical-device acceptance.
 

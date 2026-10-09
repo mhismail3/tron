@@ -84,6 +84,97 @@ struct ManagedSubagentPresentationTests {
         #expect(sessions.authoritativeSnapshot(for: snapshot.sessionId)?.transcript.first?.semantic?.origin.kind == .subagent)
     }
 
+    private func inputWire(queued: Bool, kind: String? = "subagentWake", hidden: Bool = true) throws -> Data {
+        var value: [String: JSONValue] = [
+            "id": .string("input"), "text": .string("Subagent updates above."),
+            "attachmentCount": .number(0), "behavior": .string("steer")
+        ]
+        if let kind {
+            value["semantic"] = .object([
+                "version": .number(1), "direction": .string(hidden ? "hiddenInternal" : "inboundContext"),
+                "contextEffect": .string("modelInput"), "delivery": .string("stored"),
+                "visibility": .string(hidden ? "hidden" : "visible"), "kind": .string(kind),
+                "origin": .object(["kind": .string("subagent"), "title": .string("Subagents"), "confidence": .string("receipt")]),
+                "sequence": .number(1)
+            ])
+        }
+        if !queued { value["createdAt"] = .string("2026-01-01T00:00:00Z") }
+        return try JSONEncoder.gateway.encode(JSONValue.object(value))
+    }
+
+    @Test("pending and queued DTOs retain present, absent and unknown input semantics")
+    func inputSemanticDecode() throws {
+        for kind: String? in ["subagentWake", nil, "future-input"] {
+            let pending = try JSONDecoder.gateway.decode(SessionSnapshot.PendingPrompt.self, from: inputWire(queued: false, kind: kind))
+            let queued = try JSONDecoder.gateway.decode(SessionSnapshot.QueuedMessage.self, from: inputWire(queued: true, kind: kind))
+            for encoded in [try JSONValue.encode(pending), try JSONValue.encode(queued)] {
+                let semantic = encoded.objectValue?["semantic"]?.objectValue
+                #expect(semantic?["kind"]?.stringValue == kind.map { $0 == "subagentWake" ? $0 : "unknown" })
+                #expect(semantic?["direction"]?.stringValue == kind.map { _ in "hiddenInternal" })
+            }
+        }
+    }
+
+    @Test("pending handoff and displayed queue hide internal inputs without mutating authority")
+    func inputPresentationTransitions() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 613).openingTail(targetEncodedBytes: 4096)
+        snapshot.transcript = []
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = 0
+        snapshot.phase = .compacting
+        let sessions = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let transcript = ChatTranscriptPresentationStore()
+        defer { sessions.clearProfile(); transcript.reset() }
+        // Start/preflight, steer, visible replacement, return to hidden, cold reinstall.
+        for (index, variant) in [(true, "subagentWake"), (true, "future-input"), (false, "prompt"), (false, nil), (true, "subagentWake")].enumerated() {
+            let (hidden, kind) = variant
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            snapshot.queueRevision += 1
+            snapshot.pendingPrompt = try JSONDecoder.gateway.decode(SessionSnapshot.PendingPrompt.self, from: inputWire(queued: false, kind: kind, hidden: hidden))
+            snapshot.queuedItems = [try JSONDecoder.gateway.decode(SessionSnapshot.QueuedMessage.self, from: inputWire(queued: true, kind: kind, hidden: hidden))]
+            if index == 0 || index == 4 {
+                sessions.clearProfile()
+                sessions.installHostedSubscription(snapshot: snapshot, token: "input-\(index)")
+            } else {
+                sessions.admitSynchronously(GatewayEvent(type: "event", topic: "session.snapshot", sessionId: snapshot.sessionId, payload: try JSONValue.encode(snapshot)))
+            }
+            let authoritative = try #require(sessions.authoritativeSnapshot(for: snapshot.sessionId))
+            #expect(authoritative.queuedItems.count == 1)
+            #expect(authoritative.queueRevision == snapshot.queueRevision)
+            #expect(authoritative.pendingPrompt != nil)
+            #expect(authoritative.displayedQueuedMessages.count == (hidden ? 0 : 1))
+            let handoff = ChatTranscriptHandoffCommit.pending(in: authoritative)
+            #expect((handoff.pendingPromptPresentation == nil) == hidden)
+            let tag = ChatTranscriptProjectionTag(snapshot: authoritative, presentationGeneration: index + 1, handoff: handoff)
+            #expect(transcript.submit(snapshot: authoritative, handoff: handoff, tag: tag))
+            let installed = try await transcript.waitForInstall(of: tag)
+            #expect(installed.queuedMessages.count == (hidden ? 0 : 1))
+            #expect((installed.handoff.pendingPromptPresentation == nil) == hidden)
+        }
+    }
+
+    @Test("hidden queue inputs remain subject to authoritative bounds and identity admission")
+    func hiddenQueueAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 614).openingTail(targetEncodedBytes: 4096)
+        let hidden = try JSONDecoder.gateway.decode(SessionSnapshot.QueuedMessage.self, from: inputWire(queued: true))
+        snapshot.queuedItems = [hidden]
+        #expect(SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems = [hidden, hidden]
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems = (0...SessionSnapshot.maximumQueuedMessages).map { index in
+            SessionSnapshot.QueuedMessage(id: "hidden-\(index)", behavior: hidden.behavior,
+                text: hidden.text, attachmentCount: 0, semantic: hidden.semantic)
+        }
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems = [.init(id: "", behavior: hidden.behavior, text: hidden.text,
+            attachmentCount: 0, semantic: hidden.semantic)]
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems = [.init(id: "invalid", behavior: hidden.behavior, text: hidden.text,
+            attachmentCount: -1, semantic: hidden.semantic)]
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+    }
+
     @Test("snapshot replacement and cold reinstall preserve typed producer ownership")
     func retainedStateStoreTransitions() throws {
         var snapshot = try SessionScenarioBuilder(seed: 612).openingTail(targetEncodedBytes: 4096)
