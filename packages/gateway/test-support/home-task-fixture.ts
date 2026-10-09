@@ -21,7 +21,11 @@ export async function disposeFixtures(): Promise<void> {
   }
 }
 
-export async function fixture(providerVersion?: string, codemode = false, contextWindow?: number, managed = false) {
+// A same-named user package. The producer gate admits a provider only by managed
+// identity, so this version string never changes what the gate decides.
+const UNMANAGED_PROVIDER_VERSION = "0.76.1-tron.4";
+
+export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -44,10 +48,10 @@ export async function fixture(providerVersion?: string, codemode = false, contex
     await mkdir(extensionDir, { recursive: true });
     await writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))}; export default createCodemodeExtension({ mode: "on" });`);
   }
-  if (providerVersion) {
+  if (unmanagedProvider) {
     const packageRoot = join(agentDir, "npm/node_modules/pi-subagents");
     await mkdir(packageRoot, { recursive: true });
-    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "pi-subagents", version: providerVersion, pi: { extensions: ["index.ts"] } }));
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "pi-subagents", version: UNMANAGED_PROVIDER_VERSION, pi: { extensions: ["index.ts"] } }));
     await writeFile(join(packageRoot, "index.ts"), `import { writeFileSync } from 'node:fs'; export default function(pi) {
       pi.registerTool({name:'subagent',label:'Subagent',description:'Test producer boundary',parameters:{type:'object',properties:{}},
         execute:async (_id,input) => { writeFileSync(${JSON.stringify(join(cwd, "subagent-effect.json"))}, JSON.stringify(input)); return {content:[{type:'text',text:'producer admitted'}]}; }});
@@ -56,7 +60,7 @@ export async function fixture(providerVersion?: string, codemode = false, contex
           writeFileSync(${JSON.stringify(join(cwd, "wait-effect.json"))}, JSON.stringify(input));
           return {content:[{type:'text',text:'wait finished'}]}; }});
     }`);
-    settings.packages = [`npm:pi-subagents@${providerVersion}`];
+    settings.packages = [`npm:pi-subagents@${UNMANAGED_PROVIDER_VERSION}`];
   }
   await writeFile(join(agentDir, "settings.json"), JSON.stringify(settings));
   const trust = new TrustService(agentDir);
