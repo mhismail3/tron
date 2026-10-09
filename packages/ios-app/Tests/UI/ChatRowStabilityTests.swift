@@ -2752,13 +2752,12 @@ private func motionFixture(_ scenario: ChatMotionScenario) throws -> ChatMotionF
             : "queued-message-motion-steer-b"
         return ChatMotionFixture(initial: initial, updated: updated, rowID: rowID)
     case .control:
-        // Gateway and ToolExecutionStatePolicy retain finalized group metadata
-        // by call ID; keep this a stable grouped capsule update, not the
-        // synthetic metadata loss that split the physical row in the old fixture.
-        var initial = try toolDetailSnapshot()
+        // Keep one runtime-owned group and animate a live call to failure.
+        // The warning-to-error tint and progress icon are the tool-chip
+        // properties under pixel test; no completed transcript call suppresses it.
+        var initial = try stabilitySnapshot(items: rowStabilityHistoryItems())
         initial.phase = .running
-        var updated = initial
-        updated.toolExecutions = RowStabilityFixture.groupedRunCallIDs.enumerated().map { index, callID in
+        initial.toolExecutions = RowStabilityFixture.groupedRunCallIDs.enumerated().map { index, callID in
             harnessRuntimeTool(
                 id: callID,
                 order: index,
@@ -2766,6 +2765,18 @@ private func motionFixture(_ scenario: ChatMotionScenario) throws -> ChatMotionF
                 groupId: RowStabilityFixture.groupedRunID,
                 groupIndex: index,
                 groupCount: RowStabilityFixture.groupedRunCallIDs.count
+            )
+        }
+        var updated = initial
+        updated.toolExecutions = RowStabilityFixture.groupedRunCallIDs.enumerated().map { index, callID in
+            harnessRuntimeTool(
+                id: callID,
+                order: index,
+                status: index == 0 ? .failed : .completed,
+                groupId: RowStabilityFixture.groupedRunID,
+                groupIndex: index,
+                groupCount: RowStabilityFixture.groupedRunCallIDs.count,
+                isError: index == 0
             )
         }
         updated.revision += 1
@@ -2899,11 +2910,12 @@ private func recordMotionPixels(
     let trackedPhysicalID = physicalID ?? initialTarget?.physicalID ?? targetSemanticID
     var previousFrame = initialTarget?.windowFrame
     var previousGeometryFrame = initialTarget?.windowFrame
-    var previousImage: UIImage? = try ChatMotionPixelSupport.captureWindow(harness: harness)
-    let rootLayer = harness.visibleRootView.layer
-    let previousAnimationClockSpeed = rootLayer.speed
-    rootLayer.speed = ChatMotionPixelSupport.animationClockSpeed
-    defer { rootLayer.speed = previousAnimationClockSpeed }
+    let baselineRegion = initialTarget?.windowFrame ?? harness.visibleRootView.bounds
+    var previousImage: UIImage? = try await ChatMotionPixelSupport.settledBaseline(harness: harness, in: baselineRegion)
+    let initialToolChipSample = scenario == .control ? harness.probe.observation.toolChipSamples.last : nil
+    let previousAnimationScale = ChatMotion.hostedTestAnimationScale
+    ChatMotion.hostedTestAnimationScale = ChatMotionPixelSupport.animationScale
+    defer { ChatMotion.hostedTestAnimationScale = previousAnimationScale }
     harness.replaceAuthoritativeSnapshot(updated)
     var changedFrames = 0
     var stablePixelCaptures = 0
@@ -2955,6 +2967,11 @@ private func recordMotionPixels(
     }
     #expect(didSettle,
             "pixel region and row geometry did not settle within \(ChatMotionPixelSupport.maximumSampleCount) captures (observedChange=\(observedPixelChange))")
+    if scenario == .control {
+        let finalToolChipSample = harness.probe.observation.toolChipSamples.last
+        #expect(initialToolChipSample?.isRunning == true, "the control starts with a live tool group")
+        #expect(finalToolChipSample?.failureCount == 1, "the control completes the same group with a visible failure")
+    }
     try writeMotionPixelMetric(scenario.rawValue, changedFrames: changedFrames)
     print("CHAT-MOTION-PIXELS \(scenario.rawValue) changedFrames=\(changedFrames) captures=\(captureCount) settled=\(didSettle)")
     if scenario != .depart {

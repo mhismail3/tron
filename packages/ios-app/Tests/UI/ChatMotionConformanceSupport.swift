@@ -65,19 +65,36 @@ func sampledPixel(of image: UIImage, at point: CGPoint) -> (red: Int, green: Int
 
 @MainActor
 enum ChatMotionPixelSupport {
-    /// `drawHierarchy` takes 20–80 ms on the hosted window, longer than a display
-    /// frame. Slow the local clock so real-time animations remain observable
-    /// across captures instead of aliasing differently on each run.
-    static let animationClockSpeed: Float = 0.1
-    /// Fifty pixel- and row-geometry-stable captures span the local gaps between
-    /// expensive hosted snapshots; the larger cap remains only a hang guard.
+    /// Hosted-window captures take 20–80 ms, longer than a display frame. The
+    /// pixel suite scales ChatMotion's test-host clock so captures observe the
+    /// whole transition instead of aliasing real-time frames.
+    static let animationScale = 2.0
+    /// The cap only prevents a hung transition from stalling the pixel suite.
     static let maximumSampleCount = 120
-    static let requiredStablePixelCaptures = 50
+    static let requiredStablePixelCaptures = 80
+    static let requiredBaselineCaptures = 3
 
     /// Pixel sampling is a separate, slower pass; use the orientation fixture's
     /// shared hosted-window capture and sample points only within this row.
     static func captureWindow(harness: ChatViewScrollHarness) throws -> UIImage {
         try ChatDisplayOrientationFixture.capture(harness)
+    }
+
+    static func settledBaseline(harness: ChatViewScrollHarness, in region: CGRect) async throws -> UIImage {
+        var previous = try captureWindow(harness: harness)
+        var stableCaptures = 0
+        for _ in 0..<maximumSampleCount {
+            try await harness.driveFrameBoundary()
+            let current = try captureWindow(harness: harness)
+            if changedPixels(previous, current, in: region) {
+                stableCaptures = 0
+            } else {
+                stableCaptures += 1
+            }
+            previous = current
+            if stableCaptures >= requiredBaselineCaptures { return current }
+        }
+        throw CocoaError(.fileReadUnknown)
     }
 
     static func changedPixels(_ lhs: UIImage, _ rhs: UIImage, in frame: CGRect) -> Bool {

@@ -1007,7 +1007,8 @@ func harnessRuntimeTool(
     groupId: String? = nil,
     groupIndex: Int = 0,
     groupCount: Int = 1,
-    groupFinalized: Bool = true
+    groupFinalized: Bool = true,
+    isError: Bool = false
 ) -> ToolExecutionState {
     ToolExecutionState(
         toolCallId: id,
@@ -1018,7 +1019,7 @@ func harnessRuntimeTool(
         partialResult: nil,
         result: status == .completed ? .object(["ok": .bool(true)]) : nil,
         output: status == .completed ? "done" : nil,
-        isError: false,
+        isError: isError,
         startedAt: "2026-01-01T00:00:00Z",
         updatedAt: status == .completed ? "2026-01-01T00:00:01Z" : "2026-01-01T00:00:00Z",
         completedAt: status == .completed ? "2026-01-01T00:00:01Z" : nil,
