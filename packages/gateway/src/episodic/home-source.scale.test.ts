@@ -54,7 +54,9 @@ async function measureHomeHeap(root: string, chapters: HomeSourceChapter[], opti
         },
         branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: options.ledgerRevision, chapters }, cursor, limits),
       },
-      summarizer: async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-100)),
+      // A provider's reply is a fresh string. A slice of the prompt would keep the
+      // whole prompt (here the 128 KB context block) alive with each node's summary.
+      summarizer: async request => fauxAssistantMessage(Buffer.from(request.turns.at(-1)!.text.slice(-100), "utf8").toString("utf8")),
       limits: options.limits, sleep: async () => {},
     });
     await memory.entriesCommitted("home");
@@ -104,8 +106,9 @@ it("measures retained Home heap at production record caps for a 2k-message histo
       },
     };
     await reportFile("heap-production.json", report);
-    // Each retained message holds at most its production text cap, so the
-    // total grows with history length and never with one record's size.
-    expect(retained / messages).toBeLessThan(EPISODIC_DEFAULTS.recordCapChars * 2 + 4_096);
+    // The catalog keeps each message's projected text and its node topology, a few
+    // kilobytes at these sizes (about 1.25 KB of text per message). Nothing of a
+    // summary's prompt may survive, so the bound sits well under the view's 128 KB.
+    expect(retained / messages).toBeLessThan(8 * 1_024);
   } finally { await rm(root, { recursive: true, force: true }); }
 }, 300_000);

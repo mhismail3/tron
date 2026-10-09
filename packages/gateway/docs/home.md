@@ -191,12 +191,14 @@ chapter. Its size is bounded per record and per cursor, but not per history:
   (`messages`, `nodes`, `entryIndex`), so live heap grows with Home's message
   count. Paging the catalog is a follow-up, not current behavior.
 - Measured (`home-source.scale.test.ts`, production caps, 2,000 messages in four
-  chapters): about 194 MB of live heap while the memory is open, about 97 KB per
-  message. That is far above the average projected text (about 1.25 KB); what
-  else the catalog retains per message is not yet diagnosed. Cold ingestion ran
-  at about 70–80 ms per message (1,000 messages in 69 s). The 20,000-message
-  case is not measured; a linear extrapolation would be about 25 minutes to
-  ingest and about 2 GB of live heap, and must not be taken as a result. Its canonical source reads active, sealed, and materializing
+  chapters): about 8 MB of live heap while the memory is open, about 4 KB per
+  message, against an average projected text of about 1.25 KB. The catalog's own
+  records (`messages`, `nodes`, `entryIndex`) are what remain. An earlier 97 KB per
+  message was a fixture artifact: its summaries were slices of the summary prompt,
+  which kept each 128 KB context block alive. Cold ingestion ran at about 70–80 ms
+  per message (1,000 messages in 69 s). The 20,000-message case is not measured; a
+  linear extrapolation would be about 25 minutes to ingest and about 80 MB of live
+  heap, and must not be taken as a result. Its canonical source reads active, sealed, and materializing
 chapters in ledger order and retains each physical session ID as provenance.
 Delta ingestion streams and caps each entry before retaining a chapter projection;
 it never concatenates raw chapter histories. Per-chapter cursors continue linear
@@ -222,7 +224,7 @@ cross-chapter replay, restart, navigation and frozen-cut proof.
 regenerated with `vitest.scale.config.ts`. `heap.json` covers four chapters with
 at least 64 MiB of canonical payload at a reduced record cap, proving the raw
 source's streamed bound. `heap-production.json` (run with `-t production`, about
-three minutes) covers 2,000 messages at production caps. Both reports are
+one minute) covers 2,000 messages at production caps. Both reports are
 post-GC live heap samples at ingestion cuts and a retained heap sample; neither
 claims an allocation peak or power-loss proof.
 
