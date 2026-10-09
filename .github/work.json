@@ -455,12 +455,14 @@
           "scripts/gateway-install-inputs.mjs",
           "scripts/gateway-install-inputs.test.mjs",
           "scripts/gateway-payload-deploy.test.mjs",
+          "scripts/tron",
           "scripts/tron-dev",
+          "scripts/test-tron-npm-bytecode.sh",
           "scripts/hash-npm-runtime.py",
           "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
+        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && scripts/test-tron-npm-bytecode.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
       },
       {
         "name": "mac-bundle-rebuild",
