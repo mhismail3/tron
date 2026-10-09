@@ -220,12 +220,22 @@ struct HostedHomeDashboardFixture: View {
                 taskListReads = await gateway.taskListReadCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
                 configuredModel = await gateway.configuredModelIdentity()
-                // A hosted reconnect is a new connection identity, which the mounted
-                // Home sheet must observe by re-reading. Requested once, after its first read.
-                if !reconnectRequested, arguments.contains("-home-reconnect-after-task-list"), taskListReads > 0 {
-                    reconnectRequested = true
-                    do { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
-                    catch { self.error = error.localizedDescription }
+                // Requested once. A hosted reconnect is a new connection identity, which the mounted
+                // sheet must observe by re-reading, so it fires after the first read. A profile switch
+                // fires after the second, so a test can observe the presented sheet first (its reload).
+                if !reconnectRequested {
+                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 2 {
+                        reconnectRequested = true
+                        let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
+                        do {
+                            try model.profiles.save(other, token: "other-fixture-token", selecting: false)
+                            await model.switchGateway(other)
+                        } catch { self.error = error.localizedDescription }
+                    } else if arguments.contains("-home-reconnect-after-task-list"), taskListReads >= 1 {
+                        reconnectRequested = true
+                        do { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
+                        catch { self.error = error.localizedDescription }
+                    }
                 }
                 do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             }

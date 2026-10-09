@@ -415,6 +415,28 @@ final class TronSmokeUITests: XCTestCase {
         baseline.terminate()
     }
 
+    /// A Home sheet belongs to the profile that opened it: once the selected profile
+    /// changes, the sheet is dismissed rather than left presenting another Mac's Home.
+    @MainActor
+    func testHomeSheetDismissesWhenProfileSwitches() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-switch-profile-after-task-list"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        app.buttons["home-controls"].tap()
+        app.buttons["Tasks and permissions"].tap()
+        XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
+        // Reloading is the sheet's second read; the fixture then selects another profile through
+        // the production switch, which must release the chat and the sheet it presents.
+        app.buttons["Reload tasks"].tap()
+        XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForNonExistence(timeout: 10),
+                      "A profile switch left the Home sheet presented for the previous profile")
+    }
+
     @MainActor
     func testHomeHeaderStatesAndStopOwner() {
         for (phase, label) in [("ready", "Ready"), ("active", "Working"), ("paused", "Paused"),

@@ -82,8 +82,17 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderBackgroundReconnectAndUnresolvedCompletion \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderKeepsOrdinaryChatAndControls \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredSettingsSheet
 ```
+
+Selecting another profile through `AppModel.switchGateway` ends the chat route in the
+dashboard's profile route owner, which releases a presented Home sheet with it;
+`testHomeSheetDismissesWhenProfileSwitches` guards that owner order (a sheet owned above
+the route would survive the switch).
 
 Matrix attachments are named `proof-<appearance>-<type>-<item>` and retained in the
 result bundle; export them with `xcrun xcresulttool export attachments` into private

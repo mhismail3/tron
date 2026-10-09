@@ -29,7 +29,8 @@ enum HomeSheetDestination: Identifiable {
 }
 
 /// A Home sheet the chat presents for one profile. Choosing another destination
-/// for that profile replaces the open sheet; a different profile dismisses it.
+/// for that profile replaces the open sheet; the chat's route owner releases the
+/// chat, and with it this sheet, when the selected profile changes.
 struct HomeSheetRoute: Identifiable {
     let profileID: String
     let destination: HomeSheetDestination
