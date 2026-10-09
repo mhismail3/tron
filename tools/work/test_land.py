@@ -1215,6 +1215,23 @@ class RequiredCheckTests(LandFixture):
                 self.assertIn("timed out", str(raised.exception))
         self.assertEqual(self.merges(), [])
 
+    def test_required_check_skipped_by_the_path_policy_counts_as_passed(self):
+        # CI skips a required job (for example `gateway`) when the policy job
+        # finds no path it owns; GitHub's required-check rule treats that
+        # skip as passing, so land must too (#624 was blocked by this).
+        self.config["land"]["requiredChecks"] = ["policy", "gateway"]
+        self.set_state(checks={"policy": "SUCCESS", "gateway": "SKIPPED"})
+        self.assertEqual(self.land(), 0)
+        self.assertEqual(len(self.merges()), 1)
+
+    def test_required_checks_that_are_all_skipped_do_not_merge(self):
+        self.config["land"]["requiredChecks"] = ["policy", "gateway"]
+        self.set_state(checks={"policy": "SKIPPED", "gateway": "SKIPPED"})
+        with self.assertRaises(land.LandError) as raised:
+            self.land()
+        self.assertIn("a required check failed", str(raised.exception))
+        self.assertEqual(self.merges(), [])
+
     def test_waits_through_pending_checks_then_merges(self):
         self.set_state(pendingViews=3)
         self.assertEqual(self.land(), 0)

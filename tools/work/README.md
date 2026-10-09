@@ -873,7 +873,9 @@ as does `acceptance` for the journeys it can run.
    `land.waitSeconds`. It waits until every check run named in
    `land.requiredChecks` and the `verify.statusContext` status succeed on the
    pull request's head, and that head is the commit it pushed. A required check
-   that fails stops `land` and names the check. A timeout also stops it.
+   that CI's path policy skipped counts as passed, as GitHub's required-check
+   rule treats it, provided at least one required check ran and succeeded.
+   A required check that fails stops `land` and names the check. A timeout also stops it.
    Neither merges.
 7. **Base moves.** Once the checks pass, it fetches the base branch again.
    When the head no longer contains its tip, steps 2 to 6 repeat, at most
