@@ -43,6 +43,8 @@ struct ChatMotionSurfaceMetrics: Codable {
     let maximumGeometryStep: Double
     let maximumTailDistance: Double
     let changedFrames: Int
+    let pixelChangingFrames: Int?
+    let markerIdentityInstances: Int
     let samples: [Double]
 }
 

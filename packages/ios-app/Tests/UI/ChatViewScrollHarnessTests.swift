@@ -2151,7 +2151,9 @@ final class ChatViewScrollHarness {
               let composer = views.compactMap({ $0 as? ChatHostedNativeRowMarker })
                 .first(where: { $0.physicalID == ChatHostedNativeRowProbe.composerID }),
               let toolbar = views.compactMap({ $0 as? UINavigationBar }).first else { return nil }
-        return FloatingLayout(marker: marker, frame: marker.convert(marker.bounds, to: window),
+        let presentedMarkerLayer = marker.layer.presentation() ?? marker.layer
+        return FloatingLayout(marker: marker,
+                              frame: presentedMarkerLayer.convert(presentedMarkerLayer.bounds, to: window.layer).standardized,
                               composer: composer.convert(composer.bounds, to: window),
                               toolbarBottom: toolbar.convert(toolbar.bounds, to: window).maxY)
     }

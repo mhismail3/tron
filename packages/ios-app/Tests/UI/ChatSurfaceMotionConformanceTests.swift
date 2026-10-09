@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 @MainActor
@@ -58,6 +59,60 @@ struct ChatSurfaceMotionConformanceTests {
         await harness.close()
     }
 
+    @Test("floating display arrival, programmatic settling and dismissal stay bounded")
+    func floatingDisplayMotion() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 2_773).openingTail(targetEncodedBytes: 10_000)
+        let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+            snapshot: snapshot,
+            displayFrameScheduler: .displayLink
+        )
+        do {
+            _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+            for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            let display = DisplayProjection(
+                displayId: "mo7-floating-motion", title: "Browser", altText: "Live browser viewport",
+                kind: .browserLive,
+                presentation: .init(requestedSurface: .floating, inlineTapAction: .sheet),
+                eligibleSurfaces: [.sheet, .floating], fallbackText: "Unavailable",
+                liveView: .init(schema: "tron.browser-live-view.v1", viewId: "mo7-view",
+                    generation: "mo7-generation", title: "Browser", fallbackText: "Unavailable")
+            )
+            let route = DisplayRoute(sessionID: snapshot.sessionId, display: display)
+            let arrival = try await recordFloatingMotion(harness, name: "floating-arrive", samplePixels: true) {
+                harness.probe.presentDisplay(.showFloating(route))
+            }
+            #expect(arrival.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(arrival.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect((arrival.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
+            #expect(arrival.markerIdentityInstances == 1)
+            #expect(arrival.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+
+            let initial = try #require(harness.floatingLayout())
+            let move = try await recordFloatingMotion(harness, name: "floating-programmatic-move") {
+                initial.marker.move?(.topLeading)
+            }
+            #expect(move.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(move.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect(move.markerIdentityInstances == 1)
+            #expect(move.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+
+            let current = try #require(harness.floatingLayout())
+            let dismissal = try await recordFloatingMotion(harness, name: "floating-dismiss", samplePixels: true) {
+                current.marker.dismiss?()
+            }
+            #expect(dismissal.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(dismissal.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect((dismissal.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
+            #expect(dismissal.markerIdentityInstances == 1)
+            #expect(dismissal.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            try writeSurfaceMetrics([arrival, move, dismissal], named: "floating-motion.json")
+        } catch {
+            await harness.close()
+            throw error
+        }
+        await harness.close()
+    }
+
     @Test("Reduce Motion installs composer attachment strip height atomically")
     func composerAttachmentReduceMotion() async throws {
         let snapshot = try SessionScenarioBuilder(seed: 2_771).openingTail(targetEncodedBytes: 10_000)
@@ -79,6 +134,60 @@ struct ChatSurfaceMotionConformanceTests {
         }
         await harness.close()
     }
+}
+
+@MainActor
+private func recordFloatingMotion(
+    _ harness: ChatViewScrollHarness,
+    name: String,
+    samplePixels: Bool = false,
+    action: () -> Void
+) async throws -> ChatMotionSurfaceMetrics {
+    var previousFrame = harness.floatingLayout()?.frame
+    var previousImage = try samplePixels ? ChatMotionPixelSupport.captureWindow(harness: harness) : nil
+    action()
+    var maximumStep: CGFloat = 0
+    var maximumTail: CGFloat = 0
+    var changedFrames = 0
+    var pixelChangingFrames = 0
+    var identities: Set<ObjectIdentifier> = []
+    var samples: [Double] = []
+    for _ in 0..<24 {
+        try await harness.driveFrameBoundary()
+        let current = harness.floatingLayout()
+        let frame = current?.frame ?? previousFrame
+        let image = try samplePixels ? ChatMotionPixelSupport.captureWindow(harness: harness) : nil
+        if let frame, let previousImage, let image,
+           ChatMotionPixelSupport.changedPixels(previousImage, image, in: frame) {
+            pixelChangingFrames += 1
+        }
+        if let current {
+            identities.insert(ObjectIdentifier(current.marker))
+            let next = current.frame
+            if let previousFrame {
+                let step = max(
+                    max(abs(next.minX - previousFrame.minX), abs(next.minY - previousFrame.minY)),
+                    max(abs(next.width - previousFrame.width), abs(next.height - previousFrame.height))
+                )
+                if step > 0.5 { changedFrames += 1 }
+                maximumStep = max(maximumStep, step)
+            }
+            previousFrame = next
+            samples.append(contentsOf: [Double(next.minX), Double(next.minY), Double(next.width), Double(next.height)])
+        }
+        maximumTail = max(maximumTail, abs(harness.probeObservation.geometry.distanceFromBottom))
+        previousImage = image
+    }
+    return ChatMotionSurfaceMetrics(
+        name: name,
+        hostedMarkerID: "floating-display",
+        maximumGeometryStep: Double(maximumStep),
+        maximumTailDistance: Double(maximumTail),
+        changedFrames: samplePixels ? max(changedFrames, pixelChangingFrames) : changedFrames,
+        pixelChangingFrames: samplePixels ? pixelChangingFrames : nil,
+        markerIdentityInstances: identities.count,
+        samples: samples
+    )
 }
 
 @MainActor
@@ -112,6 +221,8 @@ private func recordAttachmentChipChange(
         maximumGeometryStep: Double(maximumStep),
         maximumTailDistance: Double(maximumTail),
         changedFrames: changedFrames,
+        pixelChangingFrames: nil,
+        markerIdentityInstances: 1,
         samples: sizes
     )
 }
@@ -146,6 +257,8 @@ private func recordComposerInsetChange(
         maximumGeometryStep: Double(maximumStep),
         maximumTailDistance: Double(maximumTail),
         changedFrames: changedFrames,
+        pixelChangingFrames: nil,
+        markerIdentityInstances: 1,
         samples: heights
     )
 }
