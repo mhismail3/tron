@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import lockfile from "proper-lockfile";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
@@ -23,6 +23,35 @@ function piCliPath(): string {
   throw new Error("could not locate the pi-coding-agent package manifest");
 }
 const cliPath = piCliPath();
+
+/** `ps` state of a process: empty once it is reaped, `Z` while an exited child awaits reaping. */
+function processState(pid: number): string {
+  return spawnSync("/bin/ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+}
+function isExited(pid: number): boolean {
+  const state = processState(pid);
+  return state === "" || state.startsWith("Z");
+}
+
+/** Kills every process whose command line names this test's private root (the stdio fixture and
+ * the CLI stand-ins it starts), then removes the root. It runs from `onTestFinished`, after the
+ * assertions and on every outcome, so a failing or hung test cannot leave a server running. It is
+ * a test-side net: the production cleanup under test must have already killed these processes. */
+async function cleanupFixtures(root: string, unrelatedPid?: number): Promise<void> {
+  vi.unstubAllEnvs();
+  if (unrelatedPid) { try { process.kill(-unrelatedPid, "SIGKILL"); } catch {} }
+  killProcessesNaming(root);
+  await rm(root, { recursive: true, force: true });
+}
+function killProcessesNaming(root: string): void {
+  const listing = spawnSync("/bin/ps", ["-A", "-o", "pid=,command="], { encoding: "utf8", maxBuffer: 16 * 1_048_576 }).stdout;
+  for (const line of listing.split("\n")) {
+    const pid = Number(line.trim().split(/\s+/u, 1)[0]);
+    if (Number.isInteger(pid) && pid > 1 && pid !== process.pid && line.includes(root)) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+  }
+}
 
 describe("McpAdminService", () => {
   it("quotes interactive Keychain commands and rejects line-breaking secrets without exposing argv", async () => {
@@ -80,25 +109,47 @@ describe("McpAdminService", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-timeout-"));
     const pidFile = join(root, "stdio.pid");
     let unrelatedPid: number | undefined;
+    // Registered before the fixtures start: vitest runs it on timeouts too, where a hung
+    // CLI would otherwise leave a `finally`-less body (and its stdio server) pending.
+    onTestFinished(() => cleanupFixtures(root, unrelatedPid));
     vi.stubEnv("PI_CODING_AGENT_DIR", root);
-    try {
-      const program = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
-      await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { slow: { command: process.execPath, args: ["-e", program] } } }));
-      const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
-      if (!unrelated.pid) throw new Error("could not start unrelated process fixture");
-      unrelatedPid = unrelated.pid;
-      unrelated.unref();
-      const service = new McpAdminService(root, cliPath, undefined, undefined, 1_000);
-      await expect(service.list({ scope: "global" })).rejects.toThrow(/listing failed/u);
-      const pid = Number(await readFile(pidFile, "utf8"));
-      const childStatus = spawnSync("/bin/ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
-      expect(childStatus === "" || childStatus.startsWith("Z")).toBe(true);
-      expect(() => process.kill(unrelatedPid!, 0)).not.toThrow();
-    } finally {
-      vi.unstubAllEnvs();
-      if (unrelatedPid) { try { process.kill(-unrelatedPid, "SIGKILL"); } catch {} }
-      await rm(root, { recursive: true, force: true });
-    }
+    const program = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
+    await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { slow: { command: process.execPath, args: ["-e", program] } } }));
+    const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+    if (!unrelated.pid) throw new Error("could not start unrelated process fixture");
+    unrelatedPid = unrelated.pid;
+    unrelated.unref();
+    const service = new McpAdminService(root, cliPath, undefined, undefined, 1_000);
+    await expect(service.list({ scope: "global" })).rejects.toThrow(/listing failed/u);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(isExited(pid)).toBe(true);
+    expect(() => process.kill(unrelatedPid!, 0)).not.toThrow();
+  });
+
+  it("kills a stdio MCP child that the CLI starts after the bounded timeout's SIGTERM", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-late-timeout-"));
+    const serverPidFile = join(root, "server.pid");
+    onTestFinished(() => cleanupFixtures(root));
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
+    // A CLI stand-in that survives SIGTERM and starts its stdio server only when the bounded
+    // timeout delivers that SIGTERM, i.e. after the timeout's process snapshot was taken.
+    const server = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+    const cli = [
+      "const { spawn } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      "process.on('SIGTERM', () => {",
+      `  const child = spawn(process.execPath, ['-e', ${JSON.stringify(server)}, ${JSON.stringify(root)}], { detached: true, stdio: 'ignore' });`,
+      "  child.unref();",
+      `  writeFileSync(${JSON.stringify(serverPidFile)}, String(child.pid));`,
+      "});",
+      "setInterval(() => {}, 1000);",
+    ].join("\n");
+    const script = join(root, "cli.cjs");
+    await writeFile(script, cli);
+    const service = new McpAdminService(root, script, undefined, undefined, 1_000);
+    await expect(service.list({ scope: "global" })).rejects.toThrow(/listing failed/u);
+    const serverPid = Number(await readFile(serverPidFile, "utf8"));
+    expect(isExited(serverPid)).toBe(true);
   });
 
   it("records bounded MCP startup problems without returning command stderr", async () => {
@@ -136,6 +187,8 @@ describe("McpAdminService", () => {
 
   it("maps a contended token configuration lock to a retryable busy error", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-token-lock-"));
+    // Registered before the lock is taken, so a failed setup still removes the root.
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
     const config = join(root, "mcp.json");
     await writeFile(config, JSON.stringify({ mcpServers: { fixture: { url: "https://fixture.invalid/mcp" } } }));
     const owner: McpCredentialOwner = { async store() { return "account"; }, async remove() {} };
@@ -146,7 +199,7 @@ describe("McpAdminService", () => {
       const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
       await expect(service.storeBearer({ scope: "global" }, "fixture", "token"))
         .rejects.toMatchObject({ code: "busy", retryable: true });
-    } finally { await release(); await rm(root, { recursive: true, force: true }); }
+    } finally { await release(); }
   });
 
   it("scopes credential removal to the same config scope", async () => {
