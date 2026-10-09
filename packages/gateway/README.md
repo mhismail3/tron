@@ -3420,6 +3420,14 @@ contract — a throughput or latency relationship the test measures, a bounded
 number of discovery passes, an event storm whose length is the assertion — keep
 that explicit bound or count and say why at the call site.
 
+Two shapes that have failed under load (#650). A Stop, abort or steer that
+follows a wait for `slot.isBusy` or a phase is racing SDK admission: `isBusy`
+turns true at slot admission, and a Stop before the SDK admits the run revokes
+the prompt. Gate on the run's own entry (the faux response function signals when
+it is called) instead. And a wait whose condition needs a streamed faux reply
+must keep that reply short: the faux provider paces each chunk with a timer of at
+least 1 ms, so an 88 KB reply alone costs seconds against a 10 s bound.
+
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 
 ```bash

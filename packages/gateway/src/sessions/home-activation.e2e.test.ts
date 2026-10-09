@@ -871,8 +871,10 @@ describe("Tron Home activations end to end", () => {
     await prepareThresholdFixture(f, slot, "initialize successful threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
     // Canonical custom entries bring the chapter near the byte boundary without
-    // crossing it; only the provider's finalized successful message crosses.
-    for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 40 * 1_024; index += 1) {
+    // crossing it; only the provider's finalized successful message crosses. The
+    // reply is sized to the remaining headroom, not to the boundary: a reply
+    // streamed at the fixture's pace costs about 40 chars per timer tick.
+    for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 58 * 1_024; index += 1) {
       slot.sessionManager.appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
     }
     const before = statSync(slot.sessionFile!).size;
@@ -892,7 +894,7 @@ describe("Tron Home activations end to end", () => {
       }
       return terminalize(...args);
     });
-    f.faux.setResponses([fauxAssistantMessage("successful response ".repeat(2_048))]);
+    f.faux.setResponses([fauxAssistantMessage("successful response ".repeat(410))]);
     const running = slot.prompt("cross only on the successful response");
     void running.catch(() => {});
     try {

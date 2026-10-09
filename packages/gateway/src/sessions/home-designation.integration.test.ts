@@ -20,8 +20,9 @@ const OTHER_MODEL_ID = "home-model-2";
 const VIRTUAL_MODEL_ID = "home-router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 /** Long enough that a faux stream is still running when the cache warmer fires
- * (the SDK's minimum warm delay is one second). */
-const SLOW_RESPONSE = "streaming reply ".repeat(400);
+ * (the SDK's minimum warm delay is one second), and no longer: each stream chunk is
+ * paced at 300 tokens/s, so this streams for about 1.5 s. */
+const SLOW_RESPONSE = "streaming reply ".repeat(120);
 const LARGE_PROMPT = "context ".repeat(1_000);
 const SYSTEM_SENTINEL = "HOME-SYSTEM-SENTINEL";
 const APPEND_SENTINEL = "HOME-APPEND-SENTINEL";
