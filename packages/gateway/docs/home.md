@@ -601,9 +601,11 @@ Delivery proof reads its chapter one line at a time under the shared
 `maxSourceLineBytes` bound and keeps only the entries that can belong to that one
 delivery: its result message, its terminal invocation receipt and the attribution
 receipt naming its task. A proof that cannot be read (an over-bound line, a torn
-tail, a missing file) fails only that event: it becomes `outcome-unknown` with
-reason `admission-proof-unreadable` or `terminal-proof-unreadable`, and the
-activation proceeds. A delivery whose admitted message was never appended (Stop
+tail, a source that is not this session) fails only that event: it becomes
+`outcome-unknown` with reason `admission-proof-unreadable` or
+`terminal-proof-unreadable`, and the activation proceeds. A transient read or
+fsync failure leaves the event in its current state for the next activation to
+re-prove; it is neither a refusal nor an uncertain outcome. A delivery whose admitted message was never appended (Stop
 between admission and append) returns to `pending` under the same mutex with
 reason `admission-aborted`; it is not an uncertain delivery.
 Home reads its full immutable report with `task { action: "report", taskId,

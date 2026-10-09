@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { HomeTaskStore } from "./home-task-store.js";
+import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { SessionCatalog } from "../sessions/session-catalog.js";
 import { ManagedSubagents } from "../sessions/managed-subagents.js";
@@ -768,7 +769,7 @@ describe("Home task cold reconciliation", () => {
     const owner = f.registry.homeOwner() as any;
     // The first settlement proof fails to read its chapter (the failure an
     // over-bound line produces). Only that delivery is affected.
-    const unreadable = vi.spyOn(owner, "inboxEvidence").mockRejectedValueOnce(new Error("canonical proof unreadable"));
+    const unreadable = vi.spyOn(owner, "inboxEvidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
     f.faux.setResponses([fauxAssistantMessage("Result delivered before the unreadable proof")]);
     await home.prompt("Review the result"); await waitFor(() => home.snapshot().configurationBlocker === null, "delivery with an unreadable proof");
     expect(unreadable).toHaveBeenCalledTimes(1);

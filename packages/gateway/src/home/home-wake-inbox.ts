@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
+import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
 
@@ -84,7 +85,7 @@ export class WakeInboxOwner {
           if (proof === "proven") {
             if (route.enabled && task.homeId === route.homeId && wake.routeGeneration === route.routeGeneration) await this.ack(task, route);
           }
-          else await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), `admission-proof-${proof}`);
+          else if (proof !== "deferred") await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), `admission-proof-${proof}`);
         }
       }
     });
@@ -163,6 +164,7 @@ export class WakeInboxOwner {
         if (task.wake?.delivery?.operationId !== operationId || task.wake.state !== "admitted") continue;
         this.assertRoute(task, route);
         const proof = await this.prove(task);
+        if (proof === "deferred") continue;
         if (proof !== "proven") {
           await this.change(task.taskId, wake => ({ ...wake, state: "outcome-unknown" }), `terminal-proof-${proof}`); continue;
         }
@@ -197,15 +199,17 @@ export class WakeInboxOwner {
     this.assertRoute(task, route);
     await this.change(task.taskId, wake => ({ ...wake, state: "acknowledged", acknowledgedAt: new Date().toISOString() }), "canonical-consumed");
   }
-  /** One delivery's proof. A canonical source that cannot be read proves nothing
-   * about this event; that fails only this event, so the activation proceeds. */
-  private async prove(task: HomeTaskRecord): Promise<"proven" | "missing" | "unreadable"> {
+  /** One delivery's proof. A source that refuses this event (over the bound, torn,
+   * or not this session) can never prove it: `unreadable`. A transient read or
+   * fsync failure is `deferred`: the event keeps its state for the next activation
+   * to re-prove. Neither outcome refuses the activation. */
+  private async prove(task: HomeTaskRecord): Promise<"proven" | "missing" | "unreadable" | "deferred"> {
     const delivery = task.wake!.delivery!;
     let entries: HomeWakeEvidence[];
     try {
       entries = await this.options.evidence({ sessionId: delivery.sessionId, taskId: task.taskId, eventId: task.wake!.eventId, operationId: delivery.operationId });
-    } catch {
-      return "unreadable";
+    } catch (error) {
+      return error instanceof EpisodicMemoryError && error.kind === "source" ? "unreadable" : "deferred";
     }
     return this.proof(task, entries) ? "proven" : "missing";
   }

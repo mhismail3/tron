@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
+import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
 import { makeInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -120,13 +121,25 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     const f = await fixture();
     await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     f.receipt();
-    vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new Error("canonical line exceeds the source bound"));
+    vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session line exceeds 16777216 bytes"));
     await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
     expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
     // A later activation recovers the rest of the namespace; the unreadable event is not replayed.
     await expect(f.reopen().recover(f.route)).resolves.toBeUndefined();
     expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
     expect(f.entries.filter(entry => entry.type === "custom_message")).toHaveLength(1);
+  });
+
+  it("keeps a delivery whose proof read fails transiently admitted, so the next activation proves and acknowledges it", async () => {
+    const f = await fixture();
+    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    f.receipt();
+    vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new Error("EIO while syncing the chapter"));
+    await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
+    expect((await f.store.read("task"))?.wake?.state).toBe("admitted");
+    vi.restoreAllMocks();
+    await f.reopen().recover(f.route);
+    expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");
   });
 
   it("refuses the activation only for the delivery whose proof is unreadable during recovery", async () => {
@@ -138,7 +151,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     const second = await fixture();
     await second.owner.admit(second.route, "activation", second.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     second.receipt();
-    vi.spyOn(second.options, "evidence").mockRejectedValueOnce(new Error("unreadable chapter"));
+    vi.spyOn(second.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
     await expect(second.reopen().recover(second.route)).resolves.toBeUndefined();
     expect((await second.store.read("task"))?.wake?.state).toBe("outcome-unknown");
   });
