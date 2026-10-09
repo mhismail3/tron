@@ -100,8 +100,13 @@ async function runProcess(command: string, args: string[], options: { cwd: strin
       timeoutGroups = child.pid ? mcpChildProcessGroups(child.pid) : [];
       child.kill("SIGTERM");
       timeoutEscalation = setTimeout(() => {
+        // A CLI that survives SIGTERM can start a stdio server after the first snapshot. Its children
+        // are reachable by parent only while the CLI lives, so list them again before killing it.
         // Pi's detached stdio process groups are ours only if this CLI directly created their leader.
-        if (child.pid) signalGroup(child.pid, "SIGKILL");
+        if (child.pid) {
+          timeoutGroups = [...new Set([...timeoutGroups, ...mcpChildProcessGroups(child.pid)])];
+          signalGroup(child.pid, "SIGKILL");
+        }
         timeoutChildCleanup = terminateMcpChildGroups(timeoutGroups);
       }, 2_000);
       timeoutEscalation.unref();
