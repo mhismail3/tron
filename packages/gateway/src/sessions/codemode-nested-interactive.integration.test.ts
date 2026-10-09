@@ -45,13 +45,24 @@ describe("codemode nested interactive tools", () => {
       secret: Buffer.alloc(32, 9).toString("base64url") as const,
       previewsEnabled: false, relayOrigin: "https://push.example.test",
     };
+    const hourlyLimit = 1; // Only explicit alerts are enabled here; the second is refused by the relay backstop.
+    const relayDeliveryKinds: string[] = [];
+    let relayRequestCount = 0;
     const relay = {
       available: true, relayOrigin: "https://push.example.test",
-      async send() { return "accepted_by_apns" as const; },
+      async send(request: { relayEnvelope: string }) {
+        const kind = (JSON.parse(request.relayEnvelope) as { notificationKind: string }).notificationKind;
+        relayDeliveryKinds.push(kind);
+        return ++relayRequestCount > hourlyLimit
+          ? { status: "rate_limited", reason: "hourly_limit" } as const
+          : { status: "accepted_by_apns" } as const;
+      },
       async revoke() { return "revoked" as const; },
     } as unknown as PushRelayClient;
     const notificationService = new NotificationService(notificationStore, relay);
-    await notificationService.upsertGrant(grant);
+    await notificationService.upsertGrant({
+      ...grant, notifyWhenAskPresented: false, notifyWhenFinished: false, notifyWhenWaiting: false,
+    });
     const notificationAdmissions: Array<{ kind: string; status: string; sessionId: string }> = [];
     const enqueue = notificationService.enqueue.bind(notificationService);
     notificationService.enqueue = async (input) => {
@@ -72,13 +83,13 @@ describe("codemode nested interactive tools", () => {
       () => Date.parse("2026-01-01T00:00:00.000Z"),
     );
     const faux = fauxProvider({ provider: "tron-codemode-nested-interactive", tokensPerSecond: 10_000 });
-    const script = `const results = await Promise.allSettled([\n` +
+    const script = `const questions = await Promise.allSettled([\n` +
       `  tools.ask_user({ title: "First", questions: [{ question: "First choice?", options: [{ label: "A" }, { label: "B" }] }] }),\n` +
       `  tools.ask_user({ title: "Second", questions: [{ question: "Second choice?", options: [{ label: "A" }, { label: "B" }] }] }),\n` +
-      `  tools.notify({ message: "nested one" }),\n` +
-      `  tools.notify({ message: "nested two" }),\n` +
-      `  tools.schedule({ action: "create", name: "Nested schedule", prompt: "Review", at: "2030-01-01T00:00:00.000Z", activate: false }),\n` +
-      `]); return JSON.stringify(results.map((r) => r.status));`;
+      `]);\n` +
+      `const notices = await Promise.allSettled([tools.notify({ message: "nested one" }), tools.notify({ message: "nested two" })]);\n` +
+      `const schedule = await tools.schedule({ action: "create", name: "Nested schedule", prompt: "Review", at: "2030-01-01T00:00:00.000Z", activate: false });\n` +
+      `return JSON.stringify({ questions: questions.map((r) => r.status), notices: notices.map((r) => r.status), schedule: Boolean(schedule) });`;
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "interactive-parent" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("done"),
@@ -94,6 +105,7 @@ describe("codemode nested interactive tools", () => {
     const waitForPendingInteraction = (): Promise<void> => new Promise((resolve) => interactionWaiters.push(resolve));
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+      machineId: "machine-codemode-test",
       notifications: notificationService as unknown as NotificationServiceType,
       scheduleToolOperations: schedule,
       broadcast: (_sessionId, topic, payload) => {
@@ -154,14 +166,23 @@ describe("codemode nested interactive tools", () => {
         { toolName: "schedule", status: "completed" },
       ] },
     });
+    await notificationService.drain();
     const notificationState = await notificationStore.snapshot();
-    expect(notificationState.receipts).toHaveLength(3);
     expect(notificationAdmissions.filter((admission) => admission.kind === "explicit").map((admission) => admission.status).sort())
-      .toEqual(["queued", "rate_limited"]);
+      .toEqual(["queued", "queued"]);
+    expect(notificationAdmissions.filter((admission) => admission.kind === "ask").every((admission) => admission.status === "suppressed")).toBe(true);
+    expect(notificationAdmissions.filter((admission) => admission.kind === "agent_finished").map((admission) => admission.status))
+      .toEqual(["suppressed"]);
     expect(notificationAdmissions.every((admission) => admission.sessionId === slot.id)).toBe(true);
-    expect(notificationState.receipts.every((receipt) => ["queued", "accepted_by_apns"].includes(receipt.result))).toBe(true);
-    expect(notificationState.inbox.filter((item) => item.kind === "explicit")).toHaveLength(1);
-    expect(notificationState.inbox.find((item) => item.kind === "explicit")).toMatchObject({ sessionId: slot.id });
+    expect(relayDeliveryKinds).toEqual(["explicit", "explicit"]);
+    expect(notificationState.receipts).toHaveLength(2);
+    expect(notificationState.receipts.map((receipt) => receipt.result).sort()).toEqual(["accepted_by_apns", "failed"]);
+    expect(notificationState.inbox.filter((item) => item.kind === "ask")).toEqual([]);
+    const explicitInbox = notificationState.inbox.filter((item) => item.kind === "explicit");
+    expect(explicitInbox).toHaveLength(2);
+    expect(explicitInbox.every((item) => item.sessionId === slot.id)).toBe(true);
+    expect(explicitInbox.map((item) => item.outcome).sort()).toEqual(["accepted_by_apns", "failed"]);
+    expect(notificationState.inbox.filter((item) => item.kind === "agent_finished" || item.kind === "waiting")).toEqual([]);
     expect(scheduleCalls).toHaveLength(1);
     expect(scheduleCalls[0]).toMatchObject({ sessionId: slot.id, action: "create", toolCallId: expect.stringMatching(/^interactive-parent\//) });
     const scheduleCallId = scheduleCalls[0]!.toolCallId;
@@ -192,7 +213,7 @@ describe("codemode nested interactive tools", () => {
     await mkdir(dirname(artifactPath), { recursive: true });
     await writeFile(artifactPath, `${JSON.stringify({
       askUser: { concurrentRequests: 2, maximumLiveForms: 1, stopLeavesPendingForms: 0 },
-      notify: { admissions: notificationAdmissions.filter((item) => item.kind === "explicit"), sessionId: notificationState.inbox[0]?.sessionId },
+      notify: { hourlyLimit, relayDeliveryKinds, admissions: notificationAdmissions.filter((item) => item.kind === "explicit"), sessionId: notificationState.inbox[0]?.sessionId },
       schedule: scheduleCalls,
     }, null, 2)}\n`);
   });
