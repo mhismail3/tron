@@ -125,6 +125,9 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     };
     const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT");
     const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT");
+    // Refusal of a verified build with an invalid extension entry: each case is its own
+    // nested run and reports by exit status. A refusal regression must still block publication.
+    invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", "src/sessions/managed-subagents.invalid-entry.test.ts", "--maxWorkers=2"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
     if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));

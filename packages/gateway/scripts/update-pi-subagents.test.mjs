@@ -78,7 +78,8 @@ test("packs committed objects, builds a closure and retains current as previous"
     const originalPin = readFileSync(join(target, "pi-subagents-pin.json"));
     const executed = [];
     const beforePublication = (bin, args, options) => {
-      if (args.includes("src/sessions/managed-subagents.integration.test.ts") || args.includes("src/sessions/managed-subagents.rollback.test.ts")) {
+      if (args.includes("src/sessions/managed-subagents.integration.test.ts") || args.includes("src/sessions/managed-subagents.rollback.test.ts")
+        || args.includes("src/sessions/managed-subagents.invalid-entry.test.ts")) {
         assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
         assert.deepEqual(snapshot(target), original);
         executed.push(args.find((arg) => arg.endsWith(".test.ts")));
@@ -86,7 +87,7 @@ test("packs committed objects, builds a closure and retains current as previous"
       return spawn(bin, args, options);
     };
     const result = runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: beforePublication });
-    assert.deepEqual(executed, ["src/sessions/managed-subagents.integration.test.ts", "src/sessions/managed-subagents.rollback.test.ts"]);
+    assert.deepEqual(executed, ["src/sessions/managed-subagents.integration.test.ts", "src/sessions/managed-subagents.rollback.test.ts", "src/sessions/managed-subagents.invalid-entry.test.ts"]);
     const candidate = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
     assert.equal(candidate.version, "0.76.1-tron.99");
     assert.deepEqual(candidate.fork, { repository: null, commit });
