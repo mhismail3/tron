@@ -2,7 +2,8 @@
 """Failure modes: a changed path skips its verify check; a deleted or renamed
 path loses its owner; an unrelated path selects a check; a missing, zero or
 unresolvable base skips coverage; an unknown check name is silently unselected;
-the GitHub output format drifts from the `name=true|false` lines the workflow reads.
+the GitHub output format drifts from the `name=true|false` lines the workflow reads;
+a gated policy suite skips a repository file it reads.
 
 Each case runs the real CLI in a temporary Git repository. The check globs come
 from the repository's `.github/work.json`, so CI and verify share one definition.
@@ -111,6 +112,21 @@ class VerifyScopeTests(unittest.TestCase):
         payload = self.run_cli(self.base, "pi-subagents", "not-a-check")
         self.assertEqual(payload["reason"], "error")
         self.assertEqual(payload["checks"], {"pi-subagents": True, "not-a-check": True})
+
+    def test_policy_gates_select_every_input_their_suites_read(self):
+        # Policy skips a gated suite when its check is not selected, so each file a
+        # suite reads must select that suite, and no other gated suite.
+        names = ("work-tooling", "triage", "profiler")
+        for path, owner in [
+            ("tools/work/land.py", "work-tooling"),
+            ("packages/mac-app/.gitignore", "work-tooling"),
+            ("packages/gateway/src/tron-home-environment-policy.mjs", "work-tooling"),
+            ("scripts/tron_triage.py", "triage"),
+            ("scripts/tron-profile-ios", "profiler"),
+        ]:
+            with self.subTest(path=path):
+                base = self.change(path)
+                self.assertEqual(self.run_cli(base, *names)["checks"], {name: name == owner for name in names})
 
     def test_github_output_appends_name_and_lowercase_boolean_lines(self):
         output = self.repo / "github-output"

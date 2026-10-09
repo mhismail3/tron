@@ -24,6 +24,7 @@ from pathlib import Path
 
 import verify
 from gh import Gh
+from repo_template import clone_with_identity, copy_template
 
 REMOTE = "origin"
 BASE = "main"
@@ -73,40 +74,8 @@ def snapshot(root: Path) -> dict:
     return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
-class VerifyFixture(unittest.TestCase):
-    def test_agent_shell_live_home_paths_do_not_block_or_reach_checks(self):
-        # Failure modes: an agent shell's live-home paths refuse verify before any
-        # check runs; a check inherits them; a check writes into the live home
-        # through them. The fake live home is HOME/.tron, the policy's live home.
-        home = self.tmp / "agent-home"
-        live_home = home / ".tron"
-        (live_home / "sessions").mkdir(parents=True)
-        (live_home / "sessions" / "live.jsonl").write_text("live\n")
-        probe = self.tmp / "probe.py"
-        probe.write_text(textwrap.dedent("""\
-            import os, sys
-            if "PI_SESSION_FILE" in os.environ:
-                with open(os.environ["PI_SESSION_FILE"], "a") as session:
-                    session.write("probe\\n")
-            inherited = [name for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT")
-                         if name in os.environ]
-            sys.exit(f"inherited {inherited}" if inherited else 0)
-            """))
-        self.config["verify"]["checks"][0]["command"] = f"python3 {probe} && {self._counting('app')}"
-        self.commit(self.repo, "app/a.txt", "two\n")
-        before = snapshot(live_home)
-        agent_shell = {
-            "HOME": str(home),
-            "PI_CODING_AGENT_DIR": str(live_home / "agent"),
-            "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
-            "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
-        }
-        with mock.patch.dict(os.environ, agent_shell):
-            receipt = self.verify()
-        self.assertTrue(receipt["passed"], receipt["checks"]["app"])
-        self.assertEqual(self.runs("app"), 1)
-        self.assertEqual(snapshot(live_home), before)
-
+class EnvironmentAndSelectorTests(unittest.TestCase):
+    # These need no fixture repository, so they run once rather than once per fixture subclass.
     def test_home_name_selector_fails_before_check_selection(self):
         root = Path(__file__).resolve().parents[2]
         node_bin = str(Path(subprocess.check_output(["which", "node"], text=True).strip()).parent)
@@ -118,60 +87,64 @@ class VerifyFixture(unittest.TestCase):
         # Failure modes: PATH entries under ~/.tron are refused (they locate
         # executables); an unrelated path is dropped (it is no home); a selector is
         # dropped (removal would retarget the home), so it must be refused instead.
-        root = Path(__file__).resolve().parents[2]
-        user_home = self.tmp / "user-home"
-        agent_bin = user_home / ".tron" / "agent" / "bin"
-        policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
-        node = subprocess.check_output(["which", "node"], text=True).strip()
-        environment = {
-            "HOME": str(user_home),
-            "PATH": str(agent_bin),
-            "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent"),
-            "GATEWAY_TEST_UNRELATED": str(self.tmp / "elsewhere"),
-        }
-        dropped = subprocess.run([node, str(policy)], env=environment, capture_output=True, text=True)
-        self.assertEqual(dropped.returncode, 0, dropped.stderr)
-        self.assertEqual(dropped.stdout, "PI_CODING_AGENT_DIR\n")
+        with tempfile.TemporaryDirectory() as scratch:
+            tmp = Path(scratch)
+            root = Path(__file__).resolve().parents[2]
+            user_home = tmp / "user-home"
+            agent_bin = user_home / ".tron" / "agent" / "bin"
+            policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
+            node = subprocess.check_output(["which", "node"], text=True).strip()
+            environment = {
+                "HOME": str(user_home),
+                "PATH": str(agent_bin),
+                "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent"),
+                "GATEWAY_TEST_UNRELATED": str(tmp / "elsewhere"),
+            }
+            dropped = subprocess.run([node, str(policy)], env=environment, capture_output=True, text=True)
+            self.assertEqual(dropped.returncode, 0, dropped.stderr)
+            self.assertEqual(dropped.stdout, "PI_CODING_AGENT_DIR\n")
 
-        refused = subprocess.run(
-            [node, str(policy)],
-            env={**environment, "TRON_DATA_DIR": str(user_home / ".tron")},
-            capture_output=True, text=True,
-        )
-        self.assertNotEqual(refused.returncode, 0, refused.stdout)
-        self.assertIn("TRON_DATA_DIR=", refused.stderr)
+            refused = subprocess.run(
+                [node, str(policy)],
+                env={**environment, "TRON_DATA_DIR": str(user_home / ".tron")},
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(refused.returncode, 0, refused.stdout)
+            self.assertIn("TRON_DATA_DIR=", refused.stderr)
 
     def test_gateway_test_entry_drops_inherited_home_paths_and_refuses_selectors(self):
         # Failure modes: the --import preflight that node --test entry points load
         # keeps an inherited live-home path (a test then reaches it); drops PATH or
         # an unrelated variable; or accepts a selector that retargets the home.
-        root = Path(__file__).resolve().parents[2]
-        gateway = root / "packages/gateway"
-        user_home = self.tmp / "user-home"
-        live_home = user_home / ".tron"
-        node = subprocess.check_output(["which", "node"], text=True).strip()
-        entry = [node, "--import", "./test-support/tron-home-environment-preflight.mjs", "-e",
-                 "process.stdout.write(JSON.stringify(process.env))"]
-        inherited = {
-            "HOME": str(user_home),
-            "PATH": os.environ["PATH"],
-            "PI_CODING_AGENT_DIR": str(live_home / "agent"),
-            "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
-            "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
-            "GATEWAY_TEST_UNRELATED": "kept",
-        }
-        result = subprocess.run(entry, cwd=gateway, env=inherited, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        seen = json.loads(result.stdout)
-        for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT"):
-            self.assertNotIn(name, seen)
-        self.assertEqual(seen["GATEWAY_TEST_UNRELATED"], "kept")
-        self.assertEqual(seen["PATH"], inherited["PATH"])
+        with tempfile.TemporaryDirectory() as scratch:
+            tmp = Path(scratch)
+            root = Path(__file__).resolve().parents[2]
+            gateway = root / "packages/gateway"
+            user_home = tmp / "user-home"
+            live_home = user_home / ".tron"
+            node = subprocess.check_output(["which", "node"], text=True).strip()
+            entry = [node, "--import", "./test-support/tron-home-environment-preflight.mjs", "-e",
+                     "process.stdout.write(JSON.stringify(process.env))"]
+            inherited = {
+                "HOME": str(user_home),
+                "PATH": os.environ["PATH"],
+                "PI_CODING_AGENT_DIR": str(live_home / "agent"),
+                "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
+                "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
+                "GATEWAY_TEST_UNRELATED": "kept",
+            }
+            result = subprocess.run(entry, cwd=gateway, env=inherited, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            seen = json.loads(result.stdout)
+            for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT"):
+                self.assertNotIn(name, seen)
+            self.assertEqual(seen["GATEWAY_TEST_UNRELATED"], "kept")
+            self.assertEqual(seen["PATH"], inherited["PATH"])
 
-        selector = subprocess.run(entry, cwd=gateway, env={**inherited, "TRON_DATA_DIR": str(live_home)},
-                                  capture_output=True, text=True)
-        self.assertNotEqual(selector.returncode, 0, selector.stdout)
-        self.assertIn("TRON_DATA_DIR=", selector.stderr)
+            selector = subprocess.run(entry, cwd=gateway, env={**inherited, "TRON_DATA_DIR": str(live_home)},
+                                      capture_output=True, text=True)
+            self.assertNotEqual(selector.returncode, 0, selector.stdout)
+            self.assertIn("TRON_DATA_DIR=", selector.stderr)
 
     def test_node_test_runner_rejects_home_name_selector(self):
         root = Path(__file__).resolve().parents[2]
@@ -230,6 +203,33 @@ class VerifyFixture(unittest.TestCase):
                 self.assertTrue(scale.matches(path))
         self.assertFalse(scale.matches("packages/gateway/src/sessions/session-manager.ts"))
 
+def _build_verify_template(root: Path) -> None:
+    """The history every VerifyFixture copies: a remote whose base holds three files, and a clone on BRANCH."""
+    remote = root / "remote.git"
+    git(root, "init", "-q", "--bare", "-b", BASE, str(remote))
+    seed = clone_with_identity(remote, root / "seed")
+    for relative in ("app/a.txt", "lib/b.txt", "README.md"):
+        VerifyFixture.write(seed, relative, "one\n")
+    git(seed, "add", "-A")
+    git(seed, "commit", "-q", "-m", "base")
+    git(seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
+    repo = clone_with_identity(remote, root / "repo")
+    git(repo, "checkout", "-q", "-b", BRANCH)
+
+
+_verify_template_root: Path
+
+
+def setUpModule():
+    # Built once per module; each VerifyFixture copies it.
+    global _verify_template_root
+    template = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(template.cleanup)
+    _verify_template_root = Path(template.name).resolve()
+    _build_verify_template(_verify_template_root)
+
+
+class VerifyFixture(unittest.TestCase):
     def setUp(self):
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
@@ -237,15 +237,9 @@ class VerifyFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
-        self.seed = self._clone("seed")
-        for relative in ("app/a.txt", "lib/b.txt", "README.md"):
-            self.write(self.seed, relative, "one\n")
-        git(self.seed, "add", "-A")
-        git(self.seed, "commit", "-q", "-m", "base")
-        git(self.seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
-        self.repo = self._clone("repo")
-        git(self.repo, "checkout", "-q", "-b", BRANCH)
+        self.seed = self.tmp / "seed"
+        self.repo = self.tmp / "repo"
+        copy_template(_verify_template_root, self.tmp, [self.seed, self.repo], REMOTE, self.remote)
         self.counts = self.tmp / "counts"
         self.counts.mkdir()
         self.fail_flag = self.tmp / "fail-app"
@@ -269,13 +263,6 @@ class VerifyFixture(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-
-    def _clone(self, name: str) -> Path:
-        path = self.tmp / name
-        git(self.tmp, "clone", "-q", str(self.remote), str(path))
-        git(path, "config", "user.name", "Agent")
-        git(path, "config", "user.email", "agent@example.invalid")
-        return path
 
     def _counting(self, name: str) -> str:
         return f"echo run >> {self.counts / name}"
@@ -323,6 +310,39 @@ class ReceiptBindingTests(VerifyFixture):
 class CheckSetTests(VerifyFixture):
     # Failure mode 13: the required set comes from the whole branch diff, and
     # carry-over keeps a check required without running it.
+    def test_agent_shell_live_home_paths_do_not_block_or_reach_checks(self):
+        # Failure modes: an agent shell's live-home paths refuse verify before any
+        # check runs; a check inherits them; a check writes into the live home
+        # through them. The fake live home is HOME/.tron, the policy's live home.
+        home = self.tmp / "agent-home"
+        live_home = home / ".tron"
+        (live_home / "sessions").mkdir(parents=True)
+        (live_home / "sessions" / "live.jsonl").write_text("live\n")
+        probe = self.tmp / "probe.py"
+        probe.write_text(textwrap.dedent("""\
+            import os, sys
+            if "PI_SESSION_FILE" in os.environ:
+                with open(os.environ["PI_SESSION_FILE"], "a") as session:
+                    session.write("probe\\n")
+            inherited = [name for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT")
+                         if name in os.environ]
+            sys.exit(f"inherited {inherited}" if inherited else 0)
+            """))
+        self.config["verify"]["checks"][0]["command"] = f"python3 {probe} && {self._counting('app')}"
+        self.commit(self.repo, "app/a.txt", "two\n")
+        before = snapshot(live_home)
+        agent_shell = {
+            "HOME": str(home),
+            "PI_CODING_AGENT_DIR": str(live_home / "agent"),
+            "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
+            "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
+        }
+        with mock.patch.dict(os.environ, agent_shell):
+            receipt = self.verify()
+        self.assertTrue(receipt["passed"], receipt["checks"]["app"])
+        self.assertEqual(self.runs("app"), 1)
+        self.assertEqual(snapshot(live_home), before)
+
     def test_later_commit_does_not_narrow_the_required_set(self):
         first = self.commit(self.repo, "app/a.txt", "two\n")
         self.verify()
