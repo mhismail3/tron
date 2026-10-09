@@ -412,9 +412,13 @@
           "scripts/ios_verify_test_selection.py",
           "scripts/test-ios-verify-test-selection.py",
           "scripts/ci_ios_infra_scope.py",
-          "scripts/test-ci-ios-infra-scope.py"
+          "scripts/test-ci-ios-infra-scope.py",
+          "scripts/ci_verify_scope.py",
+          "scripts/test-ci-verify-scope.py",
+          "tools/work/verify.py",
+          ".github/work.json"
         ],
-        "command": "python3 scripts/test-ios-verify-test-selection.py && python3 scripts/test-ci-ios-infra-scope.py"
+        "command": "python3 scripts/test-ios-verify-test-selection.py && python3 scripts/test-ci-ios-infra-scope.py && python3 scripts/test-ci-verify-scope.py"
       },
       {
         "name": "mac",
@@ -731,6 +735,7 @@
     "ciWorkflow": "ci.yml",
     "advisoryJobs": [
       "gateway",
+      "gateway-tooling",
       "ios",
       "pi-sdk-e2e",
       "mac"
