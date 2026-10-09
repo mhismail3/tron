@@ -1801,7 +1801,7 @@ struct ChatView: View {
     }
 
     private var transcriptRevealAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26)
+        ChatMotion.transcriptViewReveal(reduceMotion: reduceMotion)
     }
 
     private var admitsScrollGeometryCallbacks: Bool {
@@ -1859,9 +1859,7 @@ struct ChatView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.tronBackground)
             .transition(.opacity.animation(
-                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
-                    reduceMotion: reduceMotion
-                )
+                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
         case .presented, .ready:
             EmptyView()
@@ -2577,7 +2575,7 @@ struct ChatView: View {
                 transaction.disablesAnimations = true
                 withTransaction(transaction, update)
             } else {
-                withAnimation(.smooth(duration: duration), update)
+                withAnimation(ChatMotion.smooth(duration: duration), update)
             }
         }
         #if HOSTED_TEST

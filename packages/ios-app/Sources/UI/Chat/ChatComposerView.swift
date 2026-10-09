@@ -92,20 +92,10 @@ struct ChatComposerView: View {
                         if showsCatchUp { catchUpButton }
                     }
                 }
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: showsCatchUp
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: showsCatchUp)
                 // Visibility and glyph changes animate at the shared layout
                 // owner so the input bar participates in the glass morph too.
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: activityKind
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: activityKind)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
@@ -114,19 +104,19 @@ struct ChatComposerView: View {
             // removed child surfaces inside the already-installed space.
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.attachmentArrive(reduceMotion: reduceMotion)
                     : nil,
                 value: pendingAttachments.map(\.id)
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: selectedResource?.id
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: resourcePicker?.kind
             )
@@ -150,7 +140,7 @@ struct ChatComposerView: View {
             )
             .offset(y: ChatBottomActivityBlurLayout.translation(keyboardVisible: keyboardVisible))
             .ignoresSafeArea(edges: .bottom)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: keyboardVisible)
+            .animation(reduceMotion ? nil : ChatMotion.keyboardControl, value: keyboardVisible)
         }
     }
 
@@ -287,9 +277,7 @@ struct ChatComposerView: View {
             }
         }
         .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .spring(response: 0.32, dampingFraction: 0.82),
+            ChatMotion.composerStructuralResize(reduceMotion: reduceMotion),
             value: trailingMode
         )
         .frame(maxWidth: .infinity, minHeight: 40)
@@ -421,7 +409,7 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         if reduceMotion {
-            withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true)) {
+            withAnimation(ChatMotion.attachmentArrive(reduceMotion: true)) {
                 presentedAttachments = target
             }
             return
@@ -439,7 +427,7 @@ struct ChatPendingAttachmentStrip: View {
             current: presentedAttachments.map(\.id),
             target: target.map(\.id)
         )
-        let animation = ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+        let animation = ChatMotion.attachmentArrive(reduceMotion: false)
         withAnimation(animation) {
             presentedAttachments.removeAll { !targetIDs.contains($0.id) }
             if insertionIDs.isEmpty {
