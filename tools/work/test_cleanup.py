@@ -1,4 +1,4 @@
-"""Isolated checks for cleanup failure modes 53-62, 66, 70 and 75 in README.md.
+"""Isolated checks for cleanup failure modes 53-62, 66, 70, 75 and 88-91 in README.md.
 
 Real temporary repositories: a local bare remote, a primary clone, and linked
 task worktrees under the configured root. GitHub is a fake `gh` (WORK_GH) that
@@ -588,6 +588,82 @@ class LocalDataTests(CleanupFixture):
                 self.assertEqual(code, 1, out)
                 self.assertIn(name, out)
                 self.assert_kept(path, branch, head)
+
+
+class NestedCheckoutTests(CleanupFixture):
+    """Failure modes 88-91: a Git checkout nested in an ignored build root, as SwiftPM makes under DerivedData.
+
+    Git lists a nested checkout as one directory entry (`dir/`), not as its files.
+    """
+
+    CHECKOUT = "build/device-compile-derived-data/SourcePackages/checkouts/SwiftTerm"
+
+    def nested_checkout(self, path: Path, relative: str) -> Path:
+        """A clone of its own remote, at main, as `swift package resolve` makes: its commits are all on origin."""
+        slug = f"{path.name}-{relative.replace('/', '-')}"
+        origin = self.tmp / f"origin-{slug}.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(origin))
+        seed = clone_with_identity(origin, self.tmp / f"seed-{slug}")
+        self.commit(seed, "Package.swift", "// swift-tools-version: 5.9\n")
+        git(seed, "push", "-q", "origin", f"HEAD:{BASE}")
+        checkout = path / relative
+        checkout.parent.mkdir(parents=True)
+        clone_with_identity(origin, checkout)
+        return checkout
+
+    def test_a_clean_nested_checkout_in_a_build_root_is_removed(self):
+        # Failure mode 88: SwiftPM re-fetches its checkouts, so a clean one never keeps the worktree.
+        path, branch, _ = self.task(7)
+        self.nested_checkout(path, self.CHECKOUT)
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 0, out)
+        self.assertIn(str(path), self.released_in())
+        self.assert_removed(path, branch)
+
+    def test_a_nested_checkout_with_uncommitted_untracked_or_ignored_content_keeps_the_worktree(self):
+        # Failure mode 89: a checkout's own changes are local data, whatever the parent's globs say.
+        def ignored_file(checkout: Path) -> None:
+            self.write(checkout, ".git/info/exclude", "scratch/\n")
+            self.write(checkout, "scratch/a.o", "x\n")
+
+        cases = {
+            "modified": lambda c: self.write(c, "Package.swift", "edited\n"),
+            "untracked": lambda c: self.write(c, "scratch.txt", "x\n"),
+            "ignored": ignored_file,
+        }
+        for number, (name, make) in enumerate(cases.items(), start=20):
+            with self.subTest(case=name):
+                path, branch, head = self.task(number)
+                make(self.nested_checkout(path, self.CHECKOUT))
+                code, out = self.cleanup(path)
+                self.assertEqual(code, 1, out)
+                self.assertIn(self.CHECKOUT, out)
+                self.assert_kept(path, branch, head)
+
+    def test_a_nested_checkout_with_a_commit_only_locally_keeps_the_worktree(self):
+        # Failure mode 90: a commit on any local ref that no remote-tracking ref contains is local data.
+        path, branch, head = self.task(30)
+        checkout = self.nested_checkout(path, self.CHECKOUT)
+        git(checkout, "switch", "-q", "-c", "scratch")
+        self.commit(checkout, "src/unpushed.swift", "x\n")
+        git(checkout, "switch", "-q", BASE)
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn(self.CHECKOUT, out)
+        self.assert_kept(path, branch, head)
+
+    def test_a_nested_checkout_outside_the_regenerable_globs_keeps_the_worktree(self):
+        # Failure mode 91: only a path whose segments match a glob is regenerable; `build-tools` is not `build`.
+        path, branch, head = self.task(31)
+        # Ignored by the repository, so the regenerable globs alone decide whether it is kept.
+        self.write(self.repo, ".git/info/exclude", "vendor/\npackages/\n")
+        for relative in ("vendor/Lib", "packages/build-tools/Lib"):
+            self.nested_checkout(path, relative)
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 1, out)
+        self.assertIn("vendor/Lib", out)
+        self.assertIn("packages/build-tools/Lib", out)
+        self.assert_kept(path, branch, head)
 
 
 class ProcessTests(CleanupFixture):
