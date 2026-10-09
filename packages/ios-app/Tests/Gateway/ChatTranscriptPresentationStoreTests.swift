@@ -1652,8 +1652,8 @@ struct ChatTranscriptPresentationStoreTests {
                 ))
             )
         }
-        func kind(_ row: ChatPhysicalTranscriptRow) -> ChatPhysicalTranscriptReplacementKind {
-            ChatPhysicalTranscriptReplacementPolicy.replacement(from: row, to: canonicalRow)
+        func kind(_ row: ChatPhysicalTranscriptRow) -> ChatRowMotionTransition {
+            ChatRowMotionTransitionPolicy.select(from: row, to: canonicalRow)
         }
 
         // Ordinary lifecycles already render the canonical bubble.
@@ -1735,7 +1735,7 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(!resolvedNotification.showsProgress)
             #expect(resolvedPhysical.id == pendingPhysical.id)
             #expect(resolvedPhysical.content != pendingPhysical.content)
-            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+            #expect(ChatRowMotionTransitionPolicy.select(
                 from: pendingPhysical,
                 to: resolvedPhysical
             ) == .notification)
@@ -1837,7 +1837,7 @@ struct ChatTranscriptPresentationStoreTests {
             let outgoingPhysical = try #require(
                 localRows.first { $0.id == submission.presentationID }
             )
-            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+            #expect(ChatRowMotionTransitionPolicy.select(
                 from: outgoingPhysical,
                 to: replacement
             ) == .promptContent)
@@ -1856,11 +1856,11 @@ struct ChatTranscriptPresentationStoreTests {
                     queue: [queuedMessage]
                 ))
             )
-            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+            #expect(ChatRowMotionTransitionPolicy.select(
                 from: outgoingPhysical,
                 to: queuedPhysical
             ) == .none)
-            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+            #expect(ChatRowMotionTransitionPolicy.select(
                 from: queuedPhysical,
                 to: replacement
             ) == .promptContent)

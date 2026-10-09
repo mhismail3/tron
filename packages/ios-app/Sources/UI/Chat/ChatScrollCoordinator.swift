@@ -188,6 +188,13 @@ final class ChatScrollCoordinator {
             && catchUpPhase == .none
             && !visibleOpeningRevealPending
     }
+    /// Row-height motion must install atomically while an application or user
+    /// scroll lease owns viewport positioning.
+    var isViewportBeingPositioned: Bool {
+        isUserInteracting || command != nil || appliedTargetCommandToken != nil
+            || targetReleaseToken != nil || prepend != nil
+            || catchUpPhase != .none || visibleOpeningRevealPending
+    }
     var canInstallPersistentBottomPosition: Bool {
         canAutomaticallyFollow && command == nil
             && appliedTargetCommandToken == nil && targetReleaseToken == nil

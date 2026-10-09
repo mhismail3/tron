@@ -40,7 +40,7 @@ enum ChatEntranceGrowthPolicy {
     /// a transcript admission requirement. Keeping very tall rows at their
     /// natural height prevents a single large prompt or Markdown response from
     /// moving the lazy stack by tens of thousands of points per animation.
-    static let maximumAnimatedHeight: CGFloat = 8_000
+    static let maximumAnimatedHeight: CGFloat = ChatRowMotionPolicy.maximumAnimatedHeight
 
     static func normalizedProgress(_ progress: CGFloat) -> CGFloat {
         guard progress.isFinite else { return 0 }
@@ -74,10 +74,25 @@ enum ChatEntranceGrowthPolicy {
 }
 
 enum ChatRowMotionPolicy {
-    /// A large accumulated network backlog installs atomically instead of
-    /// interpolating an unbounded row. Ordinary line and chip growth remains
-    /// well below this limit.
     static let maximumAnimatedGrowth: CGFloat = 2_000
+    static let maximumAnimatedHeight: CGFloat = 8_000
+
+    static func canInterpolate(
+        from currentHeight: CGFloat,
+        to targetHeight: CGFloat,
+        reduceMotion: Bool,
+        surfaceActive: Bool,
+        viewportIsPositioning: Bool
+    ) -> Bool {
+        guard currentHeight.isFinite,
+              targetHeight.isFinite,
+              max(currentHeight, targetHeight) <= maximumAnimatedHeight,
+              !reduceMotion,
+              surfaceActive,
+              !viewportIsPositioning else { return false }
+        let delta = abs(targetHeight - currentHeight)
+        return delta > 0.5 && delta <= maximumAnimatedGrowth
+    }
 
     static func shouldAnimate(
         currentHeight: CGFloat?,
@@ -85,17 +100,20 @@ enum ChatRowMotionPolicy {
         contentChanged: Bool,
         streaming: Bool,
         reduceMotion: Bool,
-        surfaceActive: Bool
+        surfaceActive: Bool,
+        viewportIsPositioning: Bool
     ) -> Bool {
         guard let currentHeight,
-              currentHeight.isFinite,
-              targetHeight.isFinite,
-              targetHeight > currentHeight + 0.5 else { return false }
-        return contentChanged
-            && streaming
-            && !reduceMotion
-            && surfaceActive
-            && targetHeight - currentHeight <= maximumAnimatedGrowth
+              targetHeight > currentHeight + 0.5,
+              contentChanged,
+              streaming else { return false }
+        return canInterpolate(
+            from: currentHeight,
+            to: targetHeight,
+            reduceMotion: reduceMotion,
+            surfaceActive: surfaceActive,
+            viewportIsPositioning: viewportIsPositioning
+        )
     }
 }
 
@@ -186,14 +204,6 @@ private struct ChatEntranceGrowthClipShape: Shape {
 }
 
 extension View {
-    /// Clips only the animated vertical admission. Horizontal overflow remains
-    /// available to native text and glass effects throughout incremental growth.
-    func chatIncrementalVerticalClip() -> some View {
-        padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
-            .clipShape(Rectangle())
-            .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
-    }
-
     /// Clips only the animated vertical admission. The clip node is present at
     /// every progress — a settled row's clip covers everything it can draw — so
     /// admission never switches the row's view structure and the transcript chip
