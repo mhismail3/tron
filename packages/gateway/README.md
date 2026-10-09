@@ -1796,15 +1796,24 @@ Stop is scoped to one invocation, not to an extension workflow. A stopped run's 
 assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
 continuations can distinguish a user stop from a completed run and decide whether to
 continue; Tron never silently disables extension continuation on the user's behalf, and the
-Stop affordance must not claim that it does. Accepted steering is Gateway-owned through
-consumption: when Stop aborts a run with queued steering, RuntimeSlot waits for abort
-settlement, clears Pi's non-authoritative string queue, then starts one new run with the first
-accepted steer through the public user-message API and queues the rest in order. This retains
-the Gateway's exact command identities and image payloads; the queued-steer projection clears
-only as each item is consumed. Stop without queued steering leaves the session idle. The
-`stop-steering-continuation` diagnostic records the accepted steer count and continuation
-outcome. A continuation that starts after a stop is a new invocation with its own identity,
-never a resurrection of the stopped one.
+Stop affordance must not claim that it does. Accepted steering remains Gateway-owned through
+consumption. If Stop aborts a run with queued steering, RuntimeSlot closes Pi queue admission
+and preserves each original input record (raw submitted text, images, source, command and
+operation identity). It clears Pi's queued copies before the full abort so Pi cannot consume
+those copies at the abort boundary; steering accepted during settlement stays Gateway-owned.
+After the shared abort set settles, all originals are redelivered in order through normal
+serialized admission. The first starts the run and later items queue with
+their original behavior; a queue row retires only at its exact message-start or terminal
+admission boundary. Input handlers run again on redelivery because the first processed copy
+never reached the model and is discarded. Stop without queued steering leaves the session idle.
+The Gateway `session.stop-steering-continuation` log records the accepted steer count and
+continuation outcome. A continuation that starts after a stop reuses the accepted input's
+identity rather than resurrecting the stopped run. A future Pi API that accepts an already
+processed input without rerunning handlers is tracked separately in #617. The
+real-WebSocket `rpc-idle-admission.integration.test.ts` case pins this boundary to the pinned
+Pi SDK's public `AgentSession.clearQueue()` and `prompt()` lifecycle: clearing must retire both
+session- and Agent-level queue copies, and normal prompt admission must preserve the AgentSession
+run, transcript and terminal callbacks. Requalify this case on every Pi SDK upgrade.
 Extension commands are resolved before ordinary streaming rejection and still execute through
 Pi's prompt path. Tron registers its release-owned `ask_user` capability as one sequential
 semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
