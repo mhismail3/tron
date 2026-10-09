@@ -645,7 +645,7 @@ describe("Tron Home activations end to end", () => {
     expect(signals.some(record => record.event === "home.chapter-recovery" && record.reason === "absent")).toBe(true);
     expect(signals.some(record => record.event === "home.chapter-refused" && record.reason === "hard-entries")).toBe(true);
     const approved = new Set(["timestamp", "level", "message", "process", "event", "source", "reason", "category", "chapterOrdinal",
-      "boundary", "crossingBytes", "crossingEntries", "settledBytes", "settledEntries"]);
+      "boundary", "crossingBytes", "crossingEntries", "settledBytes", "settledEntries", "operation"]);
     for (const signal of signals) expect(Object.keys(signal).every(key => approved.has(key))).toBe(true);
     const encoded = JSON.stringify(signals);
     for (const privateValue of [secret, f.root, slot.id, successor.sessionId, params.commandId, client.identity]) {

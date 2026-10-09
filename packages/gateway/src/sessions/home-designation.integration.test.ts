@@ -342,7 +342,7 @@ describe("Tron Home designation", () => {
 
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: false, live: false, sessionPresent: false, taskRecovery: { available: true },
-      memory: { configured: false, open: false },
+      memory: { configured: false, open: false, paused: false },
       // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
       phase: "undesignated", activation: { available: false },
       readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
@@ -377,7 +377,7 @@ describe("Tron Home designation", () => {
       sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
       // Home has no memory defaults: until `home.configureMemory`, the
       // projection says so, every activation refuses, and status names the fix.
-      memory: { configured: false, open: false },
+      memory: { configured: false, open: false, paused: false },
       phase: "blocked", activation: { available: false },
       readiness: { ready: false, gaps: ["memory-not-configured"] }, recovery: { action: "configure-memory" },
     });
@@ -467,7 +467,7 @@ describe("Tron Home designation", () => {
     await waitUntil(() => home.snapshot().configurationBlocker === null, 20_000);
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "home-disable-after-busy" }) as unknown as HomeDesignation;
     expect(disabled).toEqual({ ...designation, generation: 2 });
-    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "refused", "disabled"]);
+    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "client-control", "refused", "disabled"]);
   });
 
   homeCase("replaces the live runtime in place, keeping the slot, its subscribers and the session", async () => {
