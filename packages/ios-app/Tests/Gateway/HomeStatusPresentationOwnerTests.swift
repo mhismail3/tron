@@ -167,31 +167,136 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         if let token = owner.surfaceToken { owner.retireSurface(token) }
     }
 
-    func testConnectionOnlyClaimReadsPerConnectionAndNeverPollsOrReadsOnPresentationChange() async throws {
+    func testUnresolvedClaimReadsPerConnectionAndNeverPolls() async throws {
         let (owner, coordinator, token) = mountedOwner()
         let claimed = expectation(description: "claim read")
         let reconnected = expectation(description: "read after connection admission")
         var fetchCount = 0
-        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly) { _ in
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly(sessionID: "home-session")) { _ in
             fetchCount += 1
             if fetchCount == 1 { claimed.fulfill() }
             if fetchCount == 2 { reconnected.fulfill() }
-            return try self.decodeStatus()
+            throw URLError(.networkConnectionLost)
         }
         await fulfillment(of: [claimed], timeout: 1)
         try await Task.sleep(for: .milliseconds(5_300))
-        XCTAssertEqual(fetchCount, 1, "a claimed status polls at the mounted fallback cadence")
+        XCTAssertEqual(fetchCount, 1, "a claim that has not published polls at no cadence")
+        await owner.invalidateMounted()
+        XCTAssertEqual(fetchCount, 1, "a claim that has not published is not refreshed by invalidation")
+        owner.connectionAvailable(profileID: "p", connectionID: "next", capabilityEnabled: true)
+        await fulfillment(of: [reconnected], timeout: 1)
+        XCTAssertEqual(fetchCount, 2)
+        owner.retireSurface(token)
+        coordinator.retire(token)
+    }
+
+    func testMatchingClaimPromotesToMountedCadence() async throws {
+        let (owner, coordinator, token) = mountedOwner()
+        var fetchCount = 0
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly(sessionID: "home-session")) { _ in
+            fetchCount += 1
+            return try self.decodeStatus(sessionID: "home-session")
+        }
+        try await waitUntil { owner.status != nil }
+        XCTAssertEqual(owner.status?.sessionId, "home-session")
+        XCTAssertEqual(fetchCount, 1, "publishing the claim takes no extra read")
+        await owner.invalidateMounted()
+        XCTAssertEqual(fetchCount, 2, "a promoted claim refreshes on invalidation")
+        try await Task.sleep(for: .seconds(5.5))
+        XCTAssertEqual(fetchCount, 3, "a promoted claim runs the five-second mounted fallback")
+        owner.retireSurface(token)
+        coordinator.retire(token)
+    }
+
+    func testNonMatchingClaimReleasesEveryReadButKeepsStatus() async throws {
+        let (owner, coordinator, token) = mountedOwner()
+        var fetchCount = 0
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly(sessionID: "ordinary-session")) { _ in
+            fetchCount += 1
+            return try self.decodeStatus(sessionID: "home-session")
+        }
+        try await waitUntil { owner.status != nil }
+        XCTAssertEqual(owner.status?.sessionId, "home-session", "the released status stays for the dashboard")
+        XCTAssertEqual(fetchCount, 1)
+
+        await owner.invalidateMounted()
+        await owner.invalidateMounted(sessionID: "home-session")
+        await owner.refreshMounted()
         let cover = PresentationSurfaceToken(id: "cover", generation: UUID())
         coordinator.register(cover, parent: token)
         owner.presentationActivityChanged(for: token)
         coordinator.retire(cover)
         owner.presentationActivityChanged(for: token)
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertEqual(fetchCount, 1, "a claimed status reads on presentation changes")
+        XCTAssertEqual(owner.status?.sessionId, "home-session", "the released status stays for the dashboard")
         owner.connectionAvailable(profileID: "p", connectionID: "next", capabilityEnabled: true)
-        await fulfillment(of: [reconnected], timeout: 1)
-        XCTAssertEqual(fetchCount, 2)
+        try await Task.sleep(for: .seconds(5.5))
+        XCTAssertEqual(fetchCount, 1, "a released claim reads on no invalidation, mutation, uncover, connection, or fallback")
         owner.retireSurface(token)
+        coordinator.retire(token)
+    }
+
+    func testCoveredClaimReadRetriesOnceWhenSurfaceUncovers() async throws {
+        let (owner, coordinator, token) = mountedOwner()
+        var fetchCount = 0
+        var gated: [CheckedContinuation<HomeStatusDTO, Error>] = []
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly(sessionID: "home-session")) { _ in
+            fetchCount += 1
+            if fetchCount == 1 {
+                return try await withCheckedThrowingContinuation { gated.append($0) }
+            }
+            return try self.decodeStatus(sessionID: "home-session")
+        }
+        try await waitUntil { fetchCount == 1 }
+        let cover = PresentationSurfaceToken(id: "cover", generation: UUID())
+        coordinator.register(cover, parent: token)
+        owner.presentationActivityChanged(for: token)
+        gated[0].resume(returning: try decodeStatus(sessionID: "home-session"))
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(owner.status, "a read discarded by the cover publishes nothing")
+
+        coordinator.retire(cover)
+        owner.presentationActivityChanged(for: token)
+        try await waitUntil { owner.status != nil }
+        XCTAssertEqual(fetchCount, 2, "the uncover retries the discarded claim read once")
+        XCTAssertEqual(owner.status?.sessionId, "home-session")
+        owner.retireSurface(token)
+    }
+
+    func testClaimCoverRetryRunsOnlyOncePerClaim() async throws {
+        let (owner, coordinator, token) = mountedOwner()
+        var fetchCount = 0
+        var gated: [CheckedContinuation<HomeStatusDTO, Error>] = []
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly(sessionID: "home-session")) { _ in
+            fetchCount += 1
+            if fetchCount <= 2 {
+                return try await withCheckedThrowingContinuation { gated.append($0) }
+            }
+            return try self.decodeStatus(sessionID: "home-session")
+        }
+        try await waitUntil { fetchCount == 1 }
+        let cover = PresentationSurfaceToken(id: "cover", generation: UUID())
+        coordinator.register(cover, parent: token)
+        owner.presentationActivityChanged(for: token)
+        gated[0].resume(returning: try decodeStatus(sessionID: "home-session"))
+        coordinator.retire(cover)
+        owner.presentationActivityChanged(for: token)
+        try await waitUntil { fetchCount == 2 }
+        guard gated.count == 2 else {
+            XCTFail("the first uncover must start exactly one retry read")
+            return
+        }
+
+        let secondCover = PresentationSurfaceToken(id: "cover", generation: UUID())
+        coordinator.register(secondCover, parent: token)
+        owner.presentationActivityChanged(for: token)
+        gated[1].resume(returning: try decodeStatus(sessionID: "home-session"))
+        coordinator.retire(secondCover)
+        owner.presentationActivityChanged(for: token)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(fetchCount, 2, "a second cover of the same claim is not retried")
+        XCTAssertNil(owner.status)
+        owner.retireSurface(token)
+        coordinator.retire(token)
     }
 
     func testMountedStatusRefreshesImmediatelyOnInvalidation() async throws {
@@ -222,8 +327,19 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         return (owner, coordinator, token)
     }
 
-    private func decodeStatus() throws -> HomeStatusDTO {
-        try HomeStatusDTO.decode(JSONValue.parse(Data(validStatus.utf8)))
+    private func decodeStatus(sessionID: String? = nil) throws -> HomeStatusDTO {
+        var json = validStatus
+        if let sessionID {
+            json = String(json.dropLast()) + #","sessionId":"\#(sessionID)"}"#
+        }
+        return try HomeStatusDTO.decode(JSONValue.parse(Data(json.utf8)))
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<500 where !condition() {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(condition(), "condition not reached within 2.5 seconds")
     }
 }
 

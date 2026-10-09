@@ -133,12 +133,19 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private var profileID: String?
     @ObservationIgnored private var connectionID: String?
     private(set) var capabilityEnabled = false
-    /// `mounted` follows the visible Home surface: a fallback cadence and immediate
-    /// invalidation. `connectionOnly` is a chat's claim for a status it could not
-    /// yet know: it reads when a connection is admitted and never polls or reads
-    /// on presentation changes.
-    enum Cadence: Equatable, Sendable { case mounted, connectionOnly }
+    /// `mounted` follows the visible Home surface: a fallback cadence, immediate
+    /// invalidation, and mutation refresh. `connectionOnly` is a chat's probe for a
+    /// status it could not yet know: it reads on connection admission and, once
+    /// per claim, after a covering discarded its read. Its first publication decides
+    /// the claim. The claimed session promotes it to `mounted`; any other session
+    /// moves it to `released`, which keeps the published status but never reads again.
+    enum Cadence: Equatable, Sendable {
+        case mounted
+        case connectionOnly(sessionID: String)
+        case released
+    }
     @ObservationIgnored private var cadence = Cadence.mounted
+    @ObservationIgnored private var claimCoverRetryUsed = false
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO)?
     @ObservationIgnored private var activeReadTask: Task<Void, Never>?
@@ -172,6 +179,7 @@ final class HomeStatusPresentationOwner {
         self.connectionID = connectionID
         self.capabilityEnabled = capabilityEnabled
         self.cadence = cadence
+        claimCoverRetryUsed = false
         self.fetch = fetch
         suspended = false
         guard capabilityEnabled else {
@@ -205,14 +213,24 @@ final class HomeStatusPresentationOwner {
 
     /// Presentation coordinator changes are re-evaluated at the same owner
     /// boundary as reads, rather than trusting an activity Boolean captured earlier.
+    /// A covering discards a claim's in-flight read; the first uncover of that claim
+    /// retries it once, so a sheet cannot leave the chat header unresolved forever.
     func presentationActivityChanged(for token: PresentationSurfaceToken) {
         guard token == surfaceToken else { return }
         guard surfaceIsActive(token) else {
             stopWork(clearStatus: false)
             return
         }
-        guard cadence == .mounted else { return }
-        startWorkIfActive()
+        switch cadence {
+        case .mounted:
+            startWorkIfActive()
+        case .connectionOnly:
+            guard !claimCoverRetryUsed, latestFence == nil else { return }
+            claimCoverRetryUsed = true
+            startWorkIfActive()
+        case .released:
+            return
+        }
     }
 
     func invalidateMounted(sessionID: String? = nil) async {
@@ -221,21 +239,8 @@ final class HomeStatusPresentationOwner {
     }
 
     func refreshMounted() async {
-        guard !suspended,
-              capabilityEnabled,
-              let profileID, let connectionID,
-              let token = surfaceToken,
-              let coordinator = activityCoordinator,
-              let fetch,
-              surfaceIsActive(token) else { return }
-        await refresh(
-            profileID: profileID,
-            connectionID: connectionID,
-            capabilityEnabled: capabilityEnabled,
-            token: token,
-            coordinator: coordinator,
-            fetch: fetch
-        )
+        guard cadence == .mounted else { return }
+        await readCurrentSurface()
     }
 
     func beginRead(
@@ -284,6 +289,7 @@ final class HomeStatusPresentationOwner {
               ),
               !suspended else { return false }
         status = value
+        resolveClaim(with: value)
         return true
     }
 
@@ -305,6 +311,20 @@ final class HomeStatusPresentationOwner {
     func suspendForBackground() {
         suspended = true
         stopWork(clearStatus: true)
+    }
+
+    /// A claim's first publication decides it. A matching session promotes the
+    /// surface to the mounted cadence without an extra read. Any other session
+    /// releases it and stops every read, while the published status stays for the dashboard.
+    private func resolveClaim(with value: HomeStatusDTO) {
+        guard case .connectionOnly(let claimedSessionID) = cadence else { return }
+        if value.sessionId == claimedSessionID {
+            cadence = .mounted
+            startFallbackLoop()
+        } else {
+            cadence = .released
+            stopWork(clearStatus: false)
+        }
     }
 
     private func refresh(
@@ -339,16 +359,20 @@ final class HomeStatusPresentationOwner {
     }
 
     private func startWorkIfActive() {
-        guard !suspended, capabilityEnabled, let token = surfaceToken,
+        guard cadence != .released, !suspended, capabilityEnabled, let token = surfaceToken,
               let coordinator = activityCoordinator,
               coordinator.activity(for: token).allowsPresentationPublication,
+              profileID != nil, connectionID != nil, fetch != nil else { return }
+        mountedTask?.cancel()
+        mountedTask = nil
+        Task { @MainActor [weak self] in await self?.readCurrentSurface() }
+        if cadence == .mounted { startFallbackLoop() }
+    }
+
+    private func startFallbackLoop() {
+        guard let token = surfaceToken, let coordinator = activityCoordinator,
               let profileID, let connectionID, let fetch else { return }
         mountedTask?.cancel()
-        Task { @MainActor [weak self] in await self?.refreshMounted() }
-        guard cadence == .mounted else {
-            mountedTask = nil
-            return
-        }
         mountedTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
@@ -368,6 +392,24 @@ final class HomeStatusPresentationOwner {
                 )
             }
         }
+    }
+
+    private func readCurrentSurface() async {
+        guard !suspended,
+              capabilityEnabled,
+              let profileID, let connectionID,
+              let token = surfaceToken,
+              let coordinator = activityCoordinator,
+              let fetch,
+              surfaceIsActive(token) else { return }
+        await refresh(
+            profileID: profileID,
+            connectionID: connectionID,
+            capabilityEnabled: capabilityEnabled,
+            token: token,
+            coordinator: coordinator,
+            fetch: fetch
+        )
     }
 
     private func surfaceIsActive(_ token: PresentationSurfaceToken) -> Bool {

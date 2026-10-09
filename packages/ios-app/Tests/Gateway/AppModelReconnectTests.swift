@@ -1749,6 +1749,59 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a matching chat claim promotes to the mounted cadence and refreshes on its session's summary")
+    func matchingChatClaimPromotesToMountedCadence() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "home-session"))
+            let claim = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "home-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: claim.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: homeStatusResult()))
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("a chat claim that finds another session releases Home reads, including on session invalidations")
+    func nonMatchingChatClaimReadsNoMoreAfterInvalidation() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "ordinary-session"))
+            let claim = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            #expect(fixture.model.homeStatus.status?.sessionId == "home-session")
+
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "home-session", payload: .object([:])))
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.listChanged", sessionId: nil, payload: .object([:])))
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
+            #expect(fixture.model.homeStatus.status?.sessionId == "home-session", "the released status stays for the dashboard")
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
     @Test("a claimed chat's status read cannot publish after the chat retires")
     func claimedChatStatusReadCannotPublishAfterRetirement() async throws {
         let socket = ScriptedGatewaySocket()

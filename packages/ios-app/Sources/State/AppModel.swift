@@ -4707,8 +4707,9 @@ final class AppModel {
 
     /// A chat takes the status surface from the covered dashboard. A known status
     /// decides by session identity alone, so an ordinary chat never reads. Before
-    /// any status is known, the chat claims one read per connection admission.
-    /// Returns whether the chat now owns the status surface.
+    /// any status is known, the chat's probe decides by its first published read
+    /// (see `HomeStatusPresentationOwner.Cadence`). Returns whether the chat now
+    /// owns the status surface.
     func mountHomeStatusForChat(
         surfaceToken: PresentationSurfaceToken,
         activityCoordinator: PresentationActivityCoordinator,
@@ -4720,7 +4721,7 @@ final class AppModel {
             return true
         }
         guard lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return false }
-        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly)
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(sessionID: sessionID))
         return true
     }
 
