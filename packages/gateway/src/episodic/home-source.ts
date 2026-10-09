@@ -86,7 +86,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
       previous = undefined;
     }
     if (previous && !exact && (start.size === previous.size
-      || await prefixLineDigest(handle, previous.completeBytes) !== previous.leafLineDigest)) previous = undefined;
+      || await prefixLineDigest(handle, previous.completeBytes, limits.maxSourceLineBytes) !== previous.leafLineDigest)) previous = undefined;
     let incremental = Boolean(previous && !exact);
     const offset = incremental ? previous!.completeBytes : 0;
     const endBytes = exact ? previous!.completeBytes : start.size;

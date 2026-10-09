@@ -134,27 +134,30 @@ export function parseEntry(line: string): EpisodicCanonicalEntry {
   return { id, parentId, timestamp, type: raw.type, raw, line };
 }
 
-/** The digest of the last complete non-blank line before `offset`, read from a
- * small window. `undefined` when the window cannot prove it. */
-export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number): Promise<string | undefined> {
+/** The digest of the last complete non-blank line before `offset`. The window
+ * widens until it holds that whole line, so a line longer than the first window is
+ * proven too. `undefined` when no complete line fits within `maxLineBytes`: such a
+ * line cannot be a canonical line, so nothing is proven. */
+export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number, maxLineBytes: number): Promise<string | undefined> {
   if (offset <= 1) return undefined;
-  const start = Math.max(0, offset - PREFIX_WINDOW_BYTES);
-  const buffer = Buffer.alloc(offset - start);
-  let filled = 0;
-  while (filled < buffer.length) {
-    const read = await handle.read(buffer, filled, buffer.length - filled, start + filled);
-    if (read.bytesRead === 0) break;
-    filled += read.bytesRead;
+  for (let span = Math.min(PREFIX_WINDOW_BYTES, offset); ; span = Math.min(span * 2, offset, maxLineBytes + 2)) {
+    const start = offset - span;
+    const buffer = Buffer.alloc(span);
+    let filled = 0;
+    while (filled < span) {
+      const read = await handle.read(buffer, filled, span - filled, start + filled);
+      if (read.bytesRead === 0) break;
+      filled += read.bytesRead;
+    }
+    const lines = buffer.subarray(0, filled).toString("utf8").split("\n");
+    // The window ends at a line boundary, so its last element is the empty tail.
+    // Its first element is whole only when the window starts the file.
+    for (let index = lines.length - 2; index >= (start === 0 ? 0 : 1); index -= 1) {
+      const line = lines[index]!;
+      if (line.trim() !== "") return digest(line);
+    }
+    if (start === 0 || span >= maxLineBytes + 2) return undefined;
   }
-  const text = buffer.subarray(0, filled).toString("utf8");
-  const lines = text.split("\n");
-  // The window ends at a line boundary, so its last element is the empty tail.
-  for (let index = lines.length - 2; index >= 0; index -= 1) {
-    const line = lines[index]!;
-    if (line.trim() === "") continue;
-    return digest(line);
-  }
-  return undefined;
 }
 
 /**
