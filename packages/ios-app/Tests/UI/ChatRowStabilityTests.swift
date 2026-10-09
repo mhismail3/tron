@@ -2441,6 +2441,15 @@ private func recordMotionMetrics(
             return frame.minY >= initialGeometryFrame.maxY
         }
         .min { $0.value.minY < $1.value.minY }?.key
+    if scenario == .replace {
+        // This scenario replaces the second steer while the first queued card
+        // departs. Attribute any row-below movement in this fixture to both
+        // layout changes rather than treating it as replacement-row resize.
+        #expect(before.observation.rowFrames["queued-message-motion-steer-a"] != nil,
+                "replacement fixture must include the departing first steer")
+        #expect(fixture.updated.queuedItems.isEmpty,
+                "replacement fixture must empty the queue and retire the first steer")
+    }
     harness.replaceAuthoritativeSnapshot(fixture.updated)
 
     var samples: [ChatMotionFrameSample] = []
@@ -2497,7 +2506,8 @@ private func recordMotionMetrics(
         samples: samples
     )
     try writeMotionMetrics(metrics)
-    print("CHAT-MOTION-CONFORMANCE \(scenario.rawValue) transitionStep=\(maxTransitionStep) belowStep=\(maxBelowStep) tail=\(maxTail) identity=\(identityCount)")
+    let belowIDDescription = belowSemanticID ?? "none"
+    print("CHAT-MOTION-CONFORMANCE \(scenario.rawValue) transitionStep=\(maxTransitionStep) belowID=\(belowIDDescription) belowStep=\(maxBelowStep) tail=\(maxTail) identity=\(identityCount)")
 
     if scenario.isKnownUnanimated {
         let unanimatedStep = max(maxTransitionStep, maxBelowStep)
@@ -2584,14 +2594,13 @@ private func recordReduceMotionScenario(
 enum ChatMotionScenario: String, CaseIterable {
     case arrive, replace, resize, depart, move, stopTwoSteers, control
 
-    var isKnownUnanimated: Bool { self == .depart || self == .move || self == .stopTwoSteers || self == .control }
+    var isKnownUnanimated: Bool { self == .depart || self == .move || self == .stopTwoSteers }
     var isAnimated: Bool { self == .arrive || self == .replace || self == .resize }
     var knownIssue: String {
         switch self {
         case .depart: "MO-5 adds departing rows to the spine; current row disappearance is atomic."
         case .move: "MO-6 animates queue reorder; current physical row order changes atomically."
         case .stopTwoSteers: "MO-5 retains the departing queue rows during the Stop redelivery sequence."
-        case .control: "MO-4 (#274, row motion owner) must animate the tool-capsule row resize; current install steps by 37.7 pt."
         default: ""
         }
     }
