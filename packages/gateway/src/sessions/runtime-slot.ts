@@ -8459,8 +8459,11 @@ export class RuntimeSlot {
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) {
       const invocation = this.invocationForOperation(invocationOperationId);
-      if (invocation) {
-        // A limit crossing is authoritative even if a user Stop races it.
+      // Only a Gateway-owned stop is attributed on the invocation; it outranks the
+      // SDK's own outcome. A user Stop stays an intent (`abortedOperations`), so
+      // the settled SDK outcome decides the receipt exactly as it does on main.
+      if (invocation && terminalErrorCode !== "user-abort") {
+        // A limit crossing is authoritative even if another Gateway stop races it.
         if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
       }
       this.abortedOperations.add(invocationOperationId);

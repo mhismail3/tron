@@ -169,8 +169,10 @@ rolls over before binding its command receipt. Every physical prompt (including
 explicit terminal targets, held prompts and steer/follow-up admissions) rechecks
 the policy in its slot lane after admission awaits, before invocation/SDK effects;
 a full physical target refuses without silently redirecting. Ordinary sessions
-are not subject to Home thresholds. The exact Stop owner synchronously records
-its reason on the live invocation before cancellation yields. Every terminal
+are not subject to Home thresholds. The exact Gateway-owned stop owner (chapter
+limit, task report, task Stop, deadline) synchronously records its reason on the
+live invocation before cancellation yields; a user Stop records only its intent,
+so an ordinary session's receipt is the SDK's settled outcome, as on main. Every terminal
 observer reads that reason at the common receipt boundary, so a successful
 assistant crossing is interrupted with `chapter-limit`, never `user-abort`,
 regardless of completion/abort settlement ordering. Receipt retirement owns
