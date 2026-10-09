@@ -15,6 +15,19 @@ enum ChatHostedRowStability: Sendable {
 import SwiftUI
 import TronMobileCore
 
+final class ChatOpeningOverlayMotionMarker: UIView {}
+
+struct ChatOpeningOverlayMotionProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ChatOpeningOverlayMotionMarker {
+        let view = ChatOpeningOverlayMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        return view
+    }
+
+    func updateUIView(_ view: ChatOpeningOverlayMotionMarker, context: Context) {}
+}
+
 /// Test-only mounted UIKit evidence, queried at a display boundary. Unlike the
 /// semantic callback cache, this cannot report a frame after native unmount.
 final class ChatHostedNativeRowMarker: UIView {
@@ -341,6 +354,7 @@ final class ChatHostedProbe {
     private var projectionInstallCount = 0
     private(set) var composerCatalogBuildCount = 0
     private(set) var composerCatalogCommandNames: [String] = []
+    var openingOverlayControl: (@MainActor (Bool) -> Void)?
     var composerCatalogWillInstall: (@MainActor (ComposerResourceCatalog) async -> Void)?
     var composerCatalogDidFinish: (@MainActor ([CommandInfo]) -> Void)?
     var composerPickerEntries: (@MainActor () -> [ComposerResourceEntry])?
@@ -899,6 +913,7 @@ final class ChatHostedProbe {
         semanticResponseControl = nil
         submitPromptControl = nil
         fixtureOpenPresentation = nil
+        openingOverlayControl = nil
         displayControl = nil
         frameControl = nil
         stateControl = nil

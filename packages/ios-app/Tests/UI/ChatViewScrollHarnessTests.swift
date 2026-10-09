@@ -1471,6 +1471,123 @@ final class ChatViewScrollHarness {
 
     var probeObservation: ChatHostedObservation { probe.observation }
 
+    var openingOverlayMotionMarker: ChatOpeningOverlayMotionMarker? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        return descendants(hostingController.view).compactMap { $0 as? ChatOpeningOverlayMotionMarker }.first
+    }
+
+    var openingOverlayMotionFrame: CGRect {
+        guard let marker = openingOverlayMotionMarker else { return window.bounds }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    var openingOverlayMotionOpacity: CGFloat {
+        guard let marker = openingOverlayMotionMarker else { return 0 }
+        var opacity: CGFloat = 1
+        var layer: CALayer? = marker.layer.presentation() ?? marker.layer
+        while let current = layer {
+            opacity *= CGFloat(current.opacity)
+            layer = current.superlayer
+        }
+        return opacity
+    }
+
+    func driveOpeningOverlay(failed: Bool) {
+        probe.openingOverlayControl?(failed)
+    }
+
+    var composerProcessOrbMotionMarker: ChatComposerProcessOrbMotionMarker? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        return descendants(hostingController.view).compactMap { $0 as? ChatComposerProcessOrbMotionMarker }.first
+    }
+
+    var composerProcessOrbMotionFrame: CGRect? {
+        guard let marker = composerProcessOrbMotionMarker else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    func deliverProcessActivity(_ activity: SessionProcessActivity) async throws {
+        guard let socket else { throw HarnessError.missingSocket }
+        let current = model.selectedSnapshot ?? snapshot
+        let revision = (current.processOverview?.revision ?? 0) + 1
+        let asOf = activity.lifecycle.observedAt
+        let active = activity.visibility == .active
+        let recent = activity.visibility == .recent
+        let overview = SessionProcessOverview(
+            revision: revision,
+            asOf: asOf,
+            activeCount: active ? 1 : 0,
+            recentCount: recent ? 1 : 0,
+            problemCount: 0,
+            visibility: active ? .active : (recent ? .recent : .hidden),
+            nearestExpiry: recent ? activity.lifecycle.recentUntil : nil
+        )
+        let delta = SessionProcessDelta(
+            activity: activity,
+            removedProcessIds: [],
+            processRevision: revision,
+            processAsOf: asOf,
+            overview: overview
+        )
+        let data = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(delta))
+        let event = JSONValue.object([
+            "type": .string("event"),
+            "topic": .string("session.processActivity"),
+            "sessionId": .string(snapshot.sessionId),
+            "payload": .object([
+                "runtimeGeneration": .string(current.runtimeGeneration),
+                "eventSequence": .number(Double(current.eventSequence + 1)),
+                "revision": .number(Double(current.revision + 1)),
+                "data": data,
+            ]),
+        ])
+        await socket.enqueue(try JSONEncoder.gateway.encode(event))
+    }
+
+    var composerTrailingMotionMarker: ChatComposerTrailingMotionMarker? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        return descendants(hostingController.view).compactMap { $0 as? ChatComposerTrailingMotionMarker }.first
+    }
+
+    var composerTrailingMotionFrame: CGRect? {
+        guard let marker = composerTrailingMotionMarker else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    var composerMotionFrame: CGRect? {
+        TranscriptWindowOracle.composerFrame(in: hostingController.view)
+    }
+
+    func pendingAttachmentMotionFrame(id: String) -> CGRect? {
+        guard let window = hostingController.view.window,
+              let marker = Self.pendingAttachmentMarkers(in: hostingController.view).first(where: {
+                  $0.attachmentID == id
+              }) else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    var catchUpMotionMarker: ChatCatchUpMotionMarker? {
+        Self.catchUpMotionMarkers(in: hostingController.view).first
+    }
+
+    var catchUpMotionFrame: CGRect? {
+        guard let window = hostingController.view.window,
+              let marker = catchUpMotionMarker else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    func beginReaderDetachmentForMotion() async throws {
+        try scrollReader(byVisualPoints: 10_000_000)
+        try await driveFrameBoundary()
+        drivePhase(from: .idle, to: .interacting, geometry: nil)
+        drivePhase(from: .interacting, to: .idle, geometry: nil)
+    }
+
     /// `chat.tail.first-displacement` diagnostics seen so far. The incident's
     /// trace ring held 99 of them and evicted the geometry records they shared
     /// the ring with, so the CT-2 fixtures count them explicitly.
@@ -2138,8 +2255,13 @@ final class ChatViewScrollHarness {
               let composer = views.compactMap({ $0 as? ChatHostedNativeRowMarker })
                 .first(where: { $0.physicalID == ChatHostedNativeRowProbe.composerID }),
               let toolbar = views.compactMap({ $0 as? UINavigationBar }).first else { return nil }
-        return FloatingLayout(marker: marker, frame: marker.convert(marker.bounds, to: window),
-                              composer: composer.convert(composer.bounds, to: window),
+        let presentedMarkerLayer = marker.layer.presentation() ?? marker.layer
+        // Compare the visible surfaces on the same clock; mixing a rendered
+        // panel with the composer's target layer invents transient overlap.
+        let presentedComposerLayer = composer.layer.presentation() ?? composer.layer
+        return FloatingLayout(marker: marker,
+                              frame: presentedMarkerLayer.convert(presentedMarkerLayer.bounds, to: window.layer).standardized,
+                              composer: presentedComposerLayer.convert(presentedComposerLayer.bounds, to: window.layer).standardized,
                               toolbarBottom: toolbar.convert(toolbar.bounds, to: window).maxY)
     }
 
@@ -2272,6 +2394,16 @@ final class ChatViewScrollHarness {
     private static func textViews(in view: UIView) -> [UITextView] {
         let current = (view as? UITextView).map { [$0] } ?? []
         return current + view.subviews.flatMap(textViews)
+    }
+
+    private static func pendingAttachmentMarkers(in view: UIView) -> [ChatPendingAttachmentMotionMarker] {
+        let current = (view as? ChatPendingAttachmentMotionMarker).map { [$0] } ?? []
+        return current + view.subviews.flatMap { pendingAttachmentMarkers(in: $0) }
+    }
+
+    private static func catchUpMotionMarkers(in view: UIView) -> [ChatCatchUpMotionMarker] {
+        let current = (view as? ChatCatchUpMotionMarker).map { [$0] } ?? []
+        return current + view.subviews.flatMap { catchUpMotionMarkers(in: $0) }
     }
 
     private static func buttons(in view: UIView) -> [UIButton] {
@@ -2728,6 +2860,7 @@ final class PresentedFrameRecorder: NSObject {
 
 enum HarnessError: Error {
     case invalidAuthorityBoundary
+    case missingSocket
     case missingTranscript
     case missingWindowScene
     case missingComposer
