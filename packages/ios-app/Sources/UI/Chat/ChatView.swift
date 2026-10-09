@@ -1844,6 +1844,9 @@ struct ChatView: View {
             .transition(.opacity.animation(
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
+            #if HOSTED_TEST
+            .background(ChatOpeningOverlayMotionProbe())
+            #endif
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -1864,6 +1867,9 @@ struct ChatView: View {
             .transition(.opacity.animation(
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
+            #if HOSTED_TEST
+            .background(ChatOpeningOverlayMotionProbe())
+            #endif
         case .presented, .ready:
             EmptyView()
         }
@@ -2269,6 +2275,17 @@ struct ChatView: View {
     #if HOSTED_TEST
     @MainActor
     private func installHostedControls(probe: ChatHostedProbe) {
+        probe.openingOverlayControl = { failed in
+            var state = sessionPresentation.open
+            if failed {
+                _ = state.fail(sessionID: sessionID, epoch: state.epoch, message: "Hosted opener failure")
+            } else {
+                _ = state.begin()
+            }
+            withAnimation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)) {
+                sessionPresentation.open = state
+            }
+        }
         probe.composerPickerEntries = {
             presentedComposerResourcePicker == nil ? [] : composerResourceResults
         }
