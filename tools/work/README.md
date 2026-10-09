@@ -338,11 +338,13 @@ configurations and Node test scripts.
    code, wall time, log path, and the commit it was carried from, if any. The
    receipt passes only when every required check exited 0. If the head moves or
    the worktree changes while checks run, verify refuses and writes no receipt.
-6. **Incremental re-verify.** Verify looks for the nearest earlier passing
-   receipt whose commit `P` is an ancestor of the head and whose configuration
-   hash is identical. A required check is carried from `P` instead of run when it
-   passed there, it is not `always`, and none of the paths changed between `P`
-   and the head match its globs. Workers run `scripts/tron work verify` at
+6. **Incremental re-verify.** For each required check, verify looks for the
+   nearest receipt, on the head itself or an ancestor `P`, with an identical
+   configuration hash in which **that check** passed. The receipt as a whole
+   need not have passed, so re-running after one failed check reruns only the
+   checks that did not pass. A check is carried from `P` instead of run when it
+   is not `always` and none of the paths changed between `P` and the head match
+   its globs. Workers run `scripts/tron work verify` at
    their final commit, before handing off to `land`. A merge of the base carries
    unaffected checks, including already-carried checks with their original
    provenance; matching incoming paths rerun their checks. Those paths include everything an update from
