@@ -180,7 +180,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     facts.realWakeProjection = realInputs;
     expect.soft(realInputs).toHaveLength(3);
     expect.soft(realInputs[0]).toMatchObject({ semantic: { origin: { kind: "user" } } });
-    for (const input of realInputs.slice(1)) expect.soft(input).toMatchObject({ semantic: { kind: "subagentWake", direction: "hiddenInternal", origin: { kind: "subagent" } } });
+    for (const input of realInputs.slice(1)) expect.soft(input).toMatchObject({ semantic: { kind: "prompt", direction: "hiddenInternal", visibility: "hidden", origin: { kind: "subagent" } } });
     facts.customMessages = entries.filter(entry => entry.type === "custom_message");
     // The released provider's path-first header is ownership, not the compact
     // widget's native detail/coverage contract. Exercise its real four-child file.
@@ -420,7 +420,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
       managed.sendUserMessage("idle-wake-marker", { deliverAs: "steer" });
     });
     await waitFor(() => globals.tronWakeInputStarted === true, "idle wake preflight hook");
-    expect.soft(slot.snapshot().pendingPrompt).toMatchObject({ semantic: { kind: "subagentWake", origin: { kind: "subagent", ownerId: owner.id } } });
+    expect.soft(slot.snapshot().pendingPrompt).toMatchObject({ semantic: { kind: "prompt", direction: "hiddenInternal", origin: { kind: "subagent", ownerId: owner.id } } });
     release!(); release = undefined;
     delete globals.tronWakeInputGate; delete globals.tronWakeInputStarted;
     await waitFor(() => slot.snapshot().transcript.some(item => item.kind === "message" && item.role === "user" && JSON.stringify(item.content).includes("idle-wake-marker")) && !slot.isBusy, "idle wake settles");
@@ -438,13 +438,13 @@ it("attributes real workflow completion and supervisor delivery to their managed
     await racing;
     await waitFor(() => liveSession.getSteeringMessages().length >= 2, "both owners queued");
     facts.wakeQueue = slot.snapshot().queuedItems;
-    expect.soft(slot.snapshot().queuedItems.find(item => item.text === "busy-wake-marker")).toMatchObject({ semantic: { kind: "subagentWake", origin: { kind: "subagent", ownerId: owner.id } } });
+    expect.soft(slot.snapshot().queuedItems.find(item => item.text === "busy-wake-marker")).toMatchObject({ semantic: { kind: "prompt", direction: "hiddenInternal", origin: { kind: "subagent", ownerId: owner.id } } });
     release!(); release = undefined;
     await waitFor(() => !slot.isBusy, "wake and maintainer queue settle");
     const wakeProjection = slot.snapshot().transcript;
     facts.wakeProjection = wakeProjection;
     for (const marker of ["idle-wake-marker", "busy-wake-marker"]) expect.soft(wakeProjection.find(item => item.kind === "message" && item.role === "user" && JSON.stringify(item.content).includes(marker)))
-      .toMatchObject({ semantic: { kind: "subagentWake", origin: { kind: "subagent", ownerId: owner.id }, direction: "hiddenInternal" } });
+      .toMatchObject({ semantic: { kind: "prompt", origin: { kind: "subagent", ownerId: owner.id }, direction: "hiddenInternal" } });
     for (const marker of ["maintainer-marker", "racing-maintainer-marker"]) expect.soft(wakeProjection.find(item => item.kind === "message" && item.role === "user" && JSON.stringify(item.content).includes(marker)))
       .toMatchObject({ semantic: { origin: { kind: "user" } } });
     external.runInAsyncScope(() => managed.sendMessage({customType: "frame-expired", content: "expired", display: true}, {triggerTurn: false}));
@@ -519,7 +519,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     for (const entry of wakeEntries.filter(entry => entry.type === "custom_message")) {
       expect.soft(restartedDeliveries.get(entry.id), `restart ${entry.id}`).toEqual(coldDeliveries.get(entry.id));
     }
-    for (const input of restarted.snapshot().transcript.filter(item => item.semantic?.kind === "subagentWake")) {
+    for (const input of restarted.snapshot().transcript.filter(item => item.kind === "message" && item.role === "user" && item.semantic?.origin.kind === "subagent")) {
       expect.soft(input.semantic).toMatchObject({direction: "hiddenInternal", visibility: "hidden"});
     }
     facts.restartDeliveries = [...restartedDeliveries];

@@ -6509,7 +6509,7 @@ export class RuntimeSlot {
   private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
     const invocation = this.invocationForOperation(operationId);
     return invocation?.source === "subagentWake" ? {
-      version: 1, kind: "subagentWake", direction: "hiddenInternal", contextEffect: "modelInput",
+      version: 1, kind: "prompt", direction: "hiddenInternal", contextEffect: "modelInput",
       delivery: "stored", visibility: "hidden", origin: invocation.origin,
       invocationId: invocation.invocationId, operationId, sequence: invocation.sequence,
     } : undefined;

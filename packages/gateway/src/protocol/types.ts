@@ -260,7 +260,10 @@ export type ChatDirection = "inboundContext" | "agentOutput" | "agentInvocation"
 export type ChatContextEffect = "none" | "modelInput" | "hiddenModelInput" | "toolResult";
 export type ChatDelivery = "stored" | "nextTurn" | "steer" | "followUp" | "triggeredTurn" | "continuedTurn" | "beforeAgentStart" | "toolResult" | "unknown";
 export type ChatOriginKind = "user" | "subagent" | "extension" | "process" | "gateway" | "assistant" | "unknown";
-export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "subagentWake" | "unknown";
+// Released protocol-7 iOS clients decode this vocabulary as a closed enum and
+// reject the whole snapshot on an unknown value. Express new row classes through
+// existing axes (direction/visibility/origin) or a protocol version change.
+export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "unknown";
 
 export interface ChatOrigin {
   kind: ChatOriginKind;

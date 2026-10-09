@@ -2193,7 +2193,9 @@ function withInvocationSemantics(
       origin: boundInvocation.origin,
       invocationId: boundInvocation.invocationId,
       operationId: boundInvocation.operationId,
-      kind: boundInvocation.source === "subagentWake" ? "subagentWake" : "resourcePrompt",
+      // A subagent wake is a hidden internal prompt: its subagent origin plus
+      // hiddenInternal direction classify it on the existing protocol-7 axes.
+      kind: boundInvocation.source === "subagentWake" ? "prompt" : "resourcePrompt",
       ...(boundInvocation.source === "subagentWake" ? { direction: "hiddenInternal" as const, visibility: "hidden" as const } : {}),
       ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
       ...(boundInvocation.submittedText === undefined ? {} : { submittedText: boundInvocation.submittedText }),

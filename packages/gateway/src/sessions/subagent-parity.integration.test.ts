@@ -241,7 +241,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
       const transcript = snapshot.transcript.filter(row => row.semantic?.direction !== "hiddenInternal").filter(row => row.kind === "customMessage" && ["subagent-notify", "subagent_supervisor_request", "subagent-incremental-child-notify"].includes(row.customType)
         || row.kind === "message" && row.role === "user").map(row => {
           const details = row.kind === "customMessage" ? row.details as { reason?: string } : undefined;
-          const category = row.kind === "customMessage" ? details?.reason ?? row.customType : row.semantic?.kind === "subagentWake" ? "wake" : "prompt";
+          const category = row.kind === "customMessage" ? details?.reason ?? row.customType : "prompt";
           return { category, origin: row.semantic?.origin.kind ?? "unknown", title: row.semantic?.origin.title ?? null, classification: row.semantic?.kind ?? null,
             direction: row.semantic?.direction ?? null, contextEffect: row.semantic?.contextEffect ?? null, confidence: row.semantic?.origin.confidence ?? null,
             lifecycle: row.semantic?.lifecycle ?? null, resourceInvocation: normalize(row.semantic?.resourceInvocation ?? null), submittedText: row.semantic?.submittedText ?? null, delivery: row.semantic?.delivery ?? null, visibility: row.semantic?.visibility ?? null,
@@ -294,7 +294,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     if (!old) {
       await waitFor(() => preflightStarted && Boolean(slot.snapshot().pendingPrompt), "idle wake pending preflight");
       const pending = slot.snapshot().pendingPrompt!;
-      expect(pending.semantic).toMatchObject({ kind: "subagentWake", direction: "hiddenInternal", visibility: "hidden" });
+      expect(pending.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
       report.pendingWakeAuthority = pending;
       report.inputPresentation = { pending: pending.semantic?.direction === "hiddenInternal" ? null : pending.text };
     }
@@ -368,7 +368,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     await slot.prompt("Queued maintainer input", [], "steer");
     await waitFor(() => slot.snapshot().queuedItems.length === (old ? 1 : 2), "racing internal and maintainer steering inputs");
     const queued = slot.snapshot().queuedItems;
-    if (!old) expect(queued.find(item => item.text === "PARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "subagentWake", direction: "hiddenInternal", visibility: "hidden" });
+    if (!old) expect(queued.find(item => item.text === "PARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
     report.queuedWakeAuthority = queued;
     (report.inputPresentation as Record<string, unknown>).queued = queued.filter(item => item.semantic?.direction !== "hiddenInternal").map(item => ({ ...item, id: "<input>" }));
     gates.busy.release();

@@ -44,7 +44,7 @@ struct ManagedSubagentPresentationTests {
         }
     }
 
-    private func wake(kind: String = "subagentWake") throws -> TranscriptItem {
+    private func wake(kind: String = "prompt") throws -> TranscriptItem {
         try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
         {"id":"wake","parentId":null,"timestamp":"2026-01-01T00:00:00Z","presentationId":"wake","kind":"message","role":"user",
          "content":[{"id":"text","ordinal":0,"type":"text","text":"Subagent updates above."}],
@@ -56,7 +56,8 @@ struct ManagedSubagentPresentationTests {
     @Test("internal wake and unknown future input decode without corrupting historical/live transcript")
     func wakeDecodeAndStore() async throws {
         let item = try wake()
-        #expect(item.semantic?.kind.rawValue == "subagentWake")
+        #expect(item.semantic?.kind == .prompt)
+        #expect(item.semantic?.direction == .hiddenInternal)
         #expect(try wake(kind: "future-input").semantic?.kind.rawValue == "unknown")
         let ordinary = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data(#"{"id":"ordinary","parentId":null,"timestamp":"2026-01-01T00:00:00Z","presentationId":"ordinary","kind":"message","role":"user","content":[{"id":"ordinary-text","ordinal":0,"type":"text","text":"Ordinary prompt"}]}"#.utf8))
         #expect(ordinary.semantic == nil)
@@ -67,7 +68,7 @@ struct ManagedSubagentPresentationTests {
         let sessions = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
         defer { sessions.clearProfile() }
         sessions.installHostedSubscription(snapshot: snapshot, token: "subagents")
-        #expect(sessions.visibleTranscript.first?.semantic?.kind.rawValue == "subagentWake")
+        #expect(sessions.visibleTranscript.first?.semantic?.direction == .hiddenInternal)
         let transcript = ChatTranscriptPresentationStore()
         defer { transcript.reset() }
         let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
@@ -84,7 +85,7 @@ struct ManagedSubagentPresentationTests {
         #expect(sessions.authoritativeSnapshot(for: snapshot.sessionId)?.transcript.first?.semantic?.origin.kind == .subagent)
     }
 
-    private func inputWire(queued: Bool, kind: String? = "subagentWake", hidden: Bool = true) throws -> Data {
+    private func inputWire(queued: Bool, kind: String? = "prompt", hidden: Bool = true) throws -> Data {
         var value: [String: JSONValue] = [
             "id": .string("input"), "text": .string("Subagent updates above."),
             "attachmentCount": .number(0), "behavior": .string("steer")
@@ -104,12 +105,12 @@ struct ManagedSubagentPresentationTests {
 
     @Test("pending and queued DTOs retain present, absent and unknown input semantics")
     func inputSemanticDecode() throws {
-        for kind: String? in ["subagentWake", nil, "future-input"] {
+        for kind: String? in ["prompt", nil, "future-input"] {
             let pending = try JSONDecoder.gateway.decode(SessionSnapshot.PendingPrompt.self, from: inputWire(queued: false, kind: kind))
             let queued = try JSONDecoder.gateway.decode(SessionSnapshot.QueuedMessage.self, from: inputWire(queued: true, kind: kind))
             for encoded in [try JSONValue.encode(pending), try JSONValue.encode(queued)] {
                 let semantic = encoded.objectValue?["semantic"]?.objectValue
-                #expect(semantic?["kind"]?.stringValue == kind.map { $0 == "subagentWake" ? $0 : "unknown" })
+                #expect(semantic?["kind"]?.stringValue == kind.map { $0 == "prompt" ? $0 : "unknown" })
                 #expect(semantic?["direction"]?.stringValue == kind.map { _ in "hiddenInternal" })
             }
         }
@@ -126,7 +127,7 @@ struct ManagedSubagentPresentationTests {
         let transcript = ChatTranscriptPresentationStore()
         defer { sessions.clearProfile(); transcript.reset() }
         // Start/preflight, steer, visible replacement, return to hidden, cold reinstall.
-        for (index, variant) in [(true, "subagentWake"), (true, "future-input"), (false, "prompt"), (false, nil), (true, "subagentWake")].enumerated() {
+        for (index, variant) in [(true, "prompt"), (true, "future-input"), (false, "prompt"), (false, nil), (true, "prompt")].enumerated() {
             let (hidden, kind) = variant
             snapshot.revision += 1
             snapshot.eventSequence += 1

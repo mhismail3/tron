@@ -1467,8 +1467,10 @@ immediate revocation; revoking this iPhone also removes its local profile.
 Subagent context uses the shared seafoam compact inbound pill: supervisor progress
 keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent ·
 Child Update**, and other admitted subagent messages use **Subagent · Update**.
-The canonical user-role `subagentWake` is an internal provider input with
-`direction=hiddenInternal` and hidden visibility. The existing transcript kernel
+The canonical user-role subagent wake is an internal provider input projected
+as `kind=prompt` with `direction=hiddenInternal`, hidden visibility and a
+`subagent` origin; it adds no semantic kind, so released protocol-7 clients
+decode and hide it too. The existing transcript kernel
 excludes it: it has no row, pill or user bubble. Pending and queued DTOs retain
 that same optional semantic metadata. The pending-handoff owner rejects hidden
 input before constructing a user presentation, and `displayedQueuedMessages`
