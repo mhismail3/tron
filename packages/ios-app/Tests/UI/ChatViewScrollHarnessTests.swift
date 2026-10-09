@@ -1475,6 +1475,15 @@ final class ChatViewScrollHarness {
         TranscriptWindowOracle.composerFrame(in: hostingController.view)
     }
 
+    func pendingAttachmentMotionFrame(id: String) -> CGRect? {
+        guard let window = hostingController.view.window,
+              let marker = Self.pendingAttachmentMarkers(in: hostingController.view).first(where: {
+                  $0.attachmentID == id
+              }) else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
     /// `chat.tail.first-displacement` diagnostics seen so far. The incident's
     /// trace ring held 99 of them and evicted the geometry records they shared
     /// the ring with, so the CT-2 fixtures count them explicitly.
@@ -2276,6 +2285,11 @@ final class ChatViewScrollHarness {
     private static func textViews(in view: UIView) -> [UITextView] {
         let current = (view as? UITextView).map { [$0] } ?? []
         return current + view.subviews.flatMap(textViews)
+    }
+
+    private static func pendingAttachmentMarkers(in view: UIView) -> [ChatPendingAttachmentMotionMarker] {
+        let current = (view as? ChatPendingAttachmentMotionMarker).map { [$0] } ?? []
+        return current + view.subviews.flatMap { pendingAttachmentMarkers(in: $0) }
     }
 
     private static func buttons(in view: UIView) -> [UIButton] {

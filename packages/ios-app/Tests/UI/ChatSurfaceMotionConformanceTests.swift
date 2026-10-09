@@ -32,6 +32,32 @@ struct ChatSurfaceMotionConformanceTests {
         await harness.close()
     }
 
+    @Test("attachment chip insertion and removal animate the chip and preserve the pinned tail")
+    func attachmentChipMotion() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 2_772).openingTail(targetEncodedBytes: 10_000)
+        let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+            snapshot: snapshot,
+            displayFrameScheduler: .displayLink
+        )
+        do {
+            _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+            for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            let insertion = try await recordAttachmentChipChange(harness, attached: true)
+            #expect(insertion.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect(insertion.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(insertion.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            let removal = try await recordAttachmentChipChange(harness, attached: false)
+            #expect(removal.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect(removal.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(removal.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            try writeSurfaceMetrics([insertion, removal], named: "attachment-chip-motion.json")
+        } catch {
+            await harness.close()
+            throw error
+        }
+        await harness.close()
+    }
+
     @Test("Reduce Motion installs composer attachment strip height atomically")
     func composerAttachmentReduceMotion() async throws {
         let snapshot = try SessionScenarioBuilder(seed: 2_771).openingTail(targetEncodedBytes: 10_000)
@@ -53,6 +79,41 @@ struct ChatSurfaceMotionConformanceTests {
         }
         await harness.close()
     }
+}
+
+@MainActor
+private func recordAttachmentChipChange(
+    _ harness: ChatViewScrollHarness,
+    attached: Bool
+) async throws -> ChatMotionSurfaceMetrics {
+    try harness.setMotionAccessory(attached ? .file : nil)
+    var previous: CGSize?
+    var maximumStep: CGFloat = 0
+    var maximumTail: CGFloat = 0
+    var changedFrames = 0
+    var sizes: [Double] = []
+    for _ in 0..<24 {
+        try await harness.driveFrameBoundary()
+        if let frame = harness.pendingAttachmentMotionFrame(id: "motion-attachment") {
+            let size = frame.size
+            if let previous {
+                let step = max(abs(size.width - previous.width), abs(size.height - previous.height))
+                if step > 0.5 { changedFrames += 1 }
+                maximumStep = max(maximumStep, step)
+            }
+            previous = size
+            sizes.append(Double(size.width))
+        }
+        maximumTail = max(maximumTail, abs(harness.probeObservation.geometry.distanceFromBottom))
+    }
+    return ChatMotionSurfaceMetrics(
+        name: attached ? "attachment-chip-insert" : "attachment-chip-remove",
+        hostedMarkerID: "motion-attachment",
+        maximumGeometryStep: Double(maximumStep),
+        maximumTailDistance: Double(maximumTail),
+        changedFrames: changedFrames,
+        samples: sizes
+    )
 }
 
 @MainActor

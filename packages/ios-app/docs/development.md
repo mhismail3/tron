@@ -1923,7 +1923,8 @@ root geometry feedback or scroll command; the structural host associates accesso
 last installed height, so an identity read that precedes the new measured height cannot suppress the
 transition. Reduce Motion makes that transition atomic. `ChatSurfaceMotionConformanceTests` samples the
 attachment-strip insertion and removal at hosted display boundaries, enforcing a 20 pt maximum frame
-step and a 12 pt pinned-tail bound. With the
+step and a 12 pt pinned-tail bound. A hosted-only chip marker measures the
+50-to-100 percent attachment transition and removal without adding production layout state. With the
 keyboard visible, the panel list caps at three
 internally scrolling rows and the native editor at four visible lines. Every outgoing prompt uses one full-height straight fade/slide entrance; prompt length and optional chip content do not select another animation path.
 A mounted retained snapshot remains readable during reconnect, but command
