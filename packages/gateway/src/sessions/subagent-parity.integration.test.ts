@@ -42,11 +42,8 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
-  // An inherited PI_SUBAGENT_CHILD (a delegated agent's shell) makes the managed
-  // provider act as a child, so the parent's subagent tool is never registered.
-  const envNames = ["PI_CODING_AGENT_DIR", "PI_SUBAGENTS_TEMP_ROOT", "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT", "NODE_OPTIONS", "TRON_TEST_PROCESS_OWNER", "TRON_TEST_PROCESS_OWNER_FAILURE", "PI_SUBAGENT_CHILD"];
+  const envNames = ["PI_CODING_AGENT_DIR", "PI_SUBAGENTS_TEMP_ROOT", "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT", "NODE_OPTIONS", "TRON_TEST_PROCESS_OWNER", "TRON_TEST_PROCESS_OWNER_FAILURE"];
   const previous = envNames.map(name => process.env[name]);
-  delete process.env.PI_SUBAGENT_CHILD;
   const gates = { single: gate(), workflow: gate(), answer: gate(), finish: gate(), preflight: gate(), busy: gate() };
   const globals = globalThis as unknown as { parityPreflight?: () => Promise<void>; parityPi?: import("@earendil-works/pi-coding-agent").ExtensionAPI };
   const prototype = ChildProcess.prototype as ChildProcess & { spawn(options: unknown): unknown };
