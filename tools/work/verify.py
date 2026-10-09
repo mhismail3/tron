@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -25,6 +26,8 @@ _CHECK_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BRANCH_ISSUE = re.compile(r"^[^/]+/(\d+)-")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _EXCERPT_LINE_LIMIT = 240
+# Exported only to heavy checks: the CPU share of one host-wide heavy slot.
+_CPU_SHARE_VARIABLE = "VERIFY_CPU_SHARE"
 
 
 class VerifyError(RuntimeError):
@@ -58,6 +61,7 @@ class Check:
     patterns: List[Pattern]
     exclusive_group: Optional[str]
     exclusive_patterns: Optional[List[Pattern]]
+    heavy: bool
 
     def matches(self, path: str) -> bool:
         return any(pattern.match(path) for pattern in self.patterns)
@@ -87,16 +91,35 @@ def load_checks(settings: dict) -> List[Check]:
         if "exclusivePaths" in raw and (group is None or not isinstance(exclusive_paths, list)
                 or not exclusive_paths or any(not isinstance(path, str) or not path for path in exclusive_paths)):
             raise VerifyError(f"verify check {name} needs nonempty exclusivePaths and an exclusiveGroup")
+        if "heavy" in raw and type(raw["heavy"]) is not bool:
+            raise VerifyError(f"verify check {name} needs a boolean heavy flag")
         names.add(name)
         checks.append(Check(name, raw["paths"], raw["command"], always,
                             [glob_regex(g) for g in raw["paths"]], group,
-                            [glob_regex(g) for g in exclusive_paths] if exclusive_paths is not None else None))
+                            [glob_regex(g) for g in exclusive_paths] if exclusive_paths is not None else None,
+                            raw.get("heavy", False)))
     return checks
 
 
+def heavy_slot_count(settings: dict) -> int:
+    """Heavy checks that may run at once on this host; the default is one slot per eight CPUs."""
+    if "heavySlots" not in settings:
+        return max(1, (os.cpu_count() or 1) // 8)
+    slots = settings["heavySlots"]
+    if type(slots) is not int or slots < 1:
+        raise VerifyError("verify.heavySlots must be a positive integer")
+    return slots
+
+
 def config_hash(config: dict) -> str:
+    settings = config["verify"]
+    # Heavy admission and its pool size choose how checks share the host, not what
+    # they prove, so changing them must not invalidate receipts (like --jobs).
+    verify_scope = {key: value for key, value in settings.items() if key != "heavySlots"}
+    verify_scope["checks"] = [{key: value for key, value in check.items() if key != "heavy"}
+                              for check in settings["checks"]]
     scope = {"remote": config["claim"]["remote"], "baseBranch": config["claim"]["baseBranch"],
-             "verify": config["verify"]}
+             "verify": verify_scope}
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
 
@@ -123,6 +146,41 @@ def _changed(repo: Path, start: str, end: str) -> List[str]:
 
 def _dirty(repo: Path) -> List[str]:
     return _git(repo, "status", "--porcelain", "--untracked-files=all").splitlines()
+
+
+@dataclass
+class HeavyPool:
+    """Host-wide heavy-check slots: one flock'd file per slot in the shared git common dir.
+
+    Every worktree of a repository shares that directory, so the bound holds across
+    verify invocations and sessions. flock is per open file description and is released
+    when its descriptor closes or its process exits, so a slot cannot outlive the check
+    that holds it. Descriptors are not inheritable, so no check child can keep one.
+    """
+    directory: Path
+    size: int
+
+    def acquire(self) -> Optional[int]:
+        """A descriptor holding one free slot, or None while every slot is held."""
+        for index in range(self.size):
+            descriptor = os.open(self.directory / f"{index}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(descriptor)
+                continue
+            except OSError:
+                os.close(descriptor)
+                raise
+            return descriptor
+        return None
+
+
+def _heavy_pool(repo: Path, settings: dict) -> HeavyPool:
+    common = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    directory = common / "work" / "slots"
+    directory.mkdir(parents=True, exist_ok=True)
+    return HeavyPool(directory, heavy_slot_count(settings))
 
 
 # ----------------------------------------------------------------- receipts
@@ -209,9 +267,12 @@ class RunningCheck:
     group: Optional[str]
 
 
-def _run_checks(root: Path, pending: list, prelude: str, jobs: int, environment: Dict[str, str]) -> Dict[str, dict]:
+def _run_checks(root: Path, pending: list, prelude: str, jobs: int, environment: Dict[str, str],
+                pool: HeavyPool, cpu_share: int) -> Dict[str, dict]:
     results: Dict[str, dict] = {}
     running: List[RunningCheck] = []
+    # Heavy checks refused a slot, with the time of the first refusal: their wait counts in check time.
+    queued: Dict[str, float] = {}
     # The invocation owns every started check. No threads or background queue
     # can outlive it; all exits unwind these exact process-group owners.
     with contextlib.ExitStack() as invocation:
@@ -230,9 +291,26 @@ def _run_checks(root: Path, pending: list, prelude: str, jobs: int, environment:
                 check, command, log_path, group = task
                 if group and any(item.group == group for item in running):
                     continue
+                descriptor = None
+                if check.heavy:
+                    descriptor = pool.acquire()
+                    if descriptor is None:
+                        # Only heavy checks wait here; independent checks keep launching.
+                        if check.name not in queued:
+                            queued[check.name] = time.monotonic()
+                            print(f"  {check.name}: waiting for a heavy slot", flush=True)
+                        continue
                 owner = invocation.enter_context(contextlib.ExitStack())
+                if descriptor is not None:
+                    # Registered before the process group, so it is released only after the group is retired.
+                    owner.callback(os.close, descriptor)
+                    check_environment = {**environment, _CPU_SHARE_VARIABLE: str(cpu_share)}
+                else:
+                    check_environment = environment
                 print(f"  {check.name}: running", flush=True)
-                process, started = owner.enter_context(_run_check(root, prelude, command, log_path, environment))
+                process, started = owner.enter_context(
+                    _run_check(root, prelude, command, log_path, check_environment))
+                started = queued.pop(check.name, started)
                 running.append(RunningCheck(check, process, started, owner, group))
                 pending.remove(task)
             for item in running[:]:
@@ -422,7 +500,9 @@ def _check_environment() -> Dict[str, str]:
         message = result.stderr.strip() or "inherited environment resolves into a live Tron home"
         raise VerifyError(message)
     dropped = set(result.stdout.split())
-    return {name: value for name, value in os.environ.items() if name not in dropped}
+    # Only heavy checks receive the CPU share; an inherited value must not reach the others.
+    return {name: value for name, value in os.environ.items()
+            if name not in dropped and name != _CPU_SHARE_VARIABLE}
 
 
 def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
@@ -433,6 +513,8 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
     remote = claim["remote"]
     checks = load_checks(settings)
     root = Path(_git(repo, "rev-parse", "--show-toplevel").strip())
+    pool = _heavy_pool(root, settings)
+    cpu_share = max(1, (os.cpu_count() or 1) // pool.size)
     dirty = _dirty(root)
     if dirty:
         raise VerifyError("commit or remove local changes first; the receipt binds to a commit:\n  "
@@ -476,7 +558,7 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
         log_path = work / "logs" / head / f"{check.name}.log"
         pending.append((check, command, log_path, check.group_for(matched[check.name])))
 
-    executed = _run_checks(root, pending, settings.get("prelude", ""), workers, check_environment)
+    executed = _run_checks(root, pending, settings.get("prelude", ""), workers, check_environment, pool, cpu_share)
     for check in required:
         if check.name in executed:
             results[check.name] = {**executed[check.name],
