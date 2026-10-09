@@ -381,6 +381,29 @@ class CheckSetTests(VerifyFixture):
         self.assertIsNone(receipt["checks"]["app"]["carriedFrom"])
         self.assertEqual(self.runs("app"), 2)
 
+    def test_rerun_after_one_failed_check_reruns_only_that_check(self):
+        # A failed receipt still proves each check that passed in it: a rerun
+        # of the same head, or of a descendant whose new paths miss that check,
+        # carries it rather than paying for it again.
+        first = self.commit(self.repo, "app/a.txt", "two\n")
+        self.commit(self.repo, "lib/b.txt", "two\n")
+        self.fail_flag.write_text("")
+        receipt = self.verify()
+        self.assertFalse(receipt["passed"])
+        head = receipt["head"]
+        self.fail_flag.unlink()
+        receipt = self.verify()
+        self.assertTrue(receipt["passed"])
+        self.assertEqual(receipt["checks"]["lib"]["carriedFrom"], head)
+        self.assertIsNone(receipt["checks"]["app"]["carriedFrom"])
+        self.assertEqual((self.runs("app"), self.runs("lib"), self.runs("policy")), (2, 1, 2))
+        # A descendant touching lib reruns lib, and carries app from the newer pass.
+        self.commit(self.repo, "lib/b.txt", "three\n")
+        receipt = self.verify()
+        self.assertEqual(receipt["checks"]["app"]["carriedFrom"], git(self.repo, "rev-parse", "HEAD~1"))
+        self.assertEqual(self.runs("lib"), 2)
+        self.assertNotEqual(first, head)
+
     def test_paths_placeholder_passes_every_matched_existing_file(self):
         out = self.tmp / "paths"
         config = json.loads(json.dumps(self.config))
