@@ -516,9 +516,8 @@ export class GatewayService {
       case "home.steerTask":
       case "home.stopTask":
         return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, method === "home.steerTask" ? ["commandId", "taskId", "operationId", "controllerGeneration", "text"] : ["commandId", "taskId", "operationId", "controllerGeneration"], method);
-          if (!Number.isSafeInteger(params.controllerGeneration) || (params.controllerGeneration as number) < 1) throw new GatewayError("invalid_request", "Invalid controllerGeneration");
-          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }), controllerGeneration: params.controllerGeneration as number };
+          rejectUnknownFields(params, method === "home.steerTask" ? ["commandId", "taskId", "operationId", "text"] : ["commandId", "taskId", "operationId"], method);
+          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }) };
           if (method === "home.steerTask") await this.requireHome().maintainTask({ ...control, text: string(params.text, "text", { max: 65536 }) });
           else await this.requireHome().stopTask(control);
           return safeJson({ accepted: true });

@@ -7453,7 +7453,7 @@ export class RuntimeSlot {
 
   async stopHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
     if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
-      || this.taskWorker.identity.operationId !== control.operationId || control.controllerGeneration !== 1) {
+      || this.taskWorker.identity.operationId !== control.operationId) {
       throw new GatewayError("conflict", "Task operation changed before Stop");
     }
     await this.taskWorker.stop();
@@ -7705,7 +7705,7 @@ export class RuntimeSlot {
           const fence = ownership?.taskFence;
           if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
-            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId || fence.controllerGeneration !== 1))) {
+            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
             throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
           }
         }
@@ -8001,7 +8001,7 @@ export class RuntimeSlot {
               this.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
                 taskHash: createHash("sha256").update(this.taskWorker.identity.taskId).digest("hex").slice(0, 16),
                 operationHash: createHash("sha256").update(this.taskWorker.identity.operationId).digest("hex").slice(0, 16),
-                action: "steer", disposition: "accepted", controllerGeneration: 1 });
+                action: "steer", disposition: "accepted" });
             }
             acceptedResolve(true);
           },

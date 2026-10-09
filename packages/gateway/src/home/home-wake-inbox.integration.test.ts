@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +7,7 @@ import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-con
 import { makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
 import { makeInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { HomeTaskStore, type HomeTaskRecord } from "./home-task-store.js";
+import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord } from "./home-task-store.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -22,11 +21,11 @@ async function fixture() {
   await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
   const workspace = new TronWorkspace(home); workspaces.push(workspace); await workspace.initialize();
   const store = new HomeTaskStore(home, workspace); await store.initialize();
-  const intent = { revision: 1, text: "finite" };
+  const intent = { text: "finite" };
   const task = { version: 1, taskId: "task", revision: 1, homeId: "home", generation: 1, routeGeneration: 1,
-    intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"), target: root,
-    workerProfile: "home-task-v1", policyRevision: 1, grantRef: null, scopeRef: null, lifecycle: "pending",
-    sessionId: null, operationId: null, controllerGeneration: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null, wake: null } as HomeTaskRecord;
+    intent, intentDigest: taskIntentDigest(intent.text), target: root,
+    grantRef: null, scopeRef: null, lifecycle: "pending",
+    sessionId: null, operationId: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null, wake: null } as HomeTaskRecord;
   await store.put(task, null);
   const { WakeInboxOwner } = await import("./home-wake-inbox.js");
   const pushes: unknown[] = []; const entries: any[] = [];

@@ -54,7 +54,7 @@ describe("GatewayLogger", () => {
     logger.log("info", "Home task lifecycle", { event: "home.task.inbox", source: "home", eventHash: "1122334455667788",
       state: "admitted", reason: "canonical-admission" });
     logger.log("info", "Home task lifecycle", { event: "home.task.control", source: "home", taskHash, operationHash,
-      action: "stop", disposition: "persisted", controllerGeneration: 2 });
+      action: "stop", disposition: "persisted" });
     logger.log("info", "Home task lifecycle", { event: "home.task.authorization", source: "home", outcome: "refused",
       reason: "grant-required", referenceHash: "5566778899aabbcc" });
     logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash: "x".repeat(400),
@@ -64,7 +64,7 @@ describe("GatewayLogger", () => {
     expect(spend).toMatchObject({ taskHash, spendReference: "9a8b7c6d5e4f3a2b", inputTokens: 1200, outputTokens: 40 });
     expect(stop).toMatchObject({ elapsedMs: 86_400_123, cancelAndJoin: "failed" });
     expect(inbox).toMatchObject({ eventHash: "1122334455667788", state: "admitted" });
-    expect(control).toMatchObject({ action: "stop", disposition: "persisted", controllerGeneration: 2 });
+    expect(control).toMatchObject({ action: "stop", disposition: "persisted" });
     expect(authorization).toMatchObject({ referenceHash: "5566778899aabbcc" });
     expect(unbounded.taskHash).toHaveLength(64);
     expect(unbounded).not.toHaveProperty("revision");

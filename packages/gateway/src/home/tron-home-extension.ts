@@ -61,12 +61,12 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
         return { content: [{ type: "text", text: "Task admitted; a report is required for its result." }], details: { taskId, sessionId, operationId } };
       },
     });
-    pi.registerTool({ name: "task", label: "Task", description: "Read durable task status/spend or immutable report UTF-8 byte pages (action report, offset, limit up to 4096), steer a shared active task, or Stop its exact operation. Status has no control effect. Mutations require the operation and controller generation from status.",
+    pi.registerTool({ name: "task", label: "Task", description: "Read durable task status/spend or immutable report UTF-8 byte pages (action report, offset, limit up to 4096), steer a shared active task, or Stop its exact operation. Status has no control effect. Mutations require the operation from status.",
       parameters: Type.Union([
         Type.Object({ action: Type.Literal("status"), taskId: Type.String({ minLength: 1, maxLength: 160 }) }, { additionalProperties: false }),
         Type.Object({ action: Type.Literal("report"), taskId: Type.String({ minLength: 1, maxLength: 160 }), offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 4096 }) }, { additionalProperties: false }),
-        Type.Object({ action: Type.Literal("steer"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), controllerGeneration: Type.Integer({ minimum: 1 }), text: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
-        Type.Object({ action: Type.Literal("stop"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), controllerGeneration: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
+        Type.Object({ action: Type.Literal("steer"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }), text: Type.String({ minLength: 1, maxLength: 65536 }) }, { additionalProperties: false }),
+        Type.Object({ action: Type.Literal("stop"), taskId: Type.String({ minLength: 1, maxLength: 160 }), operationId: Type.String({ minLength: 1, maxLength: 160 }) }, { additionalProperties: false }),
       ]), executionMode: "sequential", execute: async (_id, request) => {
         const result = await task(request);
         return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };

@@ -576,20 +576,19 @@ real directories.
     strictly advances across creates; updates never regress.
   - `homeId`, `generation`, `routeGeneration`: immutable originating identity,
     enabled generation and route epoch.
-  - `intent`, `intentDigest`: immutable `{ revision, text }` (at most 64 KiB UTF-8);
-    digest is SHA-256 of `JSON.stringify({ revision, text })`.
-  - `target`, `workerProfile`, `policyRevision`: immutable absolute target (at most
-    4 KiB), profile identity and positive policy revision. Storage is not admission
+  - `intent`, `intentDigest`: immutable `{ text }` (at most 64 KiB UTF-8); the digest
+    is SHA-256 of the text.
+  - `target`: immutable absolute target (at most 4 KiB). Storage is not admission
     authority.
   - `grantRef`, `scopeRef`: nullable, at most one set, each naming an existing
     authorization record, filled once, never swapped.
   - `lifecycle`: `pending`, `active` or `terminal`. `active` requires authority and
     session, operation and controller identity; `terminal` requires terminal
     evidence and a co-committed wake event.
-  - `sessionId`, `operationId`, `controllerGeneration`: set by dispatch; shared
-    control fences the active operation and controller generation.
-  - `stopIntent`: null or exact `{ operationId, controllerGeneration, requestedAt
-    }`, durable and never replaced.
+  - `sessionId`, `operationId`: set by dispatch; shared control fences the active
+    operation.
+  - `stopIntent`: null or exact `{ operationId, requestedAt }`, durable and never
+    replaced.
   - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
     safe nonnegative integers. No cost is recorded.
   - `reportRefs`: null or at most 256 unique `{ resultId, sessionId, entryId, digest
@@ -651,8 +650,8 @@ standing scope covers any currently trusted project, with trust resolved again a
 admission. The scope binds to the restore epoch.
 
 - A request outside an active scope needs a one-use grant, recorded separately from
-  the decision. It binds the intent revision and digest, canonical target,
-  authorization scope, worker profile, policy revision, expiry and restore epoch.
+  the decision. It binds the intent digest, canonical target,
+  authorization scope, expiry and restore epoch.
   Admission consumes it atomically. Revoked, expired, spent, mismatched or
   stale-epoch grants never authorize. Authorization never infers a restore from
   startup.
@@ -681,7 +680,7 @@ admission. A task ID never replays an accepted prompt.
 
 - A task worker has normal project tools and resources plus `report`, and cannot
   replace its owned session. Its canonical `tron-home-task` marker binds the task,
-  Home identity and generation, intent revision, session and operation. Cold
+  Home identity and generation, session and operation. Cold
   construction checks the marker before loading executable resources. Missing or
   contradictory tasks are never recreated.
 - Task Stop (report, control or deadline) is terminal, unlike ordinary chat Stop,
@@ -779,7 +778,7 @@ work. One per-process result is shared by every task surface.
   authorizes recreation or replay.
 - A task becomes report-backed only if the read-only canonical boundary proves
   exactly one matching `tron-home-task` marker and one valid `tron-home-task-report`
-  after it. Task, intent revision, Home identity and generation, session, operation
+  after it. Task, Home identity and generation, session, operation
   and receipt must agree, and the payload is re-checked. Addresses are file-wide, so
   navigation cannot discard an accepted report. The session format, unique IDs,
   append-ordered parents, a stable untorn file identity and canonical file and
@@ -961,10 +960,10 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
 | `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation and controller generation, spend, immutable result. |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
-| `home.steerTask` | `commandId`, `taskId`, `operationId`, `controllerGeneration`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
-| `home.stopTask` | `commandId`, `taskId`, `operationId`, `controllerGeneration` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
+| `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
+| `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
 | `home.redeliverTaskResult` | `commandId`, `taskId`, `homeId`, `routeGeneration` (positive) | receipted | Re-stamps one unadmitted wake event; see [Task wake inbox](#task-wake-inbox-and-terminal-push). |
 | `home.revokeTaskScope` | `commandId`, `scopeId` | receipted | Revokes the standing scope. Repeated or missing references are no-ops. A revoked initial scope is never recreated by dispatch. |
 | `home.revokeTaskGrant` | `commandId`, `grantId` | receipted | Revokes an available grant. Consumed, revoked or missing grants are no-ops and never resurrected. |
@@ -1155,8 +1154,8 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home approve-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Approves a pending request with a one-use grant that expires at the given Unix-millisecond time. |
 | `/home deny-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Denies a pending request. Records the decision without a grant. |
 | `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and input and output tokens. |
-| `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation and controller generation read from status. |
-| `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation and controller generation read from status. |
+| `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation read from status. |
+| `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation read from status. |
 | `/home redeliver <id>` | `home.status`, then `home.redeliverTaskResult` | Re-stamps an unadmitted task result to the current Home route. |
 
 ## Evidence
