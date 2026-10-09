@@ -180,7 +180,7 @@ def _merged_pull(gh: Gh, branch: str, head: str, base: str) -> Optional[dict]:
 
 def _view(gh: Gh, number: int) -> dict:
     return json.loads(gh.run("pr", "view", str(number), "--json",
-                             "state,headRefOid,baseRefName,mergeCommit,statusCheckRollup"))
+                             "state,headRefOid,baseRefName,mergeCommit,mergeable,statusCheckRollup"))
 
 
 # ------------------------------------------------------------- public text
@@ -660,15 +660,20 @@ def run_acceptance(config: dict, root: Path, journeys: List[str]) -> List[dict]:
     return records
 
 
-def _wait(gh: Gh, config: dict, pull: int, head: str, sleep: Callable[[float], None],
+def _wait(gh: Gh, config: dict, pull: int, head: str, base: str, sleep: Callable[[float], None],
           clock: Callable[[], float]) -> None:
     settings = config["land"]
+    remote = config["claim"]["remote"]
     deadline = clock() + settings["waitSeconds"]
     shown = None
     while True:
         view = _view(gh, pull)
         if view["state"] != "OPEN":
             raise LandError(f"#{pull} is {view['state'].lower()}; nothing was merged")
+        # Hosted CI never runs on a conflicting pull request, so waiting cannot finish it.
+        if view["mergeable"] == "CONFLICTING":
+            raise LandError(f"#{pull} conflicts with {remote}/{base}; merge {remote}/{base} into the branch, "
+                            "resolve, commit, and run land again; nothing was merged")
         if view["headRefOid"] != head:
             state, details = "pending", [f"pull request head is {view['headRefOid'][:12]}, not {head[:12]}"]
         else:
@@ -785,7 +790,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
             start.set_status(gh, issue["item"], settings["reviewStatus"])
             issue["status"] = settings["reviewStatus"]
 
-        _wait(gh, config, pull["number"], head, sleep, clock)
+        _wait(gh, config, pull["number"], head, base, sleep, clock)
         # Without a branch rule that requires up-to-date branches, only this
         # check keeps a head that lacks the latest base from being merged.
         if not _is_ancestor(root, _fetch_base(root, remote, base), head):

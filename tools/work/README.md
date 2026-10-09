@@ -927,7 +927,9 @@ as does `acceptance` for the journeys it can run.
    that CI skipped because the change does not touch its inputs counts as
    passed, as in GitHub's own required-check rule. A required check that fails
    or is cancelled stops `land` and names the check. A timeout also stops it.
-   Neither merges.
+   A pull request that GitHub reports as conflicting stops `land` at its first
+   poll and names the base to merge; hosted checks never run on it. Neither
+   merges.
 7. **Base moves.** Once the checks pass, it fetches the base branch again.
    When the head no longer contains its tip, steps 2 to 6 repeat, at most
    `land.maxRounds` times in all, and the journeys run again against the new
@@ -1234,6 +1236,12 @@ Project state and records every call. The live E2E covers GitHub itself.
     Valid non-bug summaries remain unchanged;
     stewarding and merged-resume paths preserve the generated Verification and
     Maintainer validation sections.
+80. **A conflicting pull request waits out the timeout.** GitHub reports a pull
+    request that conflicts with its base as `CONFLICTING` and runs no checks on
+    it, so waiting never finishes. `land` stops at the first poll, names the
+    base and says to merge it into the branch, resolve, commit and run land
+    again. Nothing merges. `UNKNOWN` (GitHub still computing mergeability) keeps
+    waiting.
 
 ## `cleanup`
 
