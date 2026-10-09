@@ -130,7 +130,11 @@ took. If they ask for options, list the top three and wait.
    Anything out of scope becomes a new issue (see AGENTS.md); do not grow the
    pull request.
 6. **Verify.**
-   - Run `scripts/tron work verify` until it passes.
+   - Workers run `scripts/tron work verify` at their final commit, until it
+     passes, before handing off to `land`. Its ancestor receipt carries passing
+     non-always checks across the base merge when their matched inputs are
+     unchanged (including checks already carried from an earlier commit).
+     Merged paths matching a check rerun it; always checks rerun every time.
    - A failure that also fails on unchanged `main` (prove it with a control
      run) is pre-existing: file or reference its issue rather than masking it.
      `land` still refuses a failing receipt, so stop and report.
