@@ -199,6 +199,7 @@ export class WakeInboxOwner {
     this.assertRoute(task, route);
     await this.change(task.taskId, wake => ({ ...wake, state: "acknowledged", acknowledgedAt: new Date().toISOString() }), "canonical-consumed");
   }
+
   /** One delivery's proof. A source that refuses this event (over the bound, torn,
    * or not this session) can never prove it: `unreadable`. A transient read or
    * fsync failure is `deferred`: the event keeps its state for the next activation
