@@ -43,7 +43,9 @@ async function fixture(providerVersion?: string, codemode = false, contextWindow
   const cwd = join(root, "project");
   const tronHome = join(root, "tron");
   await mkdir(agentDir); await mkdir(cwd);
-  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 100_000, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
+  // Pacing 0 streams by microtask. A timer per chunk waits at least 1 ms in Node, so a
+  // 64 KB tool call alone took about 5 s here.
+  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 0, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
   const model = faux.getModel();
   const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
   if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
