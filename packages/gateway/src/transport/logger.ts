@@ -80,6 +80,7 @@ export interface LogRecord {
 export interface LogMetadata {
   event?: string;
   source?: string;
+  kind?: string;
   sessionId?: string;
   connectionId?: string;
   peerClientId?: string;

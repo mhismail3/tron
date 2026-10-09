@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { GatewayError } from "../errors.js";
 
 export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "invalid_grant" | "permanent_failure" | "ambiguous" | "rate_limited" | "in_progress";
+export interface RelayNotificationResult { status: RelayNotificationOutcome; reason?: string }
 export interface RelayFetchResponse { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null; }
 export type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchResponse>;
 
@@ -57,10 +58,13 @@ function exactResult(value: unknown): { status: Exclude<RelayNotificationOutcome
   if (object.apnsId !== undefined && typeof object.apnsId !== "string") return undefined;
   if (object.reason !== undefined && typeof object.reason !== "string") return undefined;
   if (object.retryAfterSeconds !== undefined && (!Number.isSafeInteger(object.retryAfterSeconds) || (object.retryAfterSeconds as number) < 1)) return undefined;
+  const reason = typeof object.reason === "string" && /^[A-Za-z0-9_.-]{1,96}$/u.test(object.reason)
+    ? object.reason
+    : undefined;
   return ["accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "rate_limited", "in_progress"].includes(object.status)
     ? {
       status: object.status as Exclude<RelayNotificationOutcome, "invalid_grant">,
-      ...(typeof object.reason === "string" ? { reason: object.reason } : {}),
+      ...(reason ? { reason } : {}),
     }
     : undefined;
 }
@@ -80,40 +84,25 @@ export class PushRelayClient {
     grantId: string;
     secret: string;
     requestId: string;
-    notificationKind: "ask" | "explicit" | "agent_finished" | "waiting";
-    interruptionLevel?: "time-sensitive";
-    message: string;
-    title?: string;
-    sessionId?: string;
-    machineId?: string;
-    expiresAt: string;
-  }): Promise<RelayNotificationOutcome> {
-    if (!this.origin) return "retryable";
+    relayEnvelope: string;
+  }): Promise<RelayNotificationResult> {
+    if (!this.origin) return { status: "retryable", reason: "relay_unavailable" };
     const path = "/v3/notifications";
-    const body = JSON.stringify({
-      version: 1,
-      kind: "agent_alert",
-      notificationKind: input.notificationKind,
-      ...(input.interruptionLevel ? { interruptionLevel: input.interruptionLevel } : {}),
-      requestId: input.requestId,
-      message: input.message,
-      ...(input.title ? { title: input.title } : {}),
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      ...(input.machineId ? { machineId: input.machineId } : {}),
-      expiresAt: input.expiresAt,
-    });
+    const body = input.relayEnvelope;
     if (Buffer.byteLength(body) > REQUEST_MAX_BYTES) throw new GatewayError("invalid_request", "Notification request exceeds its bounded payload");
     const response = await this.request("POST", path, input.grantId, input.secret, input.requestId, body);
     const text = await boundedBody(response);
     let parsed: unknown;
-    try { parsed = text ? JSON.parse(text) : undefined; } catch { return response.status >= 500 ? "retryable" : "ambiguous"; }
+    try { parsed = text ? JSON.parse(text) : undefined; } catch {
+      return { status: response.status >= 500 ? "retryable" : "ambiguous", reason: `http_${response.status}` };
+    }
     const result = exactResult(parsed);
     if (response.status === 200 && result) {
       // Compatibility with relays predating the explicit in_progress status.
       // Re-querying this exact ID is still safe: their ledger never starts a
       // second APNs request, and the Gateway retry schedule remains bounded.
-      if (result.status === "ambiguous" && result.reason === "provider_outcome_unknown") return "in_progress";
-      return result.status;
+      if (result.status === "ambiguous" && result.reason === "provider_outcome_unknown") return { status: "in_progress", reason: result.reason };
+      return result;
     }
     // The relay intentionally exposes one bounded error key. An unknown,
     // disabled, or mismatched grant is recoverable only by rotating the mobile
@@ -123,8 +112,10 @@ export class PushRelayClient {
       ? (parsed as Record<string, string>).error
       : undefined;
     if ((response.status === 401 && relayError === "invalid_signature")
-      || (response.status === 410 && relayError === "installation_unavailable")) return "invalid_grant";
-    return response.status === 429 || response.status >= 500 ? "retryable" : "ambiguous";
+      || (response.status === 410 && relayError === "installation_unavailable")) return { status: "invalid_grant", reason: relayError };
+    return response.status === 429 || response.status >= 500
+      ? { status: "retryable", reason: relayError ?? `http_${response.status}` }
+      : { status: "ambiguous", reason: relayError ?? `http_${response.status}` };
   }
 
   async revoke(grantId: string, secret: string, requestId: string): Promise<"revoked" | "retryable"> {

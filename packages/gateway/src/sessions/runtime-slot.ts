@@ -2848,9 +2848,10 @@ export class RuntimeSlot {
   /** The process activity projection owns live delegated work that may wake
    * this session; paused and recent history are not pending work. */
   private pendingBackgroundProcesses(): string[] {
-    return [...this.processActivities.values()]
-      .filter((activity) => activity.kind === "subagent" && isActiveProcessLifecycle(activity.lifecycle))
-      .map((activity) => activity.processId)
+    return [...this.extensionActivities.values()]
+      .filter((activity) => this.extensionActivityOwnsLiveWork(activity)
+        && ["asynchronous", "workflow"].includes(activity.mode?.toLowerCase() ?? ""))
+      .map((activity) => `${activity.toolCallId}:${activity.runId ?? activity.activityId ?? activity.id}`)
       .sort();
   }
 

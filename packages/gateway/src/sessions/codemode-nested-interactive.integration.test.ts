@@ -50,9 +50,7 @@ describe("codemode nested interactive tools", () => {
       async send() { return "accepted_by_apns" as const; },
       async revoke() { return "revoked" as const; },
     } as unknown as PushRelayClient;
-    const notificationService = new NotificationService(notificationStore, relay, Date.now, {
-      dailyIntents: 3, sessionHourlyIntents: 3, targetDailyIntents: 3,
-    });
+    const notificationService = new NotificationService(notificationStore, relay);
     await notificationService.upsertGrant(grant);
     const notificationAdmissions: Array<{ kind: string; status: string; sessionId: string }> = [];
     const enqueue = notificationService.enqueue.bind(notificationService);

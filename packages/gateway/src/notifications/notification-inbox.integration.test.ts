@@ -88,7 +88,6 @@ async function fixture() {
     store,
     { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient,
     Date.now,
-    undefined,
     (payload) => broadcasts.push(payload),
   );
   const service = new GatewayService({
