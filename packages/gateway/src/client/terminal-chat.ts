@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { resolveBindHost } from "../config.js";
 import { resolveTronHome } from "../tron-home.js";
-import type { ContentPart, HomeContextProjection, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
+import type { ContentPart, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
@@ -183,26 +183,23 @@ export async function listSessions(
   throw new Error("Gateway session catalog exceeds its bounded page count");
 }
 
+/** The `/home` commands, listed once for the usage line and for `/home` errors. */
+const HOME_COMMANDS = [
+  "/home [status]", "/home designate [provider/id]", "/home disable", "/home memory <provider/id>", "/home resume", "/home context",
+  "/home reconfirm-permissions", "/home permissions", "/home revoke-scope <id>", "/home revoke-grant <id>",
+  "/home approve-grant <request-id> <expiry-ms>", "/home deny-grant <request-id> <expiry-ms>", "/home task <id>",
+  "/home steer <id> <text>", "/home stop <id>", "/home redeliver <id>",
+];
+const HOME_USAGE = `Usage: ${HOME_COMMANDS.join(" | ")}\n`;
+
 function usage(): never {
   process.stderr.write(`Usage: tron-chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]\n\n`);
   process.stderr.write(`Attaches to the Gateway-owned canonical runtime. It never opens Pi JSONL directly.\n`);
-  process.stderr.write(`Commands: /home [status], /home designate [provider/id], /home disable, /home memory <provider/id>, /home resume, /home context, /home reconfirm-permissions, /home permissions, /home revoke-scope <id>, /home revoke-grant <id>, /home approve-grant <request-id> <expiry-ms>, /home deny-grant <request-id> <expiry-ms>, /home task <id>, /home steer <id> <text>, /home stop <id>, /home redeliver <id>, /abort, /quit\n`);
+  process.stderr.write(`Commands: ${HOME_COMMANDS.join(", ")}, /abort, /quit\n`);
   process.exit(64);
 }
 
 /** `home.status`: the protocol's bounded projection, rendered without a terminal-only shape. */
-type HomeStatusEnvelope = HomeStatus;
-
-interface HomeDesignationEnvelope { homeId: string; sessionId: string; generation: number }
-
-/** `home.configureMemory`/`home.resumeMemory` and `home.status`'s `memory`: the
- * same bounded memory projection the RPCs return. */
-export type HomeMemoryEnvelope = HomeMemoryStatus;
-
-/** `home.context`: the bounded request context of Home's current or last
- * activation. The sizes are absent when that activation prepared no request. */
-export type HomeContextEnvelope = HomeContextProjection;
-
 /** One `/home` line, resolved without touching the Gateway. */
 export type HomeCommand =
   | { kind: "status" }
@@ -258,7 +255,7 @@ export function parseHomeCommand(input: string): HomeCommand | undefined {
   return { kind: "usage" };
 }
 
-export function describeHomeStatus(status: HomeStatusEnvelope): string {
+export function describeHomeStatus(status: HomeStatus): string {
   const designation = !status.available
     ? `Home unavailable: ${status.reason ?? "the stored record could not be used"}`
     : !status.enabled ? "Home is not designated."
@@ -268,10 +265,8 @@ export function describeHomeStatus(status: HomeStatusEnvelope): string {
   return `${designation} Phase: ${status.phase}. Readiness: ${status.readiness.ready ? "ready" : `not ready; ${gaps}`}. ${describeHomeMemory(status.memory)} ${describeHomeContext(status.activation)} Recovery: ${recovery}.`;
 }
 
-const HOME_USAGE = "Usage: /home [status] | /home designate [provider/id] | /home disable | /home memory <provider/id> | /home resume | /home context | /home reconfirm-permissions | /home permissions | /home revoke-scope <id> | /home revoke-grant <id> | /home approve-grant <request-id> <expiry-ms> | /home deny-grant <request-id> <expiry-ms> | /home task <id> | /home steer <id> <text> | /home stop <id> | /home redeliver <id>\n";
-
 export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
-  return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatusEnvelope);
+  return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatus);
 }
 
 /** `provider/id`, the same spelling the model picker uses. */
@@ -285,7 +280,7 @@ export function parseHomeModelArgument(argument: string): { provider: string; id
 
 /** What the memory projection says, in one line: its model, the spend so far,
  * whether its store is open yet and the reason it is blocked. */
-export function describeHomeMemory(memory: HomeMemoryEnvelope): string {
+export function describeHomeMemory(memory: HomeMemoryStatus): string {
   if (!memory.configured) {
     return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id> configures it.`;
   }
@@ -303,7 +298,7 @@ export function describeHomeMemory(memory: HomeMemoryEnvelope): string {
 
 /** What the request-context projection says: the activation's start, whether it
  * is still open, the size of the request it prepared, and its own refusal. */
-export function describeHomeContext(context: HomeContextEnvelope): string {
+export function describeHomeContext(context: HomeContextProjection): string {
   if (!context.available) return "Home has no activation to report yet.";
   const start = context.activationStartEntryId ?? "the start of the conversation";
   const state = context.activationOpen ? "open" : "settled";
@@ -320,17 +315,17 @@ export async function configureHomeMemory(
   client: Pick<GatewayProtocolClient, "request">,
   model: { provider: string; id: string },
 ): Promise<string> {
-  const result = await client.request("home.configureMemory", { commandId: randomUUID(), model }) as unknown as HomeMemoryEnvelope;
+  const result = await client.request("home.configureMemory", { commandId: randomUUID(), model }) as unknown as HomeMemoryStatus;
   return describeHomeMemory(result);
 }
 
 export async function resumeHomeMemory(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
-  const result = await client.request("home.resumeMemory", { commandId: randomUUID() }) as unknown as HomeMemoryEnvelope;
+  const result = await client.request("home.resumeMemory", { commandId: randomUUID() }) as unknown as HomeMemoryStatus;
   return describeHomeMemory(result);
 }
 
 export async function homeContextCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
-  return describeHomeContext(await client.request("home.context", {}) as unknown as HomeContextEnvelope);
+  return describeHomeContext(await client.request("home.context", {}) as unknown as HomeContextProjection);
 }
 
 export async function designateHome(
@@ -340,12 +335,12 @@ export async function designateHome(
   const result = await client.request("home.designate", {
     commandId: randomUUID(),
     ...(model ? { model } : {}),
-  }) as unknown as HomeDesignationEnvelope;
+  }) as unknown as HomeDesignation;
   return `Home designated: session ${result.sessionId}, generation ${result.generation}.`;
 }
 
 export async function disableHome(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
-  const result = await client.request("home.disable", { commandId: randomUUID() }) as unknown as HomeDesignationEnvelope;
+  const result = await client.request("home.disable", { commandId: randomUUID() }) as unknown as HomeDesignation;
   return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
 }
 

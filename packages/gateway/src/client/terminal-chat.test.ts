@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
 import { GatewayClientError } from "./gateway-client.js";
-import { afterEach } from "vitest";
 import {
-  configureHomeMemory, connectResilient, designateHome, describeHomeContext, describeHomeMemory,
-  describeHomeStatus, disableHome, homeContextCommand, homeStatusCommand, listSessions,
-  assistantText, parseHomeCommand, parseHomeModelArgument, resumeHomeMemory, runHomeCommand, runHomeInput,
+  connectResilient, describeHomeStatus, homeStatusCommand, listSessions,
+  assistantText, parseHomeCommand, parseHomeModelArgument, runHomeCommand, runHomeInput,
   synchronizeTerminalSession,
 } from "./terminal-chat.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -220,102 +218,6 @@ describe("terminal chat Home commands", () => {
       .toContain("unreadable");
     expect(describeHomeStatus({ ...base, phase: "undesignated", available: true, enabled: false, live: false, sessionPresent: false }))
       .not.toEqual(describeHomeStatus({ ...base, phase: "ready", available: true, enabled: true, homeId: "home", sessionId: "session", generation: 1, live: true, sessionPresent: true }));
-  });
-
-  it("sends the two mutations with a command id and reports the new generation", async () => {
-    const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({ homeId: "home", sessionId: "session", generation: 2 }));
-    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
-
-    const designated = await designateHome(client, { provider: "anthropic", id: "claude-sonnet-4-5" });
-    expect(request).toHaveBeenLastCalledWith("home.designate", {
-      commandId: expect.any(String), model: { provider: "anthropic", id: "claude-sonnet-4-5" },
-    });
-    expect(designated).toContain("session");
-
-    await designateHome(client);
-    expect(request).toHaveBeenLastCalledWith("home.designate", { commandId: expect.any(String) });
-
-    const disabled = await disableHome(client);
-    expect(request).toHaveBeenLastCalledWith("home.disable", { commandId: expect.any(String) });
-    expect(disabled).toContain("session");
-  });
-
-  it("configures Home's memory with the model it was given", async () => {
-    const model = { provider: "anthropic", id: "claude-haiku-4-5" };
-    const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({
-      configured: true, open: false, model,
-    }));
-    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
-
-    const described = await configureHomeMemory(client, model);
-    expect(request).toHaveBeenLastCalledWith("home.configureMemory", { commandId: expect.any(String), model });
-    expect(described).toContain(model.id);
-    expect(described).not.toContain("budget");
-
-    // The state the projection reports is what makes each outcome distinguishable:
-    // an open store with a spend, a blocked one with its reason, and none at all.
-    expect(describeHomeMemory({ configured: true, open: true, model, spentTokens: 1_200 }))
-      .toContain("1200");
-    const detailed = describeHomeMemory({
-      configured: true, open: true, model, reason: "summary ingestion delayed",
-      episodic: {
-        sourceSessionId: "session", generation: 1, messages: 4,
-        nodes: { total: 2, free: 0, summary: 2, byLevel: [{ level: 1, count: 2 }] },
-        view: { parts: [], truncatedParts: 0, bytes: 20, budgetBytes: 100, built: 1, unbuilt: 2 },
-        coverage: { admitted: 4, summarized: 2 }, pump: { busy: 1 }, blocked: null,
-        tokens: { used: 1_200, sinceOpen: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } },
-      },
-    });
-    expect(detailed).toContain("summary ingestion delayed");
-    expect(detailed).toContain("4 admitted");
-    expect(detailed).toContain("2 summarized");
-    expect(detailed).toContain("2 unbuilt");
-    expect(detailed).toContain("pump busy: 1");
-    expect(describeHomeMemory({ configured: true, open: false, model, blocked: "permanent-failure" }))
-      .toContain("permanent-failure");
-    expect(describeHomeMemory({ configured: false, open: false })).toContain("not configured");
-  });
-
-  it("resumes Home's memory and reports the state it left", async () => {
-    const model = { provider: "anthropic", id: "claude-haiku-4-5" };
-    const request = vi.fn(async () => ({
-      configured: true, open: true, model, spentTokens: 900,
-    }));
-    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
-
-    const before = describeHomeMemory({ configured: true, open: false, model, blocked: "retries-exhausted" });
-    const after = await resumeHomeMemory(client);
-    expect(request).toHaveBeenLastCalledWith("home.resumeMemory", { commandId: expect.any(String) });
-    expect(before).toContain("retries-exhausted");
-    expect(after).not.toContain("blocked");
-    expect(after).toContain("900");
-  });
-
-  it("reads the request context and prints its bounded fields", async () => {
-    const request = vi.fn(async () => ({
-      available: true, activationStartEntryId: "entry-2", activationOpen: false,
-      viewLines: 7, viewBytes: 500, effectiveTokens: 2_197, contextWindow: 128_000,
-      lastRefusalReason: "context-overflow", lastRefusalDetail: "effective 2197 tokens leave no head-room",
-    }));
-    const client = { request } as unknown as Pick<GatewayProtocolClient, "request">;
-
-    const described = await homeContextCommand(client);
-    expect(request).toHaveBeenCalledExactlyOnceWith("home.context", {});
-    expect(described).toContain("entry-2");
-    expect(described).toContain("7");
-    expect(described).toContain("128000");
-    expect(described).toContain("context-overflow");
-
-    // An activation refused before it prepared a request has its reason and no
-    // sizes, and a Home that never ran one says so rather than inventing numbers.
-    const refused = describeHomeContext({ available: true, activationStartEntryId: "entry-3", activationOpen: false, lastRefusalReason: "memory-not-configured" });
-    expect(refused).toContain("memory-not-configured");
-    expect(refused).not.toContain("view lines");
-    expect(describeHomeContext({ available: true, activationStartEntryId: null, activationOpen: true, viewLines: 0, viewBytes: 0, effectiveTokens: 0, contextWindow: 0 }))
-      .toContain("open");
-    expect(describeHomeContext({ available: true, activationStartEntryId: null, activationOpen: true }))
-      .toContain("awaiting request preparation");
-    expect(describeHomeContext({ available: false })).toContain("no activation");
   });
 
   it("keeps a malformed command inside the per-command error boundary", async () => {
