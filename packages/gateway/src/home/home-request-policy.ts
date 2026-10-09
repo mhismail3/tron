@@ -54,7 +54,6 @@ const HOME_RESERVE_TOKENS = 1_024;
 /** Why a Home request was refused. Bounded and reported; observable. */
 export type HomeRefusalReason =
   | "no-activation"
-  | "stale-activation"
   | "memory-not-configured"
   | "memory-paused"
   | "memory-blocked"
@@ -88,12 +87,10 @@ export class HomeMemoryRefusal extends Error {
   }
 }
 
-/** One request the policy refused. Bounded, so a broken session cannot grow it. */
+/** The refusal an activation ended with, as `home.context` reports it. */
 export interface HomeRefusal {
   reason: HomeRefusalReason;
   detail: string;
-  operationId?: string;
-  nonce?: string;
 }
 
 /** The sizes of the last request one activation prepared, as `home.context` reports them. */
@@ -106,15 +103,6 @@ export interface HomeRequestStep {
   /** The model's context window this activation was measured against, 0 when the
    * model declares none. */
   contextWindow: number;
-}
-
-/** One `transformContext` pass, recorded so the comparison mode stays visible. */
-export interface HomeTransformObservation {
-  operationId: string;
-  nonce: string;
-  /** True when the activation's non-system messages survived by object identity. */
-  identity: boolean;
-  nonSystemMessages: number;
 }
 
 /** What identifies one activation to the memory view source. */
@@ -216,7 +204,6 @@ interface RewrittenContext {
   excludedMessages: number;
 }
 
-const MAXIMUM_RECORDED_REFUSALS = 64;
 const MAXIMUM_RECORDED_TRANSFORMS = 64;
 
 export class HomeRequestPolicy {
@@ -227,23 +214,17 @@ export class HomeRequestPolicy {
   private expectedDigest: string | undefined;
   /** The exact non-system request messages `prepareRequest` returned for the current request. */
   private expectedNonSystemMessages: AgentMessage[] | undefined;
-  private readonly refusals: HomeRefusal[] = [];
-  private readonly transforms: HomeTransformObservation[] = [];
+  /** Whether each recent `transformContext` pass kept the activation's non-system
+   * messages by object identity, oldest first. Bounded, and surviving settlement. */
+  private readonly transformIdentities: boolean[] = [];
 
   constructor(private readonly options: HomeRequestPolicyOptions) {}
 
-  /** Every refusal, oldest first (bounded). */
-  refusalLog(): readonly HomeRefusal[] {
-    return this.refusals;
-  }
-
-  /** Every `transformContext` pass, oldest first (bounded), surviving settlement. */
-  transformLog(): readonly HomeTransformObservation[] {
-    return this.transforms;
-  }
-
-  currentOperationId(): string | undefined {
-    return this.activation?.operationId;
+  /** The SDK's context stage clones messages, so this is the one place the
+   * identity claim is observed rather than inferred (the fidelity check's
+   * equal-value fallback is what Gateway sessions use). */
+  recentTransformIdentities(): readonly boolean[] {
+    return this.transformIdentities;
   }
 
   /**
@@ -274,14 +255,6 @@ export class HomeRequestPolicy {
     // A displaced activation means the previous operation settled without a
     // matching `settle`, or a new run began first. Replacing it is the only safe
     // choice: the old boundary can no longer be trusted.
-    if (this.activation && this.activation.operationId !== operationId) {
-      this.recordRefusal({
-        reason: "stale-activation",
-        detail: `activation for ${this.activation.operationId} was replaced by ${operationId}`,
-        operationId: this.activation.operationId,
-        nonce: this.activation.nonce,
-      });
-    }
     this.activation?.cancellation.abort();
     this.activation = {
       operationId,
@@ -616,13 +589,8 @@ export class HomeRequestPolicy {
         );
       }
     }
-    this.transforms.push({
-      operationId: activation.operationId,
-      nonce: activation.nonce,
-      identity: identical,
-      nonSystemMessages: actual.length,
-    });
-    if (this.transforms.length > MAXIMUM_RECORDED_TRANSFORMS) this.transforms.shift();
+    this.transformIdentities.push(identical);
+    if (this.transformIdentities.length > MAXIMUM_RECORDED_TRANSFORMS) this.transformIdentities.shift();
   }
 
   private cut(
@@ -669,11 +637,6 @@ export class HomeRequestPolicy {
     };
   }
 
-  private recordRefusal(refusal: HomeRefusal): void {
-    this.refusals.push(refusal);
-    if (this.refusals.length > MAXIMUM_RECORDED_REFUSALS) this.refusals.shift();
-  }
-
   private refuse(
     reason: HomeRefusalReason,
     detail: string,
@@ -681,13 +644,7 @@ export class HomeRequestPolicy {
     sizes?: { effectiveTokens: number; contextWindow: number },
   ): HomeRequestPolicyError {
     const open = activation ?? this.activation;
-    const refusal: HomeRefusal = {
-      reason,
-      detail,
-      ...(open ? { operationId: open.operationId, nonce: open.nonce } : {}),
-    };
-    if (open) open.refusal = refusal;
-    this.recordRefusal(refusal);
+    if (open) open.refusal = { reason, detail };
     this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
     return new HomeRequestPolicyError(reason, `Home request refused (${reason}): ${detail}`);
   }

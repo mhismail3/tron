@@ -72,6 +72,8 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
       }
       await commit();
     },
+    beginHomePublicationReconciliation: () => {},
+    retireHomeRuntimes: async () => {},
   };
   const workspace = new TronWorkspace(join(root, "tron-workspace"));
   workspaces.push(workspace);
