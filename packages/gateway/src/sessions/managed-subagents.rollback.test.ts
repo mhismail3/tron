@@ -72,7 +72,13 @@ it("executes previous → candidate → previous with detached resume through th
           NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
       }).catch(async (error: Error & { stdout?: string; stderr?: string }) => {
         await writeFile(join(root, `${name}.log`), (error.stdout ?? "") + (error.stderr ?? ""));
-        const failed = JSON.parse(await readFile(join(root, `${name}.json`), "utf8"));
+        // A leg that exits before writing its report (killed by the budget, or
+        // crashed) fails with its own exit, not with the missing report file.
+        const legReport = await readFile(join(root, `${name}.json`), "utf8").catch((readError: NodeJS.ErrnoException) => {
+          if (readError.code === "ENOENT") throw error;
+          throw readError;
+        });
+        const failed = JSON.parse(legReport);
         report.legs.push(failed);
         throw new Error(`${name} leg failed: ${JSON.stringify(failed)}`);
       });
