@@ -56,7 +56,9 @@ it.skipIf(Boolean(leg)).each([
     await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
     for (const directory of ["agent", "workspace", "home", "tmp"]) await mkdir(join(root, directory));
     await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/sessions/${ownTestFile}`], {
-      cwd: payload, timeout: 15_000, maxBuffer: 1024 * 1024,
+      // Hang guard only: this file runs alone in the nested pass (vitest.nested.config.ts);
+      // a passing cold child takes about 3-14 s, so a reached bound means a hung child.
+      cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
       env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
         TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE: root,
         TRON_TEST_PROCESS_OWNER: root,
@@ -67,7 +69,7 @@ it.skipIf(Boolean(leg)).each([
     await refuseUnjoinedFixture(root);
     await rm(root, { recursive: true, force: true });
   }
-}, 20_000);
+}, 150_000);
 
 // Runs in the nested child only: the staged payload's pin selects the invalid closure.
 it.skipIf(!leg)("refuses the staged invalid extension entry", async () => {

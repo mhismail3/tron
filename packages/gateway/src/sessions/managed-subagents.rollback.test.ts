@@ -49,7 +49,9 @@ it("executes previous → candidate → previous with detached resume through th
         childBefore = await readFile(join(root, candidate!.completion.childFile));
       }
       const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/sessions/managed-subagents.rollback.test.ts"], {
-        cwd: payload, timeout: 30_000, maxBuffer: 1024 * 1024,
+        // Hang guard only: legs run alone in the nested pass (vitest.nested.config.ts);
+        // a passing leg takes about 9-12 s, so a reached bound means a hung leg.
+        cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
         env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), PI_SKIP_VERSION_CHECK: "1",
           TRON_SUBAGENTS_ROLLBACK_LEG: name, TRON_SUBAGENTS_ROLLBACK_FIXTURE: root,
           TRON_TEST_PROCESS_OWNER: root,
@@ -96,7 +98,7 @@ it("executes previous → candidate → previous with detached resume through th
     await rm(payloads, { recursive: true, force: true });
     if (!retainedRoot) await rm(root, { recursive: true, force: true });
   }
-}, 100_000);
+}, 400_000);
 
 async function runLeg(): Promise<void> {
   const root = await realpath(process.env.TRON_SUBAGENTS_ROLLBACK_FIXTURE!);
