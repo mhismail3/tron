@@ -8994,7 +8994,7 @@ export default function (pi) {
   });
 
   it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-abort-failed-stop-"));
+    const root = await temporaryRoot("tron-abort-failed-stop-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9041,7 +9041,7 @@ export default function (pi) {
   });
 
   it("records a completed receipt for a Stop that arrives after a natural completion", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-abort-after-completion-"));
+    const root = await temporaryRoot("tron-abort-after-completion-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
