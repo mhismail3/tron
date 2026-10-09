@@ -112,3 +112,23 @@ it("measures retained Home heap at production record caps for a 2k-message histo
     expect(retained / messages).toBeLessThan(8 * 1_024);
   } finally { await rm(root, { recursive: true, force: true }); }
 }, 300_000);
+
+it("retains at most the capped text of each over-cap message at production caps", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-home-heap-over-cap-"));
+  try {
+    // Every message is over the record cap, so each projection is its capped text.
+    const messagesPerChapter = 10;
+    const sourceBytes = 2 * 1024 * 1024;
+    const chapters = await writeChapters(root, 2, messagesPerChapter, (chapter, index) => `over-cap ${chapter}-${index} ` + "y".repeat(sourceBytes));
+    const { messages, retained } = await measureHomeHeap(root, chapters, { ledgerRevision: 2 });
+    expect(messages).toBe(2 * messagesPerChapter);
+    const retainedPerMessage = Math.round(retained / messages);
+    await reportFile("heap-over-cap.json", {
+      chapters: 2, messages, sourceBytesPerMessage: sourceBytes, retainedBytes: retained, retainedBytesPerMessage: retainedPerMessage,
+      production: { recordCapChars: EPISODIC_DEFAULTS.recordCapChars, capTailChars: EPISODIC_DEFAULTS.capTailChars },
+    });
+    // The capped text is about 128 Ki characters, two bytes each (its marker is not
+    // ASCII): about 256 KB per message. A retained source would be 2 MB per message.
+    expect(retainedPerMessage).toBeLessThan(2 * EPISODIC_DEFAULTS.recordCapChars * 2 + 256 * 1024);
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 120_000);

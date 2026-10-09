@@ -22,7 +22,9 @@ afterEach(async () => {
   await Promise.all(owners.splice(0).map(owner => owner.dispose()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
-const summarizer: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-120));
+// A provider's reply is a fresh string. A slice of the prompt would keep the whole
+// prompt alive with each node's summary, which is not what a production summary does.
+const summarizer: EpisodicSummarizer = async request => fauxAssistantMessage(Buffer.from(request.turns.at(-1)!.text.slice(-120), "utf8").toString("utf8"));
 
 async function namespaceBytes(path: string): Promise<number> {
   let total = 0;

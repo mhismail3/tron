@@ -236,7 +236,8 @@ source data; their privacy contract is owned by `home/home-diagnostic.ts` and th
   assistant text whole; a memory record must still fit its store's line, so text
   over `recordCapChars` keeps head and tail with a marker and a `capped`
   omission. The compactor then sees the capped text, exactly as it sees a capped
-  tool result.
+  tool result. The kept text is a copy: a record holds the capped text, never a
+  slice that would keep the whole canonical line alive (`capText`).
 - Each message records `sourceDigest` (sha256 of the canonical entry's JSON
   line), `projectedDigest` (sha256 of the projected text), its omissions
   (`thinking`, `attachment`, `capped`, `credentials`, `context-edit`,

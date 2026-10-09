@@ -103,13 +103,16 @@ export function cutBytes(text: string, maxBytes: number): string {
 }
 
 /** Cap one text at `capChars`, keeping head and tail with a marker naming what
- * was removed (gist §7; the recipe caps tool output the same way). */
+ * was removed (gist §7; the recipe caps tool output the same way). The result is a
+ * copy: a slice keeps its whole source string alive for as long as the capped text
+ * is stored, and a stored record must not hold a multi-megabyte source. */
 export function capText(text: string, capChars: number, tailChars: number): { text: string; capped: boolean } {
   if (text.length <= capChars) return { text, capped: false };
   const tail = Math.min(tailChars, Math.max(0, capChars - 1));
   const head = capChars - tail;
   const removed = text.length - head - tail;
-  return { text: `${text.slice(0, head)}\n…[truncated ${removed} characters]…\n${text.slice(text.length - tail)}`, capped: true };
+  const capped = `${text.slice(0, head)}\n…[truncated ${removed} characters]…\n${text.slice(text.length - tail)}`;
+  return { text: Buffer.from(capped, "utf8").toString("utf8"), capped: true };
 }
 
 /**

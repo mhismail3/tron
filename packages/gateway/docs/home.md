@@ -221,13 +221,15 @@ no migration or automatic rebuild. Ordinary session formats are unchanged.
 
 `home-source.e2e.test.ts` retains `test-results/home-memory/continuity.json` for
 cross-chapter replay, restart, navigation and frozen-cut proof.
-`home-source.scale.test.ts` retains two reports under `test-results/home-memory/`,
+`home-source.scale.test.ts` retains three reports under `test-results/home-memory/`,
 regenerated with `vitest.scale.config.ts`. `heap.json` covers four chapters with
 at least 64 MiB of canonical payload at a reduced record cap, proving the raw
 source's streamed bound. `heap-production.json` (run with `-t production`, about
-one minute) covers 2,000 messages at production caps. Both reports are
-post-GC live heap samples at ingestion cuts and a retained heap sample; neither
-claims an allocation peak or power-loss proof.
+one minute) covers 2,000 messages at production caps. `heap-over-cap.json` covers
+20 messages of 2 MiB each at production caps: each message's catalog cost is its
+capped text (about 256 KB), not its source. Each report holds post-GC live heap
+samples at ingestion cuts and a retained heap sample; none claims an allocation
+peak or power-loss proof.
 
 A reserved chapter contributes nothing until canonical evidence exists. If an SDK
 operation fails after staging canonical entries, RuntimeSlot retains the existing
