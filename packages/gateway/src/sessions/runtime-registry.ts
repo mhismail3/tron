@@ -707,6 +707,7 @@ export class RuntimeRegistry {
        * reserved or already-running automation target. */
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
+      stopSteeringDiagnostic?: RuntimeSlotDependencies["stopSteeringDiagnostic"];
       manualCompactionAdopted?: RuntimeSlotDependencies["manualCompactionAdopted"];
       codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
@@ -1597,6 +1598,7 @@ export class RuntimeRegistry {
       noteModelUsed: (sessionId: string, model: { provider: string; id: string }) => { void this.noteModelUsed(sessionId, model); },
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
+      ...(this.options.stopSteeringDiagnostic ? { stopSteeringDiagnostic: this.options.stopSteeringDiagnostic } : {}),
       ...(this.options.manualCompactionAdopted ? { manualCompactionAdopted: this.options.manualCompactionAdopted } : {}),
       ...(this.options.codemodeDiagnostic ? { codemodeDiagnostic: this.options.codemodeDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
