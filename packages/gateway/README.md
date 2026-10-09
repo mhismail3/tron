@@ -3215,9 +3215,11 @@ definitions, or workflow scripts to force-load
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing
 `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, preserving
 the task verbatim and never truncating it. Direct execution selects `agent` and
-excludes `workflow`. `workflow: true` runs the single fenced JavaScript workflow
-block in the same assistant reply; a string containing `/` names a script path
-relative to the request cwd, and other strings select a named workflow resource.
+excludes `workflow`. Tron's model guidance tells the model to write a workflow script
+to a git-ignored file under the request cwd and pass its relative path (a string
+containing `/`); absolute paths such as `/tmp` fail. Other strings select a named
+workflow resource. `workflow: true` (a script
+in the same assistant reply) is not recommended because the script prints in chat.
 The hook never rewrites workflow source or mixed `agent`/`workflow` requests. Native tasks above 8,000 UTF-16 code
 units use the launcher's private task-file delivery; that is not a task rejection
 limit. Workflow/structured delegation stage limits remain runner-owned (1 MiB
