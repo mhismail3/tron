@@ -982,10 +982,9 @@ from the canonical message's `errorMessage`, even when it has no content text:
 | `/home resume` | `home.resumeMemory`, then the memory projection it returns |
 | `/home context` | `home.context`: the activation's start, whether it is open, the request's sizes and its refusal |
 
-An unknown or incomplete command prints the usage line; a value that cannot be
-read — a model that is not spelled `provider/id`, a budget that is not a whole
-number of tokens — is reported with its own reason. A refused RPC is printed and
-the chat continues.
+An unknown or incomplete command prints the usage line; a model that is not
+spelled `provider/id` is reported with its own reason. `/home memory` accepts
+exactly one model argument. A refused RPC is printed and the chat continues.
 
 ## Disable keeps the transcript's tool loadout
 
@@ -1060,7 +1059,7 @@ invalidation or a restart, and any request after the provider's cache expired:
 - **Constant system prompt and tools.** The system prompt and tool list carry no
   dates or per-turn state.
 - **The view only grows between rebalances.** It rebalances only once it passes
-  its budget, and then leaves an eighth of the budget for later turns
+  its view-byte target, and then leaves an eighth of that target for later turns
   ([episodic-memory.md](episodic-memory.md)), so a rebalance rewrites its start
   once in about every twenty turns at production sizes.
 - **The memory message's blocks** (`viewPieces` in `home/home-memory.ts`):
@@ -1114,12 +1113,15 @@ that could depend on releasing the response under test.
 
 ## Memory and readiness
 
-Home currently owns ONE `EpisodicMemory` ([episodic-memory.md](episodic-memory.md))
-over the active chapter's canonical entries, outside the session's runtime so an idle
-eviction, a reload or a profile change cannot lose it. The runtime only reports
-that canonical entries changed (persisted messages, custom entries, navigation);
-the memory re-reads the log after its cursor and builds its tree in the background
-under its own bounds.
+HomeOwner owns ONE `EpisodicMemory` ([episodic-memory.md](episodic-memory.md))
+keyed by stable `homeId`, outside the physical session's runtime so an idle
+eviction, a reload or a profile change cannot lose its durable projection. Its
+canonical source reads active, sealed and materializing chapters in ledger order
+(see [Physical chapter mutation boundary](#physical-chapter-mutation-boundary)).
+RuntimeSlot reports that canonical entries changed (persisted messages, custom
+entries, navigation); HomeMemory ingests the source after its cursor and builds
+missing summaries in the background under the episodic owner's bounds. Each
+activation waits for and freezes the preceding view before provider admission.
 
 There is **no default model** (decision D4). The record's optional `memory` field
 holds the model: `home.configureMemory` (a command-id-receipted mutation,
@@ -1134,10 +1136,11 @@ only after its source changed, so spend grows only with the conversation and its
 edits. Token spend is persisted with the memory's state and reported as
 `spentTokens`, as information.
 
-A fresh-session designation keeps the memory configuration (the model is the
-user's decision about *how* Home remembers), but the replacement session gets a
-NEW memory store with its own spend, because the store is keyed by session id. Disabling Home and re-enabling it keeps the same session and store,
-so nothing is re-spent.
+Rollover and replacement designation keep the same `homeId`, memory configuration,
+store and recorded spend; the physical successor adds a chapter, not a new memory
+namespace. Disabling Home closes the open memory owner without deleting its store.
+Re-enabling or restarting restores that store's cursor, summaries, block and spend,
+rather than rebuilding completed summaries.
 
 A Home whose memory is unconfigured, blocked, or unable to place the activation's
 start entry refuses every activation with a readable reason and makes zero
@@ -1160,11 +1163,10 @@ the block's reason:
 | any block | `home.configureMemory` with a *different model*, which resumes it as part of re-opening the store |
 
 None of these waits for the summary catch-up: the block is cleared, the canonical
-log is re-read and the pump restarts, while the activation that asked waits only
-for the lines it will send. Resuming a memory that is *not* blocked, or one whose
-block a budget raise would not address, is refused as a conflict with the reason,
-so the caller learns what is actually wrong rather than being told a no-op
-succeeded.
+source is re-read and the pump restarts, while the activation that asked waits only
+for the lines it will send. `home.resumeMemory` refuses a memory that is *not*
+blocked as a conflict. Reconfiguring with the same model does not clear a block;
+changing the model or explicitly resuming never discards completed summaries.
 
 An activation waits for the memory before it sends anything (the recipe's "wait,
 don't cut"): the wait covers the lines the view will carry, so an unbuilt line is
