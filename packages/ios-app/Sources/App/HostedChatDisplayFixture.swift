@@ -152,7 +152,7 @@ struct HostedHomeDashboardFixture: View {
                             if staleActionFinished {
                                 Text("Stale action finished").accessibilityIdentifier("fixture.stale-action-finished")
                             }
-                            Text(model.homeMutations.isRunning ? "running" : model.homeMutations.hasUnresolvedCommand ? "unresolved" : "idle")
+                            Text(model.homeMutations.isRunning(profileID: profile.id) ? "running" : model.homeMutations.ownsUnresolvedCommand(profileID: profile.id) ? "unresolved" : "idle")
                                 .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
                             Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")

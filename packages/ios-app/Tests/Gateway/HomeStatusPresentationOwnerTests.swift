@@ -167,6 +167,33 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         if let token = owner.surfaceToken { owner.retireSurface(token) }
     }
 
+    func testConnectionOnlyClaimReadsPerConnectionAndNeverPollsOrReadsOnPresentationChange() async throws {
+        let (owner, coordinator, token) = mountedOwner()
+        let claimed = expectation(description: "claim read")
+        let reconnected = expectation(description: "read after connection admission")
+        var fetchCount = 0
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true, cadence: .connectionOnly) { _ in
+            fetchCount += 1
+            if fetchCount == 1 { claimed.fulfill() }
+            if fetchCount == 2 { reconnected.fulfill() }
+            return try self.decodeStatus()
+        }
+        await fulfillment(of: [claimed], timeout: 1)
+        try await Task.sleep(for: .milliseconds(5_300))
+        XCTAssertEqual(fetchCount, 1, "a claimed status polls at the mounted fallback cadence")
+        let cover = PresentationSurfaceToken(id: "cover", generation: UUID())
+        coordinator.register(cover, parent: token)
+        owner.presentationActivityChanged(for: token)
+        coordinator.retire(cover)
+        owner.presentationActivityChanged(for: token)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(fetchCount, 1, "a claimed status reads on presentation changes")
+        owner.connectionAvailable(profileID: "p", connectionID: "next", capabilityEnabled: true)
+        await fulfillment(of: [reconnected], timeout: 1)
+        XCTAssertEqual(fetchCount, 2)
+        owner.retireSurface(token)
+    }
+
     func testMountedStatusRefreshesImmediatelyOnInvalidation() async throws {
         let (owner, coordinator, _) = mountedOwner()
         let initial = expectation(description: "mounted initial refresh")

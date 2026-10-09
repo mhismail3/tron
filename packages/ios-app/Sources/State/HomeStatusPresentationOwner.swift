@@ -133,6 +133,12 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private var profileID: String?
     @ObservationIgnored private var connectionID: String?
     private(set) var capabilityEnabled = false
+    /// `mounted` follows the visible Home surface: a fallback cadence and immediate
+    /// invalidation. `connectionOnly` is a chat's claim for a status it could not
+    /// yet know: it reads when a connection is admitted and never polls or reads
+    /// on presentation changes.
+    enum Cadence: Equatable, Sendable { case mounted, connectionOnly }
+    @ObservationIgnored private var cadence = Cadence.mounted
     @ObservationIgnored private var suspended = false
     @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO)?
     @ObservationIgnored private var activeReadTask: Task<Void, Never>?
@@ -157,6 +163,7 @@ final class HomeStatusPresentationOwner {
         profileID: String,
         connectionID: String?,
         capabilityEnabled: Bool,
+        cadence: Cadence = .mounted,
         fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
     ) {
         let identityChanged = self.profileID != profileID || self.connectionID != connectionID
@@ -164,6 +171,7 @@ final class HomeStatusPresentationOwner {
         self.profileID = profileID
         self.connectionID = connectionID
         self.capabilityEnabled = capabilityEnabled
+        self.cadence = cadence
         self.fetch = fetch
         suspended = false
         guard capabilityEnabled else {
@@ -203,6 +211,7 @@ final class HomeStatusPresentationOwner {
             stopWork(clearStatus: false)
             return
         }
+        guard cadence == .mounted else { return }
         startWorkIfActive()
     }
 
@@ -336,6 +345,10 @@ final class HomeStatusPresentationOwner {
               let profileID, let connectionID, let fetch else { return }
         mountedTask?.cancel()
         Task { @MainActor [weak self] in await self?.refreshMounted() }
+        guard cadence == .mounted else {
+            mountedTask = nil
+            return
+        }
         mountedTask = Task { @MainActor [weak self] in
             guard let self else { return }
             while !Task.isCancelled {

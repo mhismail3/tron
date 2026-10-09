@@ -115,7 +115,7 @@ struct HomePinnedRow: View {
 
     private var icon: some View {
         Image(systemName: "house.fill")
-            .font(.system(size: 22, weight: .semibold))
+            .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
             .foregroundStyle(Color.tronEmerald)
             .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
             .accessibilityHidden(true)

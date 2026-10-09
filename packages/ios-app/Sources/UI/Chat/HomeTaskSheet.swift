@@ -26,9 +26,10 @@ struct HomeTaskSheet: View {
     private var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     private var canMutate: Bool {
-        guard active, !model.homeMutations.isRunning, !model.homeMutations.hasUnresolvedCommand,
+        guard active, !model.homeMutations.isRunning(profileID: profileID),
+              !model.homeMutations.ownsUnresolvedCommand(profileID: profileID),
               case .loaded(let read, _) = owner.state else { return false }
-        return read.id == requestID && read.identity == identity
+        return read.requestID == requestID && read.identity == identity
     }
     private struct TaskID: Hashable { let identity: HomeSheetReadIdentity?; let request: UUID; let active: Bool }
 
@@ -154,7 +155,7 @@ struct HomeTaskSheet: View {
             if task.lifecycle == .active, let operation = task.operationId, let generation = task.controllerGeneration {
                 Button("Stop task", role: .destructive) { mutate(.stopTask(taskID: task.taskId, operationID: operation, generation: generation)) }
                     .buttonStyle(TronActionButtonStyle(expands: false)).disabled(!canMutate)
-                TextField("Steering message", text: $steering, axis: .vertical).textFieldStyle(.roundedBorder)
+                TextField("Steering message", text: $steering, axis: .vertical).tronField()
                 Button("Send steer") { mutate(.steerTask(taskID: task.taskId, operationID: operation, generation: generation, text: steering)) }
                     .buttonStyle(TronActionButtonStyle(expands: false))
                     .disabled(!canMutate || steering.isEmpty || steering.count > 65536)

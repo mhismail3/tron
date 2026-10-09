@@ -56,12 +56,18 @@ final class HomeMutationCoordinator {
         let commandID: String
         let command: Command
     }
+    /// Notice code for a receipt that proves the change was never applied. The
+    /// Home status projection must be reloaded before the caller reports it.
+    static let notAppliedCode = "home_change_not_found"
+
     private enum State {
         case idle, running(Invocation), unresolved(Invocation)
     }
-    private var state: State = .idle
-    var isRunning: Bool { if case .running = state { true } else { false } }
-    var hasUnresolvedCommand: Bool { if case .unresolved = state { true } else { false } }
+    /// Pending state is owned per profile: each profile is a separate Gateway, so
+    /// one profile's running or unresolved change neither blocks nor re-targets
+    /// another. Idle profiles have no entry, and forgetting a profile retires its
+    /// entry, which keeps this map bounded by the profile store.
+    private var pending: [String: State] = [:]
     @ObservationIgnored private let client: GatewayClient
     @ObservationIgnored private let lifecycle: GatewayLifecycleCoordinator
     @ObservationIgnored private let mutationExecutor: ConfirmedMutationExecutor
@@ -75,14 +81,29 @@ final class HomeMutationCoordinator {
         self.uuidSource = uuidSource
     }
 
+    func isRunning(profileID: String) -> Bool {
+        if case .running = state(for: profileID) { true } else { false }
+    }
+
     func ownsUnresolvedCommand(profileID: String) -> Bool {
-        if case .unresolved(let invocation) = state { return invocation.profileID == profileID }
-        return false
+        if case .unresolved = state(for: profileID) { true } else { false }
+    }
+
+    func forgetProfile(_ profileID: String) {
+        pending.removeValue(forKey: profileID)
+    }
+
+    private func state(for profileID: String) -> State {
+        pending[profileID] ?? .idle
+    }
+
+    private func setState(_ newState: State, for profileID: String) {
+        if case .idle = newState { pending.removeValue(forKey: profileID) } else { pending[profileID] = newState }
     }
 
     func designate(authority: Authority) async throws -> HomeDesignationReceipt {
         let value: JSONValue
-        if case .unresolved(let invocation) = state, invocation.command == .designate {
+        if case .unresolved(let invocation) = state(for: authority.profileID), invocation.command == .designate {
             value = try await checkCompletion(authority: authority)
         } else {
             value = try await perform(.designate, authority: authority)
@@ -92,7 +113,7 @@ final class HomeMutationCoordinator {
 
     func perform(_ command: Command, authority: Authority) async throws -> JSONValue {
         let profileID = authority.profileID
-        guard case .idle = state else {
+        guard case .idle = state(for: profileID) else {
             throw GatewayFailure(code: "conflict", message: "A Home change is pending. Check its completion before starting another.", retryable: false, details: nil)
         }
         try requireAuthority(profileID: profileID, generation: authority.generation)
@@ -113,43 +134,54 @@ final class HomeMutationCoordinator {
             params["taskId"] = .string(task); params["homeId"] = .string(home); params["routeGeneration"] = .number(Double(route))
         default: break
         }
-        state = .running(invocation)
+        setState(.running(invocation), for: profileID)
         do {
             let value = try await mutationExecutor.performValue(
                 method: command.method, commandID: invocation.commandID, replayMissingReceipt: false
             ) { try await self.client.requestValue(command.method, JSONValue.object(params)) }
-            state = .idle
+            setState(.idle, for: profileID)
             try requireAuthority(profileID: profileID, generation: invocation.generation)
             return value
         } catch let failure as GatewayFailure where failure.code == "outcome_unknown" {
-            state = .unresolved(invocation)
+            setState(.unresolved(invocation), for: profileID)
             throw failure
         } catch {
-            state = .idle
+            setState(.idle, for: profileID)
             if let notSent = error as? GatewayDefinitelyNotSentError { throw notSent.failure }
             throw error
         }
     }
 
-    /// Checking an unresolved command never creates or re-sends a mutation.
+    /// Checking an unresolved command never creates or re-sends a mutation. A
+    /// missing receipt from the admitted Gateway retires the command as not
+    /// applied; pending or uncertain answers keep it unresolved.
     func checkCompletion(authority: Authority) async throws -> JSONValue {
         let profileID = authority.profileID
-        guard case .unresolved(let invocation) = state, invocation.profileID == profileID else {
+        guard case .unresolved(let invocation) = state(for: profileID) else {
             throw GatewayFailure(code: "conflict", message: "Check the pending Home change on its original Gateway.", retryable: false, details: nil)
         }
         try requireAuthority(profileID: profileID, generation: authority.generation)
         let generation = authority.generation
-        state = .running(invocation)
+        setState(.running(invocation), for: profileID)
         do {
-            let value = try await mutationExecutor.resolveValue(method: invocation.command.method, commandID: invocation.commandID)
-            // A terminal receipt retires its invocation even if its UI is gone.
-            state = .idle
+            let resolution = try await mutationExecutor.resolveReceipt(method: invocation.command.method, commandID: invocation.commandID)
+            // A receipt answer retires its invocation even if its UI is gone.
+            setState(.idle, for: profileID)
             try requireAuthority(profileID: profileID, generation: generation)
-            return value
+            switch resolution {
+            case .completed(let value): return value
+            case .missing:
+                throw GatewayFailure(
+                    code: Self.notAppliedCode,
+                    message: "Tron has no record of that Home change, so nothing was replayed. Check the current Home status before trying again.",
+                    retryable: false,
+                    details: nil
+                )
+            }
         } catch {
             // Publication cancellation after terminal retirement must not restore
             // an already-completed receipt as a pending command.
-            if case .running = state { state = .unresolved(invocation) }
+            if case .running = state(for: profileID) { setState(.unresolved(invocation), for: profileID) }
             throw error
         }
     }

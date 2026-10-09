@@ -203,17 +203,17 @@ struct HomeSheet: View {
                     }
                 }
             }
-            if model.homeMutations.hasUnresolvedCommand {
+            if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                 Button("Check completion") { checkCompletion() }.buttonStyle(TronActionButtonStyle(expands: false))
             }
         }
     }
 
     private var modelSelectionAvailability: ModelSelectionAvailability {
-        if model.homeMutations.hasUnresolvedCommand { return .blocked("Check the pending Home change first") }
-        guard !model.homeMutations.isRunning,
+        if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) { return .blocked("Check the pending Home change first") }
+        guard !model.homeMutations.isRunning(profileID: profileID),
               case .loaded(let read, .status) = owner.state,
-              read.id == request.id, read.identity == identity else { return .applying }
+              read.requestID == request.id, read.identity == identity else { return .applying }
         return .ready
     }
 
