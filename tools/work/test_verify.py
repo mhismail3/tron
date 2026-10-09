@@ -300,19 +300,43 @@ class CheckSetTests(VerifyFixture):
 
 
 class ParallelCheckTests(VerifyFixture):
-    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), delays=(0.8, 0.8, 0.1)):
-        self.commit(self.repo, "app/a.txt", "two\n")
+    """Scheduling oracles are events the checks record, never wall time or the host's size.
+
+    Overlap is proven by a rendezvous: a check with `peers=n` waits until n checks
+    of the same run have started, so it can only finish when the scheduler really
+    ran them together. Order and non-overlap come from one append-only event log.
+    The rendezvous and hold waits are bounded only so a broken scheduler fails
+    instead of hanging; a passing run never waits on them.
+    """
+
+    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), peers=(1, 1, 1), hold=False):
+        if (self.repo / "app/a.txt").read_text() != "two\n":
+            self.commit(self.repo, "app/a.txt", "two\n")
         checks = []
-        for name, group, code, delay in zip(("first", "second", "third"), groups, codes, delays):
+        for name, group, code, need in zip(("first", "second", "third"), groups, codes, peers):
             script = self.tmp / f"{name}.py"
             script.write_text(textwrap.dedent(f"""\
-                import os, pathlib, time, sys
-                output = pathlib.Path({str(self.counts / name)!r})
-                output.with_suffix('.pid').write_text(str(os.getpid()))
-                output.with_suffix('.group').write_text(str(os.getpgrp()))
-                started = time.time()
-                time.sleep({delay})
-                output.write_text(str(started) + ' ' + str(time.time()))
+                import os, pathlib, sys, time
+                counts = pathlib.Path({str(self.counts)!r})
+                def event(kind):
+                    fd = os.open(counts / 'events.log', os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+                    os.write(fd, f'{{kind}} {name}\\n'.encode())
+                    os.close(fd)
+                def wait(condition, what):
+                    deadline = time.monotonic() + 60
+                    while not condition():
+                        if time.monotonic() > deadline:
+                            print('timed out waiting for ' + what)
+                            sys.exit(99)
+                        time.sleep(0.01)
+                (counts / '{name}.pid').write_text(str(os.getpid()))
+                (counts / '{name}.group').write_text(str(os.getpgrp()))
+                event('start')
+                (counts / '{name}.started').touch()
+                wait(lambda: len(list(counts.glob('*.started'))) >= {need}, 'peers')
+                if {hold!r}:
+                    wait(lambda: False, 'release')
+                event('end')
                 print({name!r})
                 sys.exit({code})
             """))
@@ -323,43 +347,56 @@ class ParallelCheckTests(VerifyFixture):
             checks.append(check)
         self.config["verify"]["checks"] = checks
 
-    def intervals(self):
-        return [tuple(map(float, (self.counts / name).read_text().split()))
-                for name in ("first", "second", "third")]
+    def reset_events(self):
+        for path in list(self.counts.glob("*.started")) + [self.counts / "events.log"]:
+            path.unlink(missing_ok=True)
 
-    def test_independent_checks_finish_near_max_not_sum(self):
-        self.prepare_checks()
-        started = time.monotonic()
-        receipt = verify.verify(self.repo, self.config)
-        elapsed = time.monotonic() - started
-        first, second, _ = self.intervals()
-        self.assertLess(max(first[0], second[0]), min(first[1], second[1]))
-        self.assertLess(elapsed, 1.5, f"serialized check wall time: {elapsed}")
-        self.assertTrue(receipt["passed"])
+    def events(self):
+        return [tuple(line.split()) for line in (self.counts / "events.log").read_text().splitlines()]
+
+    def before(self, first, second):
+        """Whether `first` ended before `second` started."""
+        events = self.events()
+        return events.index(("end", first)) < events.index(("start", second))
 
     def test_default_concurrency_is_bounded_by_cpu_and_physical_memory(self):
-        self.prepare_checks(delays=(0.2, 0.2, 0.2))
-        for raw in self.config["verify"]["checks"]:
-            raw["always"] = True
+        popen, launched, live_at_launch = subprocess.Popen, [], []
+
+        def launch(*args, **kwargs):
+            # Check processes still running when the scheduler starts another one;
+            # poll() reaps, so a check the scheduler already settled never counts.
+            if kwargs.get("start_new_session"):
+                live_at_launch.append(sum(process.poll() is None for process in launched))
+            process = popen(*args, **kwargs)
+            if kwargs.get("start_new_session"):
+                launched.append(process)
+            return process
+
         for cpus, gib, expected in ((1, 64, 1), (18, 16, 2), (18, 36, 3), (18, 0, 1)):
             with self.subTest(cpus=cpus, gib=gib), \
                     mock.patch.object(verify.os, "cpu_count", return_value=cpus), \
-                    mock.patch.object(verify, "_physical_memory", return_value=gib * 1024 ** 3):
-                self.verify()
-                intervals = self.intervals()
-                peak = max(sum(start <= point < end for start, end in intervals)
-                           for point, _ in intervals)
-                self.assertEqual(peak, expected)
+                    mock.patch.object(verify, "_physical_memory", return_value=gib * 1024 ** 3), \
+                    mock.patch.object(verify.subprocess, "Popen", side_effect=launch):
+                # Each check needs `expected` running peers, so a lower bound never
+                # finishes; no launch may find `expected` checks still running.
+                self.prepare_checks(peers=(expected,) * 3)
+                for raw in self.config["verify"]["checks"]:
+                    raw["always"] = True
+                self.reset_events()
+                launched.clear()
+                live_at_launch.clear()
+                self.assertTrue(self.verify()["passed"])
+                self.assertEqual(len(live_at_launch), 3)
+                self.assertLess(max(live_at_launch), expected)
 
     def test_jobs_one_serializes_in_configuration_order(self):
-        self.prepare_checks(delays=(0.1, 0.1, 0.1))
+        self.prepare_checks()
         verify.verify(self.repo, self.config, jobs=1)
-        first, second, third = self.intervals()
-        self.assertLessEqual(first[1], second[0])
-        self.assertLessEqual(second[1], third[0])
+        self.assertEqual(self.events(), [(kind, name) for name in ("first", "second", "third")
+                                         for kind in ("start", "end")])
 
     def test_failure_and_admission_refusal_do_not_cancel_passing_check(self):
-        self.prepare_checks(codes=(73, 9, 0), delays=(0.2, 0.1, 0.3))
+        self.prepare_checks(codes=(73, 9, 0), peers=(3, 3, 3))
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             receipt = verify.verify(self.repo, self.config, jobs=3)
@@ -371,32 +408,31 @@ class ParallelCheckTests(VerifyFixture):
         self.assertEqual(final_lines, ["first", "second", "third"])
         for name, entry in receipt["checks"].items():
             self.assertIn(name, Path(entry["log"]).read_text())
-            self.assertGreaterEqual(entry["seconds"], 0.1)
+            self.assertGreaterEqual(entry["seconds"], 0)
         stored = json.loads((self.receipts() / f"{receipt['head']}.json").read_text())
         self.assertEqual(stored, receipt)
 
     def test_exclusive_pair_does_not_overlap_but_independent_check_runs(self):
-        self.prepare_checks(groups=("shared-tree", "shared-tree", None))
-        verify.verify(self.repo, self.config, jobs=2)
-        first, second, third = self.intervals()
-        self.assertLessEqual(first[1], second[0])
-        self.assertLess(max(first[0], third[0]), min(first[1], third[1]))
+        # first and third can only finish together; second must wait for first.
+        self.prepare_checks(groups=("shared-tree", "shared-tree", None), peers=(2, 1, 2))
+        self.assertTrue(verify.verify(self.repo, self.config, jobs=2)["passed"])
+        self.assertTrue(self.before("first", "second"))
 
     def test_conditional_group_only_serializes_selected_gateway_fixture_paths(self):
-        self.prepare_checks(groups=("gateway-source-tree", "gateway-source-tree", None),
-                            delays=(0.3, 0.3, 0.1))
+        # Unselected, first and second must run together (two peers). Selected,
+        # third stands in as first's peer and second must wait for first.
+        self.prepare_checks(groups=("gateway-source-tree", "gateway-source-tree", None), peers=(2, 2, 1))
         for raw in self.config["verify"]["checks"]:
             raw["always"] = True
         second = self.config["verify"]["checks"][1]
         second["paths"].append("lib/**")
         second["exclusivePaths"] = ["lib/**"]
-        verify.verify(self.repo, self.config, jobs=2)
-        first, second_interval, _ = self.intervals()
-        self.assertLess(max(first[0], second_interval[0]), min(first[1], second_interval[1]))
+        self.assertTrue(verify.verify(self.repo, self.config, jobs=2)["passed"])
+        self.assertFalse(self.before("first", "second"))
+        self.reset_events()
         self.commit(self.repo, "lib/b.txt", "fixture selected\n")
-        verify.verify(self.repo, self.config, jobs=2)
-        first, second_interval, _ = self.intervals()
-        self.assertLessEqual(first[1], second_interval[0])
+        self.assertTrue(verify.verify(self.repo, self.config, jobs=2)["passed"])
+        self.assertTrue(self.before("first", "second"))
 
     def test_ios_exclusive_paths_track_the_selection_owner(self):
         root = Path(__file__).resolve().parents[2]
@@ -430,7 +466,7 @@ class ParallelCheckTests(VerifyFixture):
         self.assertEqual(list(self.counts.iterdir()), [])
 
     def test_abort_retires_all_running_process_groups_without_receipt(self):
-        self.prepare_checks(delays=(5, 5, 5))
+        self.prepare_checks(hold=True)
         processes = []
         popen = subprocess.Popen
 
@@ -467,7 +503,7 @@ class ParallelCheckTests(VerifyFixture):
         self.assertEqual(list(self.receipts().glob("*.json")), [])
 
     def test_termination_retires_check_groups_before_exiting(self):
-        self.prepare_checks(delays=(5, 5, 5))
+        self.prepare_checks(hold=True)
         config = self.tmp / "config.json"
         config.write_text(json.dumps(self.config))
         code = (f"import sys, json; sys.path.insert(0, {str(Path(verify.__file__).parent)!r}); "
@@ -476,12 +512,11 @@ class ParallelCheckTests(VerifyFixture):
         process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL)
         try:
-            for _ in range(100):
-                if all((self.counts / f"{name}.pid").exists() for name in ("first", "second")):
-                    break
+            # Bounded only so a broken launch fails instead of hanging.
+            deadline = time.monotonic() + 60
+            while not all((self.counts / f"{name}.started").exists() for name in ("first", "second")):
+                self.assertLess(time.monotonic(), deadline, "checks never started")
                 time.sleep(0.02)
-            else:
-                self.fail("checks never started")
             process.send_signal(signal.SIGTERM)
             process.wait(timeout=5)
             self.assertNotEqual(process.returncode, 0)

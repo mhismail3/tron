@@ -536,8 +536,12 @@ hash input: changing `--jobs` does not invalidate already-passing receipts.
 
 ### Failure modes
 
-`ParallelCheckTests` in `test_verify.py` exercises real sleeping/failed subprocess
-checks and temporary Git histories: independent overlap, sequential override,
+`ParallelCheckTests` in `test_verify.py` exercises real subprocess checks and
+temporary Git histories. Its oracles are events, never wall time or the host's
+size: overlap is a rendezvous (a check finishes only after its peers started),
+order comes from one append-only event log, and the worker bound is the number
+of checks still running at each launch, with the CPU and memory inputs mocked.
+It covers independent overlap, sequential override,
 exclusive-pair ordering without idle-worker blocking, aggregated failures
 (including exit 73), interruption disposal, configuration validation, carried
 provenance across a merge, and the Mac bundle/fast-script selection split. These
