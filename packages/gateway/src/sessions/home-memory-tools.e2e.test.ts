@@ -832,7 +832,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
     // A canonical line over the reader's per-line bound, committed mid-activation:
     // the memory stops with `source-unavailable` while the ingest runs, which it
     // reports by state rather than by throwing where the tool calls it.
-    const oversized = `{"type":"message","id":"oversized-entry","parentId":${JSON.stringify(managerOf(f).getLeafId())},"timestamp":${JSON.stringify(new Date().toISOString())},"message":{"role":"user","content":"${"x".repeat(16 * 1_024 * 1_024 + 1)}","timestamp":${Date.now()}}}`;
+    const oversized = `{"type":"message","id":"oversized-entry","parentId":${JSON.stringify(managerOf(f).getLeafId())},"timestamp":${JSON.stringify(new Date().toISOString())},"message":{"role":"user","content":"${"x".repeat(EPISODIC_DEFAULTS.maxSourceLineBytes + 1)}","timestamp":${Date.now()}}}`;
 
     f.faux.setResponses([
       async (context: { messages: Array<{ role: string }> }) => {
