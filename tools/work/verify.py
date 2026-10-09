@@ -11,6 +11,7 @@ import shlex
 import signal
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -55,9 +56,17 @@ class Check:
     command: str
     always: bool
     patterns: List[Pattern]
+    exclusive_group: Optional[str]
+    exclusive_patterns: Optional[List[Pattern]]
 
     def matches(self, path: str) -> bool:
         return any(pattern.match(path) for pattern in self.patterns)
+
+    def group_for(self, paths: List[str]) -> Optional[str]:
+        if self.exclusive_patterns is None:
+            return self.exclusive_group
+        return self.exclusive_group if any(pattern.match(path) for pattern in self.exclusive_patterns
+                                           for path in paths) else None
 
 
 def load_checks(settings: dict) -> List[Check]:
@@ -71,8 +80,17 @@ def load_checks(settings: dict) -> List[Check]:
         always = raw.get("always", False) is True
         if not raw["paths"] and not always:
             raise VerifyError(f"verify check {name} has no paths and is not always-run")
+        group = raw.get("exclusiveGroup")
+        if "exclusiveGroup" in raw and (not isinstance(group, str) or not _CHECK_NAME.fullmatch(group)):
+            raise VerifyError(f"verify check {name} needs a valid exclusiveGroup name")
+        exclusive_paths = raw.get("exclusivePaths")
+        if "exclusivePaths" in raw and (group is None or not isinstance(exclusive_paths, list)
+                or not exclusive_paths or any(not isinstance(path, str) or not path for path in exclusive_paths)):
+            raise VerifyError(f"verify check {name} needs nonempty exclusivePaths and an exclusiveGroup")
         names.add(name)
-        checks.append(Check(name, raw["paths"], raw["command"], always, [glob_regex(g) for g in raw["paths"]]))
+        checks.append(Check(name, raw["paths"], raw["command"], always,
+                            [glob_regex(g) for g in raw["paths"]], group,
+                            [glob_regex(g) for g in exclusive_paths] if exclusive_paths is not None else None))
     return checks
 
 
@@ -131,7 +149,29 @@ def _prior_receipt(repo: Path, receipts: Path, head: str, digest: str) -> Option
     return best[1] if best else None
 
 
-def _run_check(root: Path, check: Check, prelude: str, command: str, log_path: Path) -> Tuple[int, float]:
+def _physical_memory() -> int:
+    """Physical RAM, not a competing snapshot of native simulator admission."""
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
+            return int(result.stdout) if result.returncode == 0 else 0
+        return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError):
+        return 0
+
+
+def worker_count(jobs: Optional[int]) -> int:
+    if jobs is not None:
+        if type(jobs) is not int or jobs < 1:
+            raise VerifyError("verify --jobs must be a positive integer")
+        return jobs
+    # A check can itself fan out to bounded test/build workers. Native tooling
+    # remains the authority for live-memory admission and simulator leases.
+    return max(1, min(4, os.cpu_count() or 1, _physical_memory() // (8 * 1024 ** 3)))
+
+
+@contextlib.contextmanager
+def _run_check(root: Path, prelude: str, command: str, log_path: Path):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with log_path.open("w") as log:
@@ -142,10 +182,10 @@ def _run_check(root: Path, check: Check, prelude: str, command: str, log_path: P
             cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
         )
         try:
-            code = process.wait()
-        except BaseException:
-            # The check owns a process group; an interrupted verify leaves nothing running.
-            # The group may already be gone; the interrupt stays the reported error.
+            yield process, started
+        finally:
+            # Settlement and abort retire the same process-group owner, including
+            # descendants left behind by a check whose leader already exited.
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGTERM)
             try:
@@ -154,8 +194,57 @@ def _run_check(root: Path, check: Check, prelude: str, command: str, log_path: P
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-            raise
-    return code, round(time.monotonic() - started, 1)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+
+
+@dataclass
+class RunningCheck:
+    check: Check
+    process: subprocess.Popen
+    started: float
+    owner: contextlib.ExitStack
+    group: Optional[str]
+
+
+def _run_checks(root: Path, pending: list, prelude: str, jobs: int) -> Dict[str, dict]:
+    results: Dict[str, dict] = {}
+    running: List[RunningCheck] = []
+    # The invocation owns every started check. No threads or background queue
+    # can outlive it; all exits unwind these exact process-group owners.
+    with contextlib.ExitStack() as invocation:
+        # SIGINT already unwinds Python frames. Termination/hangup must do the
+        # same before restoring the caller's handlers and leaving this scope.
+        def terminate(signum, _frame):
+            raise SystemExit(128 + signum)
+
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            invocation.callback(signal.signal, signum, signal.getsignal(signum))
+            signal.signal(signum, terminate)
+        while pending or running:
+            for task in pending[:]:
+                if len(running) >= jobs:
+                    break
+                check, command, log_path, group = task
+                if group and any(item.group == group for item in running):
+                    continue
+                owner = invocation.enter_context(contextlib.ExitStack())
+                print(f"  {check.name}: running", flush=True)
+                process, started = owner.enter_context(_run_check(root, prelude, command, log_path))
+                running.append(RunningCheck(check, process, started, owner, group))
+                pending.remove(task)
+            for item in running[:]:
+                code = item.process.poll()
+                if code is None:
+                    continue
+                seconds = round(time.monotonic() - item.started, 1)
+                results[item.check.name] = {"command": item.check.command, "exitCode": code,
+                                            "seconds": seconds, "carriedFrom": None}
+                item.owner.close()
+                running.remove(item)
+            if running:
+                time.sleep(0.05)
+    return results
 
 
 # Media is explicit opt-in: format checks cannot establish that screen contents
@@ -329,8 +418,10 @@ def _preflight_tron_home_environment() -> None:
         raise VerifyError(message)
 
 
-def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None) -> dict:
+def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
+           jobs: Optional[int] = None) -> dict:
     _preflight_tron_home_environment()
+    workers = worker_count(jobs)
     settings, claim = config["verify"], config["claim"]
     remote = claim["remote"]
     checks = load_checks(settings)
@@ -361,22 +452,32 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None) -
     since_prior = _changed(root, prior["head"], head) if prior else []
 
     results: Dict[str, dict] = {}
+    pending = []
     for check in required:
         earlier = (prior or {}).get("checks", {}).get(check.name)
         if (earlier and earlier["exitCode"] == 0 and not check.always
                 and not any(check.matches(path) for path in since_prior)):
             results[check.name] = {**earlier, "carriedFrom": earlier["carriedFrom"] or prior["head"]}
-            print(f"  {check.name}: carried from {results[check.name]['carriedFrom'][:12]}")
             continue
         present = [str(root / p) for p in matched[check.name] if (root / p).exists()]
         command = (check.command.replace("{paths}", " ".join(shlex.quote(p) for p in present))
                    .replace("{merge_base}", merge_base))
         log_path = work / "logs" / head / f"{check.name}.log"
-        print(f"  {check.name}: running", flush=True)
-        code, seconds = _run_check(root, check, settings.get("prelude", ""), command, log_path)
-        print(f"  {check.name}: {'pass' if code == 0 else f'FAIL (exit {code})'} in {seconds}s")
-        results[check.name] = {"command": check.command, "exitCode": code, "seconds": seconds,
-                               "log": str(log_path), "carriedFrom": None}
+        pending.append((check, command, log_path, check.group_for(matched[check.name])))
+
+    executed = _run_checks(root, pending, settings.get("prelude", ""), workers)
+    for check in required:
+        if check.name in executed:
+            results[check.name] = {**executed[check.name],
+                                   "log": str(work / "logs" / head / f"{check.name}.log")}
+        entry = results[check.name]
+        if entry["carriedFrom"]:
+            print(f"  {check.name}: carried from {entry['carriedFrom'][:12]}", flush=True)
+        else:
+            code, seconds = entry["exitCode"], entry["seconds"]
+            print(f"  {check.name}: {'pass' if code == 0 else f'FAIL (exit {code})'} in {seconds}s", flush=True)
+    # Completion order is deliberately not receipt/report order.
+    results = {check.name: results[check.name] for check in required}
 
     if _git(root, "rev-parse", "HEAD").strip() != head or _dirty(root):
         raise VerifyError("the head or the worktree changed while checks ran; no receipt written")

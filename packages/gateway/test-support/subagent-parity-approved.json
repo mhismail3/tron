@@ -1,0 +1,373 @@
+[
+  {
+    "path": "checkpoints.workflow-question.transcript.need_decision.0.content.0.text",
+    "old": "Subagent needs a supervisor decision.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_QUESTION: proceed?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })",
+    "new": "Subagent needs a supervisor decision.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\n\nPARITY_QUESTION: proceed?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })\n\nLive guidance: subagent({ action: \"steer\", id: \"<workflow-launch:child:question>\", index: 0, message: \"...\" }) (Reply to the pending request first.)",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.need_decision.0.details.requestId",
+    "old": null,
+    "new": "<uuid>",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.need_decision.0.details.childTarget",
+    "old": null,
+    "new": "subagent-parity-worker-<workflow-launch:child:question>-1",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.need_decision.0.details.requestBody",
+    "old": null,
+    "new": "PARITY_QUESTION: proceed?",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.need_decision.0.details.replyHint",
+    "old": null,
+    "new": "subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.progress_update.0.content.0.text",
+    "old": "Subagent progress update.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_PROGRESS",
+    "new": "Subagent progress update.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\n\nPARITY_PROGRESS\n\nLive guidance: subagent({ action: \"steer\", id: \"<workflow-launch:child:question>\", index: 0, message: \"...\" })",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.progress_update.0.details.requestId",
+    "old": null,
+    "new": "<uuid>",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.progress_update.0.details.childTarget",
+    "old": null,
+    "new": "subagent-parity-worker-<workflow-launch:child:question>-1",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.progress_update.0.details.requestBody",
+    "old": null,
+    "new": "PARITY_PROGRESS",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-question.transcript.progress_update.0.details.replyHint",
+    "old": null,
+    "new": "subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.need_decision.0.content.0.text",
+    "old": "Subagent needs a supervisor decision.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_QUESTION: proceed?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })",
+    "new": "Subagent needs a supervisor decision.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\n\nPARITY_QUESTION: proceed?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })\n\nLive guidance: subagent({ action: \"steer\", id: \"<workflow-launch:child:question>\", index: 0, message: \"...\" }) (Reply to the pending request first.)",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.need_decision.0.details.requestId",
+    "old": null,
+    "new": "<uuid>",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.need_decision.0.details.childTarget",
+    "old": null,
+    "new": "subagent-parity-worker-<workflow-launch:child:question>-1",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.need_decision.0.details.requestBody",
+    "old": null,
+    "new": "PARITY_QUESTION: proceed?",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.need_decision.0.details.replyHint",
+    "old": null,
+    "new": "subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.progress_update.0.content.0.text",
+    "old": "Subagent progress update.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_PROGRESS",
+    "new": "Subagent progress update.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\n\nPARITY_PROGRESS\n\nLive guidance: subagent({ action: \"steer\", id: \"<workflow-launch:child:question>\", index: 0, message: \"...\" })",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.progress_update.0.details.requestId",
+    "old": null,
+    "new": "<uuid>",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.progress_update.0.details.childTarget",
+    "old": null,
+    "new": "subagent-parity-worker-<workflow-launch:child:question>-1",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.progress_update.0.details.requestBody",
+    "old": null,
+    "new": "PARITY_PROGRESS",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.progress_update.0.details.replyHint",
+    "old": null,
+    "new": "subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.subagent-notify.0.content.0.text",
+    "old": "Background task failed: **workflow**\n\nError: Workflow barrier failure\n    at workflow-script.js:2:242\n    at async MessagePort.<anonymous> ([worker eval]:885:15)\n\nChild outputs:\n- key=fail run=<workflow-launch:child:fail> status=failed\n  Saved output: unavailable\n  Preview: unavailable (no safe inline output)\n- key=question run=<workflow-launch:child:question> status=completed\n  Saved output: unavailable\n  Preview:\n    | PARITY_CHILD_COMPLETE\n- key=success run=<workflow-launch:child:success> status=completed\n  Saved output: unavailable\n  Preview:\n    | PARITY_CHILD_COMPLETE\n\nWorkflow run: <workflow-launch:run>\nChild runs: fail=<workflow-launch:child:fail> (failed), question=<workflow-launch:child:question> (completed), success=<workflow-launch:child:success> (completed)",
+    "new": "Background task failed: **workflow**\nWorkflow receipt: <fixture>/tron/internal/subagents/async-subagent-runs/<workflow-launch:run>/workflow-receipt.json\n\nError: Workflow barrier failure\n    at workflow-script.js:2:242\n    at async MessagePort.<anonymous> ([worker eval]:1019:15)\n\nChild outputs:\n- key=fail run=<workflow-launch:child:fail> status=failed\n  Saved output: unavailable\n  Output artifact (retention-managed): <sessions>/subagent-artifacts/<workflow-launch:child:fail>_parity-worker_output.md\n  Preview:\n    | 400: {\"message\":\"Scripted failure\",\"type\":\"invalid_request_error\"}\n- key=question run=<workflow-launch:child:question> status=completed\n  Saved output: unavailable\n  Output artifact (retention-managed): <sessions>/subagent-artifacts/<workflow-launch:child:question>_parity-worker_output.md\n  Preview:\n    | PARITY_CHILD_COMPLETE\n- key=success run=<workflow-launch:child:success> status=completed\n  Saved output: unavailable\n  Output artifact (retention-managed): <sessions>/subagent-artifacts/<workflow-launch:child:success>_parity-worker_output.md\n  Preview:\n    | PARITY_CHILD_COMPLETE\n\nRetention-managed async directory: <fixture>/tron/internal/subagents/async-subagent-runs/<workflow-launch:run>\nWorkflow run: <workflow-launch:run>\nChild runs: fail=<workflow-launch:child:fail> (failed), question=<workflow-launch:child:question> (completed), success=<workflow-launch:child:success> (completed)",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "settings.healthy.skills.1.description",
+    "old": "Delegate work to builtin or custom subagents with single-agent, parallel, scripted-chaining, async, forked-context, and coordinated workflows. Use for advisory review, implementation handoffs, and multi-step tasks where a single agent should stay in control while other agents contribute context, planning, or execution.",
+    "new": "Technical guidance for operator-requested delegation to builtin or custom\nsubagents: bounded handoffs, parallel review, scripted workflows, async work,\nforked context, isolation, and coordinated execution.\n",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "settings.healthy.subagents.evidence-auditor",
+    "old": null,
+    "new": {
+      "name": "evidence-auditor",
+      "description": "Independent evidence reviewer for checking whether important research claims are supported by their sources",
+      "thinking": "high",
+      "source": "builtin",
+      "distribution": "external"
+    },
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "settings.invalid.skills.1.description",
+    "old": "Delegate work to builtin or custom subagents with single-agent, parallel, scripted-chaining, async, forked-context, and coordinated workflows. Use for advisory review, implementation handoffs, and multi-step tasks where a single agent should stay in control while other agents contribute context, planning, or execution.",
+    "new": "Technical guidance for operator-requested delegation to builtin or custom\nsubagents: bounded handoffs, parallel review, scripted workflows, async work,\nforked context, isolation, and coordinated execution.\n",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "settings.invalid.subagents.parity-invalid",
+    "old": {
+      "name": "parity-invalid",
+      "description": "Invalid parity definition",
+      "source": "project",
+      "distribution": "local"
+    },
+    "new": null,
+    "approved": "removed fallbackModels is rejected with an early definition diagnostic"
+  },
+  {
+    "path": "settings.invalid.subagents.evidence-auditor",
+    "old": null,
+    "new": {
+      "name": "evidence-auditor",
+      "description": "Independent evidence reviewer for checking whether important research claims are supported by their sources",
+      "thinking": "high",
+      "source": "builtin",
+      "distribution": "external"
+    },
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "settings.invalid.subagentDiagnostics",
+    "old": null,
+    "new": "1 invalid subagent definition(s): Agent '<workspace>/.pi/agents/parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.",
+    "approved": "removed fallbackModels is rejected with an early definition diagnostic"
+  },
+  {
+    "path": "settings.repaired.skills.1.description",
+    "old": "Delegate work to builtin or custom subagents with single-agent, parallel, scripted-chaining, async, forked-context, and coordinated workflows. Use for advisory review, implementation handoffs, and multi-step tasks where a single agent should stay in control while other agents contribute context, planning, or execution.",
+    "new": "Technical guidance for operator-requested delegation to builtin or custom\nsubagents: bounded handoffs, parallel review, scripted workflows, async work,\nforked context, isolation, and coordinated execution.\n",
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "settings.repaired.subagents.evidence-auditor",
+    "old": null,
+    "new": {
+      "name": "evidence-auditor",
+      "description": "Independent evidence reviewer for checking whether important research claims are supported by their sources",
+      "thinking": "high",
+      "source": "builtin",
+      "distribution": "external"
+    },
+    "approved": "approved upstream resource/notification wording and metadata; typed native behavior remains compared"
+  },
+  {
+    "path": "checkpoints.workflow-completed.transcript.subagent-incremental-child-notify",
+    "old": null,
+    "new": [
+      {
+        "category": "subagent-incremental-child-notify",
+        "origin": "subagent",
+        "title": "Subagents",
+        "classification": "message",
+        "direction": "inboundContext",
+        "contextEffect": "modelInput",
+        "confidence": "receipt",
+        "lifecycle": null,
+        "resourceInvocation": null,
+        "submittedText": null,
+        "delivery": "stored",
+        "visibility": "visible",
+        "content": [
+          {
+            "id": "<entry>:0",
+            "ordinal": 0,
+            "type": "text",
+            "text": "Workflow child failed: **fail**\nWorkflow run: <workflow-launch:run>\nChild run: <workflow-launch:child:fail>\nOutput: <sessions>/subagent-artifacts/<workflow-launch:child:fail>_parity-worker_output.md\nError: Run fan-out: 3/64 used, 61 remaining\n400: {\"message\":\"Scripted failure\",\"type\":\"invalid_request_error\"}\nStatus: workflow still running"
+          }
+        ],
+        "details": null
+      }
+    ],
+    "approved": "per-child workflow notes are displayed stored context, not independent turns"
+  },
+  {
+    "path": "settings.healthy.skills.0.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/skills/council-mode/SKILL.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/skills/council-mode/SKILL.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.skills.1.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/skills/pi-subagents/SKILL.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.prompts.0.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/council.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/council.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.prompts.1.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/gather-context-and-clarify.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/gather-context-and-clarify.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.prompts.2.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-cleanup.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-cleanup.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.prompts.3.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-research.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-research.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.prompts.4.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-review.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-review.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.healthy.prompts.5.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/review-loop.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/review-loop.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.skills.0.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/skills/council-mode/SKILL.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/skills/council-mode/SKILL.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.skills.1.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/skills/pi-subagents/SKILL.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.prompts.0.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/council.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/council.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.prompts.1.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/gather-context-and-clarify.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/gather-context-and-clarify.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.prompts.2.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-cleanup.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-cleanup.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.prompts.3.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-research.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-research.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.prompts.4.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-review.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-review.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.invalid.prompts.5.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/review-loop.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/review-loop.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.skills.0.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/skills/council-mode/SKILL.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/skills/council-mode/SKILL.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.skills.1.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/skills/pi-subagents/SKILL.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.prompts.0.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/council.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/council.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.prompts.1.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/gather-context-and-clarify.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/gather-context-and-clarify.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.prompts.2.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-cleanup.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-cleanup.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.prompts.3.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-research.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-research.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.prompts.4.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-review.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/parallel-review.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  },
+  {
+    "path": "settings.repaired.prompts.5.path",
+    "old": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/review-loop.md",
+    "new": "<fixture>/tron/internal/pi-subagents/0.76.1-tron.5/prompts/review-loop.md",
+    "approved": "managed resource provenance: verified installation path replaces ignored user package path"
+  }
+]

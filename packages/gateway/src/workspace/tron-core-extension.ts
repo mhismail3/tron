@@ -24,7 +24,7 @@ export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, too
   if (tools.includes("computer")) lines.push("Use computer only for authorized Mac interaction: inspect the full desktop before foreground actions when system dialogs may block the target, use fresh observations and element references, never approve system prompts, and never replay refused or uncertain results.");
   if (tools.includes("ask_user")) lines.push("Use ask_user for a necessary bounded decision after gathering context, not for questions you can resolve yourself.");
   if (tools.includes("notify")) lines.push("Use notify for useful attention requests; queued delivery is not proof the user received it.");
-  if (tools.includes("subagent")) lines.push("Delegated runners do not inherit Gateway-only extensions. Direct model subagent task/resume calls receive an advisory workspace handoff, not authorization. For workflowScript/workflowScriptPath and slash/RPC delegation, explicitly include this internal workspace path, availability, and ownership rules in every child task (including resume stages); do not rewrite existing workflow programs to inject it. Never assume children have parent presentation tools or grant them broader authority.");
+  if (tools.includes("subagent")) lines.push("Delegated runners do not inherit Gateway-only extensions. Direct model subagent task/resume calls receive an advisory workspace handoff, not authorization. Use workflow: true for the single fenced JavaScript workflow block in the same reply, or workflow with a string containing / for a script path relative to request cwd, or another string for a named resource; agent excludes workflow. For workflows and slash/RPC delegation, explicitly include this internal workspace path, availability, and ownership rules in every child task (including resume stages); do not rewrite existing workflow programs to inject it. Never assume children have parent presentation tools or grant them broader authority.");
   return lines.join("\n");
 }
 
@@ -88,8 +88,8 @@ export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe
     pi.on("tool_call", async (event) => {
       if (event.toolName !== "subagent") return;
       const input = event.input;
+      if (input.workflow !== undefined) return;
       const field = input.action === undefined && typeof input.agent === "string"
-        && input.workflowScript === undefined && input.workflowScriptPath === undefined
         ? "task" : input.action === "resume" && typeof input.message === "string" ? "message" : undefined;
       if (!field || (input[field] !== undefined && typeof input[field] !== "string")) return;
       try {

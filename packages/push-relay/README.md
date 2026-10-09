@@ -135,8 +135,11 @@ does not blindly resend.
 Explicitly retryable outcomes may be attempted again with the same request ID.
 A request-ID reuse with a different grant or body fails permanently.
 
-Each grant admits at most 30 new requests per hour and 200 per UTC day; each
-installation admits at most 50 per hour and 300 per day across its grants. One
+Each grant and installation admits at most 120 requests per hour and 1,000 routine
+requests per UTC day. `ask` input requests and explicit agent `notify` calls are
+exempt from the daily backstop, but remain subject to the hourly runaway guard.
+The quota counts unique newly admitted requests; replaying an admitted request ID
+does not consume another unit. One
 installation may own at most eight grants, and global installation/grant tables
 are transactionally bounded. Grant authority, the current installation token, and
 quota counters are read together inside request admission, after asynchronous

@@ -290,6 +290,7 @@
         "transcript[].durationMs:number",
         "transcript[].errorMessage:string",
         "transcript[].extensionOrigin.owner.id:string",
+        "transcript[].extensionOrigin.owner.kind:string",
         "transcript[].extensionOrigin.owner.source:string",
         "transcript[].extensionOrigin.owner.title:string",
         "transcript[].extensionOrigin.owner:object",
@@ -2386,6 +2387,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Codemode"
         },
@@ -2553,6 +2555,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Mcp"
         },
@@ -2609,6 +2612,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Tool Search"
         },
@@ -2721,6 +2725,7 @@
       "extensionOrigin": {
         "owner": {
           "id": "<id>",
+          "kind": "extension",
           "source": "builtin",
           "title": "Builtin Mcp"
         },

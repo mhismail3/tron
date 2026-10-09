@@ -610,6 +610,18 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
         attachments: [PendingAttachment]
     )
 
+    /// Apply the canonical hidden-input rule before creating a user-position
+    /// handoff. Renderers only receive admitted pending presentations.
+    static func pending(in snapshot: SessionSnapshot) -> Self {
+        guard let pending = snapshot.pendingPrompt,
+              pending.semantic?.direction != .hiddenInternal,
+              !ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: snapshot.transcript) else { return .none }
+        return .pending(ChatPendingPromptPresentation(
+            snapshot: pending,
+            isCompacting: snapshot.phase == .compacting || snapshot.operation?.kind == .compaction
+        ))
+    }
+
     var outgoingAttachments: [PendingAttachment] {
         guard case .outgoing(_, let attachments) = self else { return [] }
         return attachments

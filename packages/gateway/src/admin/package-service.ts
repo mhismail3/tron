@@ -176,7 +176,7 @@ export class PackageService {
       });
       return {
         packages: provides.entries,
-        resources,
+        resources: provides.resources,
         ...(provides.diagnostic !== undefined ? { providesDiagnostic: provides.diagnostic } : {}),
       };
     }));

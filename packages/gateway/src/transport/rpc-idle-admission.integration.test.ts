@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import WebSocket from "ws";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
@@ -103,6 +103,11 @@ async function fixture(options: {
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: runtimeFactory as never,
     trust: new TrustService(agentDir),
+    stopSteeringDiagnostic: (diagnostic) => logRecords.push({
+      level: diagnostic.outcome === "failed" ? "warning" : "info",
+      message: `Stop continuation ${diagnostic.outcome}`,
+      metadata: { event: "session.stop-steering-continuation", source: "session", ...diagnostic },
+    }),
     broadcast: (sessionId: string, topic: string, payload: unknown) => {
       server?.broadcastSession(sessionId, topic, payload as never);
     },
@@ -220,7 +225,7 @@ async function fixture(options: {
     expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
-  return { root, registry, faux, port, logRecords, connect, coldSession, snapshot, openSession,
+  return { root, registry, faux, uploads, port, logRecords, connect, coldSession, snapshot, openSession,
     retirementState: () => retirement };
 }
 
@@ -257,6 +262,260 @@ const list = async (client: Client) => {
 };
 
 describe("receipt-backed mutations against their own session work entry", () => {
+  it.each([1, 2])("continues once with %i queued steer(s) after Stop", async (steerCount) => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("stop-with-queued-steering");
+    await f.openSession(client, session.id);
+    const beforeModel = await f.snapshot(client, session.id);
+    const model = f.faux.models[0]!;
+    const configured = await client.request("steer-model", "session.setModel", {
+      sessionId: session.id, commandId: "steer-model", provider: model.provider, modelId: model.id,
+      expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
+    });
+    expect(configured.ok, JSON.stringify(configured)).toBe(true);
+    let providerStarted!: () => void;
+    const started = new Promise<void>((resolve) => { providerStarted = resolve; });
+    const continuationInputs: string[][] = [];
+    const continuationImageCounts: number[] = [];
+    f.uploads.materialize.mockImplementation(async (uploadIds: string[]) => ({
+      envelope: uploadIds.length > 0 ? "[fixture image attached]" : "",
+      images: uploadIds.length > 0 ? [{ type: "image", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", mimeType: "image/png" }] : [],
+      attachments: uploadIds.map((id) => ({ id, name: "fixture.png", mimeType: "image/png", size: 5 })),
+      photoCount: uploadIds.length,
+      fileAttachmentCount: 0,
+    }));
+    const continuationResponse = async (context: any) => {
+      const userParts = context.messages.filter((message: any) => message.role === "user")
+        .flatMap((message: any) => Array.isArray(message.content) ? message.content : []);
+      continuationInputs.push(userParts.map((part: any) => part.text ?? ""));
+      continuationImageCounts.push(userParts.filter((part: any) => part.type === "image").length);
+      return fauxAssistantMessage("continued after queued steering");
+    };
+    f.faux.setResponses([
+      async () => {
+        providerStarted();
+        return fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 30" }));
+      },
+      continuationResponse,
+      continuationResponse,
+    ]);
+    const initial = await client.request("steer-start", "session.prompt", {
+      sessionId: session.id, commandId: "steer-start", text: "hold the current run",
+    });
+    expect(initial.ok, JSON.stringify(initial)).toBe(true);
+    await started;
+    await waitFor(async () => (await f.snapshot(client, session.id)).toolExecutions.length === 1, "the running tool call");
+    const first = await client.request("steer-one", "session.prompt", {
+      sessionId: session.id, commandId: "steer-one", text: "first queued steer", behavior: "steer", uploadIds: ["fixture-image"],
+    });
+    const acceptedSteers = [first];
+    if (steerCount === 2) acceptedSteers.push(await client.request("steer-two", "session.prompt", {
+      sessionId: session.id, commandId: "steer-two", text: "second queued steer", behavior: "steer",
+    }));
+    expect(acceptedSteers.every((response) => response.ok)).toBe(true);
+    const expectedTexts = steerCount === 1 ? ["first queued steer"] : ["first queued steer", "second queued steer"];
+    const operationIDs = acceptedSteers.map((response) => response.result.operationId);
+    const acceptedSteerFrameIndex = client.frames.length;
+    const slotBeforeStop = await f.registry.acquire(session.id);
+    const stopRecoveryPromptImages: number[] = [];
+    const sdkSession = (slotBeforeStop as any).runtime.session;
+    const originalSessionPrompt = sdkSession.prompt.bind(sdkSession);
+    sdkSession.prompt = (text: string, options: any) => {
+      if (text.startsWith("first queued steer")) stopRecoveryPromptImages.push(options.images?.length ?? 0);
+      return originalSessionPrompt(text, options);
+    };
+    const queuedBeforeStop = (slotBeforeStop as any).queuedMessages.map((item: any) => ({ id: item.id, behavior: item.behavior, images: item.images?.length }));
+    const activeBashOwners = {
+      sdk: (slotBeforeStop as any).runtime.session.isBashRunning,
+      direct: (slotBeforeStop as any).directBashProcesses?.hasActiveProcesses,
+    };
+    expect(queuedBeforeStop).toHaveLength(steerCount);
+    const stopped = await client.request("steer-stop", "session.abort", {
+      sessionId: session.id, commandId: "steer-stop",
+    });
+    expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
+    const slot = await f.registry.acquire(session.id);
+    expect(f.logRecords).toContainEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        event: "session.stop-steering-continuation", outcome: "started", queuedSteerCount: steerCount,
+      }),
+    }));
+    try {
+      await waitFor(() => client.frames.some((frame: any) => frame.topic === "session.snapshot"
+        && frame.payload?.sessionId === session.id && frame.payload.phase === "idle"
+        && frame.payload.queuedItems.length === 0
+        && frame.payload.transcript.filter((item: any) => item.kind === "message" && item.role === "user"
+          && item.content?.some((part: any) => expectedTexts.some((text) => part.text?.startsWith(text)))).length === steerCount),
+      "the stopped prompt and queued steers consumed and idle");
+    } catch (error) {
+      const latest = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1);
+      throw new Error(`${String(error)}\n${JSON.stringify(latest?.payload)}`);
+    }
+    const stopSignals = f.logRecords.filter(({ metadata }) => metadata.event === "session.stop-steering-continuation");
+    expect(stopSignals.map(({ metadata }) => metadata.outcome)).toEqual(["started", "completed"]);
+    expect(JSON.stringify(stopSignals)).not.toContain("first queued steer");
+    const users = slot.canonicalSessionEntries().filter((entry: any) => entry.type === "message" && entry.message.role === "user")
+      .map((entry: any) => entry.message.content.map((part: any) => part.text ?? "").join(""));
+    expect(users.filter((text: string) => text.includes("queued steer")).map((text: string) => text.split("\n")[0]))
+      .toEqual(expectedTexts);
+    const snapshots = client.frames.slice(acceptedSteerFrameIndex)
+      .filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id)
+      .map((frame: any) => frame.payload);
+    for (const snapshot of snapshots) {
+      const queuedIDs = new Set(snapshot.queuedItems.map((item: any) => item.id));
+      const users = snapshot.transcript.filter((item: any) => item.role === "user");
+      for (let index = 0; index < acceptedSteers.length; index += 1) {
+        const matchingInputs = users.filter((item: any) => item.semantic?.operationId === operationIDs[index]
+          || item.content?.some((part: any) => part.text?.startsWith(expectedTexts[index])));
+        if (queuedIDs.has(operationIDs[index])) {
+          expect(matchingInputs, `queued item ${operationIDs[index]} must not also be canonical`).toHaveLength(0);
+        } else {
+          expect(matchingInputs, `retired queue item ${operationIDs[index]} must be canonical exactly once`).toHaveLength(1);
+        }
+      }
+    }
+    const deliveredReceipts = slot.canonicalSessionEntries().filter((entry: any) => entry.customType === "tron.chat-invocation.v1"
+      && operationIDs.includes(entry.data?.operationId));
+    expect(deliveredReceipts.filter((entry: any) => entry.data?.receiptKind === "terminal"
+      && entry.data?.lifecycle === "completed").map((entry: any) => entry.data.operationId).sort())
+      .toEqual([...operationIDs].sort());
+    expect(continuationInputs).toHaveLength(1);
+    const providerSteers = continuationInputs[0]!.filter((input) => expectedTexts.some((text) => input.startsWith(text)))
+      .map((input) => input.split("\n")[0]);
+    expect(providerSteers).toEqual(expectedTexts);
+    expect(stopRecoveryPromptImages).toEqual([1]);
+    expect(continuationImageCounts).toEqual([1]);
+    expect(f.faux.state.callCount).toBe(2);
+    record(`Stop continues ${steerCount} accepted steer(s) exactly once`, { delivered: users.filter((text: string) => text.includes("queued steer")), providerCalls: f.faux.state.callCount });
+  });
+  it("holds a steer submitted during Stop outside Pi until the continuation admission", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("stop-steer-race");
+    await f.openSession(client, session.id);
+    const beforeModel = await f.snapshot(client, session.id);
+    const model = f.faux.models[0]!;
+    const configured = await client.request("race-model", "session.setModel", {
+      sessionId: session.id, commandId: "race-model", provider: model.provider, modelId: model.id,
+      expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
+    });
+    expect(configured.ok, JSON.stringify(configured)).toBe(true);
+    let providerStarted!: () => void;
+    const started = new Promise<void>((resolve) => { providerStarted = resolve; });
+    const continuationInputs: string[][] = [];
+    f.faux.setResponses([
+      async () => {
+        providerStarted();
+        return fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 30" }));
+      },
+      async (context: any) => {
+        continuationInputs.push(context.messages.filter((message: any) => message.role === "user")
+          .flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+          .map((part: any) => part.text ?? ""));
+        return fauxAssistantMessage("race continuation completed");
+      },
+    ]);
+    expect((await client.request("race-start", "session.prompt", {
+      sessionId: session.id, commandId: "race-start", text: "start before stop race",
+    })).ok).toBe(true);
+    await started;
+    await waitFor(async () => (await f.snapshot(client, session.id)).toolExecutions.length === 1, "the running race tool");
+    const first = await client.request("race-first", "session.prompt", {
+      sessionId: session.id, commandId: "race-first", text: "steer before stop", behavior: "steer",
+    });
+    expect(first.ok, JSON.stringify(first)).toBe(true);
+    const slot = await f.registry.acquire(session.id);
+    const direct = (slot as any).directBashProcesses;
+    const originalAbort = direct.abortAll.bind(direct);
+    let abortStarted!: () => void;
+    const abortIsRunning = new Promise<void>((resolve) => { abortStarted = resolve; });
+    let releaseAbort!: () => void;
+    const abortGate = new Promise<void>((resolve) => { releaseAbort = resolve; });
+    direct.abortAll = async () => {
+      const settlement = originalAbort();
+      abortStarted();
+      await abortGate;
+      await settlement;
+    };
+    const stop = client.request("race-stop", "session.abort", {
+      sessionId: session.id, commandId: "race-stop",
+    });
+    await abortIsRunning;
+    expect((slot as any).runtime.session.getSteeringMessages()).toHaveLength(0);
+    expect((slot as any).queuedMessages.map((item: any) => item.text)).toContain("steer before stop");
+    const late = await client.request("race-late-steer", "session.prompt", {
+      sessionId: session.id, commandId: "race-late-steer", text: "steer during stop", behavior: "steer",
+    });
+    expect(late.ok, JSON.stringify(late)).toBe(true);
+    expect((slot as any).heldPrompts.some((item: any) => item.id === late.result.operationId)).toBe(true);
+    releaseAbort();
+    const stopped = await stop;
+    expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
+    try {
+      await waitFor(async () => {
+        const snapshot = await f.snapshot(client, session.id);
+        return snapshot.phase === "idle" && snapshot.queuedItems.length === 0
+          && snapshot.transcript.filter((item: any) => item.role === "user"
+            && ["steer before stop", "steer during stop"].some((text) => item.content?.some((part: any) => part.text?.startsWith(text)))).length === 2;
+      }, "both stop-racing steers admitted and consumed once");
+    } catch (error) {
+      const snapshot = client.frames.filter((frame: any) => frame.topic === "session.snapshot" && frame.payload?.sessionId === session.id).at(-1)?.payload;
+      throw new Error(`${String(error)}\n${JSON.stringify({snapshot, queued:(slot as any).queuedMessages, held:(slot as any).heldPrompts, recovery:[...(slot as any).stopSteeringRecoveryIDs], closed:(slot as any).stopRecoveryQueueClosed})}`);
+    }
+    expect(continuationInputs).toHaveLength(1);
+    expect(continuationInputs[0]!.some((text) => text.startsWith("steer before stop"))).toBe(true);
+    expect(continuationInputs[0]!.some((text) => text.startsWith("steer during stop"))).toBe(true);
+    expect(f.faux.state.callCount).toBe(2);
+  });
+  it("does not replay steering after a second Stop during continuation", async () => {
+    const f = await fixture({ tokensPerSecond: 3 });
+    const client = await f.connect();
+    const session = await f.coldSession("second-stop-continuation");
+    await f.openSession(client, session.id);
+    const beforeModel = await f.snapshot(client, session.id);
+    const model = f.faux.models[0]!;
+    const configured = await client.request("second-model", "session.setModel", {
+      sessionId: session.id, commandId: "second-model", provider: model.provider, modelId: model.id,
+      expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
+    });
+    expect(configured.ok, JSON.stringify(configured)).toBe(true);
+    let providerStarted!: () => void;
+    const started = new Promise<void>((resolve) => { providerStarted = resolve; });
+    f.faux.setResponses([
+      async () => {
+        providerStarted();
+        return fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 30" }));
+      },
+      fauxAssistantMessage("continuation response that remains active ".repeat(80)),
+    ]);
+    expect((await client.request("second-start", "session.prompt", {
+      sessionId: session.id, commandId: "second-start", text: "start second stop test",
+    })).ok).toBe(true);
+    await started;
+    await waitFor(async () => (await f.snapshot(client, session.id)).toolExecutions.length === 1, "the second-stop tool");
+    const accepted = await client.request("second-steer", "session.prompt", {
+      sessionId: session.id, commandId: "second-steer", text: "only once after stop", behavior: "steer",
+    });
+    expect(accepted.ok, JSON.stringify(accepted)).toBe(true);
+    expect((await client.request("second-stop-one", "session.abort", {
+      sessionId: session.id, commandId: "second-stop-one",
+    })).ok).toBe(true);
+    await waitFor(async () => {
+      const snapshot = await f.snapshot(client, session.id);
+      return snapshot.phase === "running" && snapshot.transcript.some((item: any) => item.role === "user"
+        && item.content?.some((part: any) => part.text?.startsWith("only once after stop")));
+    }, "the continuation user input before second Stop");
+    expect((await client.request("second-stop-two", "session.abort", {
+      sessionId: session.id, commandId: "second-stop-two",
+    })).ok).toBe(true);
+    await waitFor(async () => (await f.snapshot(client, session.id)).phase === "idle", "second Stop settlement");
+    const slot = await f.registry.acquire(session.id);
+    const users = slot.canonicalSessionEntries().filter((entry: any) => entry.type === "message" && entry.message.role === "user")
+      .flatMap((entry: any) => entry.message.content.map((part: any) => part.text ?? ""));
+    expect(users.filter((text: string) => text.startsWith("only once after stop"))).toHaveLength(1);
+    expect(f.faux.state.callCount).toBe(2);
+  });
   it("publishes ready after real assistant completion without reopening the session", async () => {
     const f = await fixture();
     const client = await f.connect();
@@ -289,6 +548,9 @@ describe("receipt-backed mutations against their own session work entry", () => 
       commandId: "configuration-stop", sessionId: session.id,
     });
     expect(stopped.ok, JSON.stringify(stopped)).toBe(true);
+    const stoppedSnapshot = await f.snapshot(client, session.id);
+    expect(stoppedSnapshot.phase).toBe("idle");
+    expect(f.faux.state.callCount).toBe(1);
     const slot = await f.registry.acquire(session.id);
     // Installed extension lifecycle is independent authority. Inject only its
     // admitted artifact, not the configuration admission or RPC under test.
