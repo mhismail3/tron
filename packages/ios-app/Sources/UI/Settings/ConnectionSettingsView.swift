@@ -91,6 +91,20 @@ struct ConnectionsSettingsView: View {
         )
     }
 
+    private func notificationPolicyBinding(_ keyPath: WritableKeyPath<PushNotificationPolicy, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { pushNotifications.notificationPolicy[keyPath: keyPath] },
+            set: { value in
+                var next = pushNotifications.notificationPolicy
+                next[keyPath: keyPath] = value
+                Task { @MainActor in
+                    do { try await pushNotifications.updateNotificationPolicy(next) }
+                    catch { model.presentError(error) }
+                }
+            }
+        )
+    }
+
     private var pushStatus: (icon: String, title: String, detail: String) {
         switch model.pushNotificationReadiness {
         case .ready:
@@ -187,6 +201,12 @@ struct ConnectionsSettingsView: View {
                             detail: pushStatus.detail,
                             accent: .tronBlue
                         )
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronToggleRow(icon: "questionmark.bubble.fill", title: "Input needed", detail: "Time Sensitive alerts when Tron needs a response", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.inputNeeded))
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronToggleRow(icon: "stop.circle.fill", title: "Finished", detail: "Alert when the session has no pending background work", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.finished))
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronToggleRow(icon: "hourglass", title: "Waiting on background work", detail: "Alert once while delegated work is still running", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.waiting))
                         TronSettingsDivider(accent: .tronBlue)
                         TronValueRow(
                             icon: "stethoscope",

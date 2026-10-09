@@ -7,7 +7,7 @@ import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 
-export type NotificationKind = "explicit" | "ask" | "agent_finished";
+export type NotificationKind = "explicit" | "ask" | "agent_finished" | "waiting";
 export type DeliveryOutcome = "pending" | "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "expired";
 
 export interface PushGrant {
@@ -26,8 +26,10 @@ export interface PushGrant {
 export interface PendingTarget {
   grantId: string;
   requestId: string;
+  relayEnvelope: string;
   message: string;
   title?: string;
+  interruptionLevel?: "time-sensitive";
   route?: { sessionId: string; machineId: string };
   attempts: number;
   nextAttemptAt: string;
@@ -79,8 +81,8 @@ export interface NotificationInboxEntry {
 }
 
 export interface NotificationDocument {
-  version: 1;
-  policy: { notifyWhenAskPresented: boolean };
+  version: 2;
+  policy: { notifyWhenAskPresented: boolean; notifyWhenFinished: boolean; notifyWhenWaiting: boolean };
   grants: PushGrant[];
   pending: PendingIntent[];
   receipts: NotificationReceipt[];
@@ -135,9 +137,11 @@ function isTarget(value: unknown): value is PendingTarget {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   const route = v.route as Record<string, unknown> | undefined;
-  return exact(v, ["grantId", "requestId", "message", "attempts", "nextAttemptAt", "outcome"], ["title", "route"])
-    && id(v.grantId) && id(v.requestId) && typeof v.message === "string" && Buffer.byteLength(v.message) <= 512
+  return exact(v, ["grantId", "requestId", "relayEnvelope", "message", "attempts", "nextAttemptAt", "outcome"], ["title", "interruptionLevel", "route"])
+    && id(v.grantId) && id(v.requestId) && typeof v.relayEnvelope === "string" && Buffer.byteLength(v.relayEnvelope) <= 2_048
+    && typeof v.message === "string" && Buffer.byteLength(v.message) <= 512
     && (v.title === undefined || (typeof v.title === "string" && Buffer.byteLength(v.title) > 0 && Buffer.byteLength(v.title) <= 256))
+    && (v.interruptionLevel === undefined || v.interruptionLevel === "time-sensitive")
     && (route === undefined || (typeof route === "object" && route !== null && !Array.isArray(route)
       && exact(route, ["sessionId", "machineId"]) && id(route.sessionId)
       && typeof route.machineId === "string" && Buffer.byteLength(route.machineId) > 0
@@ -150,7 +154,7 @@ function isIntent(value: unknown): value is PendingIntent {
   const v = value as Record<string, unknown>;
   return exact(v, ["id", "dedupeKey", "sessionKey", "kind", "createdAt", "expiresAt", "targets"])
     && id(v.id) && typeof v.dedupeKey === "string" && HASH.test(v.dedupeKey) && typeof v.sessionKey === "string" && HASH.test(v.sessionKey)
-    && (v.kind === "explicit" || v.kind === "ask" || v.kind === "agent_finished") && timestamp(v.createdAt) && timestamp(v.expiresAt)
+    && (v.kind === "explicit" || v.kind === "ask" || v.kind === "agent_finished" || v.kind === "waiting") && timestamp(v.createdAt) && timestamp(v.expiresAt)
     && Array.isArray(v.targets) && v.targets.length >= 1 && v.targets.length <= MAXIMUM_PUSH_GRANTS && v.targets.every(isTarget)
     && new Set(v.targets.map((target) => target.grantId)).size === v.targets.length;
 }
@@ -175,7 +179,7 @@ function isInboxEntry(value: unknown): value is NotificationInboxEntry {
   return exact(v, ["id", "dedupeKey", "requestIds", "kind", "createdAt", "updatedAt", "title", "message", "sessionId", "outcome"], ["machineId", "readAt"])
     && id(v.id) && typeof v.dedupeKey === "string" && HASH.test(v.dedupeKey)
     && stringList(v.requestIds, MAXIMUM_PUSH_GRANTS) && (v.requestIds as string[]).length > 0
-    && (v.kind === "explicit" || v.kind === "ask" || v.kind === "agent_finished")
+    && (v.kind === "explicit" || v.kind === "ask" || v.kind === "agent_finished" || v.kind === "waiting")
     && timestamp(v.createdAt) && timestamp(v.updatedAt) && (v.readAt === undefined || timestamp(v.readAt))
     && typeof v.title === "string" && Buffer.byteLength(v.title) > 0 && Buffer.byteLength(v.title) <= 256
     && typeof v.message === "string" && Buffer.byteLength(v.message) > 0 && Buffer.byteLength(v.message) <= 512
@@ -187,10 +191,12 @@ function isInboxEntry(value: unknown): value is NotificationInboxEntry {
 function validate(value: unknown): NotificationDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not object");
   const v = value as Record<string, unknown>;
-  if (!exact(v, ["version", "policy", "grants", "pending", "receipts", "revocations", "inbox"]) || v.version !== 1) throw new Error("shape");
+  if (!exact(v, ["version", "policy", "grants", "pending", "receipts", "revocations", "inbox"]) || v.version !== 2) throw new Error("shape");
   if (!v.policy || typeof v.policy !== "object" || Array.isArray(v.policy)
-    || !exact(v.policy as Record<string, unknown>, ["notifyWhenAskPresented"])
-    || typeof (v.policy as { notifyWhenAskPresented?: unknown }).notifyWhenAskPresented !== "boolean") throw new Error("policy");
+    || !exact(v.policy as Record<string, unknown>, ["notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"])
+    || typeof (v.policy as { notifyWhenAskPresented?: unknown }).notifyWhenAskPresented !== "boolean"
+    || typeof (v.policy as { notifyWhenFinished?: unknown }).notifyWhenFinished !== "boolean"
+    || typeof (v.policy as { notifyWhenWaiting?: unknown }).notifyWhenWaiting !== "boolean") throw new Error("policy");
   if (!Array.isArray(v.grants) || v.grants.length > MAXIMUM_PUSH_GRANTS || !v.grants.every(isGrant)) throw new Error("grants");
   if (!Array.isArray(v.pending) || v.pending.length > MAXIMUM_PENDING_INTENTS || !v.pending.every(isIntent)) throw new Error("pending");
   if (!Array.isArray(v.receipts) || v.receipts.length > MAXIMUM_NOTIFICATION_RECEIPTS || !v.receipts.every(isReceipt)) throw new Error("receipts");
@@ -206,14 +212,21 @@ function validate(value: unknown): NotificationDocument {
 }
 
 const empty = (): NotificationDocument => ({
-  version: 1, policy: { notifyWhenAskPresented: true }, grants: [], pending: [], receipts: [], revocations: [], inbox: [],
+  version: 2, policy: { notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true }, grants: [], pending: [], receipts: [], revocations: [], inbox: [],
 });
 
 /** One-process owner for the bounded credential document. Runtime locking guarantees one live Gateway. */
 export class NotificationGrantStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
+  private migratedLegacyKinds: NotificationKind[] = [];
   constructor(tronHome: string, path = join(tronHome, "gateway", "notifications.json")) { this.path = path; }
+
+  takeMigratedLegacyKinds(): NotificationKind[] {
+    const kinds = this.migratedLegacyKinds;
+    this.migratedLegacyKinds = [];
+    return kinds;
+  }
 
   async initialize(): Promise<void> {
     await this.mutex.run(async () => {
@@ -224,8 +237,13 @@ export class NotificationGrantStore {
         await this.ensureSecureParent();
         return;
       }
-      try { validate(current.value); }
-      catch { throw new GatewayError("conflict", "Notification state is malformed or oversized"); }
+      try {
+        const migrated = validate(current.value);
+        if (current.migrated) {
+          await durableAtomicWriteJson(this.path, migrated);
+          await this.ensureSecureParent();
+        }
+      } catch { throw new GatewayError("conflict", "Notification state is malformed or oversized"); }
     });
   }
 
@@ -270,8 +288,36 @@ export class NotificationGrantStore {
     }
   }
 
-  private async read(): Promise<{ present: false } | { present: true; value: unknown }> {
-    try { return await readSecureJson<unknown>(this.path, MAXIMUM_DOCUMENT_BYTES); }
+  private async read(): Promise<{ present: false } | { present: true; value: unknown; migrated?: boolean }> {
+    try {
+      const result = await readSecureJson<unknown>(this.path, MAXIMUM_DOCUMENT_BYTES);
+      if (!result.present || !result.value || typeof result.value !== "object" || Array.isArray(result.value)) return result;
+      const value = result.value as Record<string, unknown>;
+      // notifications.json is explicitly versioned. Migrate the previous
+      // policy on read, preserving its ask choice and enabling new kinds.
+      if (value.version === 1 && value.policy && typeof value.policy === "object" && !Array.isArray(value.policy)) {
+        const policy = value.policy as Record<string, unknown>;
+        if (Object.keys(policy).length === 1 && typeof policy.notifyWhenAskPresented === "boolean"
+          && Array.isArray(value.pending) && Array.isArray(value.receipts) && Array.isArray(value.inbox)) {
+          const legacyPending = value.pending.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)));
+          this.migratedLegacyKinds = legacyPending.flatMap((entry) =>
+            entry.kind === "ask" || entry.kind === "agent_finished" || entry.kind === "explicit" ? [entry.kind] : []);
+          const retiredDedupeKeys = new Set(legacyPending.map((entry) => entry.dedupeKey).filter((key): key is string => typeof key === "string"));
+          const now = new Date().toISOString();
+          return { present: true, migrated: true, value: {
+            ...value,
+            version: 2,
+            policy: { notifyWhenAskPresented: policy.notifyWhenAskPresented, notifyWhenFinished: true, notifyWhenWaiting: true },
+            pending: [],
+            receipts: value.receipts.map((entry) => entry && typeof entry === "object" && retiredDedupeKeys.has((entry as Record<string, unknown>).dedupeKey as string)
+              ? { ...(entry as Record<string, unknown>), result: "failed" } : entry),
+            inbox: value.inbox.map((entry) => entry && typeof entry === "object" && retiredDedupeKeys.has((entry as Record<string, unknown>).dedupeKey as string)
+              ? { ...(entry as Record<string, unknown>), outcome: "failed", updatedAt: now } : entry),
+          } };
+        }
+      }
+      return result;
+    }
     catch (error) {
       if (error instanceof SecureJsonFileError || error instanceof RangeError || error instanceof SyntaxError) {
         throw new GatewayError("conflict", "Notification state is unsafe, malformed, or oversized");
