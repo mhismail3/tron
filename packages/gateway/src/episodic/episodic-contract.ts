@@ -159,9 +159,8 @@ export interface EpisodicMessageRecord {
   /** The entry contributes no text of its own (a null context edit, or a
    * navigation that left the branch). Never sent to the model. */
   omitted: boolean;
-  /** The canonical entry's instant. Absent on a record written before this
-   * field existed: `entryTimestamp` reads the source for it instead. */
-  timestamp?: string;
+  /** The canonical entry's instant, as the source projected it. */
+  timestamp: string;
 }
 
 /**
@@ -326,7 +325,7 @@ export type EpisodicCompactorDependency =
 
 /** Delta ingestion and frozen historical lookup are deliberately distinct. */
 export interface EpisodicSessionSource {
-  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicCanonicalCut>;
+  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicSourceDelta>;
   branchAtCursor(cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }>;
 }
 
@@ -334,10 +333,8 @@ export type EpisodicMemoryDependencies = {
   workspace: import("../workspace/tron-workspace.js").TronWorkspace;
   /** The canonical session this memory is over; also its store namespace. */
   sessionId: string;
-  /** The canonical session JSONL path. Read only, never repaired. */
-  sessionFile: string;
-  /** Ordered canonical source for a multi-chapter Home namespace. */
-  sessionSource?: EpisodicSessionSource;
+  /** The ordered canonical chapters this memory reads. Read only, never repaired. */
+  sessionSource: EpisodicSessionSource;
   /** Optional admission authority owned by Home, never persisted in this store. */
   isPaused?: () => boolean;
   limits?: Partial<EpisodicLimits>;

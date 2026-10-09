@@ -1430,10 +1430,11 @@ are byte-identical across activations: they are the head of every cached prefix,
 and only the summaries below the preamble move. The summaries themselves stay
 request-local evidence, never instructions.
 
-A `date` for a message whose catalog record was written before that field
-existed is answered from the source by entry id — every parsed entry, not only
-the branch — so a record that has since left the branch still answers, and only an
-entry the file no longer holds is `timestamp-unavailable`.
+A `date` answers the instant its catalog record holds, and every record holds one
+(the store refuses a catalog record without it). A catalog that lacks instants is
+not read from the source message by message: its store is refused on open, and the
+tools answer `memory-unavailable`. An instant the local date formatter cannot read
+answers `timestamp-unavailable`; the memory never invents a time.
 
 `memory_search` is a Tron addition to the recipe's tools, not a recipe section.
 The recipe's tree navigation is otherwise unchanged, and both surfaces are

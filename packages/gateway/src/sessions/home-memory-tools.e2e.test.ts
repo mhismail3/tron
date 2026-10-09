@@ -391,12 +391,6 @@ async function persistedCatalog(f: Fixture): Promise<EpisodicMessageRecord[]> {
   return [...(await store.read()).messages.values()];
 }
 
-async function catalogTimestampFlags(f: Fixture, maxIndex: number): Promise<Array<{ index: unknown; omitted: unknown; timestamp: boolean }>> {
-  return (await persistedCatalog(f))
-    .filter((entry) => entry.index <= maxIndex)
-    .map((entry) => ({ index: entry.index, omitted: entry.omitted, timestamp: entry.timestamp !== undefined }));
-}
-
 describe.sequential("Tron Home memory tools end to end", () => {
   it("opens a line into its two children, gives a message whole, and refuses an address that is not a line", async () => {
     const f = await fixture("zoom");
@@ -723,8 +717,10 @@ describe.sequential("Tron Home memory tools end to end", () => {
     expect(row.blocked).toBeNull();
   }, 120_000);
 
-  it("reports unavailable rather than inventing a date for a Home catalog missing instants", async () => {
-    const f = await fixture("legacy");
+  /** A Home with a message that leaves the branch, navigated away from, before its
+   * catalog is rewritten: the rewrite is what each case below tests. */
+  async function navigatedHome(label: string): Promise<Fixture> {
+    const f = await fixture(label);
     await prompt(f, "first text", "reply-r0");
     managerOf(f).appendMessage(userMessage("no date on this record"));
     // Ingest it, so the navigation below leaves an indexed message off the branch
@@ -738,8 +734,13 @@ describe.sequential("Tron Home memory tools end to end", () => {
     // starts from a complete canonical session snapshot rather than racing the
     // live source reader against SessionManager's navigation write.
     managerOf(f).branch(firstMessage.id);
-    // Malformed Home projection evidence, not a supported legacy Home format:
-    // remove instants through the shared store API. Date must not guess/backfill.
+    return f;
+  }
+
+  /** Rewrite every persisted catalog record through the shared store API, the way an
+   * older Home would have written it. The memory is closed first; the next attach
+   * opens the store from disk, as a Gateway restart does. */
+  async function rewriteCatalog(f: Fixture, rewrite: (record: Record<string, unknown>) => void): Promise<void> {
     await f.registry.dispose();
     registries.splice(registries.indexOf(f.registry), 1);
     const workspace = new TronWorkspace(f.tronHome);
@@ -747,48 +748,50 @@ describe.sequential("Tron Home memory tools end to end", () => {
     try {
       const store = new EpisodicStore(workspace, f.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
       const snapshot = await store.read();
-      if (!snapshot.state) throw new Error("Legacy timestamp fixture has no persisted store state");
-      const legacyMessages = [...snapshot.messages.values()].map((record) => {
-        const legacy = { ...record };
-        delete legacy.timestamp;
-        return legacy;
+      if (!snapshot.state) throw new Error("Catalog fixture has no persisted store state");
+      const messages = [...snapshot.messages.values()].map((record) => {
+        const rewritten: Record<string, unknown> = { ...record };
+        rewrite(rewritten);
+        return rewritten as unknown as EpisodicMessageRecord;
       });
-      await store.checkpoint({
-        messages: legacyMessages,
-        nodes: snapshot.nodes.values(),
-        state: snapshot.state,
-        watermark: snapshot.highestRevision,
-      });
+      await store.checkpoint({ messages, nodes: snapshot.nodes.values(), state: snapshot.state, watermark: snapshot.highestRevision });
     } finally { await workspace.dispose(); }
+  }
 
-    // The store is read from disk again, as a Gateway restart does, so the memory
-    // loads those records as its catalog.
+  it("refuses a Home catalog missing instants rather than inventing a date", async () => {
+    // A catalog record without its canonical instant is a store the memory refuses
+    // on open. The tools answer that refusal through the owner: no date is read from
+    // the source or guessed.
+    const f = await navigatedHome("missing-instants");
+    await rewriteCatalog(f, (record) => { delete record.timestamp; });
     await attach(f, { configure: false });
+    // Configuring opens the store, which refuses the record that has no instant.
+    await expect(f.registry.homeOwner().configureMemory({ model: MEMORY_MODEL })).rejects.toThrow("the Home memory store is unavailable");
     const status = await memoryStatus(f);
+    const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
+    const answers = [await access.zoom(0, 1), await access.date(0), await access.date(2)];
+    report.cases.push({ case: "home-missing-instants", open: status.open, answers, refusals: refusalsOf(f) });
+    expect(status.open).toBe(false);
+    for (const answer of answers) {
+      expect(answer.outcome).toBe("unavailable");
+      expect(answer.outcome === "unavailable" ? answer.reason : undefined).toBe("memory-unavailable");
+    }
+  }, 180_000);
 
-    const answers = await toolAnswers(f, "tools", [
-      { name: "date", args: { id: 0 } },
-      { name: "date", args: { id: 2 } },
-      { name: "zoom", args: { id: 0, n: 1 } },
-    ]);
-    const row = {
-      openBefore: status.open,
-      date: unavailable(answers[0]!, "timestamp-unavailable"),
-      offBranchDate: unavailable(answers[1]!, "timestamp-unavailable"),
-      zoom: ok(answers[2]!),
-      records: await catalogTimestampFlags(f, 4),
-      // Home does not use ordinary single-file legacy timestamp backfill.
-      timestampsStillAbsent: (await catalogTimestampFlags(f, 4)).every((entry) => entry.timestamp === false),
-      refusals: refusalsOf(f),
-    };
-    report.cases.push({ case: "home-missing-instants", ...row });
-    expect(row.openBefore).toBe(false);
-    expect(row.timestampsStillAbsent).toBe(true);
-    expect(row.date).toContain("no longer available");
-    expect(row.offBranchDate).toContain("no longer available");
-    expect(row.zoom).toBe("0+0|user: first text");
-    expect(row.refusals).toEqual([]);
-
+  it("answers timestamp-unavailable for an instant it cannot read, and keeps the memory open", async () => {
+    // The store accepts an instant as text. An instant the date formatter cannot read
+    // keeps the memory open and serving its projection; `date` names the unreadable
+    // instant rather than inventing a time.
+    const f = await navigatedHome("unreadable-instant");
+    await rewriteCatalog(f, (record) => { record.timestamp = "not a date"; });
+    await attach(f);
+    const status = await memoryStatus(f);
+    const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
+    const answers = [await access.zoom(0, 1), await access.date(0), await access.date(2)];
+    report.cases.push({ case: "home-unreadable-instants", open: status.open, answers });
+    expect(status.open).toBe(true);
+    expect(answers[0]).toMatchObject({ outcome: "ok", text: "0+0|user: first text" });
+    for (const answer of answers.slice(1)) expect(answer).toMatchObject({ outcome: "unavailable", reason: "timestamp-unavailable" });
   }, 180_000);
 
   it("never reaches a memory for a session that is not the enabled Home", async () => {

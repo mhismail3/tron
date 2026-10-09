@@ -46,8 +46,7 @@ async function measureHomeHeap(root: string, chapters: HomeSourceChapter[], opti
   let memory: EpisodicMemory | undefined;
   try {
     collect(); const baseline = process.memoryUsage().heapUsed; const samples: number[] = [];
-    memory = await EpisodicMemory.open({ workspace, sessionId: "home", sessionFile: chapters.at(-1)!.path,
-      sessionSource: {
+    memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource: {
         read: async function* (cursor, limits) {
           for await (const cut of readCanonicalHomeDeltas({ homeId: "home", ledgerRevision: options.ledgerRevision, chapters }, cursor, limits)) {
             collect(); samples.push(process.memoryUsage().heapUsed - baseline); yield cut;

@@ -17,6 +17,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 // local OpenAI-compatible endpoint through pi-ai's real request builder, and the
 // endpoint records every request body.
 
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 type Reply = "line" | "reasoning-only";
 
 async function endpoint(reply: () => Reply) {
@@ -129,7 +130,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     const workspace = new TronWorkspace(join(f.root, "home"));
     cleanups.push(async () => { await workspace.dispose(); });
     const memory = await EpisodicMemory.open({
-      workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!,
+      workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
       summarizer: createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!),
       sleep: async () => {},
     });

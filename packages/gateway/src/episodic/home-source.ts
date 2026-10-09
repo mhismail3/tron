@@ -7,7 +7,7 @@ import {
 } from "./episodic-contract.js";
 import {
   COMPLETE_PREFIX_SEED, EpisodicSourceChangedError, episodicDigest, extendPrefixDigest, parseEntry, prefixLineDigest, projectBranch,
-  type EpisodicCanonicalCut, type EpisodicCanonicalEntry, type EpisodicProjectedMessage,
+  type EpisodicCanonicalEntry, type EpisodicProjectedMessage, type EpisodicSourceDelta,
 } from "./episodic-source.js";
 
 export interface HomeSourceChapter { sessionId: string; path: string; sealed: boolean }
@@ -26,6 +26,10 @@ function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
     && info.mtimeMs === cursor.mtimeMs && info.ctimeMs === cursor.ctimeMs;
 }
 function fail(message: string): never { throw new EpisodicMemoryError("source", message); }
+
+function sameFile(a: Stats, b: Stats): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+}
 
 /** One line at a time. No batch of raw strings survives a parse/project step. */
 async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number, signal?: AbortSignal) {
@@ -49,11 +53,13 @@ async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, e
     // Copy the tail: it must not retain the reused read buffer.
     pending = Buffer.from(chunk);
   }
-  if (pending.length) fail("Home canonical source has an incomplete line");
+  // A trailing partial line is a live writer's append, or a crash's: it is not an
+  // entry until its newline lands. It stays unread, so the next delta ingests it
+  // once complete, as the episodic reader does.
 }
 
 function singleProjection(entry: EpisodicCanonicalEntry, limits: EpisodicLimits): EpisodicProjectedMessage | undefined {
-  return projectBranch({ branch: [entry] } as EpisodicCanonicalCut, limits)[0];
+  return projectBranch([entry], limits)[0];
 }
 
 /** Raw payloads are projected immediately. Retained state is ID/parent topology,
@@ -82,48 +88,59 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
     let leaf = incremental ? previous!.leafEntryId : null;
     let leafDigest = incremental ? previous!.leafLineDigest : null;
     let headerSeen = incremental;
-    for await (const bytes of lines(handle, offset, endBytes, limits.maxSourceLineBytes, signal)) {
-      prefix = extendPrefixDigest(prefix, bytes); completeBytes += bytes.length + 1;
-      const line = bytes.toString("utf8");
-      if (!headerSeen) {
-        let header: Record<string, unknown>;
-        try { header = JSON.parse(line); } catch { fail("Home canonical header is not JSON"); }
-        if (!header || header.type !== "session" || header.version !== 3 || header.id !== chapter.sessionId) fail("Home canonical header does not match its chapter");
-        headerSeen = true; continue;
-      }
-      if (!line.trim()) continue;
-      const entry = parseEntry(line);
-      if (evidence?.entryId === entry.id) {
-        if (episodicDigest(line) !== evidence.sourceDigest) fail("Home evidence digest changed");
-        selected = entry;
-      }
-      if (entries.has(entry.id)) fail("Home canonical source repeats an entry ID");
-      // Navigation and edits require the compact branch of this chapter, not a
-      // whole-Home refresh. Close this handle before opening that full cut.
-      if (incremental && (entry.parentId !== leaf || entry.type === "context_edit")) {
-        incremental = false;
-        break;
-      }
-      leaf = entry.id; leafDigest = episodicDigest(line);
-      const compact: CompactEntry = { id: entry.id, parentId: entry.parentId };
-      if (!exact) {
-        const projected = singleProjection(entry, limits);
-        if (projected) {
-          compact.projected = { ...projected, sourceSessionId: chapter.sessionId };
-          const message = entry.raw.message as Record<string, unknown> | undefined;
-          compact.shape = { ...entry, line: "", raw: entry.type === "message"
-            ? { message: { role: message?.role, toolName: message?.toolName } }
-            : { display: entry.raw.display } };
+    try {
+      for await (const bytes of lines(handle, offset, endBytes, limits.maxSourceLineBytes, signal)) {
+        prefix = extendPrefixDigest(prefix, bytes); completeBytes += bytes.length + 1;
+        const line = bytes.toString("utf8");
+        if (!headerSeen) {
+          let header: Record<string, unknown>;
+          try { header = JSON.parse(line); } catch { fail("Home canonical header is not JSON"); }
+          if (!header || header.type !== "session" || header.version !== 3 || header.id !== chapter.sessionId) fail("Home canonical header does not match its chapter");
+          headerSeen = true; continue;
         }
-        if (entry.type === "context_edit" && typeof entry.raw.targetId === "string") {
-          const target = entries.get(entry.raw.targetId);
-          if (target?.shape && target.projected) {
-            const edited = projectBranch({ branch: [target.shape, { ...entry, line: "" }] } as EpisodicCanonicalCut, limits)[0];
-            if (edited) compact.edit = { targetId: target.id, projected: { ...edited, sourceDigest: target.projected.sourceDigest, sourceSessionId: chapter.sessionId } };
+        if (!line.trim()) continue;
+        const entry = parseEntry(line);
+        if (evidence?.entryId === entry.id) {
+          if (episodicDigest(line) !== evidence.sourceDigest) fail("Home evidence digest changed");
+          selected = entry;
+        }
+        if (entries.has(entry.id)) fail("Home canonical source repeats an entry ID");
+        // Navigation and edits require the compact branch of this chapter, not a
+        // whole-Home refresh. Close this handle before opening that full cut.
+        if (incremental && (entry.parentId !== leaf || entry.type === "context_edit")) {
+          incremental = false;
+          break;
+        }
+        leaf = entry.id; leafDigest = episodicDigest(line);
+        const compact: CompactEntry = { id: entry.id, parentId: entry.parentId };
+        if (!exact) {
+          const projected = singleProjection(entry, limits);
+          if (projected) {
+            compact.projected = { ...projected, sourceSessionId: chapter.sessionId };
+            const message = entry.raw.message as Record<string, unknown> | undefined;
+            compact.shape = { ...entry, line: "", raw: entry.type === "message"
+              ? { message: { role: message?.role, toolName: message?.toolName } }
+              : { display: entry.raw.display } };
+          }
+          if (entry.type === "context_edit" && typeof entry.raw.targetId === "string") {
+            const target = entries.get(entry.raw.targetId);
+            if (target?.shape && target.projected) {
+              const edited = projectBranch([target.shape, { ...entry, line: "" }], limits)[0];
+              if (edited) compact.edit = { targetId: target.id, projected: { ...edited, sourceDigest: target.projected.sourceDigest, sourceSessionId: chapter.sessionId } };
+            }
           }
         }
+        entries.set(compact.id, compact);
       }
-      entries.set(compact.id, compact);
+    } catch (error) {
+      // A delta read of a source that changed while it was read can fail to parse
+      // mid-write or mid-rewrite. That is a transient cut: the next ingestion reads
+      // it again. Only a stable malformed chapter, or an exact cursor read, refuses.
+      if (!exact && error instanceof EpisodicMemoryError && error.kind === "source") {
+        const now = await handle.stat().catch(() => undefined);
+        if (!now || !sameFile(start, now)) throw new EpisodicSourceChangedError();
+      }
+      throw error;
     }
     if (previous && !exact && !incremental) {
       // The partial delta holds no canonical payload by the time we recurse.
@@ -187,7 +204,7 @@ function aggregate(snapshot: HomeSourceSnapshot, chapters: EpisodicChapterSource
 
 /** Consume/commit one chapter before reading the next. Only capped projections
  * cross the await into EpisodicMemory; old sealed JSONL is never reopened. */
-export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<EpisodicCanonicalCut> {
+export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<EpisodicSourceDelta> {
   const stats = await validateSnapshot(snapshot, cursor);
   const chapters = [...(cursor?.home?.chapters ?? [])];
   let acknowledged = cursor;
@@ -204,16 +221,16 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
     for (const entry of cut.branch) if (entry.edit && branchIds.has(entry.edit.targetId)) projected.set(entry.edit.targetId, entry.edit.projected);
     const next = aggregate(snapshot, chapters);
     acknowledged = next;
-    yield { sessionId: snapshot.homeId, branch: [], projected: [...projected.values()],
-      scopeSessionId: chapter.sessionId, completeBytes: next.completeBytes, tornBytes: 0,
+    yield { sessionId: snapshot.homeId, projected: [...projected.values()],
+      scopeSessionId: chapter.sessionId, completeBytes: next.completeBytes,
       leafEntryId: next.leafEntryId, cursor: next, incremental: cut.incremental };
   }
   // Even no-op ingestion acknowledges a ledger-only transition (seal/roll).
   const next = aggregate(snapshot, chapters);
   if (acknowledged?.completePrefixDigest === next.completePrefixDigest
     && acknowledged?.home?.ledgerRevision === next.home!.ledgerRevision) return;
-  yield { sessionId: snapshot.homeId, branch: [], projected: [], completeBytes: next.completeBytes,
-    tornBytes: 0, leafEntryId: next.leafEntryId, cursor: next, incremental: true };
+  yield { sessionId: snapshot.homeId, projected: [], completeBytes: next.completeBytes,
+    leafEntryId: next.leafEntryId, cursor: next, incremental: true };
 }
 
 /** Exact frozen cuts are not delta reads. Stream a compact index through each

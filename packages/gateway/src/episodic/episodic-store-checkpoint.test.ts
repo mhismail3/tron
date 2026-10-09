@@ -9,6 +9,7 @@ import { EPISODIC_DEFAULTS, EPISODIC_STORE_VERSION, type EpisodicMessageRecord, 
 import { EpisodicMemory } from "./episodic-memory.js";
 import { EpisodicStore } from "./episodic-store.js";
 
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const roots: string[] = [];
 const owners: TronWorkspace[] = [];
 afterEach(async () => {
@@ -32,20 +33,20 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "checkpoint message", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
     await memory.entriesCommitted(manager.getSessionId());
     expect(memory.status().messages).toBe(1);
     const legacyNamespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
     expect((await readdir(legacyNamespace)).some(name => /^checkpoint-/u.test(name))).toBe(false);
     await memory.dispose();
-    const existing = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const existing = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
     const namespace = join(root, "home", "workspace", "state", "episodic", manager.getSessionId());
     const names = await readdir(namespace);
     expect(names.some(name => name.startsWith("checkpoint-"))).toBe(true);
     expect(names).toContain("checkpoint.current.json");
     expect(existing.status().messages).toBe(1);
     await existing.dispose();
-    const reopened = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const reopened = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
     expect(reopened.status().messages).toBe(1);
     await reopened.dispose();
   });
@@ -59,7 +60,7 @@ describe("episodic store checkpoint", () => {
     const store = new EpisodicStore(workspace, sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
     const base: EpisodicMessageRecord = {
       revision: 1, index: 0, entryId: "entry-0", kind: "user", text: "x".repeat(900), omitted: false, omissions: [],
-      sourceDigest: "source", projectedDigest: "projection", sessionId,
+      sourceDigest: "source", projectedDigest: "projection", timestamp: "2026-01-01T00:00:00.000Z", sessionId,
     };
     await store.appendCatalog(base);
     await store.saveState({ version: EPISODIC_STORE_VERSION, generation: 0, cursor: null, blocked: null, spend: 0 });
@@ -89,7 +90,7 @@ describe("episodic store checkpoint", () => {
     owners.push(workspace);
     let calls = 0;
     const controlled: EpisodicSummarizer = async request => { calls += 1; return fauxAssistantMessage(request.turns.at(-1)!.text.slice(-100)); };
-    const options = { workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer: controlled, limits: { nodeBytes: 512, retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer: controlled, limits: { nodeBytes: 512, retryMs: 1 }, sleep: async () => {} };
     const memory = await EpisodicMemory.open(options);
     const owner = memory as unknown as {
       composeNode: (...args: any[]) => Promise<any>;
@@ -141,7 +142,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "safe cleanup target", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const options = { workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
     const first = await EpisodicMemory.open(options);
     await first.entriesCommitted(manager.getSessionId());
     await first.dispose();
@@ -166,7 +167,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "fold tail message", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const options = { workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
     const first = await EpisodicMemory.open(options);
     await first.entriesCommitted(manager.getSessionId());
     await first.dispose();
@@ -204,7 +205,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "checkpoint disposal ordering", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
     await memory.entriesCommitted(manager.getSessionId());
     const owner = memory as unknown as {
       store: { shouldCheckpoint: (...args: any[]) => Promise<boolean>; checkpoint: (...args: any[]) => Promise<void> };
@@ -239,7 +240,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "before checkpoint failure", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
+    const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} });
     await memory.entriesCommitted(manager.getSessionId());
     const owner = memory as unknown as { store: { checkpoint: (...args: any[]) => Promise<void> }; enqueueAppend: (operation: () => Promise<void>) => Promise<void>; publishCheckpoint: () => Promise<void> };
     owner.store.checkpoint = async () => { throw new Error("injected checkpoint reclamation failure"); };
@@ -260,7 +261,7 @@ describe("episodic store checkpoint", () => {
     manager.appendMessage({ role: "user", content: "durable checkpoint entry", timestamp: Date.now() });
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
-    const options = { workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
+    const options = { workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1 }, sleep: async () => {} };
     const initial = await EpisodicMemory.open(options);
     await initial.entriesCommitted(manager.getSessionId());
     await initial.dispose();

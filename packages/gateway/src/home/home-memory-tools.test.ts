@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import type { EpisodicSessionSource, EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeMemory, homeMemoryToolUnavailable } from "./home-memory.js";
 import { homeMemoryTools, type HomeMemoryToolDetails } from "./home-memory-tools.js";
@@ -29,6 +29,11 @@ afterEach(async () => {
 const summarizer: EpisodicSummarizer = async () => {
   throw new Error("this fixture never compacts");
 };
+/** These fixtures never open a store, so no chapter is read. */
+const unreadSource: EpisodicSessionSource = {
+  read: async function* () { throw new Error("this fixture never reads a chapter"); },
+  branchAtCursor: async function* () { throw new Error("this fixture never reads a chapter"); },
+};
 
 /** A Home memory with no open store: `configure` records the configuration, and
  * the store opens only for a session file that exists. */
@@ -38,7 +43,7 @@ async function memory(sessionFile: () => Promise<string | undefined>): Promise<H
   const workspace = new TronWorkspace(join(root, "tron"));
   workspaces.push(workspace);
   await mkdir(join(root, "sessions"), { recursive: true });
-  return new HomeMemory({ sessionId: "session-1", workspace, sessionFile, modelSummarizer: () => ({ summarizer }) });
+  return new HomeMemory({ sessionId: "session-1", workspace, sessionFile, sessionSource: unreadSource, modelSummarizer: () => ({ summarizer }) });
 }
 
 const missing = async () => undefined;

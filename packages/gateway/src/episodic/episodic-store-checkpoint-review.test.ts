@@ -10,6 +10,7 @@ import { EPISODIC_DEFAULTS, EPISODIC_STORE_VERSION, type EpisodicMessageRecord, 
 import { EpisodicMemory, readEpisodicState } from "./episodic-memory.js";
 import { EpisodicStore } from "./episodic-store.js";
 
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const roots: string[] = [];
 const owners: TronWorkspace[] = [];
 afterEach(async () => {
@@ -20,7 +21,7 @@ afterEach(async () => {
 const summarize: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-100));
 const storeRecord = (sessionId: string): EpisodicMessageRecord => ({
   revision: 1, index: 0, entryId: "entry-0", kind: "user", text: "current", omitted: false, omissions: [],
-  sourceDigest: "source", projectedDigest: "projection", sessionId,
+  sourceDigest: "source", projectedDigest: "projection", timestamp: "2026-01-01T00:00:00.000Z", sessionId,
 });
 
 async function replaceCanonicalContent(fx: Awaited<ReturnType<typeof fixture>>, entryId: string, oldText: string, newText: string): Promise<void> {
@@ -75,7 +76,7 @@ describe("episodic checkpoint review regressions", () => {
         fx.manager.appendMessage(fauxAssistantMessage(`fault reply ${index} ${"a".repeat(900)}`));
       }
       const memory = await EpisodicMemory.open({
-        workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer: summarize,
+        workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize,
         limits: { nodeBytes: 512, viewBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {},
       });
       await memory.entriesCommitted(fx.sessionId);
@@ -92,7 +93,7 @@ describe("episodic checkpoint review regressions", () => {
       await baseStore.checkpoint({ messages: before.messages.values(), nodes: before.nodes.values(), state: stateA, watermark: before.highestRevision });
       const tailRecord: EpisodicMessageRecord = {
         revision: before.highestRevision + 1, index: before.messages.size, entryId: "fault-tail", kind: "user",
-        text: "acknowledged tail", omitted: false, omissions: [], sourceDigest: "tail-source", projectedDigest: "tail-projection", sessionId: fx.sessionId,
+        text: "acknowledged tail", omitted: false, omissions: [], sourceDigest: "tail-source", projectedDigest: "tail-projection", timestamp: "2026-01-01T00:00:00.000Z", sessionId: fx.sessionId,
       };
       await baseStore.appendCatalog(tailRecord);
       const stateB = {
@@ -206,7 +207,7 @@ describe("episodic checkpoint review regressions", () => {
       await verifyStore();
       for (let opener = 0; opener < 2; opener += 1) {
         const reopened = await EpisodicMemory.open({
-          workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer: summarize,
+          workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize,
           limits: { nodeBytes: 512, viewBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {},
         });
         const status = reopened.status();
@@ -231,7 +232,7 @@ describe("episodic checkpoint review regressions", () => {
       records.push({
         revision: index + 1, index, entryId: `large-${index}`, kind: "user",
         text: `${String(index).padStart(3, "0")}${"x".repeat(899_997)}`, omitted: false, omissions: [],
-        sourceDigest: `source-${index}`, projectedDigest: `projection-${index}`, sessionId: fx.sessionId,
+        sourceDigest: `source-${index}`, projectedDigest: `projection-${index}`, timestamp: "2026-01-01T00:00:00.000Z", sessionId: fx.sessionId,
       });
     }
     await store.checkpoint({ messages: records, nodes: [], state, watermark: records.length });
@@ -329,7 +330,7 @@ describe("episodic checkpoint review regressions", () => {
     const fx = await fixture("full-refresh-replacement", "same-size-old");
     fx.manager.appendMessage(fauxAssistantMessage("middle entry"));
     fx.manager.appendMessage({ role: "user", content: "last source entry", timestamp: Date.now() });
-    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer: summarize });
+    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize });
     await memory.entriesCommitted(fx.sessionId);
     const target = fx.manager.getBranch().find(entry => entry.type === "message")!;
     expect(memory.zoomLines(0, 1)?.[0]).toContain("same-size-old");
@@ -350,7 +351,7 @@ describe("episodic checkpoint review regressions", () => {
     const fx = await fixture("missing-prefix-digest", "same-size-old");
     fx.manager.appendMessage(fauxAssistantMessage("middle entry"));
     fx.manager.appendMessage({ role: "user", content: "last source entry", timestamp: Date.now() });
-    const first = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer: summarize });
+    const first = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize });
     await first.entriesCommitted(fx.sessionId);
     const target = fx.manager.getBranch().find(entry => entry.type === "message")!;
     await first.dispose();
@@ -363,7 +364,7 @@ describe("episodic checkpoint review regressions", () => {
     await store.saveState({ ...state!, cursor });
     await replaceCanonicalContent(fx, target.id, "same-size-old", "same-size-new");
 
-    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer: summarize });
+    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize });
     await memory.entriesCommitted(fx.sessionId);
 
     expect(memory.zoomLines(0, 1)?.[0]).toContain("same-size-new");
@@ -379,7 +380,7 @@ describe("episodic checkpoint review regressions", () => {
     const fx = await fixture("prefix-fence", "first prefix entry");
     fx.manager.appendMessage(fauxAssistantMessage("middle entry"));
     fx.manager.appendMessage({ role: "user", content: "last prefix entry", timestamp: Date.now() });
-    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer: summarize });
+    const memory = await EpisodicMemory.open({ workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer: summarize });
     await memory.entriesCommitted(fx.sessionId);
     const target = fx.manager.getBranch().find(entry => entry.type === "message")!;
     const originalCut = await memory.cutAtEntry(target.id);
@@ -438,7 +439,7 @@ describe("episodic checkpoint review regressions", () => {
       return summarize(request);
     };
     const memory = await EpisodicMemory.open({
-      workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer,
+      workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer,
       limits: { nodeBytes: 256, viewBytes: 256, jobs: 4, retryMs: 1 }, sleep: async () => {},
     });
     await memory.entriesCommitted(fx.sessionId);
@@ -504,7 +505,7 @@ describe("episodic checkpoint review regressions", () => {
       return fauxAssistantMessage(request.turns.at(-1)!.text.slice(-100));
     };
     const memory = await EpisodicMemory.open({
-      workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: fx.sessionFile, summarizer,
+      workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile), summarizer,
       limits: { ...EPISODIC_DEFAULTS, retryMs: 1, nodeBytes: 512 }, sleep: async () => {},
     });
     const owner = memory as unknown as {

@@ -20,7 +20,7 @@ it the commits the runtime reports, and sends each activation the view it render
   and there is no budget (#493). One store has **one opener per
   process**: a second `open` for the same session refuses with `already-open`,
   because two memories would write the same files without a lock between them.
-- `entriesCommitted(sessionId)` re-reads the canonical file after its cursor,
+- `entriesCommitted(sessionId)` asks its source for the deltas after its cursor,
   ingests what is new, and drains the pump. It awaits the drain, so a caller
   that wants the model calls off its own path simply does not await it.
   Ingestion, invalidation and `resume()` are serialized behind one mutex; the
@@ -45,28 +45,26 @@ it the commits the runtime reports, and sends each activation the view it render
   the opener is released — then awaits the pump, releases the waiter list and
   releases this session's opener. The wait is what keeps a reconfiguration from
   handing the store to a second owner while the first is still writing it.
-- The canonical read is **incremental**: the reader remembers the file's
-  dev/ino, size, complete byte offset and the digest of the last complete line.
-  When the file only grew, it reads from the offset and extends the branch it
-  already knows; it falls back to a whole-file read when the identity changed,
-  the file shrank, the line before the offset no longer matches, or the new
-  entries do not chain onto that branch. An unchanged-source shortcut is allowed
-  only for a proven incremental no-change read; a whole-file rebuild reconciles
-  projected messages before it persists a refreshed cursor and complete-prefix
-  digest. Incremental reads do not hash the retained prefix: they verify the
-  file identity and the last complete line in an 8 KiB window, then hash only new
+- The memory reads canonical bytes only through its `EpisodicSessionSource`
+  (below); it never opens a session file itself, and it has no single-session
+  reader. A delta continues from the chapter cursor (dev/ino, size, complete byte
+  offset, the last complete line's digest and the complete-prefix digest) when
+  the file only grew. A navigation, a context edit or a changed chapter identity
+  re-reads the chapter whole, and the projected messages are reconciled before
+  the refreshed cursor and complete-prefix digest are persisted.
+  Incremental reads do not hash the retained prefix: they verify the file
+  identity and the last complete line in an 8 KiB window, then hash only new
   complete lines. Thus a same-length rewrite outside that window can remain
-  undetected on an otherwise-valid incremental read. A full rebuild reconciles
-  the projection and persists a digest of the bytes it read; it does not reject
-  the refresh merely because the old digest differs. A transient cut lookup
-  hashes the complete ingested prefix before and after reconstruction and refuses
-  a mismatch. When a source parse fails, the reader compares file identity, size,
+  undetected on an otherwise-valid incremental read. An exact cut re-reads its
+  complete ingested prefix and refuses a digest or membership mismatch.
+  When a delta's parse fails, the reader compares file identity, size,
   modification time and change time across the read. If these differ, or the
   final snapshot cannot be inspected, ingestion leaves the cursor unchanged and
   unblocked; the next ingestion attempt (for example, a commit or activation)
-  retries from the source. A stable malformed
-  file still blocks as `source-unavailable`. The session file remains append-only
-  under its owner; the reader neither repairs nor migrates it, and whole-file
+  retries from the source. A stable malformed file still blocks as
+  `source-unavailable`. A trailing partial line is not an entry until its newline
+  lands: it is left unread and ingested once complete. The session file remains
+  append-only under its owner; the reader neither repairs nor migrates it, and
   reads are bounded per line.
 - Home supplies two distinct source contracts: an async chapter-delta stream
   for ingestion, and a cursor-scoped compact ID/parent index for exact cuts.
@@ -83,7 +81,8 @@ it the commits the runtime reports, and sends each activation the view it render
 - The strict Home cursor is version 2. Every chapter requires file-change
   metadata, sealed state and a complete-prefix digest; older Home formats are
   preserved and refused before cleanup. No dual reader or migration is provided.
-  Ordinary single-session cursors and legacy timestamp lookup are unchanged.
+  No single-session cursor or legacy timestamp lookup exists: the memory has one
+  source, Home's.
 - `whenReady(cut)` resolves when every view part covering messages before `cut`
   is a built summary (gist §6). Cut 0 is trivially ready, so it resolves on an
   empty memory; a cut beyond the message count is refused; a blocked memory
@@ -96,10 +95,10 @@ it the commits the runtime reports, and sends each activation the view it render
   releases every waiter and this session's opener.
 
 The owner never subscribes to a session and never opens it with
-`SessionManager`. It reads the file itself, which is what makes "never repair or
-migrate a canonical file" a property it can hold. A transient cut lookup streams
-and hashes the complete ingested prefix before and after reconstructing the
-branch; if any earlier source byte changed in place, the cut is refused.
+`SessionManager`. It reads the chapters only through its source, which is what
+makes "never repair or migrate a canonical file" a property it can hold. A
+transient cut lookup re-reads the complete ingested prefix; if any earlier source
+byte changed in place, the cut is refused.
 
 ## Storage
 
@@ -242,9 +241,8 @@ source data; their privacy contract is owned by `home/home-diagnostic.ts` and th
   line), `projectedDigest` (sha256 of the projected text), its omissions
   (`thinking`, `attachment`, `capped`, `credentials`, `context-edit`,
   `off-branch`, `empty`, `unsupported-part`), and `timestamp`: the canonical
-  entry's instant. `timestamp` is optional, and absent on a record written before
-  it existed: `entryTimestamp` reads the source for that one entry instead (see
-  **Navigation**).
+  entry's instant. `timestamp` is required. The store refuses a catalog record
+  without one; the memory never reads the source to backfill it.
 
 ## The algorithm
 
@@ -296,20 +294,10 @@ text.
   `id + n > T`. A child whose node is not built right now renders the
   placeholder, and a revoked node's text is gone from the map, so a stale child
   cannot be served.
-- **`entryTimestamp(id)`** returns the catalog record's own instant. Ordinary
-  single-file memory also supports records written before the optional field:
-  it returns the instant the canonical source proves for that entry id. That read is the bounded canonical reader the owner
-  already uses, it is not `SessionManager`, and it covers **every parsed entry of
-  the file, not only the branch the last entry follows**: a record that has since
-  left the branch is still an entry the source can date. It happens at most once
-  per memory and is remembered, because an entry's instant never changes —
-  including across a navigation, since the map is keyed by entry id.
-  `unavailable` is the source's answer that it holds no such entry, or that it
-  cannot read the file at all — the memory never invents a time. Home's strict
-  chapter projection records carry instants and do not use legacy backfill;
-  malformed Home projection evidence missing an instant reports `unavailable`.
-  `episodic-memory-recovery.test.ts` retains the ordinary restart/navigation proof
-  at `test-results/episodic-memory/ordinary-instants.json`.
+- **`entryTimestamp(id)`** returns the catalog record's instant, or `undefined`
+  for a message this memory does not hold. It reads nothing else: an instant the
+  caller cannot parse is that caller's `timestamp-unavailable`, and the memory
+  never invents a time.
 - **`searchMessages(query, from, to)`** is Tron's addition to the recipe's tools:
   one case-insensitive substring pass over the projected catalog, bounded by
   `EPISODIC_SEARCH_HITS` (20) lines whose snippets are bounded by

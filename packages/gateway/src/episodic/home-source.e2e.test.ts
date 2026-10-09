@@ -39,8 +39,7 @@ async function fixture() {
     branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
   };
   const open = async (sessionSource = source) => {
-    const memory = await EpisodicMemory.open({ workspace, sessionId: "home", sessionFile: chapters.at(-1)!.path,
-      sessionSource,
+    const memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource,
       summarizer: async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)),
       limits: { viewBytes: 4096, jobs: 2, retryMs: 1 }, sleep: async () => {},
     }); memories.push(memory); return memory;
