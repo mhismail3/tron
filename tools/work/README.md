@@ -954,6 +954,21 @@ as does `acceptance` for the journeys it can run.
    head. Until a branch rule requires up-to-date branches, this check is the
    only guard, and a move in the second between it and the merge call is not
    caught.
+   - No round is needed, and the head is merged as verified, when no
+     `--acceptance` journey was requested and all three hold: no path in `git diff --name-only --no-renames <merge-base> <tip>`
+     matches a non-always check in the receipt's `required` list (on the
+     current `verify.checks`); `.github/work.json` is not among those paths;
+     and `git merge-tree --write-tree <head> <tip>` exits 0. Then land prints
+     `moved:` naming the verified head and continues to the merge.
+   - This rests on the assumption that a check's globs cover every input its
+     result depends on, the same assumption verify's carry-over relies on. A
+     required check keeps its inputs, since no incoming path matches it. A check
+     the branch does not require had inputs the branch left untouched, and it
+     already passed on the base. Always-run checks read the branch diff, which the
+     move leaves alone. The merged tree itself is never checked; GitHub composes
+     it from the base and the branch's diff. A check whose globs miss an input it
+     reads can let such a move merge unverified. Journeys are cross-area runs
+     whose inputs no glob describes, so any move reruns them in a new round.
 8. **Merge.** It squash-merges with `--match-head-commit`, so GitHub merges
    only the commit that was verified. The subject is the pull request title
    plus ` (#N)` unless the title already has it, and the body is `Closes #N` or
@@ -1158,9 +1173,10 @@ Project state and records every call. The live E2E covers GitHub itself.
     A scope-skipped required job counts as passed; a cancelled one stops `land`.
     A failure or a timeout stops `land` without merging.
 36. **The base branch moves between the check and the merge.** A base tip
-    the head lacks once the checks pass starts another round, and the merge
-    names the new head. A conflict stops `land` with the merge left in
-    progress and nothing pushed.
+    the head lacks once the checks pass starts another round, unless step 7
+    finds that it shares no required check with the branch (failure mode 81);
+    the merge names the head it verified. A conflict stops `land` with the merge
+    left in progress and nothing pushed.
 37. **A pull request body leaks personal data.** The scrub command sees the
     title, summary and validation text before any GitHub write. The rest of
     the body is receipt fields that already passed the scrub of the receipt
@@ -1260,6 +1276,16 @@ Project state and records every call. The live E2E covers GitHub itself.
     base and says to merge it into the branch, resolve, commit and run land
     again. Nothing merges. `UNKNOWN` (GitHub still computing mergeability) keeps
     waiting.
+81. **A base move merges unverified, or costs a round it cannot affect.** Step 7
+    merges a moved base without another round only when its three conditions
+    hold. `test_land.py` (`BaseMoveTests`) runs the real `land` against the fake
+    GitHub. A move into a path a required check covers starts another round, and
+    so does one touching `.github/work.json` or one that conflicts textually with
+    a branch path that only always-run checks cover; that last round stops at the
+    merge conflict. A move into paths no required check covers merges with one
+    round, and the `moved:` line names the verified head. With `--acceptance`,
+    any base move starts another round: journeys are cross-area runs whose inputs
+    no glob describes.
 
 ## `cleanup`
 
