@@ -33,6 +33,7 @@ import dashboard
 import land
 import start
 from gh import Gh
+from repo_template import clone_with_identity, copy_template
 
 REMOTE = "origin"
 BASE = "main"
@@ -605,6 +606,43 @@ class GitMaintenanceCleanupTests(unittest.TestCase):
         self.assertIsNone(self._auto_gc_cleanup(disable_automatic_maintenance=True))
 
 
+def _build_land_template(root: Path) -> str:
+    """The history every LandFixture copies: a remote with the base branch, and a clone holding the claim.
+
+    Returns the claim's SHA, which the copies keep.
+    """
+    remote = root / "remote.git"
+    git(root, "init", "-q", "--bare", "-b", BASE, str(remote))
+    seed = clone_with_identity(remote, root / "seed")
+    LandFixture.write(seed, "README.md", "one\n")
+    LandFixture.write(seed, "app/a.txt", "one\n")
+    git(seed, "add", "-A")
+    git(seed, "commit", "-q", "-m", "base")
+    git(seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
+    repo = clone_with_identity(remote, root / "repo")
+    claim_sha = claims.create_claim(repo, REMOTE, BASE, BRANCH, NUMBER, SESSION).sha
+    git(repo, "fetch", "-q", REMOTE)
+    git(repo, "checkout", "-q", "-b", BRANCH, "--track", f"{REMOTE}/{BRANCH}")
+    LandFixture.write(repo, "app/a.txt", "two\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "change app/a.txt")
+    return claim_sha
+
+
+_land_template_root: Path
+_land_template_claim_sha: str
+
+
+def setUpModule():
+    # Built once per module with git maintenance off; each LandFixture copies it.
+    global _land_template_root, _land_template_claim_sha
+    template = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(template.cleanup)
+    _land_template_root = Path(template.name).resolve()
+    with _owned_test_processes():
+        _land_template_claim_sha = _build_land_template(_land_template_root)
+
+
 class LandFixture(unittest.TestCase):
     def setUp(self):
         quiet = contextlib.redirect_stdout(io.StringIO())
@@ -617,18 +655,10 @@ class LandFixture(unittest.TestCase):
         self.addCleanup(process_owner.__exit__, None, None, None)
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
-        self.seed = self._clone("seed")
-        self.write(self.seed, "README.md", "one\n")
-        self.write(self.seed, "app/a.txt", "one\n")
-        git(self.seed, "add", "-A")
-        git(self.seed, "commit", "-q", "-m", "base")
-        git(self.seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
-        self.repo = self._clone("repo")
-        self.claim_sha = claims.create_claim(self.repo, REMOTE, BASE, BRANCH, NUMBER, SESSION).sha
-        git(self.repo, "fetch", "-q", REMOTE)
-        git(self.repo, "checkout", "-q", "-b", BRANCH, "--track", f"{REMOTE}/{BRANCH}")
-        self.commit(self.repo, "app/a.txt", "two\n")
+        self.seed = self.tmp / "seed"
+        self.repo = self.tmp / "repo"
+        copy_template(_land_template_root, self.tmp, [self.seed, self.repo], REMOTE, self.remote)
+        self.claim_sha = _land_template_claim_sha
 
         self.counts = self.tmp / "counts"
         self.fail_flag = self.tmp / "fail"
@@ -692,11 +722,7 @@ class LandFixture(unittest.TestCase):
                 os.environ[key] = value
 
     def _clone(self, name: str) -> Path:
-        path = self.tmp / name
-        git(self.tmp, "clone", "-q", str(self.remote), str(path))
-        git(path, "config", "user.name", "Agent")
-        git(path, "config", "user.email", "agent@example.invalid")
-        return path
+        return clone_with_identity(self.remote, self.tmp / name)
 
     @staticmethod
     def write(repo: Path, relative: str, content: str) -> None:

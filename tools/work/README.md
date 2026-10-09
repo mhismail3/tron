@@ -206,8 +206,10 @@ merges and silently drop the work.
 
 ### Base failure modes
 
-`test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
-repositories, local bare remotes and the fake `gh`. The land fixtures disable
+`test_claim.py`, `test_land.py`, `test_cleanup.py` and `test_verify.py` check these against real
+repositories, local bare remotes and the fake `gh`. Each module builds its repository
+history once and every test copies it (`repo_template.py`), so setup costs no per-test Git
+processes while each test keeps its own repositories. The land fixtures disable
 Git auto-GC and automatic maintenance for every child Git process, so repository
 temporary-directory cleanup does not race detached maintenance.
 The fixture-level test process owner tracks every child process and applies the
@@ -480,7 +482,10 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   `tools/work/verify.py`, so CI and `scripts/tron work verify` select alike. An
   empty diff selects none, as verify does; a missing or unresolvable base, or any
   selector error, runs every check. `scripts/test-ci-verify-scope.py` covers the
-  selector's real-Git cases in `policy`.
+  selector's real-Git cases in `policy`. `policy` needs `scope` and gates only its
+  slow `profiler`, `triage` and `work-tooling` test steps on the same selector; its
+  syntax checks and selector tests stay unconditional, and `!cancelled()` keeps it
+  running when selection fails.
   Jobs keep real failure conclusions;
   only `policy`, `gateway` (`land.requiredChecks`) and `tron/verify` gate `land`.
   The `main` ruleset remains
