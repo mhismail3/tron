@@ -271,6 +271,53 @@ export async function readCanonicalSession(options: {
   }
 }
 
+/**
+ * Visit every complete entry of one canonical file in file order, one line at a
+ * time, so the visitor decides what survives: nothing is batched. Refuses what the
+ * whole-file reader refuses (header, torn tail, over-long line), and a file that
+ * shrinks while it is read. Reads only the bytes present when it began.
+ */
+export async function visitCanonicalSessionEntries(options: {
+  path: string;
+  sessionId: string;
+  maxLineBytes: number;
+  visit: (entry: EpisodicCanonicalEntry) => void;
+}): Promise<void> {
+  const handle = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const start = await handle.stat();
+    if (!start.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
+    const buffer = Buffer.alloc(1_024 * 1_024);
+    let pending = Buffer.alloc(0);
+    let position = 0;
+    let headerSeen = false;
+    const accept = (bytes: Buffer): void => {
+      const line = bytes.toString("utf8");
+      if (!headerSeen) {
+        checkSessionHeader(line, options.sessionId);
+        headerSeen = true;
+      } else if (line.trim() !== "") {
+        options.visit(parseEntry(line));
+      }
+    };
+    while (position < start.size) {
+      const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, start.size - position), position);
+      if (bytesRead === 0) throw new EpisodicSourceChangedError();
+      position += bytesRead;
+      let chunk = Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
+      for (let newline = chunk.indexOf(0x0a); newline >= 0; newline = chunk.indexOf(0x0a)) {
+        if (newline > options.maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${options.maxLineBytes} bytes`);
+        accept(chunk.subarray(0, newline));
+        chunk = chunk.subarray(newline + 1);
+      }
+      if (chunk.length > options.maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${options.maxLineBytes} bytes`);
+      pending = Buffer.from(chunk);
+    }
+    if (pending.length > 0) throw new EpisodicMemoryError("source", "Canonical session has an incomplete tail");
+    if (!headerSeen) throw new EpisodicMemoryError("source", "Canonical session file is empty");
+  } finally { await handle.close(); }
+}
+
 /** Hash every complete line through a cursor without retaining the source text. */
 async function digestCompletePrefix(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, endBytes: number, maxLineBytes: number): Promise<string | undefined> {
   const buffer = Buffer.alloc(1_024 * 1_024);
@@ -397,6 +444,20 @@ interface WholeFile {
   byId: Map<string, EpisodicCanonicalEntry>;
 }
 
+function checkSessionHeader(line: string, sessionId: string): void {
+  let header: Record<string, unknown>;
+  try {
+    header = asRecord(JSON.parse(line)) ?? {};
+  } catch {
+    throw new EpisodicMemoryError("source", "Canonical session header is not JSON");
+  }
+  if (header.type !== "session") throw new EpisodicMemoryError("source", "Canonical session header is not a session header");
+  if (header.id !== sessionId) throw new EpisodicMemoryError("source", "Canonical session header names a different session");
+  if (typeof header.version === "number" && header.version > SUPPORTED_SESSION_VERSION) {
+    throw new EpisodicMemoryError("source", `Canonical session version ${header.version} is newer than this Gateway supports`);
+  }
+}
+
 /**
  * Read every complete entry of one canonical file, after checking the header this
  * reader supports. Both the branch walk and the by-id instant read prove the file
@@ -408,17 +469,7 @@ async function readWholeFile(
 ): Promise<WholeFile> {
   const batch = await readLines(handle, 0, options.maxLineBytes, options.endBytes);
   if (batch.lines.length === 0) throw new EpisodicMemoryError("source", "Canonical session file is empty");
-  let header: Record<string, unknown>;
-  try {
-    header = asRecord(JSON.parse(batch.lines[0]!)) ?? {};
-  } catch {
-    throw new EpisodicMemoryError("source", "Canonical session header is not JSON");
-  }
-  if (header.type !== "session") throw new EpisodicMemoryError("source", "Canonical session header is not a session header");
-  if (header.id !== options.sessionId) throw new EpisodicMemoryError("source", "Canonical session header names a different session");
-  if (typeof header.version === "number" && header.version > SUPPORTED_SESSION_VERSION) {
-    throw new EpisodicMemoryError("source", `Canonical session version ${header.version} is newer than this Gateway supports`);
-  }
+  checkSessionHeader(batch.lines[0]!, options.sessionId);
   const entries: EpisodicCanonicalEntry[] = [];
   const byId = new Map<string, EpisodicCanonicalEntry>();
   for (let index = 1; index < batch.lines.length; index += 1) {

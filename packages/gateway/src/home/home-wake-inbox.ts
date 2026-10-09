@@ -29,12 +29,15 @@ export interface HomeWakeMessage {
 export interface HomeWakeEvidence {
   type: string; id: string; sessionId: string; customType?: string; details?: unknown; data?: unknown; content?: unknown;
 }
+/** The one delivery whose canonical proof is being read. */
+export interface HomeWakeEvidenceScope { sessionId: string; taskId: string; eventId: string; operationId: string }
 export interface HomeWakeDiagnostic { event: "home.task.inbox"; eventHash: string; state: HomeWakeEvent["state"]; reason: string }
 interface Options {
   notify: (input: { sessionId: string; sourceId: string; kind: "agent_finished"; title: string; message: string; route?: { sessionId: string; machineId: string } }) => Promise<unknown>;
   machineId?: string;
   result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; text: string }>;
-  evidence: (sessionIds: string[]) => Promise<HomeWakeEvidence[]>;
+  /** Reads the canonical entries one delivery's proof can use; it must keep no others. */
+  evidence: (scope: HomeWakeEvidenceScope) => Promise<HomeWakeEvidence[]>;
   diagnostic?: (record: HomeWakeDiagnostic) => void;
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -72,17 +75,16 @@ export class WakeInboxOwner {
     await this.mutex.run(async () => {
       for await (const task of this.store.records()) {
         if (!task.wake || task.wake.state === "acknowledged") continue;
-        const entries = task.wake.delivery && ["admitted", "terminal"].includes(task.wake.state)
-          ? await this.options.evidence([task.wake.delivery.sessionId]) : [];
         await this.push(task.taskId);
         const wake = task.wake!;
         if (wake.state === "claimed") {
           await this.change(task.taskId, current => ({ ...current, state: "pending", delivery: null }), "claim-recovered");
         } else if (["admitted", "terminal"].includes(wake.state)) {
-          if (this.proof(task, entries)) {
+          const proof = await this.prove(task);
+          if (proof === "proven") {
             if (route.enabled && task.homeId === route.homeId && wake.routeGeneration === route.routeGeneration) await this.ack(task, route);
           }
-          else await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), "admission-proof-missing");
+          else await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), `admission-proof-${proof}`);
         }
       }
     });
@@ -138,8 +140,14 @@ export class WakeInboxOwner {
         if (selectedTokens > tokens || selectedBytes > bytes) break;
         const delivery = { sessionId: route.sessionId, operationId, generation: route.generation, routeGeneration: route.routeGeneration, messageDigest: hash(content) };
         await this.change(task.taskId, current => ({ ...current, state: "claimed", delivery }), "next-user-message");
+        // Nothing reaches the canonical session before `append`, so an abort
+        // before it returns the event to pending under this mutex. Its later
+        // proof would otherwise find no entry and mark a never-delivered event
+        // outcome-unknown.
+        if (envelope.signal.aborted) await this.release(task.taskId);
         envelope.signal.throwIfAborted();
         await this.change(task.taskId, current => ({ ...current, state: "admitted" }), "canonical-admission");
+        if (envelope.signal.aborted) await this.release(task.taskId);
         envelope.signal.throwIfAborted();
         await append(selected);
         tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; pending--; cursor = { createdAt: wake.createdAt, eventId: wake.eventId };
@@ -153,10 +161,10 @@ export class WakeInboxOwner {
     await this.mutex.run(async () => {
       for await (const task of this.store.records()) {
         if (task.wake?.delivery?.operationId !== operationId || task.wake.state !== "admitted") continue;
-        const entries = await this.options.evidence([task.wake.delivery.sessionId]);
         this.assertRoute(task, route);
-        if (!this.proof(task, entries)) {
-          await this.change(task.taskId, wake => ({ ...wake, state: "outcome-unknown" }), "terminal-proof-missing"); continue;
+        const proof = await this.prove(task);
+        if (proof !== "proven") {
+          await this.change(task.taskId, wake => ({ ...wake, state: "outcome-unknown" }), `terminal-proof-${proof}`); continue;
         }
         await this.change(task.taskId, wake => ({ ...wake, state: "terminal" }), "canonical-terminal");
         await this.ack(task, route);
@@ -177,6 +185,10 @@ export class WakeInboxOwner {
     });
   }
 
+  private async release(taskId: string): Promise<void> {
+    await this.change(taskId, current => ({ ...current, state: "pending", delivery: null }), "admission-aborted");
+  }
+
   private assertRoute(task: HomeTaskRecord, route: HomeWakeRoute): void {
     if (!route.enabled || task.homeId !== route.homeId || task.wake!.routeGeneration !== route.routeGeneration
       || task.wake!.delivery?.routeGeneration !== route.routeGeneration) throw new GatewayError("conflict", "Inbox acknowledgement route is stale");
@@ -185,6 +197,19 @@ export class WakeInboxOwner {
     this.assertRoute(task, route);
     await this.change(task.taskId, wake => ({ ...wake, state: "acknowledged", acknowledgedAt: new Date().toISOString() }), "canonical-consumed");
   }
+  /** One delivery's proof. A canonical source that cannot be read proves nothing
+   * about this event; that fails only this event, so the activation proceeds. */
+  private async prove(task: HomeTaskRecord): Promise<"proven" | "missing" | "unreadable"> {
+    const delivery = task.wake!.delivery!;
+    let entries: HomeWakeEvidence[];
+    try {
+      entries = await this.options.evidence({ sessionId: delivery.sessionId, taskId: task.taskId, eventId: task.wake!.eventId, operationId: delivery.operationId });
+    } catch {
+      return "unreadable";
+    }
+    return this.proof(task, entries) ? "proven" : "missing";
+  }
+
   private proof(task: HomeTaskRecord, entries: HomeWakeEvidence[]): boolean {
     const wake = task.wake!; const delivery = wake.delivery;
     if (!delivery) return false;
@@ -209,6 +234,25 @@ export class WakeInboxOwner {
     this.options.diagnostic?.({ event: "home.task.inbox", eventHash: hash(task.wake!.eventId).slice(0, 16), state: task.wake!.state, reason });
     return task;
   }
+}
+
+/** Whether a canonical entry can belong to one delivery's proof: its result
+ * message, its terminal invocation receipt, or the attribution receipt that names
+ * its task. The reader retains only these, never the whole chapter. */
+export function isWakeEvidence(scope: HomeWakeEvidenceScope, entry: HomeWakeEvidence): boolean {
+  if (entry.sessionId !== scope.sessionId) return false;
+  if (entry.type === "custom_message") {
+    return entry.customType === HOME_TASK_RESULT_MESSAGE && (entry.details as { eventId?: string } | undefined)?.eventId === scope.eventId;
+  }
+  if (entry.type !== "custom") return false;
+  if (entry.customType === INVOCATION_RECEIPT_TYPE) {
+    const receipt = parseInvocationReceipt(entry.data);
+    return receipt?.receiptKind === "terminal" && receipt.operationId === scope.operationId;
+  }
+  if (entry.customType === CONTEXT_DELIVERY_RECEIPT_TYPE) {
+    return (entry.data as { origin?: { owner?: { id?: unknown } } } | undefined)?.origin?.owner?.id === scope.taskId;
+  }
+  return false;
 }
 
 function deliveryOrder(a: HomeTaskRecord, b: HomeTaskRecord): number {

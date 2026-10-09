@@ -592,6 +592,16 @@ result exceeds fresh-prefix headroom for the current model, Home receives an
 attributed immutable **reference** with task ID, outcome and full report byte
 size, rather than truncated content. The exact canonical reference and terminal
 proof acknowledge that event, allowing the next result to proceed in order.
+
+Delivery proof reads its chapter one line at a time under the shared
+`maxSourceLineBytes` bound and keeps only the entries that can belong to that one
+delivery: its result message, its terminal invocation receipt and the attribution
+receipt naming its task. A proof that cannot be read (an over-bound line, a torn
+tail, a missing file) fails only that event: it becomes `outcome-unknown` with
+reason `admission-proof-unreadable` or `terminal-proof-unreadable`, and the
+activation proceeds. A delivery whose admitted message was never appended (Stop
+between admission and append) returns to `pending` under the same mutex with
+reason `admission-aborted`; it is not an uncertain delivery.
 Home reads its full immutable report with `task { action: "report", taskId,
 offset, limit }`: UTF-8 byte offsets, `limit` 1–4096 bytes, complete characters,
 `nextOffset` or null at EOF. Invalid offsets/oversized pages refuse. Each page is

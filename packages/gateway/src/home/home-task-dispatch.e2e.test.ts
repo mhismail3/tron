@@ -675,6 +675,29 @@ describe("Home task cold reconciliation", () => {
     expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
 
+  it("settles a delivery whose canonical proof cannot be read as outcome-unknown, and later Home prompts still work", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    const owner = f.registry.homeOwner() as any;
+    // The first settlement proof fails to read its chapter (the failure an
+    // over-bound line produces). Only that delivery is affected.
+    const unreadable = vi.spyOn(owner, "inboxEvidence").mockRejectedValueOnce(new Error("canonical proof unreadable"));
+    f.faux.setResponses([fauxAssistantMessage("Result delivered before the unreadable proof")]);
+    await home.prompt("Review the result"); await waitFor(() => home.snapshot().configurationBlocker === null, "delivery with an unreadable proof");
+    expect(unreadable).toHaveBeenCalledTimes(1);
+    expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "outcome-unknown" } });
+    unreadable.mockRestore();
+    f.faux.setResponses([fauxAssistantMessage("Later Home prompt still works")]);
+    await home.prompt("Continue after the unprovable delivery"); await waitFor(() => home.snapshot().configurationBlocker === null, "later Home prompt");
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Later Home prompt still works");
+    expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "outcome-unknown" } });
+    evidence.push({ case: "unreadable-inbox-proof", wake: "outcome-unknown", laterPrompt: true });
+  }, 60_000);
+
   it("joins the fresh catalog cut before irreversibly qualifying a cold report", async () => {
     const f = await fixture();
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;

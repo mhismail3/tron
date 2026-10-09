@@ -9,7 +9,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemoryError, type EpisodicDiagnostic, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import { readCanonicalSession } from "./episodic-source.js";
+import { readCanonicalSession, visitCanonicalSessionEntries } from "./episodic-source.js";
 
 /*
  * The read-only canonical reader (departure 2): it must never repair, migrate
@@ -176,6 +176,24 @@ describe("episodic canonical source reader", () => {
     expect(memory.status().blocked?.reason).toBe("source-unavailable");
     expect(memory.status().messages).toBe(0);
     await memory.dispose();
+  });
+
+  it("streams every complete entry in file order and refuses what the whole-file reader refuses", async () => {
+    const fx = await fixture("stream");
+    const raw = await readFile(fx.sessionFile, "utf8");
+    const expected = raw.trimEnd().split("\n").slice(1).map(line => (JSON.parse(line) as { id: string }).id);
+    const visited: string[] = [];
+    await visitCanonicalSessionEntries({ path: fx.sessionFile, sessionId: fx.sessionId, maxLineBytes: 1_048_576, visit: entry => { visited.push(entry.id); } });
+    expect(visited).toEqual(expected);
+
+    const header = raw.split("\n")[0]!;
+    const oversized = join(fx.root, "stream-oversized.jsonl");
+    await writeFile(oversized, `${header}\n${JSON.stringify({ type: "custom", id: "wide", parentId: null, timestamp: new Date().toISOString(), customType: "test", data: { text: "x".repeat(4_000) } })}\n`);
+    await expect(visitCanonicalSessionEntries({ path: oversized, sessionId: fx.sessionId, maxLineBytes: 1_024, visit: () => {} })).rejects.toThrowError(/exceeds 1024 bytes/u);
+    const torn = join(fx.root, "stream-torn.jsonl");
+    await writeFile(torn, `${header}\n{"type":"message","id":"partial"`);
+    await expect(visitCanonicalSessionEntries({ path: torn, sessionId: fx.sessionId, maxLineBytes: 1_048_576, visit: () => {} })).rejects.toThrowError(/incomplete tail/u);
+    await expect(visitCanonicalSessionEntries({ path: fx.sessionFile, sessionId: "another-session", maxLineBytes: 1_048_576, visit: () => {} })).rejects.toThrowError(/different session/u);
   });
 
   it("follows the branch from the last complete entry and keeps off-branch indices", async () => {

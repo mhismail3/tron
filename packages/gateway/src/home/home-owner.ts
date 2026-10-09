@@ -1,5 +1,5 @@
-import { WakeInboxOwner, type HomeWakeMessage, type HomeWakeRoute } from "./home-wake-inbox.js";
-import { readCanonicalSession } from "../episodic/episodic-source.js";
+import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute } from "./home-wake-inbox.js";
+import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -198,7 +198,7 @@ export class HomeOwner {
         ...(options.machineId ? { machineId: options.machineId } : {}),
         ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
         result: taskId => this.immutableTaskReport(taskId),
-        evidence: sessionIds => this.inboxEvidence(sessionIds),
+        evidence: scope => this.inboxEvidence(scope),
       });
       this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
     }
@@ -339,22 +339,23 @@ export class HomeOwner {
     });
   }
 
-  private async inboxEvidence(sessionIds: string[]): Promise<import("./home-wake-inbox.js").HomeWakeEvidence[]> {
-    const entries: import("./home-wake-inbox.js").HomeWakeEvidence[] = [];
-    for (const chapter of this.record?.chapters ?? []) {
-      if (!sessionIds.includes(chapter.sessionId)) continue;
-      const path = await this.options.sessions.sessionFile(chapter.sessionId);
-      if (!path) continue;
-      // SDK append proves visibility, not power-loss durability. The inbox may
-      // retire only after canonical bytes and their directory entry are synced.
-      for (const durablePath of [path, dirname(path)]) {
-        const handle = await open(durablePath, "r");
-        try { await syncDurably(handle); } finally { await handle.close(); }
-      }
-      const cut = await readCanonicalSession({ path, sessionId: chapter.sessionId, maxLineBytes: 1024 * 1024 });
-      if (cut.tornBytes) throw new GatewayError("conflict", "Home inbox canonical evidence is torn");
-      for (const entry of cut.branch) entries.push({ ...entry.raw, type: entry.type, id: entry.id, sessionId: chapter.sessionId } as import("./home-wake-inbox.js").HomeWakeEvidence);
+  /** Streams one chapter and keeps only this delivery's proof entries. A chapter
+   * that is not part of this Home yields none, so its delivery is unproven. */
+  private async inboxEvidence(scope: HomeWakeEvidenceScope): Promise<HomeWakeEvidence[]> {
+    if (!this.record?.chapters.some(chapter => chapter.sessionId === scope.sessionId)) return [];
+    const path = await this.options.sessions.sessionFile(scope.sessionId);
+    if (!path) return [];
+    // SDK append proves visibility, not power-loss durability. The inbox may
+    // retire only after canonical bytes and their directory entry are synced.
+    for (const durablePath of [path, dirname(path)]) {
+      const handle = await open(durablePath, "r");
+      try { await syncDurably(handle); } finally { await handle.close(); }
     }
+    const entries: HomeWakeEvidence[] = [];
+    await visitCanonicalSessionEntries({ path, sessionId: scope.sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, visit: entry => {
+      const evidence = { ...entry.raw, type: entry.type, id: entry.id, sessionId: scope.sessionId } as HomeWakeEvidence;
+      if (isWakeEvidence(scope, evidence)) entries.push(evidence);
+    } });
     return entries;
   }
 
