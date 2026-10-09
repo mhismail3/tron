@@ -74,7 +74,7 @@ import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryPage, HomeMemoryEvidencePage } from "../protocol/types.js";
 import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { UploadStore } from "../machine/upload-store.js";
+import { INLINE_IMAGE_BASE64_LIMIT_BYTES, UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -2171,6 +2171,45 @@ describe("Tron Home activations end to end", () => {
     expect(row.memoryBlocked).toBeNull();
     expect(row.memoryOpen).toBe(true);
     expect(row.providerRequests).toBe(2);
+  }, 120_000);
+
+  // Pi, not Tron, shrinks an oversized photo (auto-resize, on by default). Tron's
+  // source bound assumes that limit, so this test uses Pi's real behaviour as the
+  // oracle: a drifted Pi limit leaves the photo's base64 above the mirror.
+  it("shrinks a photo over the inline limit, so its canonical line stays inside the source bound", async () => {
+    const f = await fixture("inline-limit", { realUploads: true });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-inline-limit");
+    const photo = paddedPng(6_000_000);
+    // The input must be over the mirrored limit, or the test would pass for any Pi limit.
+    expect(Math.ceil(photo.length / 3) * 4).toBeGreaterThan(INLINE_IMAGE_BASE64_LIMIT_BYTES);
+    const upload = await f.uploads!.save("oversized-photo.png", "image/png", photo);
+    f.faux.setResponses([responsesOf(f, requests)("oversized photo received")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "inline-limit-command-one", text: "Look at this photo", uploadIds: [upload.id] });
+    await waitUntil(async () => (await sessionJsonl(slot)).includes('"type":"image"'), 60_000);
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const imageLine = (await sessionJsonl(slot)).split("\n").find(line => line.includes('"type":"image"')) ?? "";
+    const persisted = (JSON.parse(imageLine).message.content as Array<{ type: string; data?: string }>).find(part => part.type === "image");
+    f.faux.setResponses([responsesOf(f, requests)("second reply after the shrunk photo")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "inline-limit-command-two", text: "Still remember this?" });
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      inputBase64Bytes: Math.ceil(photo.length / 3) * 4,
+      imageBase64Bytes: persisted?.data?.length ?? -1,
+      inlineLimitBytes: INLINE_IMAGE_BASE64_LIMIT_BYTES,
+      lineBytes: Buffer.byteLength(imageLine),
+      maximumLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+      memoryOpen: status.memory?.open ?? false,
+      memoryBlocked: status.memory?.blocked ?? null,
+    };
+    report.cases.push({ case: "pi-inline-limit-shrink", ...row });
+    expect(row.imageBase64Bytes).toBeGreaterThan(0);
+    expect(row.imageBase64Bytes).toBeLessThanOrEqual(row.inlineLimitBytes);
+    expect(row.lineBytes).toBeLessThanOrEqual(row.maximumLineBytes);
+    expect(row.memoryBlocked).toBeNull();
+    expect(row.memoryOpen).toBe(true);
   }, 120_000);
 
   it("refuses an unconfigured memory, then serves the next activation once configured", async () => {

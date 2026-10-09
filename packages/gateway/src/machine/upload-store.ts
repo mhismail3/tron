@@ -29,7 +29,7 @@ export const MAXIMUM_PROMPT_ATTACHMENTS = 10;
 // Pi's inline image limit (pi-coding-agent `image-resize-core`, `DEFAULT_MAX_BYTES`):
 // with auto-resize on, an image whose base64 reaches it is re-encoded below it, and
 // one already within limits passes through only while it is below it.
-const INLINE_IMAGE_BASE64_LIMIT_BYTES = 4.5 * 1_048_576;
+export const INLINE_IMAGE_BASE64_LIMIT_BYTES = 4.5 * 1_048_576;
 // An attachment's envelope entry carries its name (at most 160 characters, 4 bytes
 // each), MIME type (at most 200) and owned path (at most 1 KiB), each escaped at up
 // to six bytes per byte, plus the element's framing.

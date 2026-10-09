@@ -185,7 +185,11 @@ chapter. Its size is bounded per record and per cursor, but not per history:
   characters by default), each tool result (`capChars`), the context view
   (`viewBytes`), and the raw source, which is read one line at a time under
   `maxSourceLineBytes` (about 46 MiB). That bound is the largest prompt line
-  (`maximumPromptLineBytes`: its inline images, text and envelope). Task results
+  (`maximumPromptLineBytes`: its inline images, text and envelope). The inline-image
+  term mirrors Pi's unexported inline limit (4.5 MiB, `image-resize-core`), and
+  `shrinks a photo over the inline limit` in `home-activation.e2e.test.ts` checks the
+  persisted base64 of an oversized photo against that mirror, so a Pi change the
+  mirror misses fails there. Task results
   and assistant turns are bounded by the model's budgets rather than by a
   constant, so the bound is not a guarantee for them.
 - Grows: the catalog keeps every projected message of the history in memory
