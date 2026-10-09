@@ -903,6 +903,8 @@ await transport.listen(async () => {
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
+await sessions.recoverHomeTasks();
+startupCheckpoint("home-task-recovery");
 const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([

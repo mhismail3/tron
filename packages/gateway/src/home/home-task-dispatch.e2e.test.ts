@@ -95,18 +95,28 @@ async function fixture(providerVersion?: string, codemode = false, contextWindow
   const registry = createRegistry();
   const owned = { registry, root };
   fixtures.push(owned);
+  await bringUpToReadiness(registry);
+  await registry.recoverHomeTasks();
+  const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } });
+  // Readiness only: task recovery runs after listen, as in gateway-main.
+  const restartToReadiness = async () => {
+    await owned.registry.dispose();
+    await owned.registry.administrativeWorkRegistry.waitUntilSettled();
+    owned.registry = createRegistry();
+    await bringUpToReadiness(owned.registry);
+    return owned.registry;
+  };
+  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust, restartToReadiness,
+    restart: async () => {
+      const cold = await restartToReadiness();
+      await cold.recoverHomeTasks();
+      return cold;
+    } };
+}
+
+async function bringUpToReadiness(registry: RuntimeRegistry): Promise<void> {
   await registry.initialize();
   await (registry as any).sessionCatalog.whenPublished();
-  const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } });
-  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust,
-    restart: async () => {
-      await owned.registry.dispose();
-      await owned.registry.administrativeWorkRegistry.waitUntilSettled();
-      owned.registry = createRegistry();
-      await owned.registry.initialize();
-      await (owned.registry as any).sessionCatalog.whenPublished();
-      return owned.registry;
-    } };
 }
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
   const directory = join(f.tronHome, "gateway/home/tasks");
@@ -803,6 +813,36 @@ describe("Home task cold reconciliation", () => {
     const recovered = await starting;
     expect(await recovered.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
     evidence.push({ case: "cold-catalog-readiness", task: await recovered.homeOwner().taskResult(run.taskId) });
+  }, 20_000);
+
+  it("reaches readiness before a cold task recovery joins the catalog cut", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    vi.spyOn(store, "update").mockRejectedValue(new Error("frozen terminal owner"));
+    const run = await dispatch(f); await expect(run.completion).rejects.toThrow(/frozen/);
+    vi.restoreAllMocks();
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = SessionCatalog.prototype.whenReconciled;
+    const barrier = vi.spyOn(SessionCatalog.prototype, "whenReconciled").mockImplementation(async function(this: SessionCatalog) {
+      await gate; await ready.call(this);
+    });
+    let blockedTimer: NodeJS.Timeout | undefined;
+    const startup = f.restartToReadiness();
+    const readiness = await Promise.race([
+      startup.then(() => "ready" as const),
+      new Promise<"blocked">(resolve => { blockedTimer = setTimeout(() => resolve("blocked"), 2_000); }),
+    ]);
+    clearTimeout(blockedTimer);
+    release();
+    const cold = await startup;
+    expect(readiness).toBe("ready");
+    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false, reason: "not-started" } });
+    await cold.recoverHomeTasks();
+    expect(barrier).toHaveBeenCalled();
+    expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
   }, 20_000);
 
   it.each(["pending", "grant-consumed", "worker-created", "operation-bound"])("retires the %s admission cut without replay or renewing grants", async cut => {
@@ -1612,6 +1652,7 @@ describe("Home task production dispatch", () => {
     });
     try {
       await cold.initialize(); await (cold as any).sessionCatalog.whenPublished();
+      await cold.recoverHomeTasks();
       await expect(cold.acquire(run.sessionId)).rejects.toThrow(/Referenced task/);
       expect(constructions).toBe(0);
       evidence.push({ case: "cold-missing-task", constructions, refused: true });

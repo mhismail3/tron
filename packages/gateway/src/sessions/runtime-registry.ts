@@ -1120,9 +1120,6 @@ export class RuntimeRegistry {
     // any event the watcher could not see (G-9 moves both into the scheduler).
     // A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
-    // Retire abandoned task identities before any runtime/admission is exposed.
-    // This uses canonical files only; accepted prompts are never recreated.
-    await this.home.recoverTasks();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -1137,6 +1134,14 @@ export class RuntimeRegistry {
 
   private pendingAttentionRecovery: ReadonlyMap<string, readonly RunMarkerEvidence[]> | undefined;
   private pendingStartupPhaseObserver: ((phase: "catalog-warming" | "attention-recovery") => void) | undefined;
+
+  /** Retires abandoned Home task identities once the Gateway is serving. Until
+   * it settles, task surfaces report `not-started`, which keeps task dispatch
+   * refused and inbox delivery deferred; pending results deliver on a later
+   * activation. Canonical files only: accepted prompts are never recreated. */
+  async recoverHomeTasks(): Promise<void> {
+    await this.home.recoverTasks();
+  }
 
   async recoverCanonicalAttention(): Promise<void> {
     const markerEvidence = this.pendingAttentionRecovery;
