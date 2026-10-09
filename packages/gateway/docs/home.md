@@ -523,8 +523,10 @@ start (no in-process repair/retry), emits `home.task.store-refused` once, and
 leaves ordinary sessions functional. `home.status.taskRecovery` exposes
 `{ available: true }` or `{ available: false, reason }`, independently of the
 Home conversation's phase. Dispatch, task tools/status, steering/Stop, permission
-reconfirmation, redelivery and inbox admission/ack refuse with that same
-`conflict` reason while fenced; no task/inbox writes or effects are attempted.
+reconfirmation and redelivery refuse with that same `conflict` reason while
+fenced. Inbox admission and settlement are no-ops while fenced: nothing is
+delivered, nothing this process admitted needs settling, and the Home prompt still
+runs. No task/inbox writes or effects are attempted.
 A readable canonical task marker also refuses worker construction before any
 executable resources are loaded. If both the task namespace and canonical marker
 are unreadable/missing, ownership cannot be inferred: there is no second

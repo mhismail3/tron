@@ -628,8 +628,6 @@ describe("Home task cold reconciliation", () => {
       ["stop", () => owner.stopTask(control)],
       ["reconfirm", () => owner.reconfirmTaskPermissions()],
       ["redelivery", () => owner.redeliverTaskResult(run.taskId, { homeId: f.home.homeId, routeGeneration: 1 })],
-      ["inbox-admit", () => owner.admitTaskResults(f.home.sessionId, "activation", async () => { throw new Error("delivery while fenced"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }))],
-      ["inbox-ack", () => owner.settleTaskResults(f.home.sessionId, "activation")],
       ["worker-open", () => cold.acquire(run.sessionId)],
     ];
     const result: string[] = [];
@@ -639,6 +637,10 @@ describe("Home task cold reconciliation", () => {
       await expect(operation(), name).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
       result.push(name);
     }
+    // Inbox delivery is a no-op while recovery is refused: nothing is appended and nothing settles.
+    await expect(owner.admitTaskResults(f.home.sessionId, "activation", async () => { throw new Error("delivery while fenced"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }))).resolves.toBeUndefined();
+    await expect(owner.settleTaskResults(f.home.sessionId, "activation")).resolves.toBeUndefined();
+    result.push("inbox-admit", "inbox-ack");
     expect(f.signals.filter(signal => signal.event === "home.task.store-refused" && signal.reason === "unsafe-state")).toHaveLength(1);
     const ordinary = await cold.create(f.cwd);
     f.faux.setResponses([fauxAssistantMessage("Ordinary sessions still work")]);
@@ -650,6 +652,58 @@ describe("Home task cold reconciliation", () => {
     expect(await again.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
     evidence.push({ case: "task-recovery-fence", operations: result, ordinaryPrompt: true, bytesPreserved: true, restartAvailable: true });
   }, 20_000);
+
+  it("admits a real Home prompt during a task-recovery refusal without stranding work or blocking disable", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const before = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started before the refusal")]);
+    await before.prompt("Start Home"); await waitFor(() => before.snapshot().configurationBlocker === null, "Home before the refusal");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    // A malformed task record refuses recovery while the workspace and Home memory stay available.
+    const bogus = join(f.tronHome, "gateway/home/tasks/0000000000001-bogus.json");
+    await writeFile(bogus, "{}", { mode: 0o600 });
+    const cold = await f.restart();
+    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false, reason: "invalid-record" } });
+    const home = await cold.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home answers while task recovery is refused")]);
+    await home.prompt("Review while recovery is refused");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home prompt during the refusal");
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Home answers while task recovery is refused");
+    expect(cold.administrativeWorkRegistry.size).toBe(0);
+    // Removing the cause does not lift the per-process refusal, and Home can still be disabled.
+    await rm(bogus);
+    expect(await cold.homeOwner().status()).toMatchObject({ taskRecovery: { available: false } });
+    await cold.administrativeWorkRegistry.waitUntilSettled();
+    await expect(cold.homeOwner().disable()).resolves.toBeDefined();
+    expect(await cold.homeOwner().status()).toMatchObject({ enabled: false });
+    evidence.push({ case: "prompt-during-task-recovery-refusal", workEntries: 0, disabled: true });
+  }, 60_000);
+
+  it("logs a failed inbox settlement after its terminal receipt and still settles the operation's work", async () => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const home = await f.registry.acquire(f.home.sessionId);
+    f.faux.setResponses([fauxAssistantMessage("Home started")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the result");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const run = await dispatch(f); await run.completion;
+    const owner = f.registry.homeOwner();
+    const settle = vi.spyOn(owner, "settleTaskResults").mockRejectedValueOnce(new Error("settlement store refused"));
+    const diagnostic = vi.spyOn(home as any, "emit");
+    f.faux.setResponses([fauxAssistantMessage("Result read although settlement failed")]);
+    await home.prompt("Review the result"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home terminal after failed settlement");
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(diagnostic).toHaveBeenCalledWith("session.diagnostic", expect.objectContaining({ code: "home-inbox-settlement-failed" }));
+    expect(JSON.stringify(home.canonicalSessionEntries())).toContain("Result read although settlement failed");
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    expect(f.registry.administrativeWorkRegistry.size).toBe(0);
+    expect(await owner.taskResult(run.taskId)).toMatchObject({ wake: { state: "admitted" } });
+  }, 60_000);
 
   it("removes a crash-leftover task temporary at the next start, and Home activates", async () => {
     const f = await fixture();

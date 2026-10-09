@@ -315,18 +315,23 @@ export class HomeOwner {
       enabled: record.enabled, sessionId: homeSessionId(record) };
   }
 
+  /** Inbox delivery needs the task namespace's proof. While task recovery is
+   * refused, nothing is delivered (and nothing this process admitted needs
+   * settling), so the Home conversation itself stays usable. */
+  private async inboxAvailable(): Promise<boolean> {
+    return this.tasks !== undefined && (await this.tasks.recoveryStatus()).available;
+  }
+
   async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<void> {
-    await this.taskOwner();
     const route = this.wakeRoute(sessionId);
-    if (!route?.enabled || !this.inbox) return;
+    if (!route?.enabled || !this.inbox || !(await this.inboxAvailable())) return;
     await this.inbox.recover(route);
     await this.inbox.admit(route, operationId, append, envelope);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
-    await this.taskOwner();
     const route = this.wakeRoute(sessionId);
-    if (route && this.inbox) await this.inbox.settle(route, operationId);
+    if (route && this.inbox && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {

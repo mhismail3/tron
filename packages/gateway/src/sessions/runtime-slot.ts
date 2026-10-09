@@ -3512,7 +3512,12 @@ export class RuntimeSlot {
     if (this.handedOffInvocations.has(receipt.invocationId)) return;
     await this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
     if (receipt.receiptKind === "terminal" && this.homeRequestPolicy) {
-      await this.dependencies.homeInboxSettlement?.(this.id, receipt.operationId);
+      // The terminal receipt is already canonical. A failed settlement leaves its
+      // delivery admitted for the next activation to re-prove; it must not strand
+      // this operation's work entry or its terminal observers.
+      await this.dependencies.homeInboxSettlement?.(this.id, receipt.operationId).catch(error => {
+        this.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+      });
     }
   }
 
