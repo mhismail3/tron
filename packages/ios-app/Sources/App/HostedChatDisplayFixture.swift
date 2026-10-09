@@ -403,7 +403,7 @@ private actor HostedHomeShellGateway {
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
-    func handle(_ method: String, _ params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
+    func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
         switch method {
         case "session.list":
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
@@ -501,7 +501,9 @@ private actor HostedHomeShellGateway {
         case "home.status":
             homeStatusCount += 1
             // The dashboard's first read is held so a chat opened now claims the status surface before any answer.
-            if chatBeforeStatus, homeStatusCount == 1 { try? await Task.sleep(for: .seconds(30)) }
+            // Only the client's cancellation ends the hold early, as a CancellationError: the
+            // cancelled request then gets no answer, as the Gateway would give none.
+            if chatBeforeStatus, homeStatusCount == 1 { try await Task.sleep(for: .seconds(30)) }
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":
@@ -706,7 +708,12 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
               let method = frame["method"]?.stringValue else { return }
-        let result = await gateway.handle(method, frame["params"]?.objectValue ?? [:])
+        let result: (JSONValue?, JSONValue?)
+        do {
+            result = try await gateway.handle(method, frame["params"]?.objectValue ?? [:])
+        } catch is CancellationError {
+            return
+        }
         var response: [String: JSONValue] = ["type": .string("response"), "id": .string(id), "ok": .bool(result.1 == nil)]
         if let body = result.0 { response["result"] = body }
         if let failure = result.1 { response["error"] = failure }
