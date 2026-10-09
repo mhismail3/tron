@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import TronMobileCore
 
@@ -379,10 +380,37 @@ private extension ChatTranscriptRenderItem {
     }
 }
 
-private struct ChatRowMotionMeasurement: Equatable {
-    let row: ChatPhysicalTranscriptRow
+struct ChatRowMotionMeasurement: Equatable {
+    let identity: ChatMessageGrowthIdentity
     let width: CGFloat
     let height: CGFloat
+}
+
+@MainActor
+@Observable
+final class ChatRowMotionStreamingGrowthState {
+    var height: CGFloat?
+    @ObservationIgnored var measurement: ChatRowMotionMeasurement?
+}
+
+struct ChatRowMotionStreamingGrowth: @unchecked Sendable, Equatable {
+    let state: ChatRowMotionStreamingGrowthState
+    let measure: @MainActor (ChatMessageGrowthIdentity, CGSize) -> Void
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.state === rhs.state
+    }
+}
+
+private struct ChatRowMotionStreamingGrowthKey: EnvironmentKey {
+    static let defaultValue: ChatRowMotionStreamingGrowth? = nil
+}
+
+extension EnvironmentValues {
+    var chatRowMotionStreamingGrowth: ChatRowMotionStreamingGrowth? {
+        get { self[ChatRowMotionStreamingGrowthKey.self] }
+        set { self[ChatRowMotionStreamingGrowthKey.self] = newValue }
+    }
 }
 
 /// The stable ForEach value. Its child motion owner keeps frame-by-frame state
@@ -450,8 +478,7 @@ private struct ChatRowMotionHost<Content: View>: View {
     @State private var promptReplacementRevision = 0
     @State private var entranceProgress: CGFloat
     @State private var retainedPromptEntrance: ChatPhysicalPromptEntrance?
-    @State private var presentedHeight: CGFloat?
-    @State private var lastMeasurement: ChatRowMotionMeasurement?
+    @State private var streamingGrowthState = ChatRowMotionStreamingGrowthState()
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
     init(
@@ -484,31 +511,17 @@ private struct ChatRowMotionHost<Content: View>: View {
     }
 
     var body: some View {
-        renderedContent
+        return renderedContent
             .environment(\.chatRowMotionEntranceAdmission, { admitEntrance() })
             .onChange(of: row) { previous, next in retarget(from: previous, to: next) }
     }
 
     @ViewBuilder
     private var renderedContent: some View {
-        if row.isAssistantMessage {
-            entranceWrappedContent
-                .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: ChatRowMotionMeasurement.self) { geometry in
-                    ChatRowMotionMeasurement(row: row, width: geometry.size.width, height: geometry.size.height)
-                } action: { measurement in
-                    install(measurement)
-                }
-                .frame(height: presentedHeight, alignment: .top)
-                .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
-                .clipShape(ChatRowMotionVerticalClip(isActive: row.isStreamingMessage))
-                .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
-                .onChange(of: row.isStreamingMessage) { _, active in
-                    if !active { releaseHeight() }
-                }
-        } else {
-            entranceWrappedContent
-        }
+        entranceWrappedContent
+            .onChange(of: row.isStreamingMessage) { _, active in
+                if !active { releaseHeight() }
+            }
     }
 
     @ViewBuilder
@@ -527,9 +540,15 @@ private struct ChatRowMotionHost<Content: View>: View {
         }
     }
 
+    @ViewBuilder
     private var replacementContent: some View {
         let incoming = replacementIncomingContent ?? incomingContent
-        return ChatRowMotionLayout(
+        let growth = row.isAssistantMessage
+            ? ChatRowMotionStreamingGrowth(state: streamingGrowthState) { identity, size in
+                install(ChatRowMotionMeasurement(identity: identity, width: size.width, height: size.height))
+            }
+            : nil
+        ChatRowMotionLayout(
             progress: promptReplacementProgress,
             arrivalProgress: entranceProgress,
             reduceMotion: reduceMotion,
@@ -537,6 +556,7 @@ private struct ChatRowMotionHost<Content: View>: View {
             viewportIsPositioning: viewportIsPositioning
         ) {
             incoming
+                .environment(\.chatRowMotionStreamingGrowth, growth)
                 .chatEntranceGrowthClip(progress: entranceProgress)
                 .opacity(promptReplacementProgress)
             if let outgoingContent {
@@ -605,12 +625,18 @@ private struct ChatRowMotionHost<Content: View>: View {
               measurement.width.isFinite,
               measurement.height.isFinite,
               measurement.height >= 0 else { return }
-        let previous = lastMeasurement
-        let contentChanged = previous.map { $0.row != measurement.row } ?? false
+        let previous = streamingGrowthState.measurement
+        let contentChanged = previous.map { $0.identity != measurement.identity } ?? false
         let widthStable = previous.map { abs($0.width - measurement.width) <= 0.5 } ?? false
-        lastMeasurement = measurement
-        guard let previous else { return }
-        let currentHeight = presentedHeight ?? previous.height
+        guard let previous else {
+            streamingGrowthState.measurement = measurement
+            return
+        }
+        let heightChanged = abs(previous.height - measurement.height) > 0.5
+        guard !widthStable || contentChanged || heightChanged else { return }
+        streamingGrowthState.measurement = measurement
+        guard heightChanged else { return }
+        let currentHeight = streamingGrowthState.height ?? previous.height
         let animates = contentChanged && widthStable
             && ChatRowMotionPolicy.shouldAnimate(
                 currentHeight: currentHeight,
@@ -622,16 +648,17 @@ private struct ChatRowMotionHost<Content: View>: View {
                 viewportIsPositioning: viewportIsPositioning
             )
         guard animates else {
+            guard streamingGrowthState.height != nil else { return }
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { presentedHeight = nil }
+            withTransaction(transaction) { streamingGrowthState.height = nil }
             return
         }
         let animation = ChatMotion.streamingResize
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             var transaction = Transaction(animation: animation)
             transaction.admitsChatMotionAnimation = true
-            withTransaction(transaction) { presentedHeight = measurement.height }
+            withTransaction(transaction) { streamingGrowthState.height = measurement.height }
         } completion: {
             if !row.isStreamingMessage { releaseHeight() }
         }
@@ -639,23 +666,13 @@ private struct ChatRowMotionHost<Content: View>: View {
 
     @MainActor
     private func releaseHeight() {
-        guard presentedHeight != nil else { return }
+        guard streamingGrowthState.height != nil else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            presentedHeight = nil
-            lastMeasurement = nil
+            streamingGrowthState.height = nil
+            streamingGrowthState.measurement = nil
         }
-    }
-}
-
-private struct ChatRowMotionVerticalClip: Shape {
-    let isActive: Bool
-
-    func path(in bounds: CGRect) -> Path {
-        if isActive { return Path(bounds) }
-        let overflow = ChatEntranceGrowthPolicy.settledOverflow
-        return Path(bounds.insetBy(dx: -overflow, dy: -overflow))
     }
 }
 

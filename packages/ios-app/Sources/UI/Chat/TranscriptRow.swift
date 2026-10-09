@@ -73,6 +73,35 @@ enum TranscriptRowPresentationPolicy {
     }
 }
 
+struct ChatMessageGrowthIdentity: Equatable, Sendable {
+    let parts: [ChatMessagePart]
+    let errorMessage: String?
+    let showsFooter: Bool
+}
+
+private struct ChatStreamingRowContent<Content: View>: View {
+    let isAssistant: Bool
+    let identity: ChatMessageGrowthIdentity
+    let content: Content
+    @Environment(\.chatRowMotionStreamingGrowth) private var streamingGrowth
+
+    var body: some View {
+        if let streamingGrowth, isAssistant {
+            content
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGSize.self) { geometry in geometry.size } action: { size in
+                    streamingGrowth.measure(identity, size)
+                }
+                .frame(height: streamingGrowth.state.height, alignment: .top)
+                .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
+                .clipShape(Rectangle())
+                .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
+        } else {
+            content
+        }
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -86,7 +115,15 @@ struct TranscriptRow: View, Equatable {
         VStack(alignment: isTrailingSessionMessage ? .trailing : .leading, spacing: 4) {
             switch item.kind {
             case .message:
-                message
+                ChatStreamingRowContent(
+                    isAssistant: item.role == .assistant,
+                    identity: ChatMessageGrowthIdentity(
+                        parts: displayedMessageParts,
+                        errorMessage: item.errorMessage,
+                        showsFooter: showsMessageFooter
+                    ),
+                    content: message
+                )
             case .bash:
                 ToolCard(data: ChatToolPresentation(
                     id: item.id,
