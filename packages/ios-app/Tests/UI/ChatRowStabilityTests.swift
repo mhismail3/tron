@@ -1782,16 +1782,12 @@ private func toolDetailSnapshot() throws -> SessionSnapshot {
 
 /// One finalized group of the given calls: the same contract a gateway install
 /// publishes when it names a run.
-private func harnessRuntimeTools(
-    callIDs: [String],
-    groupID: String,
-    status: ToolExecutionState.Status = .completed
-) -> [ToolExecutionState] {
+private func harnessRuntimeTools(callIDs: [String], groupID: String) -> [ToolExecutionState] {
     callIDs.enumerated().map { index, callID in
         harnessRuntimeTool(
             id: callID,
             order: index,
-            status: status,
+            status: .completed,
             groupId: groupID,
             groupIndex: index,
             groupCount: callIDs.count
@@ -2748,11 +2744,16 @@ private func motionFixture(_ scenario: ChatMotionScenario) throws -> ChatMotionF
         var initial = try toolDetailSnapshot()
         initial.phase = .running
         var updated = initial
-        updated.toolExecutions = harnessRuntimeTools(
-            callIDs: RowStabilityFixture.groupedRunCallIDs,
-            groupID: RowStabilityFixture.groupedRunID,
-            status: .running
-        )
+        updated.toolExecutions = RowStabilityFixture.groupedRunCallIDs.enumerated().map { index, callID in
+            harnessRuntimeTool(
+                id: callID,
+                order: index,
+                status: index == 0 ? .running : .completed,
+                groupId: RowStabilityFixture.groupedRunID,
+                groupIndex: index,
+                groupCount: RowStabilityFixture.groupedRunCallIDs.count
+            )
+        }
         updated.revision += 1
         updated.eventSequence += 1
         return ChatMotionFixture(initial: initial, updated: updated, rowID: RowStabilityFixture.groupedRunRowID)
