@@ -1960,6 +1960,12 @@ const replacingCommandExtension = (replace: string, afterReplace = "") => () => 
         }
       `;
 
+/** Holds a command handler after its replacement until the test creates the
+ * gate file, so the replacement's live state is observable as it stands. */
+const gateCall = (gate: string) => `const { existsSync: gateExists } = await import("node:fs");
+            const { setTimeout: gateDelay } = await import("node:timers/promises");
+            while (!gateExists(${JSON.stringify(gate)})) await gateDelay(5);`;
+
 /** Refuses every switch, the way a guarding extension would. */
 const refuseSwitchExtension = () => `
         export default function (pi) {
@@ -2020,7 +2026,10 @@ describe("command-driven session replacement over the real Gateway", () => {
     // replacement's authoritative state, whether the queue delivered it as the
     // snapshot itself or as the `session.rebaseline` covering a sequence a
     // newer snapshot superseded.
-    await waitFor(() => deliveredAuthorityFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
+    // Wait for the replacement's settled snapshot. An earlier frame, such as the
+    // rebind's, still carries the command's live state until the handler returns.
+    await waitFor(() => (deliveredAuthorityFrames(r.client, r.replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
+      "replacement settled snapshot delivered");
     // The command is settled: the replacement is idle and no row for it (a
     // fork inherits one) is projected as still running by the newest authority
     // the client received.
@@ -2052,6 +2061,44 @@ describe("command-driven session replacement over the real Gateway", () => {
 
   it("settles a forking command in its origin", async () => {
     await assertSettledInOrigin(await replace("fork"));
+  }, 30_000);
+
+  it("keeps a fork-inherited command row out of the running state while the replacement's handler is live", async () => {
+    // Failure modes: the replacement's snapshot marks the origin's command row
+    // running while the forked handler is still live, because the live-command
+    // overlay matches the inherited row by operation identity; the command never
+    // settles in the replacement; the settled snapshot still projects the row as
+    // running.
+    const forkCall = "await ctx.fork(ctx.sessionManager.getLeafId(), { position: \"at\" });";
+    const f = await fixture({ extensions: [{
+      name: "replace.ts",
+      source: (root) => replacingCommandExtension(forkCall, gateCall(join(root, "fork-gate")))(),
+    }] });
+    const client = await f.connect();
+    const origin = await f.coldSession("gated-origin");
+    await openSession(client, origin.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    const response = await client.request("gated-fork", "session.prompt", {
+      commandId: "gated-fork-command", sessionId: origin.id, text: "/replace",
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    await waitFor(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "fork landed");
+    const replacementId = [...registry.slots.keys()][0]!;
+    // Positive control: the origin's command is still live in the replacement.
+    await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount > 0, "forked command live");
+    await waitFor(() => deliveredAuthorityFrames(client, replacementId).length > 0, "replacement snapshot delivered while live");
+    const operationId = response.result.operationId as string;
+    for (const frame of deliveredAuthorityFrames(client, replacementId)) {
+      const transcript = (frame.payload as { transcript: Array<{ semantic?: { operationId?: string; lifecycle?: string } }> }).transcript;
+      expect(transcript.filter((item) => item.semantic?.operationId === operationId
+        && ["running", "waitingForInput"].includes(item.semantic.lifecycle ?? ""))).toEqual([]);
+    }
+    await writeFile(join(f.root, "fork-gate"), "");
+    await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "forked command work settled");
+    await waitFor(() => (deliveredAuthorityFrames(client, replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
+      "replacement settled snapshot delivered");
+    expect((await invocationReceiptsIn(origin.file)).map((receipt) => [receipt.receiptKind, receipt.lifecycle]))
+      .toEqual([["start", "staged"], ["terminal", "completed"]]);
   }, 30_000);
 
   it("keeps a failure after the switch out of the replacement", async () => {
