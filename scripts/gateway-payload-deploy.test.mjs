@@ -1,12 +1,12 @@
 import { strict as assert } from "node:assert";
 import { chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { gatewayBuildInputFingerprint, verifyGatewayBuildInputReceipt } from "./gateway-install-inputs.mjs";
 
 import {
@@ -51,6 +51,8 @@ import {
   requireBundledPayload,
   resolveRecoveryPayload,
   restoreSelectionStateAndClearAttempt,
+  makeMutable,
+  makeImmutable,
   stagePayload,
   stagedCandidate,
   runBounded,
@@ -226,11 +228,34 @@ function selection(version, payloadFingerprint = "a".repeat(64)) {
   return { schema: 1, kind: "tron-gateway-selection", channel: "stable", version, payloadFingerprint };
 }
 
+// One chmod process per tree: a per-entry walk of a fixture's ~9k npm files
+// costs more than the test it cleans up after.
 async function makeTreeWritable(root) {
-  const info = await lstat(root).catch(() => undefined);
-  if (!info || info.isSymbolicLink()) return;
-  await chmod(root, info.isDirectory() ? 0o755 : ((info.mode & 0o111) !== 0 ? 0o755 : 0o644));
-  if (info.isDirectory()) for (const entry of await readdir(root)) await makeTreeWritable(join(root, entry));
+  await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 30_000 }).catch(() => {});
+}
+
+// Fixture bases are built once per file and never handed to a test. Each test
+// receives a copy-on-write clone (`cp -c` keeps modes and relative symlinks), so
+// one test's mutation cannot reach a later test or the base.
+let fixtureBaseRootPromise;
+const fixtureBases = new Map();
+after(async () => {
+  if (fixtureBaseRootPromise) await rm(await fixtureBaseRootPromise, { recursive: true, force: true });
+});
+
+async function cloneFixture(name, root, build) {
+  if (!fixtureBases.has(name)) {
+    fixtureBaseRootPromise ??= mkdtemp(join(tmpdir(), "tron-payload-fixture-bases-"));
+    fixtureBases.set(name, (async () => {
+      const base = join(await fixtureBaseRootPromise, name);
+      await build(base);
+      return base;
+    })());
+  }
+  const base = await fixtureBases.get(name);
+  await mkdir(root, { recursive: true });
+  await runBounded("/bin/cp", ["-c", "-R", join(base, "payload"), join(root, "payload")], { timeoutMs: 120_000 });
+  return join(root, "payload");
 }
 
 let pinnedNpmRootPromise;
@@ -240,10 +265,12 @@ async function pinnedNpmRoot() {
     const repoRoot = fileURLToPath(new URL("../", import.meta.url));
     const nodeVersion = (await readFile(join(repoRoot, ".node-version"), "utf8")).trim();
     assert.equal(process.version, `v${nodeVersion}`, "payload tests require the repository-pinned Node version");
-    const cacheRoot = resolve(repoRoot, process.env.TRON_CI_TOOLS_DIR ?? ".ci-tools");
+    // The npm tree that ships with the running pinned Node (asserted above); the
+    // digest below proves it is the archive tree. No separate toolchain install
+    // is a hidden prerequisite (a missing .ci-tools failed tests 15-22 together).
     const nodeRoot = process.env.TRON_NODE_ROOT
       ? resolve(process.env.TRON_NODE_ROOT)
-      : join(cacheRoot, `node-v${nodeVersion}-${process.arch}`);
+      : resolve(dirname(process.execPath), "..");
     const archiveNpmRoot = join(nodeRoot, "lib", "node_modules", "npm");
     let npmRoot = archiveNpmRoot;
     try { await lstat(npmRoot); }
@@ -290,7 +317,7 @@ async function addRuntimeNodeAliases(root) {
     const directory = join(root, "runtime", `bin-${architecture}`);
     const npmRoot = join(root, "runtime", `npm-${architecture}`);
     await mkdir(directory, { recursive: true });
-    await cp(officialNpmRoot, npmRoot, { recursive: true });
+    await runBounded("/bin/cp", ["-c", "-R", officialNpmRoot, npmRoot], { timeoutMs: 120_000 });
     await symlink(`../node-${architecture}`, join(directory, "node"));
     await symlink(`../npm-${architecture}/bin/npm-cli.js`, join(directory, "npm"));
     await symlink("../../app/node_modules/.bin/pi", join(directory, "pi"));
@@ -897,6 +924,137 @@ async function assertSealedPayload(root) {
   } else assert.ok([0o444, 0o555].includes(info.mode & 0o777), `${root} must be a sealed file`);
 }
 
+// Entry modes keyed by path relative to root. Links are recorded without a mode:
+// their own inode mode is not a payload authority and must not be touched.
+async function entryModes(root) {
+  const modes = {};
+  const visit = async (path) => {
+    const info = await lstat(path);
+    const key = relative(root, path) || ".";
+    if (info.isSymbolicLink()) modes[key] = "link";
+    else modes[key] = `${info.isDirectory() ? "dir" : "file"}:${(info.mode & 0o7777).toString(8)}`;
+    if (info.isDirectory()) for (const entry of await readdir(path)) await visit(join(path, entry));
+  };
+  await visit(root);
+  return modes;
+}
+
+// Representative payload entries: executables with and without owner-only bits,
+// setuid/setgid, read-only and unreadable files, nested directories with restrictive
+// modes, and an in-tree link. An out-of-tree link target lives beside the root.
+async function makeModeTree(root, { escapingLink = false } = {}) {
+  await mkdir(join(root, "app", "dist"), { recursive: true });
+  await mkdir(join(root, "app", "a", "b"), { recursive: true });
+  await mkdir(join(root, "app", "c"), { recursive: true });
+  const files = {
+    "app/dist/index.js": 0o644, "app/dist/tool": 0o755, "app/dist/owner-exec": 0o700, "app/dist/x-only": 0o100,
+    "app/dist/setuid": 0o4755, "app/dist/setgid": 0o2755, "app/dist/readonly": 0o400, "app/dist/zero": 0o000,
+    "app/dist/readonly-exec": 0o555, "app/a/b/deep": 0o600,
+  };
+  for (const [path, mode] of Object.entries(files)) {
+    await writeFile(join(root, path), "payload\n");
+    await chmod(join(root, path), mode);
+  }
+  await symlink("dist/index.js", join(root, "app", "rel-file"));
+  if (escapingLink) {
+    await mkdir(join(dirname(root), "outside"), { recursive: true });
+    await writeFile(join(dirname(root), "outside", "target"), "outside\n");
+    await chmod(join(dirname(root), "outside", "target"), 0o600);
+    await symlink("../../outside/target", join(root, "app", "out-link"));
+  }
+  await chmod(join(root, "app", "a", "b"), 0o555);
+  await chmod(join(root, "app", "a"), 0o500);
+  await chmod(join(root, "app", "c"), 0o700);
+}
+
+const UNSEALED_FILE_MODES = {
+  "app/dist/index.js": "file:644", "app/dist/tool": "file:755", "app/dist/owner-exec": "file:755",
+  "app/dist/x-only": "file:755", "app/dist/setuid": "file:755", "app/dist/setgid": "file:755",
+  "app/dist/readonly": "file:644", "app/dist/zero": "file:644", "app/dist/readonly-exec": "file:755",
+  "app/a/b/deep": "file:644",
+};
+const SEALED_FILE_MODES = {
+  "app/dist/index.js": "file:444", "app/dist/tool": "file:555", "app/dist/owner-exec": "file:555",
+  "app/dist/x-only": "file:555", "app/dist/setuid": "file:555", "app/dist/setgid": "file:555",
+  "app/dist/readonly": "file:444", "app/dist/zero": "file:444", "app/dist/readonly-exec": "file:555",
+  "app/a/b/deep": "file:444",
+};
+const UNSEALED_DIRECTORY_MODES = {
+  ".": "dir:755", "app": "dir:755", "app/dist": "dir:755", "app/a": "dir:755", "app/a/b": "dir:755", "app/c": "dir:755",
+};
+const SEALED_DIRECTORY_MODES = {
+  ".": "dir:555", "app": "dir:555", "app/dist": "dir:555", "app/a": "dir:555", "app/a/b": "dir:555", "app/c": "dir:555",
+};
+
+// Sealing sets exactly these modes and never follows or re-modes a link: an
+// out-of-tree target keeps its mode, and a refused escaping link leaves the tree
+// unsealed instead of half-sealed.
+test("payload sealing sets exact entry modes and never follows links", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-modes-")));
+  try {
+    const tree = join(root, "tree");
+    await mkdir(tree);
+    await makeModeTree(tree, { escapingLink: true });
+    const outside = join(root, "outside", "target");
+    const linkInfo = await lstat(join(tree, "app", "out-link"));
+
+    await makeMutable(tree);
+    assert.deepEqual(await entryModes(tree), { ...UNSEALED_DIRECTORY_MODES, ...UNSEALED_FILE_MODES, "app/rel-file": "link", "app/out-link": "link" });
+    assert.equal((await lstat(outside)).mode & 0o7777, 0o600, "an out-of-tree link target must not be re-moded");
+    assert.equal((await lstat(join(tree, "app", "out-link"))).mode & 0o7777, linkInfo.mode & 0o7777, "link inode modes are not payload modes");
+
+    const unsealed = await entryModes(tree);
+    await assert.rejects(makeImmutable(tree), /payload symlink escapes root/);
+    assert.deepEqual(await entryModes(tree), unsealed, "a refused payload is not partially sealed");
+
+    await rm(join(tree, "app", "out-link"));
+    await makeImmutable(tree);
+    assert.deepEqual(await entryModes(tree), { ...SEALED_DIRECTORY_MODES, ...SEALED_FILE_MODES, "app/rel-file": "link" });
+    await makeMutable(tree);
+    assert.deepEqual(await entryModes(tree), { ...UNSEALED_DIRECTORY_MODES, ...UNSEALED_FILE_MODES, "app/rel-file": "link" });
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+// Sealing refuses an unsupported entry before any mode changes. Unsealing opens
+// each directory before reading it, so it may already have opened directories
+// when it refuses; cleanup removes that tree either way. A failed staging tree
+// with an unreadable directory must still unseal, or cleanup cannot remove it.
+test("payload sealing refuses unsupported entries and opens unreadable directories", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-modes-refuse-")));
+  try {
+    const tree = join(root, "tree");
+    await mkdir(tree);
+    await makeModeTree(tree);
+    await runBounded("/usr/bin/mkfifo", [join(tree, "app", "fifo")]);
+    const before = await entryModes(tree);
+    await assert.rejects(makeImmutable(tree), /payload contains unsupported entry/);
+    assert.deepEqual(await entryModes(tree), before, "a refused payload keeps its modes");
+    await assert.rejects(makeMutable(tree), /payload contains unsupported entry/);
+    await rm(join(tree, "app", "fifo"));
+
+    await mkdir(join(tree, "app", "stuck"));
+    await writeFile(join(tree, "app", "stuck", "file"), "stuck\n");
+    await chmod(join(tree, "app", "stuck"), 0o000);
+    await makeMutable(tree);
+    assert.equal((await entryModes(tree))["app/stuck"], "dir:755");
+    assert.equal((await entryModes(tree))["app/stuck/file"], "file:644");
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+// Modes are not part of the fingerprint, so sealing a real payload must keep its
+// fingerprint, and its runtime executables must stay executable for admission.
+test("sealing a real payload preserves its fingerprint and executable runtime", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-seal-fingerprint-")));
+  try {
+    const payload = await makePreflightFixture(join(root, "payload"));
+    const fingerprint = await payloadFingerprint(payload);
+    await makeImmutable(payload);
+    assert.equal(await payloadFingerprint(payload), fingerprint);
+    await makeMutable(payload);
+    assert.equal(await payloadFingerprint(payload), fingerprint);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
 // Failure modes (#116), each observed through the real publication paths:
 // 1. stagePayload freezes its staging root before renaming it into versions/,
 //    so macOS 15 refuses the rename and dev/Stable staging cannot publish.
@@ -985,6 +1143,10 @@ test("source builds reject compiled imports that are not shipped before publicat
 });
 
 async function makePreflightFixture(root) {
+  return cloneFixture("preflight", root, buildPreflightFixture);
+}
+
+async function buildPreflightFixture(root) {
   const payload = join(root, "payload");
   await mkdir(join(payload, "app", "dist"), { recursive: true });
   await mkdir(join(payload, "app", "scripts"), { recursive: true });
@@ -1245,7 +1407,7 @@ test("dev empty push configuration cannot be promoted into Stable", async () => 
       /stable payload PushService.xcconfig requires a non-empty origin/,
     );
   } finally {
-    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1284,7 +1446,7 @@ test("tron-dev candidate source stages through the real payload manifest validat
       assert.equal(staged.version, version);
     }
   } finally {
-    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1858,7 +2020,7 @@ test("Debug handoff copies exact bytes only after post-proof and leaves Stable i
       readFile(join(racedStableHome, "gateway", "payloads", "stable", "deployment-state.json")), /ENOENT/,
     );
   } finally {
-    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1973,6 +2135,10 @@ const nativeStageFiles = [
 ];
 
 async function makeNativeStageFixture(root, signature) {
+  return cloneFixture(`native-${signature}`, root, (base) => buildNativeStageFixture(base, signature));
+}
+
+async function buildNativeStageFixture(root, signature) {
   const payload = await makePreflightFixture(root);
   const packages = { "": {} };
   for (const [path, magic] of nativeStageFiles) {
