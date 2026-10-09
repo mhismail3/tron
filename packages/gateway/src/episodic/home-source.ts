@@ -1,4 +1,5 @@
 import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
+import type { HomeMemoryEvidence } from "../protocol/types.js";
 import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import {
@@ -27,11 +28,12 @@ function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
 function fail(message: string): never { throw new EpisodicMemoryError("source", message); }
 
 /** One line at a time. No batch of raw strings survives a parse/project step. */
-async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number) {
+async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number, signal?: AbortSignal) {
   const buffer = Buffer.alloc(64 * 1024);
   let pending = Buffer.alloc(0);
   let position = start;
   while (position < end) {
+    signal?.throwIfAborted();
     const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, end - position), position);
     if (bytesRead === 0) throw new EpisodicSourceChangedError();
     position += bytesRead;
@@ -56,8 +58,9 @@ function singleProjection(entry: EpisodicCanonicalEntry, limits: EpisodicLimits)
 
 /** Raw payloads are projected immediately. Retained state is ID/parent topology,
  * capped text, and the minimal role shape used by context edits, never JSONL. */
-async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits, previous?: EpisodicChapterSourceCursor, exact = false): Promise<{
-  branch: CompactEntry[]; cursor: EpisodicChapterSourceCursor; incremental: boolean;
+async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits, previous?: EpisodicChapterSourceCursor, exact = false,
+  evidence?: HomeMemoryEvidence, signal?: AbortSignal): Promise<{
+  branch: CompactEntry[]; cursor: EpisodicChapterSourceCursor; incremental: boolean; evidence?: EpisodicCanonicalEntry;
 }> {
   const handle = await open(chapter.path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => fail("Home canonical source cannot be opened"));
   try {
@@ -73,12 +76,13 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
     const offset = incremental ? previous!.completeBytes : 0;
     const endBytes = exact ? previous!.completeBytes : start.size;
     const entries = new Map<string, CompactEntry>();
+    let selected: EpisodicCanonicalEntry | undefined;
     let prefix = incremental ? previous!.completePrefixDigest! : COMPLETE_PREFIX_SEED;
     let completeBytes = offset;
     let leaf = incremental ? previous!.leafEntryId : null;
     let leafDigest = incremental ? previous!.leafLineDigest : null;
     let headerSeen = incremental;
-    for await (const bytes of lines(handle, offset, endBytes, limits.maxSourceLineBytes)) {
+    for await (const bytes of lines(handle, offset, endBytes, limits.maxSourceLineBytes, signal)) {
       prefix = extendPrefixDigest(prefix, bytes); completeBytes += bytes.length + 1;
       const line = bytes.toString("utf8");
       if (!headerSeen) {
@@ -89,6 +93,10 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
       }
       if (!line.trim()) continue;
       const entry = parseEntry(line);
+      if (evidence?.entryId === entry.id) {
+        if (episodicDigest(line) !== evidence.sourceDigest) fail("Home evidence digest changed");
+        selected = entry;
+      }
       if (entries.has(entry.id)) fail("Home canonical source repeats an entry ID");
       // Navigation and edits require the compact branch of this chapter, not a
       // whole-Home refresh. Close this handle before opening that full cut.
@@ -140,7 +148,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
       }
       branch.reverse();
     }
-    return { branch, incremental, cursor: {
+    return { branch, incremental, ...(selected ? { evidence: selected } : {}), cursor: {
       sessionId: chapter.sessionId, sealed: chapter.sealed, dev: end.dev, ino: end.ino, size: exact ? previous!.size : end.size,
       completeBytes, leafEntryId: leaf, leafLineDigest: leafDigest, completePrefixDigest: prefix,
       mtimeMs: exact ? previous!.mtimeMs : end.mtimeMs, ctimeMs: exact ? previous!.ctimeMs : end.ctimeMs,
@@ -210,16 +218,32 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
 
 /** Exact frozen cuts are not delta reads. Stream a compact index through each
  * admitted prefix, proving its digest, with no raw text retained or later tail. */
-export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }> {
+export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor, limits: EpisodicLimits, signal?: AbortSignal): AsyncIterable<{ id: string; sourceSessionId: string }> {
   await validateSnapshot(snapshot, cursor);
   const ids = new Set<string>();
   for (const [index, chapterCursor] of cursor.home!.chapters.entries()) {
     const chapter = snapshot.chapters[index]!;
-    const cut = await compactChapter(chapter, limits, chapterCursor, true);
+    signal?.throwIfAborted();
+    const cut = await compactChapter(chapter, limits, chapterCursor, true, undefined, signal);
     for (const entry of cut.branch) {
       if (ids.has(entry.id)) fail("Home source repeats a canonical entry ID across chapters");
       ids.add(entry.id);
       yield { id: entry.id, sourceSessionId: chapter.sessionId };
     }
   }
+}
+
+/** Read one original entry through its admitted physical prefix. Unlike the
+ * projection, this retains only the selected bounded raw line. It never opens
+ * SessionManager (which may migrate/repair files). All-chapter proof is the
+ * caller's read boundary; this second pass proves the selected line at use. */
+export async function readCanonicalHomeEvidence(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor,
+  evidence: HomeMemoryEvidence, limits: EpisodicLimits, signal?: AbortSignal): Promise<EpisodicCanonicalEntry> {
+  const index = cursor.home?.chapters.findIndex(chapter => chapter.sessionId === evidence.sessionId) ?? -1;
+  const chapter = snapshot.chapters[index];
+  const admitted = cursor.home?.chapters[index];
+  if (!chapter || !admitted || chapter.sessionId !== evidence.sessionId) fail("Home evidence has no admitted chapter");
+  const cut = await compactChapter(chapter, limits, admitted, true, evidence, signal);
+  if (!cut.evidence) fail("Home evidence entry is unavailable");
+  return cut.evidence;
 }

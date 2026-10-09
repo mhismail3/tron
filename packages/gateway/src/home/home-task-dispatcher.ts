@@ -141,14 +141,13 @@ export class HomeTaskDispatcher {
       return current;
     });
     if (await this.store.read(input.taskId)) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
-    let task: HomeTaskRecord = {
+    let task = await this.store.put({
       version: 1, taskId: input.taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
       intent: { revision: 1, text: input.intent }, intentDigest: createHash("sha256").update(JSON.stringify({ revision: 1, text: input.intent })).digest("hex"),
       target: await this.sessions.canonicalTaskTarget(input.target), workerProfile: "home-task-v1", policyRevision: 1,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null,
       stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
-    };
-    await this.store.put(task, null);
+    }, null);
     this.transition(task, "created");
     let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
     try {
@@ -171,7 +170,7 @@ export class HomeTaskDispatcher {
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         controllerGeneration: 1, grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
-      await this.store.put(task, task.revision - 1);
+      task = await this.store.put(task, task.revision - 1);
       this.transition(task, "operation-bound");
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });

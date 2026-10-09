@@ -30,6 +30,118 @@ The logo/search controls stay stationary. Reduce Motion
 keeps the original fixed position and title size while retaining the existing blur fade.
 Row identity, search state, and managed-sheet/mutation owners remain dashboard-owned.
 
+Home status is an observable disposable projection, separate from the ordinary Sessions catalogue. The dashboard surface passes its exact `PresentationSurfaceToken` and shared coordinator to `AppModel`; status reads consult that managed activity before admission and again after every await. Retirement names the matching token so delayed callbacks cannot retire a newer surface. The AppModel lifecycle retires the connection-bound projection on disconnect/profile replacement and re-admits a fresh `home.status` read on the authenticated reconnect only when `home.v1` is present. Backgrounding suspends reads until foreground reconciliation. Matching Home-session summary and session-list invalidations trigger immediate reads; an active mounted surface also runs one sequential five-second fallback. A chat opened before any Home status is known starts a `connectionOnly(sessionID:)` probe: it reads per connection admission and retries once after a covering discards its read, but it never polls. Its first published status decides it: the claimed session promotes it to the mounted cadence (fallback, session-summary invalidation and mutation refresh), and any other session releases it to make no further reads, keeping the status for the dashboard. A known status decides the chat by session identity alone, so an ordinary chat never reads. Home status and designation identity are never persisted as separate Home route state; navigation uses the current physical session ID in the ordinary profile-qualified session route until issue #418 owns logical Home restoration.
+
+When supported, Sessions puts a pinned Home row above the existing catalogue without changing ordinary row/filter/sort behavior. The row opens only the current enabled session ID from `home.status`; disabled, missing-session, and undesignated states use the confirmed `home.designate` mutation owner and require a fresh status projection before routing. Designation is receipt-only: pending or uncertain receipts keep their command ID and profile ownership in the mutation coordinator (one pending slot per profile), and the next explicit attempt queries that same receipt. A missing receipt on a completion check is final for the admitted Gateway: the change retires as not applied (`home_change_not_found`), the status projection is reloaded, and nothing is replayed. A missing receipt during the original attempt stays uncertain and unresolved. Backgrounding does not replay an accepted mutation, and duplicate in-flight designation is refused. The current route is the profile-qualified ordinary `ChatView`; its exact managed surface owns Home status while open, and route retirement restores dashboard status ownership. The logical cross-chapter Home route is deferred to issue #418. `HomeStatusPresentationOwnerTests` covers protocol bounds, observation, stale generations/connections, exact surface retirement, activity changes, and cadence; `HomePinnedRowPolicyTests` proves receipt checks outrank both routeable and unavailable status. `AppModelReconnectTests` drives the real `HomeMutationCoordinator` through initial-connection expiry, queued client cancellation, and a possibly-sent interruption followed by missing, pending, and completed receipts; `homeControlMissingCompletionRetiresWithoutReplay` covers a missing answer on the completion check, and `homeReceiptStaysWithItsProfileAcrossSwitch` covers per-profile pending ownership across switches. These journeys assert observable command ownership, stable receipt ID, a fresh status read before the profile-qualified route, and a single designation mutation. The suite also covers status reconnect, refusal, and duplicate admission. Hosted UI route tests mount the production `SessionShellView` with a scripted Gateway-backed `AppModel`, exercise capability absence, ordinary-session `ChatView` routing, real Home designation, and Home `ChatView` routing. A hosted Settings-sheet test verifies status reads remain quiet while covered for longer than the five-second fallback, then resume after dismissal without Gateway events or reconnect. Production-shell UI scenarios separately cover ready, undesignated, disabled, missing-session, and capability-absent profiles. Standalone row captures are appearance evidence only; blocked-state accessibility is covered separately.
+
+The Home header/controls share `HomeMutationCoordinator` with designation.
+`HomeHeaderTests` admits the Gateway's paused and chapter-recovery phases without
+guessing task states. Focused `AppModelReconnectTests` journeys exercise all four
+control methods (configure, pause, resume, disable), command IDs, duplicate
+admission, unresolved missing/pending/completed receipts, authority replacement,
+and old reads arriving after a completion refresh. A user action captures the
+profile/lifecycle authority before its asynchronous task starts; mutations are
+not cancelled with presentation reads. Hosted `TronSmokeUITests` Home-header
+journeys mount production chat and cover represented states, the existing Stop
+owner, active-response pause, resume, disable, background/reconnect and explicit
+unresolved completion. `testHomeHeaderRejectsStaleRouteAction` retains an actual
+mounted header callback, authenticates a successor profile, and proves the old
+callback cannot send a Home control there. `testHomeHeaderAcceptedControlContinuesInBackground`
+backgrounds after acceptance but before the delayed response, then requires terminal
+receipt convergence without a second command. The native delayed-admission and
+duplicate-control drivers settle erroneously sent requests too, so negative
+controls fail bounded assertions rather than hanging on unanswered responses.
+Run these with `TRON_IOS_TEST_TIER=ui-validation` through `scripts/tron-ios-test`;
+screenshots are xcresult attachments, not public source.
+These fixtures prove native wiring, not durable Gateway pause semantics (owned
+by Gateway Home activation E2E) or physical iPhone behavior. Preparing/task-state
+contracts remain separate work.
+`testHomeHeaderLightDarkAndAccessibilityCaptures` mounts the production chat in
+light/dark at normal and accessibility Dynamic Type, captures its wrapping memory
+copy, and checks menu/composer reachability. Export its attachments with
+`xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
+These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
+
+`testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
+hosted run it mounts the production chat in light and dark, at normal and accessibility
+Dynamic Type, opens the header menu and each Home sheet from it (memory settings, Home
+context, browse memory, tasks and permissions) and captures each. It proves background
+and a hosted reconnect on the tasks sheet each start a fresh authoritative read:
+`fixture.home-task-list-reads` counts the Gateway's `home.taskList` calls. The Home
+fixture forwards scene transitions to the lifecycle as production does, and
+`-home-reconnect-after-task-list` reconnects the hosted lifecycle once after the sheet's
+first read. The same run covers the capability-off ordinary session. The header state,
+background and task journeys run with it:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeCrossSurfaceProofMatrix \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderStatesAndStopOwner \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderAcceptedControlContinuesInBackground \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderBackgroundReconnectAndUnresolvedCompletion \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderKeepsOrdinaryChatAndControls \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredSettingsSheet \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatOpenedBeforeStatusShowsHeaderAfterClaim
+```
+
+Selecting another profile through `AppModel.switchGateway` ends the chat route in the
+dashboard's profile route owner, which releases a presented Home sheet with it;
+`testHomeSheetDismissesWhenProfileSwitches` is a regression guard for the route-owned lifetime.
+No failing variant (a sheet owned above the route) has been recorded for it, so it does not
+by itself prove that owner order.
+
+Matrix attachments are named `proof-<appearance>-<type>-<item>` and retained in the
+result bundle; export them with `xcrun xcresulttool export attachments` into private
+evidence. Simulator stills do not prove VoiceOver, live Gateway semantics, real
+reconnect after a dropped transport, or physical-iPhone behavior.
+
+The three Home sheets are covered by `HomeSheetTests` (bounded DTOs, exact
+canonical evidence identity/offsets, latest-request and managed-lifecycle
+publication) and these focused hosted journeys:
+
+```bash
+scripts/tron-ios-test run --only-testing TronMobileTests/HomeSheetTests
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemorySettingsSelectsPhysicalModel \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeContextShowsEffectiveMetadataOnly \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryBrowserAttributesProjectionAndPagesCanonicalEvidence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability
+```
+
+The hosted Gateway fixture uses the real `home.status`, `home.memory.page` and
+`home.memory.evidence` DTO shapes; it proves native navigation, physical-model
+selection/refusal, empty/blocked/loading/error/reload states, distinct summary/
+projection/canonical labeling, attribution and page replacement. Its model
+provider disclosure is driven by native touch; the virtual model must not appear.
+Selecting the current model again sends no second configure command, including
+while a delayed status read is still converging after the terminal receipt. Results and
+screenshots are retained as xcresult attachments; export them using the command
+above into private evidence, not source. The fixture does not prove canonical
+source correctness. Before using it as presentation evidence, run the real
+Gateway owner suite in an isolated HOME/TMPDIR with pinned Node:
+
+```bash
+cd packages/gateway
+npx vitest run src/sessions/home-activation.e2e.test.ts \
+  -t 'memory browser contract' --maxWorkers=2
+```
+
+That suite retains `test-results/home-activation/report.json`, exercising actual
+cross-chapter source identity, exact canonical text versus context-edited
+projection, continuation invalidation, byte bounds, partial source failures,
+summary settlement, cancellation and disabled/restarted read-only behavior.
+Neither suite claims live Gateway/physical-iPhone validation or VoiceOver proof.
+
+To inspect the Home row visual fixture, run `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowLightDarkAndAccessibilityCaptures`. The four retained XCTest screenshot attachments are private simulator captures; export them from that command's `.xcresult` to a private evidence directory with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`. Do not add captures to the public source tree.
+
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
 Settings and configuration actions; Filter/Search and view-specific controls;
 Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below
@@ -2880,3 +2992,31 @@ journey fail with permanently disabled controls. Retained xcresult screenshots
 label these synthetic states. This is not physical-device or real-provider evidence. Run with the owned UIValidation
 runner and that exact selector; matching protocol 7 builds require manual
 Mac-first installation before the real-device post-Stop check.
+
+### Focused Home tasks verification
+
+The fourth Home sheet consumes `home.taskList`, `home.taskStatus`, and
+`home.taskPermissions` from the Gateway's Home contract. Run the focused owners:
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/HomeTaskSheetTests \
+  --only-testing TronMobileTests/HomeSheetTests
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence
+```
+
+Hosted journeys use real DTO shapes in the isolated Home dashboard fixture;
+controls refuse incorrect execution/route/request bindings and require command
+IDs and a future selected grant expiry. Screenshots are xcresult attachments
+(list, stopped task, redelivery, permission decision, empty and recovery fence).
+They prove native wiring/presentation, not durable task/grant/inbox semantics or
+physical-device acceptance. Gateway `home-task-store.integration.test.ts` and
+`home-task-dispatch.e2e.test.ts` own creation-order paging, restore cursor refusal,
+exact permission/control/receipt semantics and task recovery. Keep their named
+reports and native result bundles in private evidence. The unreleased timestamp
+and creation-filename task format preserves/refuses older held data, with no
+migration; do not repair or erase installation data to validate it.

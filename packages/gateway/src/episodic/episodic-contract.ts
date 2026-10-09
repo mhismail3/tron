@@ -115,6 +115,7 @@ export interface EpisodicBlocked {
 }
 
 export type EpisodicErrorKind =
+  | "paused"
   | "blocked"
   | "closed"
   | "invalid-store"
@@ -337,6 +338,8 @@ export type EpisodicMemoryDependencies = {
   sessionFile: string;
   /** Ordered canonical source for a multi-chapter Home namespace. */
   sessionSource?: EpisodicSessionSource;
+  /** Optional admission authority owned by Home, never persisted in this store. */
+  isPaused?: () => boolean;
   limits?: Partial<EpisodicLimits>;
   /** Where this module raises its bounded records; the caller (gateway-main)
    * decides whether to persist them. */

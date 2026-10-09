@@ -55,6 +55,7 @@ export type HomeRefusalReason =
   | "no-activation"
   | "stale-activation"
   | "memory-not-configured"
+  | "memory-paused"
   | "memory-blocked"
   | "memory-unavailable"
   | "memory-boundary-missing"

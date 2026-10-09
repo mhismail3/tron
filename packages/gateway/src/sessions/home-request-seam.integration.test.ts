@@ -1082,7 +1082,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.record("C7b", row);
     expect(row.providerRequests).toBe(0);
     expect(row.refusalReason).toBe("memory-not-configured");
-    expect(row.memoryStatus).toEqual({ configured: false, open: false });
+    expect(row.memoryStatus).toEqual({ configured: false, open: false, paused: false });
   }, 30_000);
 
   it("C7c a virtual memory model is refused at configuration", async () => {

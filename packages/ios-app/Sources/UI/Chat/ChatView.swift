@@ -61,6 +61,7 @@ struct ChatView: View {
     /// reconciliation callbacks. They share this identity so physical evidence
     /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
+    @State private var homeSheet: HomeSheetRoute?
 
     #if HOSTED_TEST
     init(
@@ -146,6 +147,22 @@ struct ChatView: View {
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let profileID = composerScope?.profileID,
+                   profileID == model.profiles.selected?.id,
+                   model.homeStatus.isCapabilityEnabled,
+                   let status = model.homeStatus.status,
+                   status.sessionId == sessionID,
+                   status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
+                    HomeChatHeader(
+                        status: status,
+                        profileID: profileID,
+                        canStop: admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil,
+                        onStop: abortCurrentOperation,
+                        onPresent: { homeSheet = HomeSheetRoute(profileID: profileID, destination: $0) }
+                    )
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -214,7 +231,8 @@ struct ChatView: View {
             onKeepEditorRequest: { request in
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
-            }
+            },
+            homeSheet: $homeSheet
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
@@ -2735,18 +2753,7 @@ struct ChatView: View {
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: { sessionPresentation.showContext = true },
             onSend: { behavior in send(behavior: behavior) },
-            onAbort: {
-                // Command identity is canonical authority, not delayed render state.
-                let operation = selectedAuthoritativeSnapshot?.operation
-                let kind = ChatComposerPolicy.abortKind(operation: operation)
-                Task {
-                    await model.abort(
-                        sessionID: sessionID,
-                        kind: kind,
-                        operationID: operation?.id
-                    )
-                }
-            },
+            onAbort: abortCurrentOperation,
             onSelectAttachmentDestination: requestAttachmentPresentation,
             onPasteImages: importPastedImages,
             onCatchUp: catchUpToTail,
@@ -2754,6 +2761,14 @@ struct ChatView: View {
             onComposerHeightSettled: composerHeightSettled
         )
         .environment(\.chatOwnsStatusBar, true)
+    }
+
+    private func abortCurrentOperation() {
+        // Both Home's menu and the composer stop the current authoritative
+        // operation, never an ID captured by a delayed render or Home status.
+        let operation = selectedAuthoritativeSnapshot?.operation
+        let kind = ChatComposerPolicy.abortKind(operation: operation)
+        Task { await model.abort(sessionID: sessionID, kind: kind, operationID: operation?.id) }
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {
