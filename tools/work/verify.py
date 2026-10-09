@@ -132,21 +132,22 @@ def _work_dir(repo: Path) -> Path:
     return Path(_git(repo, "rev-parse", "--absolute-git-dir").strip()) / "work"
 
 
-def _prior_receipt(repo: Path, receipts: Path, head: str, digest: str) -> Optional[dict]:
-    """The nearest passing receipt on an ancestor of head under the same configuration."""
-    best: Optional[Tuple[int, dict]] = None
+def _prior_receipts(repo: Path, receipts: Path, head: str, digest: str) -> List[dict]:
+    """Receipts on head or an ancestor under the same configuration, nearest first.
+
+    Carry-over is decided per check, so a receipt that failed overall still
+    proves every check that passed in it.
+    """
+    found: List[Tuple[int, dict]] = []
     for path in receipts.glob("*.json") if receipts.is_dir() else []:
         try:
             receipt = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        if (receipt.get("passed") is not True or receipt.get("configHash") != digest
-                or not _is_ancestor(repo, receipt["head"], head)):
+        if receipt.get("configHash") != digest or not _is_ancestor(repo, receipt["head"], head):
             continue
-        distance = int(_git(repo, "rev-list", "--count", f"{receipt['head']}..{head}"))
-        if best is None or distance < best[0]:
-            best = (distance, receipt)
-    return best[1] if best else None
+        found.append((int(_git(repo, "rev-list", "--count", f"{receipt['head']}..{head}")), receipt))
+    return [receipt for _, receipt in sorted(found, key=lambda item: item[0])]
 
 
 def _physical_memory() -> int:
@@ -454,17 +455,21 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
     work = _work_dir(root)
     receipts = work / "receipts"
     artifacts = _receipt_media(root, work, head, evidence_manifest)
-    prior = _prior_receipt(root, receipts, head, digest)
-    since_prior = _changed(root, prior["head"], head) if prior else []
+    priors = _prior_receipts(root, receipts, head, digest)
+    since: Dict[str, List[str]] = {}
 
     results: Dict[str, dict] = {}
     pending = []
     for check in required:
-        earlier = (prior or {}).get("checks", {}).get(check.name)
-        if (earlier and earlier["exitCode"] == 0 and not check.always
-                and not any(check.matches(path) for path in since_prior)):
-            results[check.name] = {**earlier, "carriedFrom": earlier["carriedFrom"] or prior["head"]}
-            continue
+        # The nearest receipt in which this check passed, not only a passing receipt.
+        prior = next((r for r in priors if r.get("checks", {}).get(check.name, {}).get("exitCode") == 0), None)
+        if prior is not None and not check.always:
+            if prior["head"] not in since:
+                since[prior["head"]] = _changed(root, prior["head"], head)
+            if not any(check.matches(path) for path in since[prior["head"]]):
+                earlier = prior["checks"][check.name]
+                results[check.name] = {**earlier, "carriedFrom": earlier["carriedFrom"] or prior["head"]}
+                continue
         present = [str(root / p) for p in matched[check.name] if (root / p).exists()]
         command = (check.command.replace("{paths}", " ".join(shlex.quote(p) for p in present))
                    .replace("{merge_base}", merge_base))

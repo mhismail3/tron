@@ -338,11 +338,13 @@ configurations and Node test scripts.
    code, wall time, log path, and the commit it was carried from, if any. The
    receipt passes only when every required check exited 0. If the head moves or
    the worktree changes while checks run, verify refuses and writes no receipt.
-6. **Incremental re-verify.** Verify looks for the nearest earlier passing
-   receipt whose commit `P` is an ancestor of the head and whose configuration
-   hash is identical. A required check is carried from `P` instead of run when it
-   passed there, it is not `always`, and none of the paths changed between `P`
-   and the head match its globs. Workers run `scripts/tron work verify` at
+6. **Incremental re-verify.** For each required check, verify looks for the
+   nearest receipt, on the head itself or an ancestor `P`, with an identical
+   configuration hash in which **that check** passed. The receipt as a whole
+   need not have passed, so re-running after one failed check reruns only the
+   checks that did not pass. A check is carried from `P` instead of run when it
+   is not `always` and none of the paths changed between `P` and the head match
+   its globs. Workers run `scripts/tron work verify` at
    their final commit, before handing off to `land`. A merge of the base carries
    unaffected checks, including already-carried checks with their original
    provenance; matching incoming paths rerun their checks. Those paths include everything an update from
@@ -439,10 +441,15 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   protocol fixtures and the pinned Node version. A lockfile change merged from
   the base branch therefore reruns it. It runs `npm ci`, the Pi SDK cohort check
   and the build, then `vitest related` when every changed Gateway path is
-  existing source or test support. A change that no test imports runs only the
-  build. Any other changed input, or a deleted or renamed Gateway file, runs the
-  full suite instead, because `vitest related` cannot select a test that still
-  imports a deleted module and the build excludes tests.
+  existing source or test support. That related selection runs twice, once per
+  Vitest config: the parallel main pass, then the nested pass
+  (`vitest.nested.config.ts`) that runs the files spawning nested Vitest or pi
+  children one at a time. A nested pass runs only when a changed file is one of
+  those tests or imports a changed module, and a change that no test imports runs
+  only the build. Any other changed input, or a deleted or renamed Gateway file,
+  runs the full suite (`npm test`, which runs both passes) instead, because
+  `vitest related` cannot select a test that still imports a deleted module and
+  the build excludes tests.
 - **Gateway scale** runs the dedicated scale suite when one of its own
   `*.scale.test.ts` files, `vitest.scale.config.ts`, or an explicitly exercised
   Knowledge source/helper changes. It stays separate from the ordinary source

@@ -1,38 +1,23 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { gunzipSync, gzipSync } from "node:zlib";
-import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { GatewayError } from "../errors.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../test-support/nested-vitest-payload.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
 interface Completion { parentId: string; parentFile: string; childId: string; childFile: string; runId: string; processId?: string }
-
-async function retainedFiles(root: string): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
-  async function visit(path: string): Promise<void> {
-    for (const entry of await readdir(path, { withFileTypes: true })) {
-      const file = join(path, entry.name);
-      if (entry.isDirectory()) await visit(file);
-      else if (entry.isFile()) result[relative(root, file)] = createHash("sha256").update(await readFile(file)).digest("hex");
-    }
-  }
-  await visit(root);
-  return result;
-}
 
 // Each selection gets a fresh module/process lifetime, just as a payload restart
 // does. Never mutate the repository pin or reuse a loaded extension across legs.
@@ -49,7 +34,7 @@ it("executes previous → candidate → previous with detached resume through th
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
     for (const name of ["previous", "candidate", "rollback"]) {
       const payload = join(payloads, name);
-      await copyPayload(payload);
+      await copyPayload(payload, "managed-subagents.rollback.test.ts");
       const selection = name === "candidate" ? pin : pin.previous.fork ? pin.previous
         : { ...pin, version: pin.previous.version, closure: pin.previous.closure, fork: { commit: null } };
       await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(selection));
@@ -63,8 +48,10 @@ it("executes previous → candidate → previous with detached resume through th
         parentBefore = await readFile(join(root, candidate!.completion.parentFile));
         childBefore = await readFile(join(root, candidate!.completion.childFile));
       }
-      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "src/sessions/managed-subagents.rollback.test.ts", "--maxWorkers=2"], {
-        cwd: payload, timeout: 30_000, maxBuffer: 1024 * 1024,
+      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/sessions/managed-subagents.rollback.test.ts"], {
+        // Hang guard only: legs run alone in the nested pass (vitest.nested.config.ts);
+        // a passing leg takes about 9-12 s, so a reached bound means a hung leg.
+        cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
         env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), PI_SKIP_VERSION_CHECK: "1",
           TRON_SUBAGENTS_ROLLBACK_LEG: name, TRON_SUBAGENTS_ROLLBACK_FIXTURE: root,
           TRON_TEST_PROCESS_OWNER: root,
@@ -72,7 +59,13 @@ it("executes previous → candidate → previous with detached resume through th
           NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
       }).catch(async (error: Error & { stdout?: string; stderr?: string }) => {
         await writeFile(join(root, `${name}.log`), (error.stdout ?? "") + (error.stderr ?? ""));
-        const failed = JSON.parse(await readFile(join(root, `${name}.json`), "utf8"));
+        // A leg that exits before writing its report (killed by the budget, or
+        // crashed) fails with its own exit, not with the missing report file.
+        const legReport = await readFile(join(root, `${name}.json`), "utf8").catch((readError: NodeJS.ErrnoException) => {
+          if (readError.code === "ENOENT") throw error;
+          throw readError;
+        });
+        const failed = JSON.parse(legReport);
         report.legs.push(failed);
         throw new Error(`${name} leg failed: ${JSON.stringify(failed)}`);
       });
@@ -111,73 +104,7 @@ it("executes previous → candidate → previous with detached resume through th
     await rm(payloads, { recursive: true, force: true });
     if (!retainedRoot) await rm(root, { recursive: true, force: true });
   }
-}, 100_000);
-
-async function refuseUnjoinedFixture(root: string): Promise<void> {
-  let failure: string;
-  try { failure = await readFile(process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"), "utf8"); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-  throw new Error(`Refusing fixture removal after process join failure: ${failure}`);
-}
-
-async function copyPayload(payload: string): Promise<void> {
-  await mkdir(payload);
-  for (const file of ["src", "test-support", "vitest.config.ts", "package.json"]) {
-    await cp(join(gatewayRoot, file), join(payload, file), { recursive: true });
-  }
-  await symlink(join(gatewayRoot, "node_modules"), join(payload, "node_modules"));
-  await symlink(join(gatewayRoot, "artifacts"), join(payload, "artifacts"));
-}
-
-// Valid closure bytes with an invalid manifest entry exercise the installer and
-// both admission paths. Installed-file tampering would only test digest refusal.
-it.skipIf(Boolean(leg)).each([
-  { entries: ["../outside.js"] },
-  { entries: ["./missing.js"] },
-  { entries: [] },
-])("refuses verified builds with invalid extension entries: $entries", async ({ entries }) => {
-  const root = await mkdtemp(join(tmpdir(), "tron-subagents-invalid-entry-"));
-  try {
-    const payload = join(root, "payload");
-    await copyPayload(payload);
-    const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
-    const tar = gunzipSync(await readFile(join(gatewayRoot, pin.closure.path)));
-    const blocks: Buffer[] = [];
-    for (let offset = 0; offset + 512 <= tar.length;) {
-      const header = Buffer.from(tar.subarray(offset, offset + 512));
-      if (header.every((byte) => byte === 0)) break;
-      const size = parseInt(header.subarray(124, 136).toString().replace(/\0.*$/su, "").trim() || "0", 8);
-      const name = header.subarray(0, 100).toString().replace(/\0.*$/su, "");
-      let bytes = tar.subarray(offset + 512, offset + 512 + size);
-      if (name === "package/package.json") {
-        const manifest = JSON.parse(bytes.toString());
-        manifest.pi.extensions = entries;
-        bytes = Buffer.from(JSON.stringify(manifest));
-        header.write(`${bytes.length.toString(8).padStart(11, "0")}\0`, 124, 12);
-        header.fill(32, 148, 156);
-        header.write(`${header.reduce((sum, byte) => sum + byte, 0).toString(8).padStart(6, "0")}\0 `, 148, 8);
-      }
-      blocks.push(header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512));
-      offset += 512 + Math.ceil(size / 512) * 512;
-    }
-    const archive = gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
-    await writeFile(join(payload, "invalid-closure.tgz"), archive);
-    pin.closure = { path: "invalid-closure.tgz", sha512: createHash("sha512").update(archive).digest("hex") };
-    await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
-    for (const directory of ["agent", "workspace", "home", "tmp"]) await mkdir(join(root, directory));
-    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "src/sessions/managed-subagents.rollback.test.ts", "--maxWorkers=2"], {
-      cwd: payload, timeout: 15_000, maxBuffer: 1024 * 1024,
-      env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
-        TRON_SUBAGENTS_ROLLBACK_LEG: "invalid", TRON_SUBAGENTS_ROLLBACK_FIXTURE: root, TRON_SUBAGENTS_ROLLBACK_INVALID_ENTRY: "1",
-        TRON_TEST_PROCESS_OWNER: root,
-        TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
-        NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
-    });
-  } finally {
-    await refuseUnjoinedFixture(root);
-    await rm(root, { recursive: true, force: true });
-  }
-}, 20_000);
+}, 400_000);
 
 async function runLeg(): Promise<void> {
   const root = await realpath(process.env.TRON_SUBAGENTS_ROLLBACK_FIXTURE!);
@@ -207,15 +134,6 @@ async function runLeg(): Promise<void> {
     expect(receipt).toMatchObject({ version: pin.version, sha512: pin.closure.sha512, forkCommit: pin.fork.commit });
     expect(installedRoot).toBe(join(await realpath(tronHome), "internal", "pi-subagents", pin.version));
     facts.receipt = receipt;
-    if (process.env.TRON_SUBAGENTS_ROLLBACK_INVALID_ENTRY) {
-      const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-      const before = await retainedFiles(installedRoot);
-      await expect(managedSubagents.loaderOptions(settings)).rejects.toMatchObject({ code: "conflict" });
-      expect(() => managedSubagents.admit([])).toThrow(GatewayError);
-      expect(await retainedFiles(installedRoot)).toEqual(before);
-      facts.passed = true;
-      return;
-    }
     const model = { provider: "tron-rollback-subagents", id: "rollback-model" };
     // Requests are keyed by the current canonical turn, not arrival order:
     // detached revive and parent acknowledgement can arrive concurrently.

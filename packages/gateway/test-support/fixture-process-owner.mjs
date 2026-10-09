@@ -18,8 +18,13 @@ const ownedPids = new Set();
 const ownedGroups = new Set();
 
 function processes() {
-  const result = spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,stat="], { encoding: "utf8", timeout: 2_000 });
-  if (result.status !== 0) throw new Error("fixture process owner could not inspect process trees");
+  // No timeout: one ps snapshot always terminates, and on a loaded host it can
+  // take seconds. A deadline here failed correct legs under concurrent verify.
+  const result = spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,stat="], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  if (result.status !== 0) {
+    throw new Error(`fixture process owner could not inspect process trees: status ${result.status}, `
+      + `signal ${result.signal}, ${result.error?.message ?? result.stderr.trim()}`);
+  }
   return result.stdout.split("\n").flatMap(line => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)/u.exec(line);
     return match ? [{ pid: Number(match[1]), parent: Number(match[2]), group: Number(match[3]), state: match[4] }] : [];

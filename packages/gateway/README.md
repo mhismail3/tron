@@ -3274,6 +3274,14 @@ bound, not a change to test selection, per-test concurrency assertions, or the
 15-second default timeout. Production scheduling is unchanged. Keep focused
 owners narrow while iterating and use the full configured suite for checkpoints.
 
+`npm test` runs two Vitest passes, in order. The main pass (`vitest.config.ts`) runs
+the parallel suite. The nested pass (`vitest.nested.config.ts`) runs the files that
+spawn nested Vitest or real pi children, one file at a time. That config's list is
+the single owner of which files are nested. Under parallel workers those children
+starve and miss their execFile or detached-process bounds, so they cannot share the
+parallel pass; the bounds are hang bounds only, and a passing run never reaches them.
+Run one of them with `npx vitest run --config vitest.nested.config.ts <file>`.
+
 Tests own every remote boundary through injected fetchers, resolvers and HTTP
 stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
 connection opened by an in-process socket in the Vitest worker and fails the
