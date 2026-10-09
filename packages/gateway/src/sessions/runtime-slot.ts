@@ -562,8 +562,8 @@ export interface RuntimeSlotDependencies {
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
   homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
-  /** Physical chapter state is consulted only by mutation owners. Current Home
-   * records report unsealed until the chapter ledger is introduced. */
+  /** Physical chapter state is consulted only by mutation owners. The registry
+   * answers it from the Home chapter ledger; any other session is unsealed. */
   homeChapterState?: (sessionId: string) => HomeChapterState;
 }
 
@@ -10097,9 +10097,6 @@ export class RuntimeSlot {
     }
   }
 
-  /** `exceptWorkToken` is the initiating request's own work entry, which is not
-   * the session running. Every other entry, including a different request's,
-   * still makes this busy. */
   private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
     const state = this.dependencies.homeChapterState?.(manager.getSessionId());
     if (!state) return;
@@ -10157,23 +10154,34 @@ export class RuntimeSlot {
     const crossing = { operationId, boundary, crossingBytes: bytes, crossingEntries: entries } as const;
     this.homeLimitStop = crossing;
     void this.abort("agent", operationId, "chapter-limit").then(() => {
-      const settledBytes = path ? statSync(path).size : 0;
-      const settledEntries = this.canonicalEntryCount;
-      this.hooks.homeChapterLimitStopped?.({
-        chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
-        boundary,
-        crossingBytes: crossing.crossingBytes,
-        crossingEntries: crossing.crossingEntries,
-        settledBytes,
-        settledEntries,
-      });
-      if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+      try {
+        const settledBytes = path ? statSync(path).size : 0;
+        const settledEntries = this.canonicalEntryCount;
+        this.hooks.homeChapterLimitStopped?.({
+          chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
+          boundary,
+          crossingBytes: crossing.crossingBytes,
+          crossingEntries: crossing.crossingEntries,
+          settledBytes,
+          settledEntries,
+        });
+      } finally {
+        // The Stop has settled, so the fence is no longer needed even if the
+        // crossing record could not be read.
+        if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+      }
     }, error => {
       // If exact-operation Stop could not settle, preserve the admission fence.
+      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
+    }).catch(error => {
+      // A failure after the Stop settled must not be an unhandled rejection.
       this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
     });
   }
 
+  /** `exceptWorkToken` is the initiating request's own work entry, which is not
+   * the session running. Every other entry, including a different request's,
+   * still makes this busy. */
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
     this.assertChapterWritable();
