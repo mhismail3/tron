@@ -458,20 +458,32 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   remains in CI's heavy run and explicit checkpoints. The simulator admission
   and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
   the check with exit 73; verify again once memory is free.
-- **Advisory hosted macOS CI** uses `scripts/ci_macos_scope.py` over the
-  available event-base and checkout trees (no merge-base required). Recognized
-  docs, work-tooling and push-relay-only changes skip macOS. Gateway inputs run
-  Gateway, the hosted iOS/Gateway boundary and Mac packaging; iOS inputs run iOS
-  and the boundary; Mac inputs run Mac. Shared workflow, protocol and toolchain
-  inputs, unknown paths, empty diffs and unavailable Git inputs run all four.
-  Deleted/renamed paths retain both owners. Manual dispatch runs all four, and
-  a failed classifier or missing output never skips coverage. An explicit
-  `!cancelled()` status check lets selected or missing-output jobs run even if
-  `policy` fails; an explicit `false` scope still skips, and workflow cancellation
-  stops advisory work. `test_ci_scope.py` exercises the CLI with real Git histories
-  and the workflow's selector shell, not GitHub's job dependency scheduler.
+- **Advisory hosted macOS CI** starts with the Linux `scope` job, which runs
+  `scripts/ci_macos_scope.py` over the available event-base and checkout trees
+  (no merge-base required). Recognized docs, work-tooling and push-relay-only
+  changes skip macOS. Gateway inputs run the Gateway job, the hosted iOS/Gateway
+  boundary and Mac packaging; iOS inputs run iOS and the boundary; Mac inputs run
+  Mac. Shared workflow, protocol and toolchain inputs, unknown paths, empty diffs
+  and unavailable Git inputs run all four. Deleted/renamed paths retain both
+  owners. Manual dispatch runs all four, and a failed classifier or missing output
+  never skips coverage. An explicit `!cancelled()` status check lets selected or
+  missing-output jobs run even if an earlier job fails; an explicit `false` scope
+  still skips, and workflow cancellation stops advisory work. `test_ci_scope.py`
+  exercises the CLI with real Git histories and the `scope` job's selector shell,
+  not GitHub's job dependency scheduler.
+  The required `gateway` job runs only Gateway's install, `check:pi-sdk`, build,
+  `npm test`, the Pi SDK rollback when the graph changed, and audit. The advisory
+  `gateway-tooling` job runs the pi-subagents provider checks, the dev-lifecycle
+  state tests, the profiler test and the payload-deploy test, each only when
+  `scripts/ci_verify_scope.py` selects its check. That selector matches the
+  `paths` of the same-named verify checks in `.github/work.json` through
+  `tools/work/verify.py`, so CI and `scripts/tron work verify` select alike. An
+  empty diff selects none, as verify does; a missing or unresolvable base, or any
+  selector error, runs every check. `scripts/test-ci-verify-scope.py` covers the
+  selector's real-Git cases in `policy`.
   Jobs keep real failure conclusions;
-  only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
+  only `policy`, `gateway` (`land.requiredChecks`) and `tron/verify` gate `land`.
+  The `main` ruleset remains
   unapplied by maintainer decision; no schedule or deployment is added.
   The workflow's concurrency group stays ref-scoped, and it cancels in progress
   only for `pull_request` events. A started base-branch push run therefore always

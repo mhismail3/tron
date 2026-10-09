@@ -15,7 +15,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  policy:
+  # Selection is a separate fast job, so the required gateway job waits for it
+  # rather than for the policy suite. Every output fails open to running its job.
+  scope:
     runs-on: ubuntu-latest
     outputs:
       pi-sdk-graph-changed: ${{ steps.pi-graph.outputs.changed }}
@@ -23,6 +25,10 @@ jobs:
       ios: ${{ steps.macos-scope.outputs.ios }}
       pi-sdk-e2e: ${{ steps.macos-scope.outputs.pi-sdk-e2e }}
       mac: ${{ steps.macos-scope.outputs.mac }}
+      pi-subagents: ${{ steps.tooling-scope.outputs.pi-subagents }}
+      dev-lifecycle-state: ${{ steps.tooling-scope.outputs.dev-lifecycle-state }}
+      profiler: ${{ steps.tooling-scope.outputs.profiler }}
+      gateway-payload-deploy: ${{ steps.tooling-scope.outputs.gateway-payload-deploy }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -48,6 +54,18 @@ jobs:
             echo "macOS classifier failed; running every advisory job"
             for job in gateway ios pi-sdk-e2e mac; do echo "$job=true" >> "$GITHUB_OUTPUT"; done
           fi
+      - name: Select hosted tooling checks
+        id: tooling-scope
+        shell: bash
+        env:
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          checks=(pi-subagents dev-lifecycle-state profiler gateway-payload-deploy)
+          if ! python3 scripts/ci_verify_scope.py --base "$CI_BASE" --head HEAD --github-output "$GITHUB_OUTPUT" "${checks[@]}"; then
+            echo "verify-check classifier failed; running every hosted tooling check"
+            for check in "${checks[@]}"; do echo "$check=true" >> "$GITHUB_OUTPUT"; done
+          fi
       - name: Detect Pi SDK graph change
         id: pi-graph
         shell: bash
@@ -70,6 +88,13 @@ jobs:
           changed="$(node packages/gateway/scripts/compare-pi-sdk-graph.mjs "$base" HEAD "$GITHUB_WORKSPACE" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
           [[ "$changed" == true || "$changed" == false ]] || { echo "invalid graph comparison result" >&2; exit 1; }
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
       - run: scripts/personal-info-guard.sh
       - run: python3 scripts/test-personal-info-guard.py
       - run: scripts/check-agent-policy.sh
@@ -85,6 +110,8 @@ jobs:
             scripts/check-documentation-policy.py \
             scripts/ci_ios_infra_scope.py \
             scripts/test-ci-ios-infra-scope.py \
+            scripts/ci_verify_scope.py \
+            scripts/test-ci-verify-scope.py \
             scripts/test-personal-info-guard.py \
             scripts/tron_mac_reinstall.py \
             scripts/test-mac-reinstall.py \
@@ -111,6 +138,8 @@ jobs:
           node --experimental-strip-types --check scripts/tron-profile-gateway-extension.ts
       - name: Test iOS infrastructure path selector
         run: python3 scripts/test-ci-ios-infra-scope.py
+      - name: Test hosted tooling verify-check selector
+        run: python3 scripts/test-ci-verify-scope.py
       - name: Test focused iOS suite selector
         run: python3 scripts/test-ios-verify-test-selection.py
       - name: Select iOS runner infrastructure coverage
@@ -196,8 +225,8 @@ jobs:
   # Gateway is required for land; other advisory jobs retain real failure
   # conclusions visible in the dashboard without blocking unrelated work.
   gateway:
-    needs: policy
-    if: ${{ !cancelled() && needs.policy.outputs.gateway != 'false' }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.gateway != 'false' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -210,28 +239,55 @@ jobs:
         working-directory: packages/gateway
       - run: npm run check:pi-sdk
         working-directory: packages/gateway
-      - run: scripts/install-ci-tools.sh node
-      - run: npm run check:pi-subagents
-        working-directory: packages/gateway
-      - run: npm run test:pi-subagents-scripts
-        working-directory: packages/gateway
       - run: npm run build
         working-directory: packages/gateway
+      - run: npm test
+        working-directory: packages/gateway
+      - run: npm run test:pi-sdk-rollback
+        if: needs.scope.outputs.pi-sdk-graph-changed == 'true'
+        working-directory: packages/gateway
+      - run: npm audit --omit=dev
+        working-directory: packages/gateway
+
+  # Advisory checks moved off the required gateway job. Each step runs only when
+  # scope selected its check with the same path globs as `scripts/tron work verify`.
+  gateway-tooling:
+    needs: scope
+    if: ${{ !cancelled() && (needs.scope.outputs.pi-subagents != 'false' || needs.scope.outputs.dev-lifecycle-state != 'false' || needs.scope.outputs.profiler != 'false' || needs.scope.outputs.gateway-payload-deploy != 'false') }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: packages/gateway/package-lock.json
+      # The profiler test and the provider scripts load the Gateway's own dependencies.
+      - run: npm ci
+        working-directory: packages/gateway
+      - name: Install CI tools
+        if: needs.scope.outputs.pi-subagents != 'false'
+        run: scripts/install-ci-tools.sh node
+      - name: Check the pi-subagents provider
+        if: needs.scope.outputs.pi-subagents != 'false'
+        run: npm run check:pi-subagents
+        working-directory: packages/gateway
+      - name: Test the pi-subagents provider scripts
+        if: needs.scope.outputs.pi-subagents != 'false'
+        run: npm run test:pi-subagents-scripts
+        working-directory: packages/gateway
       - name: Test macOS development lifecycle state tooling
+        if: needs.scope.outputs.dev-lifecycle-state != 'false'
         run: node --test scripts/tron-dev-state.test.mjs
       # The Gateway profiler samples the Gateway through macOS libproc, and its
       # stub Gateway loads the Gateway's own `ws` dependency, so its fixtures
       # run here rather than on the Linux policy runner (#113).
       - name: Test the Gateway profiler
+        if: needs.scope.outputs.profiler != 'false'
         run: python3 scripts/test-tron-profile.py
-      - run: node --test scripts/gateway-payload-deploy.test.mjs
-      - run: npm test
-        working-directory: packages/gateway
-      - run: npm run test:pi-sdk-rollback
-        if: needs.policy.outputs.pi-sdk-graph-changed == 'true'
-        working-directory: packages/gateway
-      - run: npm audit --omit=dev
-        working-directory: packages/gateway
+      - name: Test the gateway payload deploy helper
+        if: needs.scope.outputs.gateway-payload-deploy != 'false'
+        run: node --test scripts/gateway-payload-deploy.test.mjs
 
   push-relay:
     runs-on: ubuntu-latest
@@ -254,8 +310,8 @@ jobs:
         working-directory: packages/push-relay
 
   ios:
-    needs: policy
-    if: ${{ !cancelled() && needs.policy.outputs.ios != 'false' }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.ios != 'false' }}
     runs-on: macos-26
     # The memory reserve protects a shared development Mac's Gateway. A hosted
     # runner is a dedicated VM whose whole memory (7 GB) is below the 8 GB
@@ -301,8 +357,8 @@ jobs:
         run: scripts/ios-ci-test.sh cleanup
 
   pi-sdk-e2e:
-    needs: policy
-    if: ${{ !cancelled() && needs.policy.outputs['pi-sdk-e2e'] != 'false' }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs['pi-sdk-e2e'] != 'false' }}
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
     runs-on: macos-26
@@ -366,8 +422,8 @@ jobs:
         run: scripts/ios-gateway-e2e-test clean
 
   mac:
-    needs: policy
-    if: ${{ !cancelled() && needs.policy.outputs.mac != 'false' }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.mac != 'false' }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
