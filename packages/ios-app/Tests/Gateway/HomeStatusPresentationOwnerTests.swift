@@ -162,6 +162,27 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         owner.retireSurface(token)
     }
 
+    /// Pairing configures the profile and the mounted surface reports itself
+    /// active in the same main-actor turn, as one mount does. Those two starts
+    /// are one mount and must start one read: a second read would cancel the
+    /// first after it had already invoked the Gateway fetch.
+    func testMountStartsOneReadWhenConfigurationAndActivityArriveTogether() async throws {
+        var fetchCount = 0
+        let (owner, coordinator, token) = mountedOwner { _ in
+            fetchCount += 1
+            try await Task.sleep(for: .seconds(60))
+            return try self.decodeStatus()
+        }
+        owner.configure(profileID: "p", connectionID: "c", capabilityEnabled: true)
+        owner.presentationActivityChanged(for: token)
+        try await waitUntil { fetchCount >= 1 }
+        // Bounded settle: let any redundant start reach its fetch before counting.
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(fetchCount, 1)
+        owner.retireSurface(token)
+        coordinator.retire(token)
+    }
+
     /// A profile transition forgets the capability; a dropped connection keeps it,
     /// so reconnecting to the same profile does not flicker the Home row.
     func testProfileRetirementForgetsCapabilityButConnectionLossKeepsIt() {

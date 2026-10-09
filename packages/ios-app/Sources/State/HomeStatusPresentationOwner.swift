@@ -281,7 +281,7 @@ final class HomeStatusPresentationOwner {
 
     func refreshMounted() async {
         guard cadence == .mounted else { return }
-        await readCurrentSurface()
+        await startRead()?.value
     }
 
     func beginRead(
@@ -373,39 +373,43 @@ final class HomeStatusPresentationOwner {
         }
     }
 
-    private func refresh(
-        profileID: String,
-        connectionID: String,
-        capabilityEnabled: Bool,
-        token: PresentationSurfaceToken,
-        coordinator: PresentationActivityCoordinator,
-        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
-    ) async {
-        guard let fence = beginRead(
-            profileID: profileID,
-            connectionID: connectionID,
-            capabilityEnabled: capabilityEnabled,
-            token: token,
-            coordinator: coordinator
-        ) else { return }
+    /// Starts the surface's read for its current identity. The fence is captured
+    /// when the read starts, so it is bound to the surface, profile and connection
+    /// current at that moment. A new read supersedes the one in flight.
+    @discardableResult
+    private func startRead() -> Task<Void, Never>? {
+        guard !suspended, capabilityEnabled,
+              let profileID, let connectionID,
+              let token = surfaceToken,
+              let coordinator = activityCoordinator,
+              let fetch,
+              surfaceIsActive(token),
+              let fence = beginRead(
+                profileID: profileID,
+                connectionID: connectionID,
+                capabilityEnabled: capabilityEnabled,
+                token: token,
+                coordinator: coordinator
+              ) else { return nil }
         activeReadTask?.cancel()
         let task = Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
                 let value = try await fetch(fence)
-                guard !Task.isCancelled, let self else { return }
-                _ = self.publish(value, for: fence)
+                if !Task.isCancelled { _ = self.publish(value, for: fence) }
             } catch is CancellationError {
                 // A superseded or retired read is not an answer from the Gateway.
             } catch {
                 // Status is disposable: the next event or mounted fallback retries.
                 // The row must still say why it has no status, not keep loading.
-                guard !Task.isCancelled, let self, fence == self.latestFence else { return }
-                self.isStatusUnavailable = true
+                if !Task.isCancelled, fence == self.latestFence { self.isStatusUnavailable = true }
             }
+            // The handle is the single in-flight read; a read that is still the latest
+            // when it settles releases it, so the next start is not blocked.
+            if fence == self.latestFence { self.activeReadTask = nil }
         }
         activeReadTask = task
-        await task.value
-        if fence == latestFence { activeReadTask = nil }
+        return task
     }
 
     private func startWorkIfActive() {
@@ -413,15 +417,15 @@ final class HomeStatusPresentationOwner {
               let coordinator = activityCoordinator,
               coordinator.activity(for: token).allowsPresentationPublication,
               profileID != nil, connectionID != nil, fetch != nil else { return }
-        mountedTask?.cancel()
-        mountedTask = nil
-        Task { @MainActor [weak self] in await self?.readCurrentSurface() }
+        // Configuration and presentation both reach here for one mount, in the same
+        // turn. The read already in flight serves that start, so a second one is not
+        // started: two reads would cancel each other after the first had fetched.
+        if activeReadTask == nil { startRead() }
         if cadence == .mounted { startFallbackLoop() }
     }
 
     private func startFallbackLoop() {
-        guard let token = surfaceToken, let coordinator = activityCoordinator,
-              let profileID, let connectionID, let fetch else { return }
+        guard let token = surfaceToken, let profileID, let connectionID else { return }
         mountedTask?.cancel()
         mountedTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -432,34 +436,9 @@ final class HomeStatusPresentationOwner {
                       self.surfaceIsActive(token),
                       self.profileID == profileID,
                       self.connectionID == connectionID else { return }
-                await self.refresh(
-                    profileID: profileID,
-                    connectionID: connectionID,
-                    capabilityEnabled: true,
-                    token: token,
-                    coordinator: coordinator,
-                    fetch: fetch
-                )
+                await self.startRead()?.value
             }
         }
-    }
-
-    private func readCurrentSurface() async {
-        guard !suspended,
-              capabilityEnabled,
-              let profileID, let connectionID,
-              let token = surfaceToken,
-              let coordinator = activityCoordinator,
-              let fetch,
-              surfaceIsActive(token) else { return }
-        await refresh(
-            profileID: profileID,
-            connectionID: connectionID,
-            capabilityEnabled: capabilityEnabled,
-            token: token,
-            coordinator: coordinator,
-            fetch: fetch
-        )
     }
 
     private func surfaceIsActive(_ token: PresentationSurfaceToken) -> Bool {
@@ -474,14 +453,16 @@ final class HomeStatusPresentationOwner {
     private func stopWork(clearStatus: Bool) {
         mountedTask?.cancel()
         mountedTask = nil
-        activeReadTask?.cancel()
-        activeReadTask = nil
         invalidateRead(clearStatus: clearStatus)
     }
 
+    /// Invalidating a read cancels it: an invalidated read has no fence left to
+    /// publish under, so its request is no longer wanted.
     private func invalidateRead(clearStatus: Bool) {
         readGeneration &+= 1
         latestFence = nil
+        activeReadTask?.cancel()
+        activeReadTask = nil
         if clearStatus {
             status = nil
             isStatusUnavailable = false
