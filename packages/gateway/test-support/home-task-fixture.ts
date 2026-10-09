@@ -27,6 +27,11 @@ export async function fixture(providerVersion?: string, codemode = false, contex
   const cwd = join(root, "project");
   const tronHome = join(root, "tron");
   await mkdir(agentDir); await mkdir(cwd);
+  // jiti transpiles pi and managed extensions into os.tmpdir(). Keep that cache in this
+  // fixture's root so disposal removes it instead of leaking into the host's temp.
+  const temporary = join(root, "tmp");
+  await mkdir(temporary);
+  vi.stubEnv("TMPDIR", temporary);
   // Pacing 0 streams by microtask. A timer per chunk waits at least 1 ms in Node, so a
   // 64 KB tool call alone took about 5 s here.
   const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 0, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
