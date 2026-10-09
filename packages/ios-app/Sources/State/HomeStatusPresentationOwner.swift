@@ -111,6 +111,20 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     }
 }
 
+/// The chat route that a status claim and the Home header both decide for. A
+/// Home route presents the chapter Home opens (`openSessionId`, the sealed
+/// predecessor during a rollover). An ordinary chat presents the chapter it is
+/// (`sessionId`, the reserved successor during a rollover).
+struct HomeChatRouteKey: Equatable, Sendable {
+    let sessionID: String
+    let isHome: Bool
+
+    func matches(_ status: HomeStatusDTO) -> Bool {
+        if isHome { return status.openSessionId == sessionID }
+        return status.sessionId == sessionID
+    }
+}
+
 struct HomeStatusReadFence: Equatable, Sendable {
     let profileID: String
     let connectionID: String
@@ -148,11 +162,11 @@ final class HomeStatusPresentationOwner {
     /// invalidation, and mutation refresh. `connectionOnly` is a chat's probe for a
     /// status it could not yet know: it reads on connection admission and, once
     /// per claim, after a covering discarded its read. Its first publication decides
-    /// the claim. The claimed session promotes it to `mounted`; any other session
+    /// the claim by its `HomeChatRouteKey`: a match promotes it to `mounted`; a miss
     /// moves it to `released`, which keeps the published status but never reads again.
     enum Cadence: Equatable, Sendable {
         case mounted
-        case connectionOnly(sessionID: String)
+        case connectionOnly(HomeChatRouteKey)
         case released
     }
     /// Chosen at mount: a claim is a property of the surface that takes the status.
@@ -337,15 +351,13 @@ final class HomeStatusPresentationOwner {
         stopWork(clearStatus: true)
     }
 
-    /// A claim's first publication decides it. The claim compares the chapter a
-    /// route opens (`openSessionId`), not the reserved `sessionId`: a chat opened on
-    /// the sealed predecessor during `rollover-pending` must keep the status surface.
-    /// A matching chapter promotes the surface to the mounted cadence without an
-    /// extra read. Any other chapter releases it and stops every read, while the
-    /// published status stays for the dashboard.
+    /// A claim's first publication decides it, by the same `HomeChatRouteKey` the
+    /// chat's header uses. A matching route promotes the surface to the mounted
+    /// cadence without an extra read. Any other route releases it and stops every
+    /// read, while the published status stays for the dashboard.
     private func resolveClaim(with value: HomeStatusDTO) {
-        guard case .connectionOnly(let claimedSessionID) = cadence else { return }
-        if value.openSessionId == claimedSessionID {
+        guard case .connectionOnly(let claim) = cadence else { return }
+        if claim.matches(value) {
             cadence = .mounted
             startFallbackLoop()
         } else {

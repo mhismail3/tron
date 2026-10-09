@@ -471,7 +471,7 @@ struct SessionShellView: View {
                           model.mountHomeStatusForChat(
                               surfaceToken: token,
                               activityCoordinator: presentationActivityCoordinator,
-                              sessionID: route.sessionID
+                              route: HomeChatRouteKey(sessionID: route.sessionID, isHome: route.isHome)
                           ) else { return }
                     mountedHomeChatRouteID = route.id
                 },

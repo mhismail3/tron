@@ -4717,22 +4717,22 @@ final class AppModel {
     }
 
     /// A chat takes the status surface from the covered dashboard. A known status
-    /// decides by the chapter the chat opens (`openSessionId`) alone, so an ordinary
-    /// chat never reads. Before any status is known, the chat's probe decides by its
+    /// decides by the route's key alone, so a chat the status does not present
+    /// never reads. Before any status is known, the chat's probe decides by its
     /// first published read (see `HomeStatusPresentationOwner.Cadence`). Returns
     /// whether the chat now owns the status surface.
     func mountHomeStatusForChat(
         surfaceToken: PresentationSurfaceToken,
         activityCoordinator: PresentationActivityCoordinator,
-        sessionID: String
+        route: HomeChatRouteKey
     ) -> Bool {
         if let status = homeStatus.status {
-            guard status.openSessionId == sessionID else { return false }
+            guard route.matches(status) else { return false }
             mountHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator)
             return true
         }
         guard lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return false }
-        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(sessionID: sessionID))
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(route))
         return true
     }
 

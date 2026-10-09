@@ -25,6 +25,38 @@ struct HomeHeaderTests {
         #expect(HomePinnedRowPolicy.action(for: status) == .open(sessionID: "predecessor"))
     }
 
+    /// The Home claim and the Home header both ask `HomeChatRouteKey`. Each row is a
+    /// Gateway shape: normal (both keys name one chapter), the sealed predecessor
+    /// during `rollover-pending`, and no openable chapter.
+    @Test("a Home route follows the chapter Home opens, an ordinary chat the chapter it is")
+    func routeKeyDecidesClaimAndHeaderPerPhase() throws {
+        let normal = try HomeStatusDTO.decode(statusValue(
+            phase: "ready", live: true, sessionPresent: true, sessionId: "chapter", openSessionId: "chapter"
+        ))
+        let rollover = try HomeStatusDTO.decode(statusValue(
+            phase: "rollover-pending", live: false, sessionPresent: false, sessionId: "successor", openSessionId: "predecessor"
+        ))
+        let noOpenable = try HomeStatusDTO.decode(statusValue(
+            phase: "undesignated", live: false, sessionPresent: false, sessionId: "chapter", openSessionId: nil
+        ))
+        let table: [(status: HomeStatusDTO, route: HomeChatRouteKey, expected: Bool)] = [
+            (normal, HomeChatRouteKey(sessionID: "chapter", isHome: true), true),
+            (normal, HomeChatRouteKey(sessionID: "chapter", isHome: false), true),
+            (normal, HomeChatRouteKey(sessionID: "other", isHome: true), false),
+            (normal, HomeChatRouteKey(sessionID: "other", isHome: false), false),
+            (rollover, HomeChatRouteKey(sessionID: "predecessor", isHome: true), true),
+            (rollover, HomeChatRouteKey(sessionID: "predecessor", isHome: false), false),
+            (rollover, HomeChatRouteKey(sessionID: "successor", isHome: true), false),
+            (rollover, HomeChatRouteKey(sessionID: "successor", isHome: false), true),
+            (noOpenable, HomeChatRouteKey(sessionID: "chapter", isHome: true), false),
+            (noOpenable, HomeChatRouteKey(sessionID: "chapter", isHome: false), true),
+        ]
+        for row in table {
+            #expect(row.route.matches(row.status) == row.expected,
+                    "route \(row.route.sessionID) isHome=\(row.route.isHome) in phase \(row.status.phase)")
+        }
+    }
+
     private func statusValue(
         phase: String, live: Bool, sessionPresent: Bool, sessionId: String, openSessionId: String?
     ) -> JSONValue {
