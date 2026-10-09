@@ -14,9 +14,9 @@ export default defineConfig({
     // Durable filesystem/SQLite fixtures and SDK child processes share the
     // host. CPU-count fanout starves their owners; bound concurrency rather
     // than weakening assertions or extending the behavioral deadlines.
-    maxWorkers: Number.isInteger(verifyCpuShare) && verifyCpuShare > 0
-      ? verifyCpuShare
-      : Math.min(4, availableParallelism()),
+    // A verify slot's CPU share can only lower this bound, never widen it.
+    maxWorkers: Math.min(4, availableParallelism(),
+      Number.isInteger(verifyCpuShare) && verifyCpuShare > 0 ? verifyCpuShare : Infinity),
     testTimeout: 15_000,
     setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },

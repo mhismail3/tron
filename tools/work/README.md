@@ -328,7 +328,7 @@ configurations and Node test scripts.
    the host shares them. A check waiting for a slot prints
    `waiting for a heavy slot`, its wait counts in its wall time, and independent
    checks keep running. Heavy checks receive `VERIFY_CPU_SHARE` (CPUs divided by
-   the slot count); the Gateway's Vitest width follows it. Slots are released
+   the slot count); it can only lower the Gateway's Vitest width (at most 4). Slots are released
    when a check's process group is retired. Heavy flags and the slot count are
    execution choices, so they do not change the configuration hash.
    Checks sharing an optional `exclusiveGroup` name in `.github/work.json`
