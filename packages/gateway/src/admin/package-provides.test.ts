@@ -28,6 +28,9 @@ import { TrustService } from "./trust-service.js";
  * 4. A failed extension load or failed subagent discovery could fail the whole
  *    `packages.list` read, or silently empty the kinds that did resolve.
  * 5. An unbounded package could enlarge the response without a documented cap.
+ * 6. An inherited PI_SUBAGENT_CHILD (a delegated agent's shell) makes pi-subagents
+ *    behave as a child and register no parent tools, so the managed provider
+ *    would appear to provide nothing.
  */
 
 let previousEnvironment: NodeJS.ProcessEnv;
@@ -35,7 +38,9 @@ beforeEach(() => {
   previousEnvironment = {
     [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
     PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT,
+    PI_SUBAGENT_CHILD: process.env.PI_SUBAGENT_CHILD,
   };
+  delete process.env.PI_SUBAGENT_CHILD;
 });
 afterEach(() => {
   for (const [name, value] of Object.entries(previousEnvironment)) {
@@ -294,12 +299,15 @@ describe("package provides attribution", () => {
         packages: value.entries,
         resources: value.resources,
         managedSubagents: (() => { const provider = new ManagedSubagents(value.root); provider.install(); return provider; })(),
+        // Only discovery is under test here. The real extension load would also cold-load
+        // the whole pi-subagents package, which this case does not assert on.
+        loadExtensions: async () => ({ extensions: [], errors: [], warnings: [] }),
         loadDiscovery: async () => { throw new Error("jiti could not load pi-subagents"); },
       });
       const alpha = providesFor(entries, "package-alpha");
       expect(alpha.skills).toEqual(["alpha-skill"]);
       expect(alpha.subagents).toEqual([]);
-      expect(diagnostic).toContain("jiti could not load pi-subagents");
+      expect(diagnostic).toBe("subagent catalog unavailable: jiti could not load pi-subagents");
     } finally {
       await rm(value.root, { recursive: true, force: true });
     }
