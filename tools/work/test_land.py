@@ -1770,8 +1770,8 @@ class AcceptanceLandingTests(LandFixture):
 
     def test_the_journeys_run_against_the_head_that_is_pushed_after_a_base_move(self):
         before = git(self.repo, "rev-parse", "HEAD")
-        # app/** is the branch's own check path, so this move starts another round.
-        moved = self.base_commit("app/base.txt", "from base\n")
+        # lib/** shares no check with the branch: only the requested journeys force the round.
+        moved = self.base_commit("lib/new.txt", "from base\n")
         self.set_state(pendingViews=1, baseMoves={"1": moved})
         self.assertEqual(self.land(acceptance=PAIR), 0)
         head = git(self.repo, "rev-parse", "HEAD")

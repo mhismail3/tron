@@ -827,7 +827,9 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         # not affected (_moved_base_is_disjoint).
         tip = _fetch_base(root, remote, base)
         if not _is_ancestor(root, tip, head):
-            if not _moved_base_is_disjoint(root, config, receipt, tip):
+            # Acceptance journeys are cross-area end-to-end runs whose inputs no
+            # check glob describes, so a requested journey always reruns on the new base.
+            if journeys or not _moved_base_is_disjoint(root, config, receipt, tip):
                 print(f"moved:    {remote}/{base} moved during round {round_number}; updating again")
                 continue
             print(f"moved:    {remote}/{base} moved; incoming paths share no check with this branch; "

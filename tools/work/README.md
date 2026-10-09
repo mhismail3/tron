@@ -953,8 +953,8 @@ as does `acceptance` for the journeys it can run.
    head. Until a branch rule requires up-to-date branches, this check is the
    only guard, and a move in the second between it and the merge call is not
    caught.
-   - No round is needed, and the head is merged as verified, when all three
-     hold: no path in `git diff --name-only --no-renames <merge-base> <tip>`
+   - No round is needed, and the head is merged as verified, when no
+     `--acceptance` journey was requested and all three hold: no path in `git diff --name-only --no-renames <merge-base> <tip>`
      matches a non-always check in the receipt's `required` list (on the
      current `verify.checks`); `.github/work.json` is not among those paths;
      and `git merge-tree --write-tree <head> <tip>` exits 0. Then land prints
@@ -966,7 +966,8 @@ as does `acceptance` for the journeys it can run.
      already passed on the base. Always-run checks read the branch diff, which the
      move leaves alone. The merged tree itself is never checked; GitHub composes
      it from the base and the branch's diff. A check whose globs miss an input it
-     reads can let such a move merge unverified.
+     reads can let such a move merge unverified. Journeys are cross-area runs
+     whose inputs no glob describes, so any move reruns them in a new round.
 8. **Merge.** It squash-merges with `--match-head-commit`, so GitHub merges
    only the commit that was verified. The subject is the pull request title
    plus ` (#N)` unless the title already has it, and the body is `Closes #N` or
@@ -1281,7 +1282,9 @@ Project state and records every call. The live E2E covers GitHub itself.
     so does one touching `.github/work.json` or one that conflicts textually with
     a branch path that only always-run checks cover; that last round stops at the
     merge conflict. A move into paths no required check covers merges with one
-    round, and the `moved:` line names the verified head.
+    round, and the `moved:` line names the verified head. With `--acceptance`,
+    any base move starts another round: journeys are cross-area runs whose inputs
+    no glob describes.
 
 ## `cleanup`
 
