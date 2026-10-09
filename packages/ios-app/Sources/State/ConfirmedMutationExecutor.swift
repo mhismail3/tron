@@ -40,14 +40,12 @@ final class ConfirmedMutationExecutor {
         method: String,
         commandID: String,
         replayAdmission: @escaping @MainActor () -> Bool = { true },
-        replayMissingReceipt: Bool = true,
         send: () async throws -> Response
     ) async throws -> Response {
         let value = try await performValue(
             method: method,
             commandID: commandID,
-            replayAdmission: replayAdmission,
-            replayMissingReceipt: replayMissingReceipt
+            replayAdmission: replayAdmission
         ) {
             try JSONValue.encode(try await send())
         }
