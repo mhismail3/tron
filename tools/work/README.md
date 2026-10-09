@@ -447,7 +447,8 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 
 - **Gateway** is one check whose globs cover every build and test input:
   sources, dependencies, TypeScript and Vitest configuration, scripts, fixtures,
-  protocol fixtures and the pinned Node version. A lockfile change merged from
+  protocol fixtures, the pinned Node version, and the pi-subagents pin and
+  artifacts that its managed-subagents suites load. A lockfile change merged from
   the base branch therefore reruns it. It runs `npm ci`, the Pi SDK cohort check
   and the build, then `vitest related` when every changed Gateway path is
   existing source or test support. That related selection runs twice, once per

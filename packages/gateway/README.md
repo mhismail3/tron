@@ -3753,7 +3753,10 @@ during and after an invalid definition. An idle real wake is gated before bindin
 a separate factory-API steering probe compares displayed queued input with ordinary
 maintainer input while retaining hidden wake authority in evidence.
 Execution-specific identities, temporary roots, timestamps and elapsed intervals are
-normalized; launch/child/widget order and authored text remain meaningful. Transport
+normalized; pi-subagents' versioned installation root and bundled `[worker eval]`
+frame positions change on every fork bump and are normalized on both legs (the
+committed OLD baseline is normalized at comparison). Launch/child/widget order and
+authored text remain meaningful. Transport
 revision counters are not presentation values. Finite label/delivery allowances and
 exact OLD/NEW upstream value pairs in `test-support/subagent-parity-approved.json`
 cover only the approved dependency changes (including notification guidance,
