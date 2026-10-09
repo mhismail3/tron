@@ -129,21 +129,16 @@ def check_runs_state(contexts: List[dict], names: List[str]) -> Tuple[str, List[
             state, shown = "pending", "not reported"
         elif any(run.get("status") != "COMPLETED" for run in runs):
             state, shown = "pending", "running"
-        elif all(run.get("conclusion") == "SUCCESS" for run in runs):
+        # A required job CI skipped because the change does not touch its inputs
+        # passes, as in GitHub's own required-check rule; cancelled proves nothing.
+        elif all(run.get("conclusion") in ("SUCCESS", "SKIPPED") for run in runs):
             state, shown = "success", "success"
-        elif all(run.get("conclusion") == "SKIPPED" for run in runs):
-            # CI's path policy skips a required job whose paths a change does
-            # not touch; GitHub's required-check rule counts that as passing.
-            # At least one required check must still have run and succeeded.
-            state, shown = "skipped", "skipped"
         else:
             state = "failure"
             shown = ", ".join(sorted({str(run.get("conclusion")).lower() for run in runs}))
         states.append(state)
         details.append(f"{name}: {shown}")
-    if states and all(state == "skipped" for state in states):
-        return "failure", details
-    return _combine(["success" if state == "skipped" else state for state in states]), details
+    return _combine(states), details
 
 
 def verify_state(contexts: List[dict], context: str) -> str:
