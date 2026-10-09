@@ -6,7 +6,7 @@ Home does today: its designation record, its curated runtime, its memory, and th
 request seam that sends each activation the memory's view instead of the
 canonical transcript. Home delegates finite project work through `delegate` into
 ordinary worker sessions with explicit immutable reports, shared task controls
-and durable spend status. Results wait in Home's durable inbox for the next user message, with one advisory push at most. Home's own client surface is a later slice. Ordinary sessions
+and durable spend status. Results wait in Home's durable inbox for the next user message, with one advisory push at most. Home has an iOS surface and the terminal client; both drive the `home.*` RPCs documented here. Ordinary sessions
 are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
@@ -178,8 +178,23 @@ assistant crossing is interrupted with `chapter-limit`, never `user-abort`,
 regardless of completion/abort settlement ordering. Receipt retirement owns
 retirement of that volatile reason; no parallel cancellation-reason map exists.
 
-Home memory remains one bounded projection keyed by stable `homeId`, not by a
-physical chapter. Its canonical source reads active, sealed, and materializing
+Home memory is one projection keyed by stable `homeId`, not by a physical
+chapter. Its size is bounded per record and per cursor, but not per history:
+
+- Bounded: each projected user, assistant or event text (`recordCapChars`, 128 Ki
+  characters by default), each tool result (`capChars`), the context view
+  (`viewBytes`), and the raw source, which is read one line at a time under a
+  16 MiB line bound.
+- Grows: the catalog keeps every projected message of the history in memory
+  (`messages`, `nodes`, `entryIndex`), so live heap grows with Home's message
+  count. Paging the catalog is a follow-up, not current behavior.
+- Measured (`home-source.scale.test.ts`, production caps, 2,000 messages in four
+  chapters): about 194 MB of live heap while the memory is open, about 97 KB per
+  message. That is far above the average projected text (about 1.25 KB); what
+  else the catalog retains per message is not yet diagnosed. Cold ingestion ran
+  at about 70–80 ms per message (1,000 messages in 69 s). The 20,000-message
+  case is not measured; a linear extrapolation would be about 25 minutes to
+  ingest and about 2 GB of live heap, and must not be taken as a result. Its canonical source reads active, sealed, and materializing
 chapters in ledger order and retains each physical session ID as provenance.
 Delta ingestion streams and caps each entry before retaining a chapter projection;
 it never concatenates raw chapter histories. Per-chapter cursors continue linear
@@ -201,11 +216,13 @@ no migration or automatic rebuild. Ordinary session formats are unchanged.
 
 `home-source.e2e.test.ts` retains `test-results/home-memory/continuity.json` for
 cross-chapter replay, restart, navigation and frozen-cut proof.
-`home-source.scale.test.ts` retains `test-results/home-memory/heap.json` for four
-chapters containing at least 64 MiB of canonical payload, with post-GC live heap
-samples at ingestion cuts and a retained heap sample. Regenerate with the named
-file and `vitest.scale.config.ts`; the heap report does not claim an allocation
-peak or power-loss proof.
+`home-source.scale.test.ts` retains two reports under `test-results/home-memory/`,
+regenerated with `vitest.scale.config.ts`. `heap.json` covers four chapters with
+at least 64 MiB of canonical payload at a reduced record cap, proving the raw
+source's streamed bound. `heap-production.json` (run with `-t production`, about
+three minutes) covers 2,000 messages at production caps. Both reports are
+post-GC live heap samples at ingestion cuts and a retained heap sample; neither
+claims an allocation peak or power-loss proof.
 
 A reserved chapter contributes nothing until canonical evidence exists. If an SDK
 operation fails after staging canonical entries, RuntimeSlot retains the existing
@@ -322,7 +339,14 @@ in the name and record must agree. Older unreleased `<taskId>.json` layouts and
 records missing timestamps are preserved and refused; no migration is performed.
 Enumeration streams bounded directory entries and validates every file: no
 second task catalog, growing task snapshot, total task-count cap, or silent
-pruning. Never-initialized absence is an empty read, not setup or a diagnostic
+pruning. Full-namespace validation (listing, recovery) retains one task ID per
+record, never record bodies, to refuse a duplicate suffix. By-ID operations
+(`read`, `put`, `update`, `updateWake`) list names only, read the target record,
+and check its authority references against one read of `authorization.json`; their
+file reads do not grow with task count. A namespace scan reads authority once,
+and a record that cites authority published after that read is refreshed once.
+Authority saves may only append or mark records, so a save that removes a scope
+or grant that any task may cite is refused. Never-initialized absence is an empty read, not setup or a diagnostic
 refusal; missing-after-initialization still blocks. A listing that later refuses
 is not a publishable complete projection.
 
@@ -516,8 +540,12 @@ renews, revokes or re-stamps authority.
 
 Cold task recovery consumes the secure store stream one record at a time, settles and publishes that record before advancing, and retains no backlog array. Inbox recovery and settlement likewise release each task before the next; the store remains the only task catalog.
 
-Task recovery is an optional capability, not a Gateway startup dependency. The
-Dispatcher owns one per-process recovery result; all task surfaces join it. A
+Task recovery is an optional capability, not a Gateway startup dependency. It
+runs after the listener is serving, following attention recovery
+(`RuntimeRegistry.recoverHomeTasks`), so readiness never waits on a task
+abandoned by a prior process. Until it settles `taskRecovery` is `not-started`,
+which refuses task work exactly like a refusal. The Dispatcher owns one
+per-process recovery result; all task surfaces join it. A
 store/workspace refusal is retained with its typed reason until the next Gateway
 start (no in-process repair/retry), emits `home.task.store-refused` once, and
 leaves ordinary sessions functional. `home.status.taskRecovery` exposes
@@ -738,7 +766,7 @@ escape hatch, without rewriting an already immutable terminal task.
 `home.reconfirmPermissions { commandId }` is an explicit maintainer mutation;
 `/home reconfirm-permissions` is its terminal spelling. It is not a model tool,
 startup refresh, grant renewal or recovery replay. It fails closed if the physical
-namespace identity changes during the command. No iOS task surface is added here.
+namespace identity changes during the command. The iOS task sheet calls it too.
 
 ### Maintainer authorization RPC and terminal controls
 
@@ -1042,8 +1070,11 @@ callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 ## The terminal client
 
 `tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the terminal
-client, and today it is the only surface that can designate Home, configure its
-memory and recover it. With no explicit `--session`, it first asks for the
+client. The iOS Home surface designates, configures and pauses Home's memory,
+reads status, and runs the task controls through the same `home.*` RPCs. iOS
+chat sends `session.prompt` to the physical session it shows, and never calls
+`home.prompt` or `home.open`; only the terminal client prompts the logical route.
+With no explicit `--session`, it first asks for the
 logical Home route; while Home is enabled, ordinary input goes through
 `home.prompt` even as physical chapters change. A reserved successor is not
 opened just to attach the terminal: its first runtime is created only when a
@@ -1416,7 +1447,6 @@ src/sessions/home-provider-runtime.e2e.test.ts`.
 
 ## Not built yet
 
-Home has no iOS surface of its own and no
-scheduled or background work. It is one conversation whose turns run on its
+Home has no scheduled or background work. It is one conversation whose turns run on its
 memory. Those are separately approved slices of the same epic, and none of them
 changes the rules above without updating this document.
