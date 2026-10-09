@@ -59,6 +59,8 @@ class MacOSScopeTests(unittest.TestCase):
             ("scripts/ci_macos_scope.py", ALL),
             ("config/ci-toolchain.env", ALL),
             (".node-version", ALL),
+            # install-ci-tools.sh runs this digest in every hosted macOS job.
+            ("scripts/hash-npm-runtime.py", ALL),
         ]:
             with self.subTest(path=path):
                 base = self.git("rev-parse", "HEAD")
@@ -81,6 +83,44 @@ class MacOSScopeTests(unittest.TestCase):
         self.git("mv", "packages/ios-app/source.swift", "docs/README-ios.md")
         self.git("commit", "-qm", "rename")
         self.assertEqual(self.select(base)[0], {"ios", "pi-sdk-e2e"})
+
+    def test_dispatcher_and_mac_helpers_select_only_the_mac_job(self):
+        # The mac job runs `scripts/tron mac generate`, test-mac-reinstall.py,
+        # test-native-host.py, test-personal-info-guard.py and bundle-gateway.sh,
+        # which read these helpers. No other macOS job consumes them.
+        for path in ("scripts/tron", "scripts/tron_mac_reinstall.py", "scripts/test-mac-reinstall.py",
+                     "scripts/verify-mac-install.sh", "scripts/test-native-host.py",
+                     "scripts/validate-native-host.py", "scripts/gateway-payload-deploy.mjs",
+                     "scripts/gateway-install-inputs.mjs",
+                     "scripts/personal-info-guard.sh", "scripts/test-personal-info-guard.py",
+                     "scripts/install-hooks.sh"):
+            with self.subTest(path=path):
+                base = self.git("rev-parse", "HEAD")
+                self.change(path)
+                self.assertEqual(self.select(base)[0], {"mac"})
+
+    def test_mixed_dispatcher_and_mac_helper_change_stays_mac_only(self):
+        base = self.git("rev-parse", "HEAD")
+        for path in ("scripts/tron", "scripts/tron_mac_reinstall.py", "scripts/test-mac-reinstall.py",
+                     "packages/mac-app/docs/development.md"):
+            self.change(path)
+        self.assertEqual(self.select(base)[0], {"mac"})
+
+    def test_unknown_path_beside_dispatcher_still_runs_every_job(self):
+        base = self.git("rev-parse", "HEAD")
+        self.change("scripts/tron")
+        self.change("scripts/new-helper.sh")
+        self.assertEqual(self.select(base)[0], ALL)
+
+    def test_helpers_without_a_hosted_macos_consumer_select_no_job(self):
+        # Linux policy/gateway-tooling checks and local-only verify checks own these.
+        for path in ("scripts/tron-dev", "scripts/tron-dev-state.mjs",
+                     "scripts/gateway-payload-deploy.test.mjs", "scripts/ci_verify_scope.py",
+                     "scripts/tron-profile-ios", "scripts/ios_verify_test_selection.py"):
+            with self.subTest(path=path):
+                base = self.git("rev-parse", "HEAD")
+                self.change(path)
+                self.assertEqual(self.select(base)[0], set())
 
     def test_workflow_selection_step_executes_scoping_dispatch_and_failure_fallback(self):
         # Execute the owning workflow's actual shell, not a source-text assertion.

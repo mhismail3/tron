@@ -476,9 +476,13 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   (no merge-base required). Recognized docs, work-tooling and push-relay-only
   changes skip macOS. Gateway inputs run the Gateway job, the hosted iOS/Gateway
   boundary and Mac packaging; iOS inputs run iOS and the boundary; Mac inputs run
-  Mac. Shared workflow, protocol and toolchain inputs, unknown paths, empty diffs
-  and unavailable Git inputs run all four. Deleted/renamed paths retain both
-  owners. Manual dispatch runs all four, and a failed classifier or missing output
+  Mac. Shared workflow, protocol and toolchain inputs (including the npm digest
+  helper `hash-npm-runtime.py`), unknown paths, empty diffs and unavailable Git
+  inputs run all four. Helpers select only the macOS job whose hosted steps run
+  or read them: the `scripts/tron` dispatcher (`mac generate`), reinstall and
+  native-host helpers, and the Gateway payload inputs select Mac; helpers that
+  only Linux checks or local verify run select none. Deleted/renamed paths retain
+  both owners. Manual dispatch runs all four, and a failed classifier or missing output
   never skips coverage. An explicit `!cancelled()` status check lets selected or
   missing-output jobs run even if an earlier job fails; an explicit `false` scope
   still skips, and workflow cancellation stops advisory work. `test_ci_scope.py`
