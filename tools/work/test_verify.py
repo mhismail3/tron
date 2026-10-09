@@ -121,8 +121,9 @@ class EnvironmentAndSelectorTests(unittest.TestCase):
 
     def test_gateway_test_entry_drops_inherited_home_paths_and_refuses_selectors(self):
         # Failure modes: the --import preflight that node --test entry points load
-        # keeps an inherited live-home path (a test then reaches it); drops PATH or
-        # an unrelated variable; or accepts a selector that retargets the home.
+        # keeps an inherited live-home path (a test then reaches it), including one
+        # embedded in a JSON value; drops PATH or an unrelated variable; or accepts a
+        # selector that retargets the home.
         with tempfile.TemporaryDirectory() as scratch:
             tmp = Path(scratch)
             root = Path(__file__).resolve().parents[2]
@@ -138,12 +139,14 @@ class EnvironmentAndSelectorTests(unittest.TestCase):
                 "PI_CODING_AGENT_DIR": str(live_home / "agent"),
                 "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
                 "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
+                "JITI_ALIAS": json.dumps({"@earendil-works/pi-coding-agent":
+                                          str(live_home / "gateway" / "payloads" / "stable" / "app" / "index.js")}),
                 "GATEWAY_TEST_UNRELATED": "kept",
             }
             result = subprocess.run(entry, cwd=gateway, env=inherited, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             seen = json.loads(result.stdout)
-            for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT"):
+            for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT", "JITI_ALIAS"):
                 self.assertNotIn(name, seen)
             self.assertEqual(seen["GATEWAY_TEST_UNRELATED"], "kept")
             self.assertEqual(seen["PATH"], inherited["PATH"])
@@ -320,7 +323,8 @@ class CheckSetTests(VerifyFixture):
     def test_agent_shell_live_home_paths_do_not_block_or_reach_checks(self):
         # Failure modes: an agent shell's live-home paths refuse verify before any
         # check runs; a check inherits them; a check writes into the live home
-        # through them. The fake live home is HOME/.tron, the policy's live home.
+        # through them; a JSON value that only embeds a live-home path (JITI_ALIAS)
+        # survives the filter. The fake live home is HOME/.tron, the policy's live home.
         home = self.tmp / "agent-home"
         live_home = home / ".tron"
         (live_home / "sessions").mkdir(parents=True)
@@ -331,7 +335,8 @@ class CheckSetTests(VerifyFixture):
             if "PI_SESSION_FILE" in os.environ:
                 with open(os.environ["PI_SESSION_FILE"], "a") as session:
                     session.write("probe\\n")
-            inherited = [name for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT")
+            inherited = [name for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT",
+                                           "JITI_ALIAS")
                          if name in os.environ]
             sys.exit(f"inherited {inherited}" if inherited else 0)
             """))
@@ -343,6 +348,8 @@ class CheckSetTests(VerifyFixture):
             "PI_CODING_AGENT_DIR": str(live_home / "agent"),
             "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
             "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
+            "JITI_ALIAS": json.dumps({"@earendil-works/pi-coding-agent":
+                                      str(live_home / "gateway" / "payloads" / "stable" / "app" / "index.js")}),
         }
         with mock.patch.dict(os.environ, agent_shell):
             receipt = self.verify()
