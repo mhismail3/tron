@@ -171,7 +171,7 @@ def worker_count(jobs: Optional[int]) -> int:
 
 
 @contextlib.contextmanager
-def _run_check(root: Path, prelude: str, command: str, log_path: Path):
+def _run_check(root: Path, prelude: str, command: str, log_path: Path, environment: Dict[str, str]):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with log_path.open("w") as log:
@@ -179,7 +179,8 @@ def _run_check(root: Path, prelude: str, command: str, log_path: Path):
         log.flush()
         process = subprocess.Popen(
             ["bash", "-c", f"set -eo pipefail\n{prelude}\n{command}"],
-            cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+            cwd=root, env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             yield process, started
@@ -207,7 +208,7 @@ class RunningCheck:
     group: Optional[str]
 
 
-def _run_checks(root: Path, pending: list, prelude: str, jobs: int) -> Dict[str, dict]:
+def _run_checks(root: Path, pending: list, prelude: str, jobs: int, environment: Dict[str, str]) -> Dict[str, dict]:
     results: Dict[str, dict] = {}
     running: List[RunningCheck] = []
     # The invocation owns every started check. No threads or background queue
@@ -230,7 +231,7 @@ def _run_checks(root: Path, pending: list, prelude: str, jobs: int) -> Dict[str,
                     continue
                 owner = invocation.enter_context(contextlib.ExitStack())
                 print(f"  {check.name}: running", flush=True)
-                process, started = owner.enter_context(_run_check(root, prelude, command, log_path))
+                process, started = owner.enter_context(_run_check(root, prelude, command, log_path, environment))
                 running.append(RunningCheck(check, process, started, owner, group))
                 pending.remove(task)
             for item in running[:]:
@@ -407,7 +408,10 @@ def branch_base(root: Path, config: dict) -> str:
         raise VerifyError(str(error)) from None
 
 
-def _preflight_tron_home_environment() -> None:
+def _check_environment() -> Dict[str, str]:
+    """The inherited environment every check runs with: live-home paths dropped
+    (the policy lists them), selectors refused. Checks never see the caller's
+    live-home pointers, so a Stable agent shell can run them."""
     policy = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
     try:
         result = subprocess.run(["node", str(policy)], capture_output=True, text=True)
@@ -416,11 +420,13 @@ def _preflight_tron_home_environment() -> None:
     if result.returncode != 0:
         message = result.stderr.strip() or "inherited environment resolves into a live Tron home"
         raise VerifyError(message)
+    dropped = set(result.stdout.split())
+    return {name: value for name, value in os.environ.items() if name not in dropped}
 
 
 def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
            jobs: Optional[int] = None) -> dict:
-    _preflight_tron_home_environment()
+    check_environment = _check_environment()
     workers = worker_count(jobs)
     settings, claim = config["verify"], config["claim"]
     remote = claim["remote"]
@@ -465,7 +471,7 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
         log_path = work / "logs" / head / f"{check.name}.log"
         pending.append((check, command, log_path, check.group_for(matched[check.name])))
 
-    executed = _run_checks(root, pending, settings.get("prelude", ""), workers)
+    executed = _run_checks(root, pending, settings.get("prelude", ""), workers, check_environment)
     for check in required:
         if check.name in executed:
             results[check.name] = {**executed[check.name],

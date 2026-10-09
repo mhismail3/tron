@@ -59,15 +59,20 @@ not a log stream. No stream is shipped off the machine.
 
 ## Test and verification environment preflight
 
-The shared `packages/gateway/src/tron-home-environment-policy.mjs` preflight rejects an
-inherited environment that resolves into a Tron home. It has two invocation owners with
-distinct messages on the invoking process's stderr: Vitest (during `setupFiles`, before test
-modules execute) and Node test entry points (before tests start) import
-`test-support/tron-home-environment-preflight.mjs`, which throws `Gateway tests refuse
-inherited Tron-home environment values`; `scripts/tron work verify` runs the policy directly,
-which prints `Tron-home environment preflight failed` and is surfaced as a verification error
-before checks are selected or carried. This is a command-line guard, not a Gateway runtime log event, and
-is not persisted in `gateway.jsonl` or `gateway-stderr.log`.
+The shared `packages/gateway/src/tron-home-environment-policy.mjs` owns the rule for an
+inherited environment that resolves into a Tron home (`~/.tron`, `~/.tron-dev`, or the selected
+home). A path-valued variable that points there (for example `PI_CODING_AGENT_DIR`,
+`PI_SESSION_FILE`, `TRON_GATEWAY_PAYLOAD_ROOT`) is removed, because the owner then derives its
+default. The selectors `TRON_DATA_DIR` and `TRON_HOME_NAME` are refused, because removing one
+would fall back to `~/.tron` or retarget another home. `PATH` is never changed. Two invocation
+owners apply the rule: Vitest (`setupFiles`) and Node test entry points (`node --import`)
+import `test-support/tron-home-environment-preflight.mjs`, which removes the path variables from
+`process.env` before test modules execute and throws `Gateway tests refuse inherited Tron-home
+selectors` for a selector; `scripts/tron work verify` runs the policy script, which lists the
+variables each check environment drops, and prints `Tron-home environment preflight failed` for a
+selector as a verification error before checks are selected or carried. This is a command-line
+guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` or
+`gateway-stderr.log`.
 
 Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-sdk-scripts`;
 reproduce the verification signal with `TRON_HOME_NAME=.tron-dev scripts/tron work verify`.
