@@ -74,7 +74,6 @@ enum ChatEntranceGrowthPolicy {
 }
 
 enum ChatIncrementalContentGrowthPolicy {
-    static let duration = ChatScrollCoordinator.liveGrowthAnimationDuration
     /// A large accumulated network backlog installs atomically instead of
     /// interpolating an unbounded row. Ordinary line and chip growth remains
     /// well below this limit.
@@ -182,7 +181,7 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
             return
         }
         if animates {
-            let animation = Animation.smooth(duration: ChatIncrementalContentGrowthPolicy.duration)
+            let animation = ChatMotion.streamingResize
             isAnimatingGrowth = true
             withAnimation(animation, completionCriteria: .logicallyComplete) {
                 // The growth marker travels with the height write itself:
@@ -385,10 +384,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
             case .pending:
                 break
             case .admitted:
-                let animation = ChatContentTransitionPolicy.revealAnimation(
-                    for: kind,
-                    reduceMotion: reduceMotion
-                )
+                let animation = ChatMotion.transcriptReveal(reduceMotion: reduceMotion)
                 var transaction = Transaction()
                 transaction.admitsChatEntranceAnimation = true
                 withTransaction(transaction) {
@@ -461,9 +457,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
             reportSettlementOnce()
             return
         }
-        let animation = Animation.easeOut(
-            duration: reduceMotion ? 0.12 : ChatContentTransitionPolicy.promptEntranceDuration
-        )
+        let animation = ChatMotion.promptArrive(reduceMotion: reduceMotion)
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             var transaction = Transaction(animation: animation)
             transaction.admitsChatEntranceAnimation = true
@@ -528,10 +522,7 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
         .onAppear {
             onEntranceConsumed()
             guard animatesEntrance, !revealed else { return }
-            var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
-                for: .queuedPrompt,
-                reduceMotion: reduceMotion
-            ))
+            var transaction = Transaction(animation: ChatMotion.transcriptReveal(reduceMotion: reduceMotion))
             transaction.admitsChatEntranceAnimation = true
             withTransaction(transaction) { revealed = true }
         }
