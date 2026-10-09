@@ -72,7 +72,7 @@ import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryPage, HomeMemoryEvidencePage } from "../protocol/types.js";
-import type { GatewayConfig } from "../config.js";
+import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
@@ -338,7 +338,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     registry: undefined!, service: undefined!, receipts: undefined!,
     openChatProvider: () => faux,
   };
-  if (options.realUploads) f.uploads = new UploadStore(tronHome, 25 * 1_048_576);
+  if (options.realUploads) f.uploads = new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES);
   openRegistry(f);
   await f.registry.initialize();
   return f;
