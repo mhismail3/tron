@@ -114,7 +114,8 @@ describe("KnowledgeObservationService", () => {
     let release!: (value: string) => void;
     const blocked = new Promise<string>(resolve => { release = resolve; });
     const infer = vi.fn(async (input) => input.range.invocationIds?.includes("invocation-a") ? blocked : output.replace("planned for Friday", "failed turn"));
-    const { store, observer } = await fixture({ infer });
+    const work = new GatewayWorkRegistry();
+    const { store, observer } = await fixture({ infer }, work);
     const first = { type: "message", id: "turn-a", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "first turn" } };
     const second = { type: "message", id: "turn-b", timestamp: "2026-01-01T00:00:02Z", message: { role: "user", content: "failed turn" } };
     observer.admit({ sessionId: "session-1", entries: [first], outcome: "completed", invocationId: "invocation-a" });
@@ -127,7 +128,10 @@ describe("KnowledgeObservationService", () => {
     expect(infer.mock.calls[1]?.[0].outcome).toBe("failed");
     expect(infer.mock.calls[1]?.[0].range.invocationIds).toEqual(["invocation-c"]);
     await waitFor(async () => (await store.status()).coverageCount === 2, "two observation coverage records");
+    // Coverage is written before each inference, so the second publication may
+    // still be running here. Settle it before the fixture root is removed.
     observer.dispose();
+    await work.waitUntilSettled();
     await vi.advanceTimersByTimeAsync(1_000);
   });
 
@@ -240,15 +244,15 @@ describe("KnowledgeObservationService", () => {
     let release!: (value: boolean) => void;
     const blocked = new Promise<boolean>(resolve => { release = resolve; });
     const infer = vi.fn(async () => output);
-    const { store, observer } = await fixture({ infer });
+    const work = new GatewayWorkRegistry();
+    const { store, observer } = await fixture({ infer }, work);
     const scopeRead = vi.spyOn(store, "scopeExcluded").mockReturnValueOnce(blocked);
     observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "dispose-scope-read" });
     await waitFor(() => scopeRead.mock.calls.length === 1, "the scope read");
     const coverageWrites = vi.spyOn(store, "setCoverage");
     observer.dispose();
     release(false);
-    await Promise.resolve();
-    await Promise.resolve();
+    await work.waitUntilSettled();
     expect(coverageWrites).not.toHaveBeenCalled();
     expect(infer).not.toHaveBeenCalled();
   });
@@ -418,8 +422,9 @@ describe("KnowledgeObservationService", () => {
 
   it("does not replay a committed second chunk when a later snapshot includes all chunks", async () => {
     vi.useFakeTimers();
+    const work = new GatewayWorkRegistry();
     const infer = vi.fn(async (input) => output.replace("planned for Friday", input.sourceText.includes("entry-3") ? "the date is still Friday" : "planned for Friday"));
-    const { store, observer } = await fixture({ infer });
+    const { store, observer } = await fixture({ infer }, work);
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1]], outcome: "completed" });
     await waitFor(() => infer.mock.calls.length === 1, "the first observation inference");
     const third = { type: "message", id: "entry-3", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "The date is still Friday." } } as const;
@@ -434,7 +439,10 @@ describe("KnowledgeObservationService", () => {
     await waitFor(() => infer.mock.calls.length === 3, "the third observation inference");
     expect(infer.mock.calls[2]?.[0].sourceText).toContain("The date moved to Monday");
     expect(infer.mock.calls[2]?.[0].sourceText).not.toContain("The date is still Friday");
+    // The third cut's publication can still be running after its inference
+    // returns. Settle admitted work before the fixture root is removed.
     observer.dispose();
+    await work.waitUntilSettled();
     await vi.advanceTimersByTimeAsync(25);
   });
 

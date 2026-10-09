@@ -183,6 +183,15 @@ function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
   return (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
 }
 
+/** A fixture root that is removed when its test finishes. `onTestFinished` runs on pass, failure
+ * and timeout, so the directory is owned by the test that created it, including roots created
+ * inside shared fixture helpers. */
+async function temporaryRoot(prefix: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  return root;
+}
+
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
@@ -211,7 +220,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     heapSample?: () => { usedBytes: number; limitBytes: number };
     capacityShedRecord?: (record: CapacityShedRecord) => void;
   } = {}) {
-    const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
+    const root = await temporaryRoot(`tron-cold-acquire-${label}-`);
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const sessionDirectory = options.nested
@@ -316,7 +325,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   /** An admitted provider root with the private mode and canonical path the
    * slot's artifact policy requires; the caller removes `delegated.root`. */
   async function delegatedFixtureRoot(label: string): Promise<{ root: string; delegatedRoot: string }> {
-    const root = await realpath(await mkdtemp(join(tmpdir(), `tron-delegated-${label}-`)));
+    const root = await realpath(await temporaryRoot(`tron-delegated-${label}-`));
     const delegatedRoot = join(root, "delegated");
     await mkdir(delegatedRoot, { recursive: true, mode: 0o700 });
     return { root, delegatedRoot };
@@ -660,7 +669,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("latches foreground-open and foreground-close completion dispositions at canonical admission", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-agent-observed-completion-"));
+    const root = await temporaryRoot("tron-agent-observed-completion-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -1000,7 +1009,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // revisioned summary together. Idle eviction runs on a 60s interval, so the
     // private trigger and the retained summary maps are the only way to reach
     // that transition without a real-time sleep.
-    const root = await mkdtemp(join(tmpdir(), "tron-live-empty-catalog-"));
+    const root = await temporaryRoot("tron-live-empty-catalog-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -1099,7 +1108,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("fails closed when a canonical file collides with a live-only slot", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-live-empty-collision-"));
+    const root = await temporaryRoot("tron-live-empty-collision-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -1144,7 +1153,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("publishes the first prompt as the live session title before the agent settles", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-live-session-title-"));
+    const root = await temporaryRoot("tron-live-session-title-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -1251,7 +1260,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // Failure mode: an event schedules the 20 ms coalesced snapshot, then an
     // immediate publication (run settlement, prompt admission) broadcasts that
     // state and the stale timer later broadcasts the identical state again.
-    const root = await mkdtemp(join(tmpdir(), "tron-duplicate-snapshot-"));
+    const root = await temporaryRoot("tron-duplicate-snapshot-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -1312,7 +1321,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-revision-"));
+    const root = await temporaryRoot("tron-catalog-summary-revision-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -1360,7 +1369,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("bounds recursive catalog directories and streamed entries before materialization", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-discovery-bounds-"));
+    const root = await temporaryRoot("tron-catalog-discovery-bounds-");
     const agentDir = join(root, "agent");
     const catalog = join(agentDir, "sessions");
     await Promise.all([
@@ -1447,7 +1456,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("owns nested SDK session directories within its bounded directory budget", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-direct-sdk-listing-"));
+    const root = await temporaryRoot("tron-catalog-direct-sdk-listing-");
     const agentDir = join(root, "agent");
     const catalog = join(agentDir, "sessions");
     const child = join(catalog, "child");
@@ -1584,11 +1593,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
     if (mode === "changed") {
       const open = SessionManager.open;
-      vi.spyOn(SessionManager, "open").mockImplementation((...args) => {
+      const reopen = vi.spyOn(SessionManager, "open").mockImplementation((...args) => {
         const manager = open(...args);
         appendFileSync(fixture.sessionFile, "\n");
         return manager;
       });
+      // Later tests open sessions through the same SessionManager; the spy must not outlive this case.
+      onTestFinished(() => reopen.mockRestore());
     }
     // The canonical appends above are this test's own writes: settle the owner so
     // the recovery reads its current row instead of racing the folder watcher.
@@ -1612,7 +1623,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("bounds discovered session count and bytes before normalization", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-materialization-bounds-"));
+    const root = await temporaryRoot("tron-catalog-materialization-bounds-");
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "sessions"), { recursive: true });
     const now = new Date("2026-01-01T00:00:00Z");
@@ -1663,7 +1674,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("caps canonical session path normalization concurrency", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-normalization-concurrency-"));
+    const root = await temporaryRoot("tron-catalog-normalization-concurrency-");
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "sessions"), { recursive: true });
     const now = new Date("2026-01-01T00:00:00Z");
@@ -2051,7 +2062,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   // and recovery must wait for that cut instead of failing startup with a
   // retryable busy (review probe-automation.mjs).
   it.each([false, true])("admits an existing-session automation while the first cut runs (durable index: %s)", async (withDocument) => {
-    const root = await mkdtemp(join(tmpdir(), "tron-automation-startup-"));
+    const root = await temporaryRoot("tron-automation-startup-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const sessionDirectory = join(agentDir, "sessions", "workspace");
@@ -2154,7 +2165,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("deduplicates same-session starts and starts distinct sessions concurrently", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-concurrent-cold-starts-"));
+    const root = await temporaryRoot("tron-concurrent-cold-starts-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const sessionDirectory = join(agentDir, "sessions", "workspace");
@@ -2801,7 +2812,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("admits scaled short headers within the aggregate validation budget", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-short-header-budget-"));
+    const root = await temporaryRoot("tron-catalog-short-header-budget-");
     const agentDir = join(root, "agent");
     const directory = join(agentDir, "sessions", "workspace");
     const cwd = join(root, "workspace");
@@ -2875,7 +2886,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("keeps a child mutation-protected when its parent ID is duplicated", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-duplicate-parent-"));
+    const root = await temporaryRoot("tron-catalog-duplicate-parent-");
     const agentDir = join(root, "agent");
     const directory = join(agentDir, "sessions", "workspace");
     const duplicateDirectory = join(agentDir, "sessions", "duplicate-workspace");
@@ -2920,7 +2931,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("omits a reserved child with a contradictory parent header without making it mutable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-contradictory-header-"));
+    const root = await temporaryRoot("tron-catalog-contradictory-header-");
     const agentDir = join(root, "agent");
     const directory = join(agentDir, "sessions", "workspace");
     const cwd = join(root, "workspace");
@@ -2968,7 +2979,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("keeps a reserved child delegated after its parent is deleted and ignores later title metadata", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-parent-deleted-"));
+    const root = await temporaryRoot("tron-catalog-parent-deleted-");
     const agentDir = join(root, "agent");
     const directory = join(agentDir, "sessions", "workspace");
     const cwd = join(root, "workspace");
@@ -3016,7 +3027,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("classifies a 1,541-file catalog using positive topology only", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-topology-scale-"));
+    const root = await temporaryRoot("tron-catalog-topology-scale-");
     const agentDir = join(root, "agent");
     const directory = join(agentDir, "sessions", "workspace");
     const cwd = join(root, "workspace");
@@ -3095,7 +3106,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("reserves a deterministic aggregate header-read budget across concurrent readers", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-strict-header-budget-"));
+    const root = await temporaryRoot("tron-catalog-strict-header-budget-");
     const agentDir = join(root, "agent");
     const directory = join(agentDir, "sessions", "workspace");
     const cwd = join(root, "workspace");
@@ -3142,7 +3153,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
     it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-time-precision-"));
+    const root = await temporaryRoot("tron-catalog-time-precision-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const sessionDirectory = join(agentDir, "sessions", "workspace");
@@ -3216,7 +3227,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
     it("matches a full scan after create, rename, fork and delete in the catalog index", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-index-mutations-"));
+    const root = await temporaryRoot("tron-catalog-index-mutations-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const sessions = join(agentDir, "sessions");
@@ -3328,7 +3339,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("fails closed when multiple canonical files claim one session ID", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-duplicate-id-"));
+    const root = await temporaryRoot("tron-catalog-duplicate-id-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -3379,7 +3390,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("keeps 128 parallel parent runs discoverable through child churn and repeated client reentry", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-scale-qualification-"));
+    const root = await temporaryRoot("tron-scale-qualification-");
     const agentDir = join(root, "agent");
     const projects = Array.from({ length: 8 }, (_, index) => join(root, `project-${index}`));
     await Promise.all(projects.map(cwd => mkdir(cwd, { recursive: true })));
@@ -3452,7 +3463,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   }, 60_000);
 
   it("runs distinct sessions concurrently and keeps a run alive after its client disconnects", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-runtime-integration-"));
+    const root = await temporaryRoot("tron-runtime-integration-");
     const agentDir = join(root, "agent");
     const tronHome = join(root, "tron");
     const firstCwd = join(root, "first");
@@ -3541,7 +3552,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("lets accepted follow-up queue work execute naturally during administrative drain", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-restart-queue-drain-"));
+    const root = await temporaryRoot("tron-restart-queue-drain-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -3586,7 +3597,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("settles foreground completion without a second derived token", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-completion-capacity-"));
+    const root = await temporaryRoot("tron-completion-capacity-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -3624,7 +3635,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("includes runtime creation admitted before administrative drain", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-restart-create-drain-"));
+    const root = await temporaryRoot("tron-restart-create-drain-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -6341,7 +6352,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("applies the per-model prompt image profile once before canonical history", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-prompt-image-bound-"));
+    const root = await temporaryRoot("tron-prompt-image-bound-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -6382,7 +6393,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-multiline-prompt-receipt-"));
+    const root = await temporaryRoot("tron-multiline-prompt-receipt-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -6419,7 +6430,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("keeps the Gateway alive when extension timers emit oversized or JSON-dense widgets", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-rpc-oversized-widget-"));
+    const root = await temporaryRoot("tron-rpc-oversized-widget-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -6447,7 +6458,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("projects retained component widgets through the RPC-bound host without enabling TUI mode", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-rpc-factory-dormant-"));
+    const root = await temporaryRoot("tron-rpc-factory-dormant-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -6493,7 +6504,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("keeps ask-style semantic selection on the RPC interaction path", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-rpc-semantic-ask-"));
+    const root = await temporaryRoot("tron-rpc-semantic-ask-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -6565,7 +6576,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("rotates and retires semantic epochs on direct, command, and trust reload paths", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-semantic-epoch-reload-"));
+    const root = await temporaryRoot("tron-semantic-epoch-reload-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -6605,7 +6616,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("orders context-edit settlement callbacks before terminal ownership and feeds the next provider request", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-context-edit-settlement-"));
+    const root = await temporaryRoot("tron-context-edit-settlement-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(join(cwd, ".pi", "extensions"), { recursive: true })]);
@@ -6672,7 +6683,7 @@ export default function (pi) {
   });
 
   it("serializes chained extension continuation ownership through a transient attention failure", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-settlement-overlap-"));
+    const root = await temporaryRoot("tron-settlement-overlap-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([
@@ -6789,7 +6800,7 @@ export default function (pi) {
   });
 
   it("recovers ordered continuation completions after the attention head repeatedly fails and restart", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-settlement-crash-durable-"));
+    const root = await temporaryRoot("tron-settlement-crash-durable-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([
@@ -6888,7 +6899,7 @@ export default function (pi) {
   });
 
   it("measures real prompt snapshot burst without dropping ordered lifecycle frames", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-snapshot-burst-"));
+    const root = await temporaryRoot("tron-snapshot-burst-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const sessionDirectory = join(agentDir, "sessions", "workspace");
@@ -6948,7 +6959,7 @@ export default function (pi) {
   });
 
   it("keeps a large streamed write visible through snapshot recovery and canonical handoff", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-large-streamed-write-"));
+    const root = await temporaryRoot("tron-large-streamed-write-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -7021,7 +7032,7 @@ export default function (pi) {
   });
 
   it("coalesces streaming progress frames while keeping the event stream contiguous and complete", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-streaming-coalesce-"));
+    const root = await temporaryRoot("tron-streaming-coalesce-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -7128,7 +7139,7 @@ export default function (pi) {
   // session must pay for none of it. The subscriber record is the slot's whole
   // audience fact, the same one `publishSnapshot` reads.
   it("projects no streaming progress for a session with no subscriber and resumes it on subscribe", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-streaming-unwatched-"));
+    const root = await temporaryRoot("tron-streaming-unwatched-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -7190,7 +7201,7 @@ export default function (pi) {
   it.each(["message_start", "message_end"] as const)(
     "keeps one presentation identity through an async %s extension hook",
     async (hook) => {
-      const root = await mkdtemp(join(tmpdir(), `tron-streaming-${hook}-`));
+      const root = await temporaryRoot(`tron-streaming-${hook}-`);
       const agentDir = join(root, "agent");
       const cwd = join(root, "workspace");
       const extensionDir = join(cwd, ".pi", "extensions");
@@ -7265,7 +7276,7 @@ export default function (pi) {
   );
 
   it("keeps async input preflight alive and settles accepted handled input exactly once", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-input-handled-preflight-"));
+    const root = await temporaryRoot("tron-input-handled-preflight-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -7305,7 +7316,7 @@ export default function (pi) {
   });
 
   it("permits the exact delayed prompt accepted before the drain cutoff", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-drain-delayed-preflight-"));
+    const root = await temporaryRoot("tron-drain-delayed-preflight-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -7342,7 +7353,7 @@ export default function (pi) {
   });
 
   it("cuts off extension auto-continuations during administrative drain", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-drain-continuation-cutoff-"));
+    const root = await temporaryRoot("tron-drain-continuation-cutoff-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -7384,7 +7395,7 @@ export default function (pi) {
   });
 
   it("uses runtime preflight as the sole prompt-admission outcome", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-prompt-preflight-"));
+    const root = await temporaryRoot("tron-prompt-preflight-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -7641,7 +7652,7 @@ export default function (pi) {
 
   it.each(["successful append", "pre-staging append failure"])(
     "retires completion observations after queued successful operations settle (%s)", async (appendOutcome) => {
-    const root = await mkdtemp(join(tmpdir(), "tron-completion-observation-retirement-"));
+    const root = await temporaryRoot("tron-completion-observation-retirement-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -7762,7 +7773,7 @@ export default function (pi) {
   });
 
   it("retires a steered operation observation when a successful queued follow-up takes ownership", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-steering-follow-up-observation-retirement-"));
+    const root = await temporaryRoot("tron-steering-follow-up-observation-retirement-");
     onTestFinished(() => rm(root, { recursive: true, force: true }));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -7878,7 +7889,7 @@ export default function (pi) {
   });
 
   it("settles a reply before the queued follow-up runs so steering remains admissible", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-follow-up-steering-settlement-"));
+    const root = await temporaryRoot("tron-follow-up-steering-settlement-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -7967,7 +7978,7 @@ export default function (pi) {
   });
 
   it("orders a prompt behind a genuinely pending attention commit", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-attention-admission-order-"));
+    const root = await temporaryRoot("tron-attention-admission-order-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -8057,7 +8068,7 @@ export default function (pi) {
   });
 
   it("binds duplicate consumed steering to each exact queue operation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-steering-ownership-"));
+    const root = await temporaryRoot("tron-steering-ownership-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -8180,7 +8191,7 @@ export default function (pi) {
   });
 
   it("reclassifies queued intent when Pi becomes idle inside an async input hook", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-queue-disposition-race-"));
+    const root = await temporaryRoot("tron-queue-disposition-race-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -8897,7 +8908,7 @@ export default function (pi) {
   });
 
   it("clears branch-summary operation state when tree navigation rejects or is cancelled", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-navigation-cleanup-"));
+    const root = await temporaryRoot("tron-navigation-cleanup-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -8941,7 +8952,7 @@ export default function (pi) {
   });
 
   it("persists fast foreground skill and prompt bindings without operation failures", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-skill-binding-receipt-"));
+    const root = await temporaryRoot("tron-skill-binding-receipt-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([
@@ -9005,7 +9016,7 @@ export default function (pi) {
   });
 
   it("records interruption intent before fast SDK settlement", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-abort-invocation-"));
+    const root = await temporaryRoot("tron-abort-invocation-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9117,7 +9128,7 @@ export default function (pi) {
   });
 
   it("projects and atomically manages multiple queued messages by stable identity", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-queue-management-"));
+    const root = await temporaryRoot("tron-queue-management-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const skillDir = join(agentDir, "skills", "review");
@@ -9277,7 +9288,7 @@ export default function (pi) {
   });
 
   it("queues one manual compaction behind an active run and keeps its receipt pending", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-queued-compaction-"));
+    const root = await temporaryRoot("tron-queued-compaction-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9367,7 +9378,7 @@ export default function (pi) {
   });
 
   it("reasserts exact marker ownership when cleanup races terminal completion stamping", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-terminal-marker-race-"));
+    const root = await temporaryRoot("tron-terminal-marker-race-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9428,7 +9439,7 @@ export default function (pi) {
   });
 
   it("settles a failed completion owner so the next prompt can proceed", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-attention-settlement-failure-"));
+    const root = await temporaryRoot("tron-attention-settlement-failure-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9475,7 +9486,7 @@ export default function (pi) {
   });
 
   it("cleans up queued manual compaction state when canonical compaction fails", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-queued-compaction-failure-"));
+    const root = await temporaryRoot("tron-queued-compaction-failure-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9525,7 +9536,7 @@ export default function (pi) {
   });
 
   it("keeps queued compaction owned while transient marker removal retries", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-compaction-marker-failure-"));
+    const root = await temporaryRoot("tron-compaction-marker-failure-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9583,7 +9594,7 @@ export default function (pi) {
   });
 
   it("admits only one direct manual compaction and retains the claim through completion", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-"));
+    const root = await temporaryRoot("tron-direct-compaction-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9633,7 +9644,7 @@ export default function (pi) {
   });
 
   it("publishes one authoritative compaction snapshot including a hook-appended suffix", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-compaction-delta-"));
+    const root = await temporaryRoot("tron-compaction-delta-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9700,7 +9711,7 @@ export default function (pi) {
   });
 
   it("restores a pre-prompt operation in the authoritative compaction completion frame", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-preprompt-compaction-frame-"));
+    const root = await temporaryRoot("tron-preprompt-compaction-frame-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9753,7 +9764,7 @@ export default function (pi) {
   });
 
   it("cleans up a failed direct manual compaction claim", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-failure-"));
+    const root = await temporaryRoot("tron-direct-compaction-failure-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9785,7 +9796,7 @@ export default function (pi) {
   });
 
   it("defers queued compaction when a newer prompt enters preflight before handoff", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-compaction-handoff-race-"));
+    const root = await temporaryRoot("tron-compaction-handoff-race-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9862,7 +9873,7 @@ export default function (pi) {
   });
 
   it("cancels pending compaction and drains its runtime during registry shutdown", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-queued-compaction-shutdown-"));
+    const root = await temporaryRoot("tron-queued-compaction-shutdown-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9918,7 +9929,7 @@ export default function (pi) {
   });
 
   it("aborts and drains an in-flight direct compaction during registry shutdown", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-shutdown-"));
+    const root = await temporaryRoot("tron-direct-compaction-shutdown-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -9965,7 +9976,7 @@ export default function (pi) {
   });
 
   it("closes global slot admission before draining an already-entered creation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-registry-admission-shutdown-"));
+    const root = await temporaryRoot("tron-registry-admission-shutdown-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -10013,7 +10024,7 @@ export default function (pi) {
   });
 
   it("preserves the admitted run marker when global shutdown forces interruption", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-forced-shutdown-marker-"));
+    const root = await temporaryRoot("tron-forced-shutdown-marker-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -10042,7 +10053,7 @@ export default function (pi) {
   });
 
   it("does not tear down blob ownership before every captured slot drains", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-registry-blob-drain-order-"));
+    const root = await temporaryRoot("tron-registry-blob-drain-order-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -10248,7 +10259,7 @@ export default function (pi) {
 
   it("aborts the exact foreground bash tree even when the client reports a stale bash kind", async () => {
     if (process.platform === "win32") return;
-    const root = await mkdtemp(join(tmpdir(), "tron-foreground-bash-abort-"));
+    const root = await temporaryRoot("tron-foreground-bash-abort-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -10444,7 +10455,7 @@ export default function (pi) {
   }, 30_000);
 
   it("projects stable ordinals for parallel tools from start through completion", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
+    const root = await temporaryRoot("tron-tool-order-integration-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -10616,7 +10627,7 @@ export default function (pi) {
   });
 
   it("projects codemode nested calls live and after a cold reload", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-nested-tools-e2e-"));
+    const root = await temporaryRoot("tron-nested-tools-e2e-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -10716,7 +10727,7 @@ export default function (pi) {
     // Failure modes: the Gateway drops calls Pi kept (it projected only the
     // first 32 of Pi's 256), so a long script's call list is cut short; or a
     // long list of calls with large arguments makes every live frame unbounded.
-    const root = await mkdtemp(join(tmpdir(), "tron-nested-call-list-e2e-"));
+    const root = await temporaryRoot("tron-nested-call-list-e2e-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -10789,7 +10800,7 @@ export default function (pi) {
   });
 
   it("returns Pi structured bash output through nested codemode calls", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-output-e2e-"));
+    const root = await temporaryRoot("tron-codemode-bash-output-e2e-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -10862,7 +10873,7 @@ export default function (pi) {
 
   it("aborts a nested codemode bash process tree", async () => {
     if (process.platform === "win32") return;
-    const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-abort-e2e-"));
+    const root = await temporaryRoot("tron-codemode-bash-abort-e2e-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -10920,7 +10931,7 @@ export default function (pi) {
   });
 
   it("connects Pi MCP stdio and streamable HTTP fixtures and exposes resources through composed built-ins", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-fixture-e2e-"));
+    const root = await temporaryRoot("tron-pi-mcp-fixture-e2e-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -11051,7 +11062,7 @@ export default function (pi) {
   });
 
   it("loads project MCP config only after TrustService authorizes the workspace", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-project-trust-"));
+    const root = await temporaryRoot("tron-pi-mcp-project-trust-");
     const agentDir = join(root, "agent");
     const sessionDir = join(agentDir, "sessions", "workspace");
     const cwd = join(root, "workspace");
@@ -11138,7 +11149,7 @@ export default function (pi) {
   });
 
   it("stops sleeping and tool-looping codemode scripts and drains active codemode work", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-pi-codemode-stop-"));
+    const root = await temporaryRoot("tron-pi-codemode-stop-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -11215,7 +11226,7 @@ export default function (pi) {
   });
 
   it("keeps one tool display segment across tool-only agent continuations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-continuation-"));
+    const root = await temporaryRoot("tron-tool-segment-continuation-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -11272,7 +11283,7 @@ export default function (pi) {
   });
 
   it("rotates tool segment authority across a visible assistant barrier before new tool progress", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-visible-barrier-"));
+    const root = await temporaryRoot("tron-tool-segment-visible-barrier-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -11353,7 +11364,7 @@ export default function (pi) {
   });
 
   it("rotates tool segment authority at a visible custom-message barrier", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-custom-barrier-"));
+    const root = await temporaryRoot("tron-tool-segment-custom-barrier-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -11429,7 +11440,7 @@ export default function (pi) {
   });
 
   it("permits one delayed agent start owned by an accepted extension command during drain", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-drain-extension-command-start-"));
+    const root = await temporaryRoot("tron-drain-extension-command-start-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -11472,7 +11483,7 @@ export default function (pi) {
   });
 
   it("retires a command-triggered foreground owner when the turn has no successful assistant completion", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-failed-command-turn-drain-"));
+    const root = await temporaryRoot("tron-failed-command-turn-drain-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -11680,7 +11691,7 @@ export default function (pi) {
   });
 
   it("admits exact extension commands while streaming without hiding the foreground run", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-streaming-extension-command-"));
+    const root = await temporaryRoot("tron-streaming-extension-command-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -11830,7 +11841,7 @@ export default function (pi) {
   });
 
   it("persists extension notifications as centered non-context rows with exact command provenance", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-extension-command-notification-"));
+    const root = await temporaryRoot("tron-extension-command-notification-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -11916,7 +11927,7 @@ export default function (pi) {
   });
 
   it("records a caught extension-command handler error as a failed canonical invocation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-extension-command-failure-"));
+    const root = await temporaryRoot("tron-extension-command-failure-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -12091,7 +12102,7 @@ export default function (pi) {
   });
 
   it("scopes extension shutdown to the owning runtime slot", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-extension-scoped-shutdown-"));
+    const root = await temporaryRoot("tron-extension-scoped-shutdown-");
     const agentDir = join(root, "agent");
     const closingCwd = join(root, "closing");
     const otherCwd = join(root, "other");
@@ -12170,7 +12181,7 @@ export default function (pi) {
   });
 
   it("isolates same-named providers registered by concurrent project extensions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-provider-isolation-"));
+    const root = await temporaryRoot("tron-provider-isolation-");
     const agentDir = join(root, "agent");
     const firstCwd = join(root, "first");
     const secondCwd = join(root, "second");
@@ -12205,7 +12216,7 @@ export default function (pi) {
   });
 
   it("projects the canonical latest cache hit rate used by the terminal footer", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-cache-rate-integration-"));
+    const root = await temporaryRoot("tron-cache-rate-integration-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
@@ -12246,7 +12257,7 @@ export default function (pi) {
   });
 
   it("projects readable metadata for project resources", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-resources-integration-"));
+    const root = await temporaryRoot("tron-resources-integration-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const pi = join(cwd, ".pi");
@@ -12337,7 +12348,7 @@ export default function (pi) {
   /** A real runtime slot whose project, user and settings-listed package
    * resources exercise every distribution branch, with pi-subagents absent. */
   async function distributionFixture(): Promise<any> {
-    const root = await mkdtemp(join(tmpdir(), "tron-resource-distribution-"));
+    const root = await temporaryRoot("tron-resource-distribution-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const pi = join(cwd, ".pi");
@@ -12414,7 +12425,7 @@ export default function (pi) {
   });
 
   it("persists the first invocation receipt with the first user message across runtime teardown", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-first-message-receipt-"));
+    const root = await temporaryRoot("tron-first-message-receipt-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -12483,7 +12494,7 @@ export default function (pi) {
   });
 
   it("rekeys the owning slot when a completed session is forked", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-runtime-fork-"));
+    const root = await temporaryRoot("tron-runtime-fork-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -12828,7 +12839,7 @@ export default function (pi) {
   });
 
   it("keeps overlapping completed and queued failed observation cuts tied to their invocations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-runtime-knowledge-overlap-"));
+    const root = await temporaryRoot("tron-runtime-knowledge-overlap-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
