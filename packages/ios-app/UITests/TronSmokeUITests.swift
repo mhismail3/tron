@@ -611,6 +611,25 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
+    // Failure mode: a Home chat opened before any status is known never shows its
+    // header, because its claimed read is never published or is never promoted.
+    @MainActor
+    func testHomeChatOpenedBeforeStatusShowsHeaderAfterClaim() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-chat-before-status"]
+        app.launch()
+        let count = app.staticTexts["fixture.home-status-count"]
+        XCTAssertTrue(waitForLabel(count, containing: "home-status-count:1", timeout: 10), "The dashboard's first status read must be held")
+        let homeChat = app.buttons["session-row-home-shell-fixture:home-session"]
+        XCTAssertTrue(homeChat.waitForExistence(timeout: 10), app.debugDescription)
+        homeChat.tap()
+        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["home-header-state"].waitForExistence(timeout: 10), "The claimed status read did not show the Home header")
+        XCTAssertTrue(waitForLabel(count, containing: "home-status-count:2", timeout: 5))
+        app.terminate()
+    }
+
     @MainActor
     func testBlockedHomeRowDoesNotClaimReadiness() {
         continueAfterFailure = false
