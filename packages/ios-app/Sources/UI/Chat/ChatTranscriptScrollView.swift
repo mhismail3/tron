@@ -40,10 +40,28 @@ enum ChatTranscriptLayoutConstants {
     static let tailAffordanceHeight: CGFloat = 12
 }
 
+/// One queued card with every queue-relative fact captured from the projection
+/// that built it. The replacement host can keep rendering a departed card as
+/// its overlay after a newer projection has shortened or emptied the queue, so
+/// the row must never re-read position or neighbours from the installed queue
+/// (#624: a stale index trapped after Stop redelivered two steers).
 struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
     let id: String
     let index: Int
+    let total: Int
     let message: SessionSnapshot.QueuedMessage
+    let canMoveEarlier: Bool
+    let canMoveLater: Bool
+
+    init(id: String, index: Int, queue: [SessionSnapshot.QueuedMessage]) {
+        let message = queue[index]
+        self.id = id
+        self.index = index
+        self.total = queue.count
+        self.message = message
+        canMoveEarlier = index > 0 && queue[index - 1].behavior == message.behavior
+        canMoveLater = index + 1 < queue.count && queue[index + 1].behavior == message.behavior
+    }
 }
 
 /// One bounded physical row namespace for canonical, live/runtime, local
@@ -116,7 +134,7 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
         let entry = ChatQueuedMessageRenderEntry(
             id: physicalID,
             index: index,
-            message: message
+            queue: installed.queuedMessages
         )
         return ChatPhysicalTranscriptRow(
             id: physicalID,
@@ -1111,8 +1129,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         isReplacementOverlay: Bool
     ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
-        let messages = installed.queuedMessages
-        let index = entry.index
         let message = entry.message
         let aliasID = installed.queuePresentationIDByOperationID[message.id]
         let suppressed = canonicalSubmissionIDs.contains(renderedID)
@@ -1143,15 +1159,14 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             ) {
                 QueuedMessageRow(
                     message: message,
-                    position: index + 1,
-                    total: messages.count,
+                    position: entry.index + 1,
+                    total: entry.total,
                     managementAvailability: availability,
                     isMutating: !mutatingQueuedMessageIDs.isEmpty,
                     onEdit: { onEditQueuedMessage(message.id) },
                     onClear: onClearQueuedMessages,
-                    canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
-                    canMoveLater: index + 1 < messages.count
-                        && messages[index + 1].behavior == message.behavior,
+                    canMoveEarlier: entry.canMoveEarlier,
+                    canMoveLater: entry.canMoveLater,
                     onMove: { onMoveQueuedMessage(message.id, $0) },
                     waitsForCompaction: installed.tag.layoutIdentity.phase == .compacting
                 )

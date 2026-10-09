@@ -1206,6 +1206,19 @@ class RequiredCheckTests(LandFixture):
         self.assertEqual(self.merges(), [])
         self.assertEqual(self.issue()["state"], "OPEN")
 
+    def test_scope_skipped_required_check_is_satisfied(self):
+        # CI skips a required job whose inputs the change does not touch.
+        self.set_state(checks={"policy": "SKIPPED"})
+        self.land()
+        self.assertEqual(len(self.merges()), 1)
+
+    def test_cancelled_required_check_stops_without_merging(self):
+        self.set_state(checks={"policy": "CANCELLED"})
+        with self.assertRaises(land.LandError) as raised:
+            self.land()
+        self.assertIn("policy: cancelled", str(raised.exception))
+        self.assertEqual(self.merges(), [])
+
     def test_pending_or_missing_required_check_times_out_without_merging(self):
         for checks, pending in (({"policy": "SUCCESS"}, 10 ** 6), ({"other": "SUCCESS"}, 0)):
             with self.subTest(checks=checks):
