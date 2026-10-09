@@ -466,12 +466,14 @@ struct SessionShellView: View {
                     guard presentedSession?.id == route.id else { return }
                     mountedSessionRouteToken = token
                     guard let profileID = model.profiles.selected?.id,
-                          let status = model.homeStatus.status,
-                          route.isHome || (status.sessionId == route.sessionID
-                              && route.id == "\(profileID):\(route.sessionID)"),
-                          let presentationActivityCoordinator else { return }
+                          route.isHome || route.id == "\(profileID):\(route.sessionID)",
+                          let presentationActivityCoordinator,
+                          model.mountHomeStatusForChat(
+                              surfaceToken: token,
+                              activityCoordinator: presentationActivityCoordinator,
+                              sessionID: route.sessionID
+                          ) else { return }
                     mountedHomeChatRouteID = route.id
-                    model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentationActivityCoordinator)
                 },
                 onRetire: { token in
                     if mountedSessionRouteToken == token { mountedSessionRouteToken = nil }
@@ -1128,7 +1130,7 @@ struct SessionShellView: View {
         } label: {
             HomePinnedRow(
                 status: model.homeStatus.status,
-                isDesignating: model.homeMutations.isRunning,
+                isDesignating: model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? ""),
                 hasUnresolvedCommand: model.homeMutations.ownsUnresolvedCommand(
                     profileID: model.profiles.selected?.id ?? ""
                 ),
@@ -1142,7 +1144,7 @@ struct SessionShellView: View {
                 hasUnresolvedCommand: model.profiles.selected.map {
                     model.homeMutations.ownsUnresolvedCommand(profileID: $0.id)
                 } ?? false
-            ) == .unavailable || model.homeMutations.isRunning
+            ) == .unavailable || model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? "")
         )
         .accessibilityIdentifier("home-pinned-row")
         .listRowBackground(Color.clear)

@@ -2038,8 +2038,10 @@ final class AppModel {
         setGatewayEnabled(false, profile: profile)
     }
 
-    /// Disposable per-Gateway projections retire with the Gateway itself.
+    /// Disposable per-Gateway projections retire with the Gateway itself, and so
+    /// does the profile's pending Home receipt: its Gateway can no longer be checked.
     private func forgetProfileCaches(_ profileID: String) async {
+        homeMutations.forgetProfile(profileID)
         await composerDrafts.removeProfile(profileID).value
         await cache.remove(profileID: profileID)
         await knowledgeLibraryCache.remove(profileID: profileID)
@@ -4711,9 +4713,37 @@ final class AppModel {
     /// The visible Home owner registers only authenticated focused-Gateway
     /// status reads. This is disposable presentation work, never a mutation.
     func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .mounted)
+    }
+
+    /// A chat takes the status surface from the covered dashboard. A known status
+    /// decides by the chapter the chat opens (`openSessionId`) alone, so an ordinary
+    /// chat never reads. Before any status is known, the chat's probe decides by its
+    /// first published read (see `HomeStatusPresentationOwner.Cadence`). Returns
+    /// whether the chat now owns the status surface.
+    func mountHomeStatusForChat(
+        surfaceToken: PresentationSurfaceToken,
+        activityCoordinator: PresentationActivityCoordinator,
+        sessionID: String
+    ) -> Bool {
+        if let status = homeStatus.status {
+            guard status.openSessionId == sessionID else { return false }
+            mountHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator)
+            return true
+        }
+        guard lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return false }
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(sessionID: sessionID))
+        return true
+    }
+
+    private func installHomeStatus(
+        surfaceToken: PresentationSurfaceToken,
+        activityCoordinator: PresentationActivityCoordinator,
+        cadence: HomeStatusPresentationOwner.Cadence
+    ) {
         // The read belongs to the surface, not to a selected profile: a dashboard
         // mounted before pairing reads Home as soon as pairing configures it.
-        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator) { [weak self] fence in
+        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator, cadence: cadence) { [weak self] fence in
             guard let self,
                   self.lifecycle.selectedProfileID == fence.profileID,
                   let admission = self.lifecycle.admission,
@@ -4843,14 +4873,30 @@ final class AppModel {
     }
 
     func checkHomeControlCompletion(authority: HomeMutationCoordinator.Authority) async throws {
-        _ = try await homeMutations.checkCompletion(authority: authority)
+        _ = try await refreshingHomeStatusIfNotApplied {
+            try await homeMutations.checkCompletion(authority: authority)
+        }
         await homeStatus.refreshMounted()
+    }
+
+    /// A receipt that proves a Home change was not applied leaves the projection
+    /// the user is looking at stale; reload it before reporting that outcome.
+    private func refreshingHomeStatusIfNotApplied<Value>(
+        _ operation: () async throws -> Value
+    ) async throws -> Value {
+        do { return try await operation() }
+        catch let failure as GatewayFailure where failure.code == HomeMutationCoordinator.notAppliedCode {
+            await homeStatus.refreshMounted()
+            throw failure
+        }
     }
 
     /// Designates Home through the mutation receipt owner, then requires a fresh
     /// mounted `home.status` projection before exposing its session route.
     func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatusDTO {
-        let designation = try await homeMutations.designate(authority: authority)
+        let designation = try await refreshingHomeStatusIfNotApplied {
+            try await homeMutations.designate(authority: authority)
+        }
         await homeStatus.refreshMounted()
         guard let status = homeStatus.status,
               status.enabled,

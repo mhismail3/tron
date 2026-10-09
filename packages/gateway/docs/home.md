@@ -337,16 +337,17 @@ The fixed creation filename survives every replacement; task-ID lookup scans nam
 only and refuses multiple matching suffixes before reading a record. Creation time
 in the name and record must agree. Older unreleased `<taskId>.json` layouts and
 records missing timestamps are preserved and refused; no migration is performed.
-Enumeration streams bounded directory entries and validates every file: no
-second task catalog, growing task snapshot, total task-count cap, or silent
-pruning. Full-namespace validation (listing, recovery) retains one task ID per
-record, never record bodies, to refuse a duplicate suffix. By-ID operations
-(`read`, `put`, `update`, `updateWake`) list names only, read the target record,
-and check its authority references against one read of `authorization.json`; their
-file reads do not grow with task count. A namespace scan reads authority once,
-and a record that cites authority published after that read is refreshed once.
-Authority saves may only append or mark records, so a save that removes a scope
-or grant that any task may cite is refused. Never-initialized absence is an empty read, not setup or a diagnostic
+Enumeration streams bounded directory entries in one pass, reads each file at
+its parsed name, and refuses a second name for any task ID anywhere in the
+directory; it validates every file: no second task catalog, growing task
+snapshot, total task-count cap, or silent pruning. By-ID operations (`read`,
+`put`, `update`, `updateWake`) list names only, read the target record, and check
+its authority references against one read of `authorization.json`; their file
+reads do not grow with task count. A namespace scan reads authority once, and a
+record that cites authority published after that read is refreshed once. Authority
+saves may only append or mark records, so a save that removes a scope or grant
+that any task may cite is refused. Never-initialized absence is an empty read, not
+setup or a diagnostic
 refusal; missing-after-initialization still blocks. A listing that later refuses
 is not a publishable complete projection.
 
@@ -361,7 +362,8 @@ advance the nested delivery event through the store's terminal-only adapter.
 Ordinary restart reloads scopes and unused grants unchanged; consumed grants
 stay consumed. HomeTaskStore derives authority from the physical task directory's
 `dev`, `ino` and birthtime, not a persisted document or a startup-minted epoch.
-Restart and atomic file replacement retain that identity. A restore, copy or
+Restore and page share that epoch read; a directory without birthtime is refused
+by both. Restart and atomic file replacement retain that identity. A restore, copy or
 migration of the Tron home requires reconfirming Home task permissions: directory
 recreation changes the epoch, and old scopes/grants are preserved but refused
 with `scope-reconfirmation-required`. An unreadable identity fails closed.

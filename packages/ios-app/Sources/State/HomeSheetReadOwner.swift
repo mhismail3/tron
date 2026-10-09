@@ -139,8 +139,11 @@ enum HomeSheetContent {
 /// makes replacement/retirement invalidate all outcomes, not just successes.
 @MainActor @Observable
 final class HomeSheetReadOwner {
+    /// `requestID` is the caller's request. `loadID` is this single `load` call,
+    /// so a rerun of the same request is never equal to the run it replaces.
     struct Read: Equatable {
-        let id: UUID
+        let requestID: UUID
+        let loadID: UUID
         let identity: HomeSheetReadIdentity
     }
     enum State {
@@ -169,7 +172,7 @@ final class HomeSheetReadOwner {
         if preserveInstalledFrame, case .loaded(let previous, let content) = state, previous.identity == identity {
             installed = content
         } else { installed = nil }
-        let read = Read(id: requestID, identity: identity)
+        let read = Read(requestID: requestID, loadID: UUID(), identity: identity)
         state = .loading(read, installed)
         let outcome: Result<HomeSheetContent, Error>
         do { outcome = .success(try await fetch()) }

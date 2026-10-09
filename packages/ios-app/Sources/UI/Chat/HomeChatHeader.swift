@@ -31,7 +31,7 @@ struct HomeChatHeader: View {
     }
 
     private var memoryLabel: String {
-        if model.homeMutations.hasUnresolvedCommand { return "Home change unresolved · Check completion" }
+        if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) { return "Home change unresolved · Check completion" }
         if status.memory.paused == true { return "Memory paused · New responses are blocked" }
         if let blocked = status.memory.blocked { return "Memory blocked · \(blocked)" }
         if !status.memory.configured { return "Choose a memory model before sending" }
@@ -64,7 +64,7 @@ struct HomeChatHeader: View {
                 Button("Stop response", systemImage: "stop.fill", action: onStop)
                     .disabled(!canStop)
                 Group {
-                if model.homeMutations.hasUnresolvedCommand {
+                if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                     Button("Check completion", systemImage: "arrow.clockwise") { checkCompletion() }
                 } else {
                     if status.memory.paused == true || status.memory.blocked != nil {
@@ -77,7 +77,7 @@ struct HomeChatHeader: View {
                     Button("Disable Home", systemImage: "house.slash", role: .destructive) { perform(.disable) }
                 }
                 }
-                .disabled(model.homeMutations.isRunning)
+                .disabled(model.homeMutations.isRunning(profileID: profileID))
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(TronTypography.headline)
@@ -98,7 +98,7 @@ struct HomeChatHeader: View {
         #if HOSTED_TEST
         .onAppear { hostedActionProbe?.pause = { perform(.pauseMemory) } }
         #endif
-        .onChange(of: model.homeMutations.hasUnresolvedCommand) { _, unresolved in
+        .onChange(of: model.homeMutations.ownsUnresolvedCommand(profileID: profileID)) { _, unresolved in
             if unresolved { failure = "Completion is unresolved. Check completion on the original Gateway; do not repeat the change." }
         }
     }

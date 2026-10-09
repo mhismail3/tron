@@ -107,6 +107,48 @@ final class HomeSheetTests: XCTestCase {
         owner.retire()
     }
 
+    /// A rerun of the same request (same identity, new `.task` lifetime) must not
+    /// let its cancelled predecessor retire the load that replaced it while it is in flight.
+    func testCancelledRerunOfSameRequestCannotRetireNewerLoad() async throws {
+        let coordinator = PresentationActivityCoordinator()
+        let token = PresentationSurfaceToken(id: "memory", generation: UUID())
+        coordinator.register(token, parent: nil)
+        let identity = HomeSheetReadIdentity(profileID: "p", connectionID: 1, lifecycleGeneration: 1, surfaceToken: token)
+        let owner = HomeSheetReadOwner()
+        let requestID = UUID()
+        let firstStarted = expectation(description: "first run started")
+        let rerunStarted = expectation(description: "rerun started")
+        var resumes: [CheckedContinuation<HomeSheetContent, Error>] = []
+        func gatedFetch(_ started: XCTestExpectation) async throws -> HomeSheetContent {
+            try await withCheckedThrowingContinuation { resumes.append($0); started.fulfill() }
+        }
+        let first = Task {
+            await owner.load(requestID: requestID, identity: identity, coordinator: coordinator, isCurrent: { true }) {
+                try await gatedFetch(firstStarted)
+            }
+        }
+        await fulfillment(of: [firstStarted], timeout: 1)
+        first.cancel()
+        let rerun = Task {
+            await owner.load(requestID: requestID, identity: identity, coordinator: coordinator, isCurrent: { true }) {
+                try await gatedFetch(rerunStarted)
+            }
+        }
+        await fulfillment(of: [rerunStarted], timeout: 1)
+        // The cancelled run returns late while the rerun is still the installed load.
+        resumes[0].resume(returning: .memory(try HomeMemoryPageDTO.decode(page(), revision: nil)))
+        await first.value
+        var rerunStillLoading = false
+        if case .loading(let pending, .none) = owner.state, pending.requestID == requestID { rerunStillLoading = true }
+        resumes[1].resume(returning: .memory(try HomeMemoryPageDTO.decode(page(), revision: nil)))
+        await rerun.value
+        guard rerunStillLoading else { return XCTFail("cancelled rerun retired the load that replaced it") }
+        guard case .loaded(let read, .memory) = owner.state else { return XCTFail("rerun did not publish its own result") }
+        XCTAssertEqual(read.requestID, requestID)
+        owner.retire()
+        coordinator.retire(token)
+    }
+
     func testRetiredOrChangedAuthorityRejectsLateSuccessAndFailure() async throws {
         for transition in ["dismiss", "cover", "profile", "connection", "background"] {
             let coordinator = PresentationActivityCoordinator()

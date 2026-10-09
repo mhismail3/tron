@@ -142,9 +142,7 @@ export class HomeTaskStore {
   async restoreEpoch(): Promise<string> {
     return this.run(async () => {
       if (!(await this.inspectAuthority())) throw new HomeTaskStoreError("not-initialized");
-      const info = await lstat(this.directory, { bigint: true });
-      if (!info.isDirectory() || info.isSymbolicLink() || info.birthtimeNs <= 0n) throw new HomeTaskStoreError("unsafe-state");
-      return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
+      return this.directoryEpoch();
     });
   }
 
@@ -163,14 +161,12 @@ export class HomeTaskStore {
     // Full validation runs first, so recovery refuses before it acts on any record.
     let authority = await this.run(() => this.inspect());
     if (!authority) return;
-    const directory = await this.run(() => opendir(this.directory, { bufferSize: 32 }));
-    for await (const entry of directory) {
-      if (!isTaskEntry(entry.name)) continue;
+    for await (const name of this.taskNames()) {
       const task = await this.run(async () => {
         // Each record re-checks the namespace path, so a directory swapped
         // between yields is refused; the authority file itself is not re-read.
         if (!await this.assertNamespace()) throw new HomeTaskStoreError("missing-state");
-        const current = await this.readNamedTask(parseTaskName(entry.name));
+        const current = await this.readNamedTask(name);
         if (!authorityReferencesResolve(current, authority!)) {
           // A task created after this scan's authority read may cite authority
           // published since then. Refresh once; a reference still unresolved is refused.
@@ -343,16 +339,8 @@ export class HomeTaskStore {
   private async inspect(visit?: (record: HomeTaskRecord) => void): Promise<HomeTaskAuthorizationState | undefined> {
     const state = await this.inspectAuthority();
     if (!state) return undefined;
-    // opendir has a bounded entry buffer. Each file is validated and released
-    // before the next one. The only state retained across records is one ID
-    // per record, so a duplicate suffix (never written by this store) is refused.
-    const taskIds = new Set<string>();
-    const directory = await opendir(this.directory, { bufferSize: 32 });
-    for await (const entry of directory) {
-      if (!isTaskEntry(entry.name)) continue;
-      const name = parseTaskName(entry.name);
-      if (taskIds.has(name.taskId)) invalid();
-      taskIds.add(name.taskId);
+    // Each file is validated and released before the next one.
+    for await (const name of this.taskNames()) {
       const task = await this.readNamedTask(name);
       validateAuthorityReferences(task, state);
       visit?.(task);
@@ -364,9 +352,18 @@ export class HomeTaskStore {
     return join(this.directory, `${String(task.createdAt).padStart(13, "0")}-${task.taskId}.json`);
   }
 
+  /** The one enumeration that owns the one-file-per-task invariant: a second
+   * name for the same taskId is refused wherever it appears in the directory.
+   * The only state retained across entries is one ID per record. */
   private async *taskNames(): AsyncGenerator<TaskName> {
+    const taskIds = new Set<string>();
+    // opendir has a bounded entry buffer; the caller owns the pace of iteration.
     for await (const entry of await opendir(this.directory, { bufferSize: 32 })) {
-      if (isTaskEntry(entry.name)) yield parseTaskName(entry.name);
+      if (!isTaskEntry(entry.name)) continue;
+      const name = parseTaskName(entry.name);
+      if (taskIds.has(name.taskId)) invalid();
+      taskIds.add(name.taskId);
+      yield name;
     }
   }
 
@@ -376,10 +373,7 @@ export class HomeTaskStore {
   private async readTask(taskId: string, authority: HomeTaskAuthorizationState): Promise<HomeTaskRecord | undefined> {
     let name: TaskName | undefined;
     for await (const candidate of this.taskNames()) {
-      if (candidate.taskId === taskId) {
-        if (name) invalid();
-        name = candidate;
-      }
+      if (candidate.taskId === taskId) name = candidate;
     }
     if (!name) return undefined;
     const task = await this.readNamedTask(name);
@@ -397,6 +391,14 @@ export class HomeTaskStore {
     return task;
   }
 
+  /** Physical namespace identity for restore fencing. A directory without birth
+   * time has no identity to fence with, so it is refused rather than hashed. */
+  private async directoryEpoch(): Promise<string> {
+    const info = await lstat(this.directory, { bigint: true });
+    if (!info.isDirectory() || info.isSymbolicLink() || info.birthtimeNs <= 0n) throw new HomeTaskStoreError("unsafe-state");
+    return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
+  }
+
   /** Maintainer list reads only the selected records, never report bodies.
    * A continuation is bound to the physical namespace, not installation text. */
   async page(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
@@ -408,8 +410,7 @@ export class HomeTaskStore {
         if (input.cursor) invalid();
         return { items: [] };
       }
-      const info = await lstat(this.directory, { bigint: true });
-      const epoch = createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
+      const epoch = await this.directoryEpoch();
       let after: TaskName | undefined;
       if (input.cursor) {
         try {
@@ -428,7 +429,8 @@ export class HomeTaskStore {
       }
       const items: HomeTaskSummary[] = [];
       for (const name of selected.slice(0, limit)) {
-        const task = (await this.readTask(name.taskId, authority))!;
+        const task = await this.readNamedTask(name);
+        validateAuthorityReferences(task, authority);
         items.push({ taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt,
           title: [...task.intent.text].slice(0, 160).join(""), target: task.target, lifecycle: task.lifecycle,
           outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
