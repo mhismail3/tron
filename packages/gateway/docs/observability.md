@@ -61,10 +61,12 @@ not a log stream. No stream is shipped off the machine.
 
 The shared `packages/gateway/src/tron-home-environment-policy.mjs` owns the rule for an
 inherited environment that resolves into a Tron home (`~/.tron`, `~/.tron-dev`, or the selected
-home). A path-valued variable that points there (for example `PI_CODING_AGENT_DIR`,
-`PI_SESSION_FILE`, `TRON_GATEWAY_PAYLOAD_ROOT`) is removed, because the owner then derives its
-default. The selectors `TRON_DATA_DIR` and `TRON_HOME_NAME` are refused, because removing one
-would fall back to `~/.tron` or retarget another home. `PATH` is never changed. Two invocation
+home). A variable whose value contains a live-home path is removed, because the owner then derives
+its default: standalone (for example `PI_CODING_AGENT_DIR`, `PI_SESSION_FILE`,
+`TRON_GATEWAY_PAYLOAD_ROOT`), inside a list, or inside a JSON value (for example the agent shell's
+`JITI_ALIAS`). A home matches only as a whole path, so `~/.tron-dev` is not `~/.tron`. The selectors
+`TRON_DATA_DIR` and `TRON_HOME_NAME` are refused, because removing one would fall back to `~/.tron`
+or retarget another home. `PATH` is never changed, because it locates the executables checks run. Two invocation
 owners apply the rule: Vitest (`setupFiles`) and Node test entry points (`node --import`)
 import `test-support/tron-home-environment-preflight.mjs`, which removes the path variables from
 `process.env` before test modules execute and throws `Gateway tests refuse inherited Tron-home
