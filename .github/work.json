@@ -623,7 +623,8 @@
   },
   "land": {
     "requiredChecks": [
-      "policy"
+      "policy",
+      "gateway"
     ],
     "reviewStatus": "In review",
     "doneStatus": "Done",
