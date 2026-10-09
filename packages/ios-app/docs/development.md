@@ -1373,7 +1373,8 @@ layout oracle checks every sampled native frame and each keyboard/accessory/draf
 it does not assume the host samples a particular intermediate animation instant. The UI-validation
 `ChatSurfaceMotionConformanceTests` separately measures the floating window's token-driven arrival,
 programmatic settle and dismissal frames, pixels and stable marker identity; gesture-driven moves remain
-user-owned. Streaming
+user-owned. The same suite samples catch-up affordance appearance and disappearance; the scroll command
+remains owned by `ChatScrollCoordinator` and is not routed through row motion. Streaming
 continuity exercises the existing admission/opacity policies with virtual-time schedules (including
 restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
 requires bounded fractional opacity throughout the policy's linear fade, strict progression, and a

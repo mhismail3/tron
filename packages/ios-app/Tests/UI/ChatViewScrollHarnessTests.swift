@@ -1484,6 +1484,24 @@ final class ChatViewScrollHarness {
         return layer.convert(layer.bounds, to: window.layer).standardized
     }
 
+    var catchUpMotionMarker: ChatCatchUpMotionMarker? {
+        Self.catchUpMotionMarkers(in: hostingController.view).first
+    }
+
+    var catchUpMotionFrame: CGRect? {
+        guard let window = hostingController.view.window,
+              let marker = catchUpMotionMarker else { return nil }
+        let layer = marker.layer.presentation() ?? marker.layer
+        return layer.convert(layer.bounds, to: window.layer).standardized
+    }
+
+    func beginReaderDetachmentForMotion() async throws {
+        try scrollReader(byVisualPoints: 10_000_000)
+        try await driveFrameBoundary()
+        drivePhase(from: .idle, to: .interacting, geometry: nil)
+        drivePhase(from: .interacting, to: .idle, geometry: nil)
+    }
+
     /// `chat.tail.first-displacement` diagnostics seen so far. The incident's
     /// trace ring held 99 of them and evicted the geometry records they shared
     /// the ring with, so the CT-2 fixtures count them explicitly.
@@ -2292,6 +2310,11 @@ final class ChatViewScrollHarness {
     private static func pendingAttachmentMarkers(in view: UIView) -> [ChatPendingAttachmentMotionMarker] {
         let current = (view as? ChatPendingAttachmentMotionMarker).map { [$0] } ?? []
         return current + view.subviews.flatMap { pendingAttachmentMarkers(in: $0) }
+    }
+
+    private static func catchUpMotionMarkers(in view: UIView) -> [ChatCatchUpMotionMarker] {
+        let current = (view as? ChatCatchUpMotionMarker).map { [$0] } ?? []
+        return current + view.subviews.flatMap { catchUpMotionMarkers(in: $0) }
     }
 
     private static func buttons(in view: UIView) -> [UIButton] {

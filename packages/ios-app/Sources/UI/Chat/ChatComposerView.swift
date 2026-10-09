@@ -1,5 +1,8 @@
 import SwiftUI
 import TronMobileCore
+#if HOSTED_TEST
+import UIKit
+#endif
 
 /// Value-driven composer presentation. Draft, route, transport, and canonical
 /// ownership remain outside this view and enter only through bindings/intents.
@@ -339,10 +342,27 @@ struct ChatComposerView: View {
                     .combined(with: .scale(scale: 0.82, anchor: .leading))
                     .combined(with: .opacity)
         )
+        #if HOSTED_TEST
+        .background(ChatCatchUpMotionProbe())
+        #endif
         .accessibilityLabel("Catch up")
         .accessibilityHint("Returns to the latest response and follows new messages")
     }
 }
+
+#if HOSTED_TEST
+final class ChatCatchUpMotionMarker: UIView {}
+
+struct ChatCatchUpMotionProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ChatCatchUpMotionMarker {
+        let view = ChatCatchUpMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        return view
+    }
+    func updateUIView(_ view: ChatCatchUpMotionMarker, context: Context) {}
+}
+#endif
 
 struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]

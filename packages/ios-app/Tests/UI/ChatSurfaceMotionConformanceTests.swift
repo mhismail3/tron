@@ -23,8 +23,8 @@ struct ChatSurfaceMotionConformanceTests {
             #expect(removal.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
             #expect(insertion.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
             #expect(removal.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
-            #expect(insertion.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
-            #expect(removal.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((insertion.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((removal.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
             try writeSurfaceMetrics([insertion, removal])
         } catch {
             await harness.close()
@@ -46,11 +46,11 @@ struct ChatSurfaceMotionConformanceTests {
             let insertion = try await recordAttachmentChipChange(harness, attached: true)
             #expect(insertion.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
             #expect(insertion.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
-            #expect(insertion.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((insertion.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
             let removal = try await recordAttachmentChipChange(harness, attached: false)
             #expect(removal.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
             #expect(removal.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
-            #expect(removal.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((removal.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
             try writeSurfaceMetrics([insertion, removal], named: "attachment-chip-motion.json")
         } catch {
             await harness.close()
@@ -85,7 +85,7 @@ struct ChatSurfaceMotionConformanceTests {
             #expect(arrival.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
             #expect((arrival.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
             #expect(arrival.markerIdentityInstances == 1)
-            #expect(arrival.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((arrival.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
 
             let initial = try #require(harness.floatingLayout())
             let move = try await recordFloatingMotion(harness, name: "floating-programmatic-move") {
@@ -94,7 +94,7 @@ struct ChatSurfaceMotionConformanceTests {
             #expect(move.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
             #expect(move.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
             #expect(move.markerIdentityInstances == 1)
-            #expect(move.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((move.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
 
             let current = try #require(harness.floatingLayout())
             let dismissal = try await recordFloatingMotion(harness, name: "floating-dismiss", samplePixels: true) {
@@ -104,8 +104,36 @@ struct ChatSurfaceMotionConformanceTests {
             #expect(dismissal.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
             #expect((dismissal.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
             #expect(dismissal.markerIdentityInstances == 1)
-            #expect(dismissal.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((dismissal.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
             try writeSurfaceMetrics([arrival, move, dismissal], named: "floating-motion.json")
+        } catch {
+            await harness.close()
+            throw error
+        }
+        await harness.close()
+    }
+
+    @Test("catch-up affordance appears and disappears through bounded surface motion")
+    func catchUpAffordanceMotion() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 2_774).openingTail(targetEncodedBytes: 10_000)
+        let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+            snapshot: snapshot,
+            displayFrameScheduler: .displayLink
+        )
+        do {
+            _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+            for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            let appearance = try await recordCatchUpMotion(harness, appeared: true)
+            #expect(appearance.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(appearance.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect((appearance.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
+            #expect(appearance.markerIdentityInstances == 1)
+            let disappearance = try await recordCatchUpMotion(harness, appeared: false)
+            #expect(disappearance.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
+            #expect(disappearance.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+            #expect((disappearance.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
+            #expect(disappearance.markerIdentityInstances == 1)
+            try writeSurfaceMetrics([appearance, disappearance], named: "catch-up-motion.json")
         } catch {
             await harness.close()
             throw error
@@ -126,7 +154,7 @@ struct ChatSurfaceMotionConformanceTests {
             for _ in 0..<24 { try await harness.driveFrameBoundary() }
             let result = try await recordComposerInsetChange(harness, accessoryEnabled: true, boundaries: 8)
             #expect(result.changedFrames <= 1, "Reduce Motion produced \(result.changedFrames) interpolated height frames")
-            #expect(result.maximumTailDistance <= ChatMotionConformanceBounds.maximumTailDistance)
+            #expect((result.maximumTailDistance ?? 0) <= ChatMotionConformanceBounds.maximumTailDistance)
             try writeSurfaceMetrics([result], named: "composer-reduce-motion.json")
         } catch {
             await harness.close()
@@ -134,6 +162,56 @@ struct ChatSurfaceMotionConformanceTests {
         }
         await harness.close()
     }
+}
+
+@MainActor
+private func recordCatchUpMotion(
+    _ harness: ChatViewScrollHarness,
+    appeared: Bool
+) async throws -> ChatMotionSurfaceMetrics {
+    var previousFrame = harness.catchUpMotionFrame
+    var previousImage = try ChatMotionPixelSupport.captureWindow(harness: harness)
+    if appeared {
+        try await harness.beginReaderDetachmentForMotion()
+    } else {
+        harness.driveCatchUp(reduceMotion: false)
+    }
+    var maximumStep: CGFloat = 0
+    var pixelChangingFrames = 0
+    var changedFrames = 0
+    var identities: Set<ObjectIdentifier> = []
+    var samples: [Double] = []
+    for _ in 0..<24 {
+        try await harness.driveFrameBoundary()
+        let current = harness.catchUpMotionFrame
+        let frame = current ?? previousFrame
+        let image = try ChatMotionPixelSupport.captureWindow(harness: harness)
+        if let frame, ChatMotionPixelSupport.changedPixels(previousImage, image, in: frame) {
+            pixelChangingFrames += 1
+        }
+        if let current {
+            let size = current.size
+            if let previousFrame {
+                let step = max(abs(size.width - previousFrame.width), abs(size.height - previousFrame.height))
+                if step > 0.5 { changedFrames += 1 }
+                maximumStep = max(maximumStep, step)
+            }
+            previousFrame = current
+            identities.insert(ObjectIdentifier(try #require(harness.catchUpMotionMarker)))
+            samples.append(Double(size.width))
+        }
+        previousImage = image
+    }
+    return ChatMotionSurfaceMetrics(
+        name: appeared ? "catch-up-affordance-arrive" : "catch-up-affordance-dismiss",
+        hostedMarkerID: "chat-catch-up",
+        maximumGeometryStep: Double(maximumStep),
+        maximumTailDistance: nil,
+        changedFrames: max(changedFrames, pixelChangingFrames),
+        pixelChangingFrames: pixelChangingFrames,
+        markerIdentityInstances: identities.count,
+        samples: samples
+    )
 }
 
 @MainActor
