@@ -52,6 +52,9 @@ struct HomeChatHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Menu {
                 Button("Memory settings", systemImage: "cpu") { sheet = .settings }
+                if status.taskRecovery != nil {
+                    Button("Tasks and permissions", systemImage: "checklist") { sheet = .tasks }
+                }
                 Button("Home context", systemImage: "doc.text.magnifyingglass") { sheet = .context }
                 if model.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true {
                     Button("Browse memory", systemImage: "brain") { sheet = .memory }

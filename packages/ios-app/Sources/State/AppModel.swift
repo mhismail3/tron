@@ -4738,12 +4738,18 @@ final class AppModel {
                                      lifecycleGeneration: lifecycle.currentLifecycleGeneration, surfaceToken: surfaceToken)
     }
 
-    func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity) async throws -> HomeSheetContent {
+    func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
         guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
-              !Task.isCancelled else { throw CancellationError() }
+              !Task.isCancelled, isCurrent() else { throw CancellationError() }
+        // Each task sheet consumes status first, so a recovery refusal remains
+        // visible without attempting a fenced task/authorization read.
+        if case .tasks = query { return try await readHomeTasks(query, identity: identity, isCurrent: isCurrent) }
+        if case .task = query { return try await readHomeTasks(query, identity: identity, isCurrent: isCurrent) }
+        if case .permissions = query { return try await readHomeTasks(query, identity: identity, isCurrent: isCurrent) }
         let method: String
         let params: JSONValue
         switch query {
+        case .tasks, .task, .permissions: throw CancellationError()
         case .status: method = "home.status"; params = .object([:])
         case .memory(let continuation):
             method = "home.memory.page"
@@ -4760,11 +4766,37 @@ final class AppModel {
         let value = try await lifecycle.client.requestValue(method, params,
             expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
         guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
-              !Task.isCancelled else { throw CancellationError() }
+              !Task.isCancelled, isCurrent() else { throw CancellationError() }
         switch query {
+        case .tasks, .task, .permissions: throw CancellationError()
         case .status: return .status(try HomeStatusDTO.decode(value))
         case .memory(let continuation): return .memory(try HomeMemoryPageDTO.decode(value, continuation: continuation))
         case .evidence(let source, let offset): return .evidence(try HomeMemoryEvidencePageDTO.decode(value, evidence: source, offset: offset))
+        }
+    }
+
+    private func readHomeTasks(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
+        func read(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
+            guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+                  !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            let value = try await lifecycle.client.requestValue(method, params,
+                expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
+            guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+                  !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            return value
+        }
+        let status = try HomeStatusDTO.decode(try await read("home.status"))
+        let canRead = status.available && status.taskRecovery?.available == true
+        switch query {
+        case .tasks(let cursor):
+            var params: [String: JSONValue] = ["limit": .number(20)]
+            if let cursor { params["cursor"] = .string(cursor) }
+            return .tasks(canRead ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
+        case .task(let id):
+            return .task(canRead ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
+        case .permissions:
+            return .permissions(canRead ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
+        default: throw CancellationError()
         }
     }
 

@@ -1225,3 +1225,22 @@ export interface HomeDesignation {
   sessionId: string;
   generation: number;
 }
+
+/** home.taskList: bounded newest-first task metadata; no canonical reports. */
+export interface HomeTaskSummary {
+  taskId: string;
+  createdAt: number;
+  updatedAt: number;
+  /** At most 160 Unicode code points from the immutable intent. */
+  title: string;
+  target: string;
+  lifecycle: "pending" | "active" | "terminal";
+  outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number; knownCostUSD: number | null; pricingProvenance: string | null; unpriced: boolean } | null;
+  attention: boolean;
+  pendingGrant: boolean;
+}
+export interface HomeTaskPage {
+  items: HomeTaskSummary[];
+  nextCursor?: string;
+}

@@ -273,12 +273,13 @@ this setup. An existing partial setup is preserved and refused, never completed
 by guessing. Once initialized, a missing namespace, marker, or authorization
 file is lost state, not a fresh installation.
 
-Each task occupies `tasks/<taskId>.json`, at most 256 KiB of encoded JSON. The
+Each task occupies `tasks/<13-digit-createdAt>-<taskId>.json`, at most 256 KiB of encoded JSON. The
 strict v1 format requires exactly these keys:
 
 | fields | contract |
 | --- | --- |
 | `version`, `taskId`, `revision` | Version 1, filename-matching identity, positive safe-integer revision; create at 1, replace only at expected revision + 1 |
+| `createdAt`, `updatedAt` | Required store-owned Unix milliseconds; creation time is immutable and strictly advances across creates (max of wall clock and previous creation + 1 ms); revision publication stamps nonregressing update time |
 | `homeId`, `generation`, `routeGeneration` | Immutable originating Home identity, enabled operation generation and logical route epoch |
 | `intent`, `intentDigest` | Immutable `{ revision, text }` snapshot (text at most 64 KiB UTF-8); SHA-256 of `JSON.stringify({ revision, text })` in that key order |
 | `target`, `workerProfile`, `policyRevision` | Immutable absolute target (at most 4 KiB UTF-8), qualified worker-profile identity and positive policy revision; storage is not trust/admission authority |
@@ -310,6 +311,10 @@ typed `HomeTaskStoreError`. `home.task.store-refused` names only the bounded
 reason. A visible publication whose durability is uncertain fences the store
 instance; a fresh owner must securely reload it rather than continue with stale
 state. Failed pre-rename writes remove only their own temporary artifacts.
+The fixed creation filename survives every replacement; task-ID lookup scans names
+only and refuses multiple matching suffixes before reading a record. Creation time
+in the name and record must agree. Older unreleased `<taskId>.json` layouts and
+records missing timestamps are preserved and refused; no migration is performed.
 Enumeration streams bounded directory entries and validates every file: no
 second task catalog, growing task snapshot, total task-count cap, or silent
 pruning. Never-initialized absence is an empty read, not setup or a diagnostic
@@ -654,6 +659,23 @@ proves the operation settled; neither it nor `!isBusy` proves that the inbox's
 separate acknowledgement write has finished.
 
 ## Shared task control and spend status
+
+`home.taskList { limit?, cursor? }` is a maintainer-only summary read. Default
+limit is 20, maximum 50. It scans directory names with a bounded candidate window
+and reads at most `limit` secure task records, never report bodies. Order is
+`createdAt` descending, then task ID ascending. Store-owned creation identity
+ensures newer arrivals appear only on a fresh first page, not mid-continuation.
+The opaque continuation binds the last order key to the physical namespace's
+restore epoch; foreign/restored/malformed cursors refuse (`conflict`, reason
+`invalid-record`). Newest-first ordering survives restart and status/wake updates.
+Rows contain task ID, creation/update dates, intent title (first 160 Unicode code
+points), target, lifecycle, terminal outcome or null, reported spend or null,
+`attention` for needs-input/unknown and `pendingGrant` for a matching undecided
+permission request. Null spend is unavailable, not zero; unpriced stays explicit.
+Never-initialized listing returns `{ items: [] }` without creating authority;
+permission listing separately refuses `not-initialized`. Unavailable Home and the
+process-owned task recovery fence refuse without task reads. This is not a second
+catalog, report view or task-count limit.
 
 `home.taskStatus { taskId }` reads the task's durable record, exact active
 operation/controller generation, cumulative token spend and immutable result.

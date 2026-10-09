@@ -2,20 +2,28 @@ import SwiftUI
 import TronMobileCore
 
 enum HomeSheetDestination: Identifiable {
-    case settings, model, context, memory
+    case settings, model, context, memory, tasks, permissions
+    case task(String), grant(HomeTaskPermissionsDTO.Request)
     case evidence(HomeMemoryEvidenceDTO)
     var id: String {
-        switch self { case .settings: "settings"; case .model: "model"; case .context: "context"; case .memory: "memory"; case .evidence: "evidence" }
+        switch self { case .settings: "settings"; case .model: "model"; case .context: "context"; case .memory: "memory"; case .evidence: "evidence"; case .tasks: "tasks"; case .permissions: "permissions"; case .task: "task"; case .grant: "grant" }
     }
     var title: String {
-        switch self { case .settings: "Memory Settings"; case .model: "Memory Model"; case .context: "Home Context"; case .memory: "Home Memory"; case .evidence: "Exact Evidence" }
+        switch self { case .settings: "Memory Settings"; case .model: "Memory Model"; case .context: "Home Context"; case .memory: "Home Memory"; case .evidence: "Exact Evidence"; case .tasks: "Home Tasks"; case .permissions: "Task Permissions"; case .task: "Task"; case .grant: "Grant Request" }
     }
     var initialQuery: HomeSheetReadQuery {
         switch self {
+        case .tasks: .tasks(nil)
+        case .task(let id): .task(id)
+        case .permissions, .grant: .permissions
         case .settings, .model, .context: .status
         case .memory: .memory(nil)
         case .evidence(let source): .evidence(source, offset: 0)
         }
+    }
+
+    var isTaskSurface: Bool {
+        switch self { case .tasks, .task, .permissions, .grant: true; default: false }
     }
 
 }
@@ -62,7 +70,8 @@ struct HomeSheet: View {
         Group {
             // The standard progressive model link owns its NavigationStack and
             // Done control. Other Home destinations own their sheet chrome.
-            if case .model = destination { sheetContent }
+            if destination.isTaskSurface { HomeTaskSheet(destination: destination, profileID: profileID) }
+            else if case .model = destination { sheetContent }
             else { NavigationStack { sheetContent } }
         }
         .tronTopBlur(.sheet)
@@ -107,7 +116,7 @@ struct HomeSheet: View {
             await owner.load(requestID: requestID, identity: identity, coordinator: coordinator,
                              isCurrent: { self.identity == identity && self.request.id == requestID },
                              preserveInstalledFrame: destination.id == "model") {
-                try await fetch(query: query, identity: identity)
+                try await fetch(query: query, identity: identity, requestID: requestID)
             }
         }
         .tronManagedSheet(item: $evidenceDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
@@ -133,6 +142,7 @@ struct HomeSheet: View {
                     if case .settings = destination { settings(status) }
                     else if case .model = destination { modelPicker(status) }
                     else { context(status.activation) }
+                case .tasks, .task, .permissions: EmptyView()
                 case .memory(let page): memory(page)
                 case .evidence(let page): evidence(page)
                 }
@@ -140,8 +150,8 @@ struct HomeSheet: View {
         }
     }
 
-    private func fetch(query: HomeSheetReadQuery, identity: HomeSheetReadIdentity) async throws -> HomeSheetContent {
-        let content = try await model.readHomeSheet(query, identity: identity)
+    private func fetch(query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, requestID: UUID) async throws -> HomeSheetContent {
+        let content = try await model.readHomeSheet(query, identity: identity, isCurrent: { self.request.id == requestID && self.active })
         if query == .status, destination.id == "settings" || destination.id == "model",
            model.providerCatalog(for: .global) == nil {
             _ = await model.refreshProviders(target: .global)

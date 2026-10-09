@@ -1123,7 +1123,7 @@ revoked scopes or one-use grants. Maintainer-only `home.taskPermissions`,
 and revoke authority or approve/deny an exact durable request with one-use
 expiry-bound permission. Terminal `/home permissions`, `/home revoke-scope`,
 `/home revoke-grant`, `/home approve-grant` and `/home deny-grant` route through
-command receipts; Home cannot approve its own requests. `home.taskStatus`, `home.steerTask` and
+command receipts; Home cannot approve its own requests. `home.taskList`, `home.taskStatus`, `home.steerTask` and
 `home.stopTask` expose durable spend and shared control; terminal `/home task`,
 `/home steer` and `/home stop` target one task. Steering shares the session lane;
 Stop persists exact intent and cancels outside blocked admission. Canonical usage

@@ -2953,3 +2953,31 @@ journey fail with permanently disabled controls. Retained xcresult screenshots
 label these synthetic states. This is not physical-device or real-provider evidence. Run with the owned UIValidation
 runner and that exact selector; matching protocol 7 builds require manual
 Mac-first installation before the real-device post-Stop check.
+
+### Focused Home tasks verification
+
+The fourth Home sheet consumes `home.taskList`, `home.taskStatus`, and
+`home.taskPermissions` from the Gateway's Home contract. Run the focused owners:
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/HomeTaskSheetTests \
+  --only-testing TronMobileTests/HomeSheetTests
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence
+```
+
+Hosted journeys use real DTO shapes in the isolated Home dashboard fixture;
+controls refuse incorrect execution/route/request bindings and require command
+IDs and a future selected grant expiry. Screenshots are xcresult attachments
+(list, stopped task, redelivery, permission decision, empty and recovery fence).
+They prove native wiring/presentation, not durable task/grant/inbox semantics or
+physical-device acceptance. Gateway `home-task-store.integration.test.ts` and
+`home-task-dispatch.e2e.test.ts` own creation-order paging, restore cursor refusal,
+exact permission/control/receipt semantics and task recovery. Keep their named
+reports and native result bundles in private evidence. The unreleased timestamp
+and creation-filename task format preserves/refuses older held data, with no
+migration; do not repair or erase installation data to validate it.

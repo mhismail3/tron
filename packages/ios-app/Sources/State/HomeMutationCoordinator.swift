@@ -14,6 +14,12 @@ struct HomeDesignationReceipt: Codable, Equatable, Sendable {
 final class HomeMutationCoordinator {
     enum Command: Equatable {
         case designate, disable, configureMemory(ModelRef), pauseMemory, resumeMemory
+        case stopTask(taskID: String, operationID: String, generation: Int)
+        case steerTask(taskID: String, operationID: String, generation: Int, text: String)
+        case revokeScope(String), revokeGrant(String)
+        case decideGrant(requestID: String, approved: Bool, expiresAt: Int)
+        case reconfirmPermissions
+        case redeliver(taskID: String, homeID: String, routeGeneration: Int)
 
         var method: String {
             switch self {
@@ -22,6 +28,13 @@ final class HomeMutationCoordinator {
             case .configureMemory: "home.configureMemory"
             case .pauseMemory: "home.pauseMemory"
             case .resumeMemory: "home.resumeMemory"
+            case .stopTask: "home.stopTask"
+            case .steerTask: "home.steerTask"
+            case .revokeScope: "home.revokeTaskScope"
+            case .revokeGrant: "home.revokeTaskGrant"
+            case .decideGrant: "home.decideTaskGrant"
+            case .reconfirmPermissions: "home.reconfirmPermissions"
+            case .redeliver: "home.redeliverTaskResult"
             }
         }
     }
@@ -86,7 +99,20 @@ final class HomeMutationCoordinator {
         let invocation = Invocation(profileID: profileID, generation: authority.generation,
                                     commandID: uuidSource.next().uuidString, command: command)
         var params: [String: JSONValue] = ["commandId": .string(invocation.commandID)]
-        if case .configureMemory(let model) = command { params["model"] = try JSONValue.encode(model) }
+        switch command {
+        case .configureMemory(let model): params["model"] = try JSONValue.encode(model)
+        case .stopTask(let task, let operation, let generation), .steerTask(let task, let operation, let generation, _):
+            params["taskId"] = .string(task); params["operationId"] = .string(operation)
+            params["controllerGeneration"] = .number(Double(generation))
+            if case .steerTask(_, _, _, let text) = command { params["text"] = .string(text) }
+        case .revokeScope(let id): params["scopeId"] = .string(id)
+        case .revokeGrant(let id): params["grantId"] = .string(id)
+        case .decideGrant(let request, let approved, let expires):
+            params["requestId"] = .string(request); params["approved"] = .bool(approved); params["expiresAt"] = .number(Double(expires))
+        case .redeliver(let task, let home, let route):
+            params["taskId"] = .string(task); params["homeId"] = .string(home); params["routeGeneration"] = .number(Double(route))
+        default: break
+        }
         state = .running(invocation)
         do {
             let value = try await mutationExecutor.performValue(

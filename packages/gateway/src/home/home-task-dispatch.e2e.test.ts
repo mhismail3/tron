@@ -1,6 +1,6 @@
 import * as fileSystem from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -106,6 +106,10 @@ async function fixture(providerVersion?: string, codemode = false, contextWindow
       await (owned.registry as any).sessionCatalog.whenPublished();
       return owned.registry;
     } };
+}
+async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
+  const directory = join(f.tronHome, "gateway/home/tasks");
+  return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
 }
 async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
   await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
@@ -606,7 +610,7 @@ describe("Home task cold reconciliation", () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
-    const taskPath = join(f.tronHome, "gateway/home/tasks", `${run.taskId}.json`);
+    const taskPath = await taskFile(f, run.taskId);
     const authPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
     const taskBytes = await readFile(taskPath, "utf8"); const authBytes = await readFile(authPath, "utf8");
     await f.registry.dispose(); await f.registry.administrativeWorkRegistry.waitUntilSettled();
@@ -663,7 +667,7 @@ describe("Home task cold reconciliation", () => {
     const starting = f.restart(); void starting.catch(() => {});
     try {
       await waitFor(() => barrier.mock.calls.length > 0, "cold task joins catalog readiness", { boundMs: 1000 });
-      expect(JSON.parse(await readFile(join(f.tronHome, "gateway/home/tasks", `${run.taskId}.json`), "utf8")).lifecycle).toBe("active");
+      expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).lifecycle).toBe("active");
     } finally { release(); await starting; }
     const recovered = await starting;
     expect(await recovered.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
@@ -686,8 +690,9 @@ describe("Home task cold reconciliation", () => {
     vi.spyOn(store, "put").mockImplementation(async (task, expected) => {
       if (frozen) throw new Error("frozen admission owner");
       if (cut === "worker-created" && task.lifecycle === "active") { frozen = true; throw new Error("frozen admission owner"); }
-      await put(task, expected);
+      const published = await put(task, expected);
       if (task.lifecycle === (cut === "pending" ? "pending" : "active") && cut !== "grant-consumed" && cut !== "worker-created") { frozen = true; throw new Error("frozen admission owner"); }
+      return published;
     });
     if (cut === "grant-consumed") {
       const save = store.authorization.save;
@@ -708,6 +713,50 @@ describe("Home task cold reconciliation", () => {
     expect(calls).not.toHaveBeenCalled();
     expect(f.notifications).toHaveLength(1);
     evidence.push({ case: `cold-admission-${cut}`, task, authorityPreserved: true, providers: calls.mock.calls.length });
+  }, 20_000);
+});
+
+describe("Home task list RPC", () => {
+  it("pages durable summaries across new arrivals and refuses foreign cursors and recovery fences", async () => {
+    const f = await fixture();
+    const owner = f.registry.homeOwner();
+    const store = (owner as any).tasks.store as HomeTaskStore;
+    await store.initialize();
+    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const client = { clientId: "task-list-reader" } as ClientContext;
+    const intent = { revision: 1, text: "Finite work" };
+    const { createHash } = await import("node:crypto");
+    for (let i = 0; i < 5; i++) {
+      await store.put({ version: 1, taskId: `list-${i}`, revision: 1, homeId: f.home.homeId, generation: 1, routeGeneration: 1,
+        intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"), target: f.cwd,
+        workerProfile: "home-task-v1", policyRevision: 1, grantRef: null, scopeRef: null, lifecycle: "pending",
+        sessionId: null, operationId: null, controllerGeneration: null, stopIntent: null, spend: null,
+        reportRefs: null, terminalEvidence: null, wake: null }, null);
+      await new Promise(resolve => setTimeout(resolve, 2));
+    }
+    const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
+    expect(first.items.map((row: any) => row.taskId)).toEqual(["list-4", "list-3"]);
+    expect(first.items[0]).toMatchObject({ createdAt: expect.any(Number), updatedAt: expect.any(Number), title: "Finite work", lifecycle: "pending", spend: null });
+    const oldestPath = await taskFile(f, "list-0");
+    const oldestBytes = await readFile(oldestPath);
+    try {
+      await writeFile(oldestPath, "{torn", { mode: 0o600 });
+      expect((await service.invoke(client, "home.taskList", { limit: 1 }) as any).items[0].taskId).toBe("list-4");
+    } finally { await writeFile(oldestPath, oldestBytes, { mode: 0o600 }); }
+    const base = (await store.read("list-4"))!;
+    await store.put({ ...base, taskId: "arrived", revision: 1 }, null);
+    const second = await service.invoke(client, "home.taskList", { limit: 2, cursor: first.nextCursor }) as any;
+    const third = await service.invoke(client, "home.taskList", { limit: 2, cursor: second.nextCursor }) as any;
+    expect([...second.items, ...third.items].map((row: any) => row.taskId)).toEqual(["list-2", "list-1", "list-0"]);
+    const copy = join(f.root, "tasks-copy"); const directory = join(f.tronHome, "gateway/home/tasks");
+    await cp(directory, copy, { recursive: true }); await rm(directory, { recursive: true }); await rename(copy, directory);
+    await expect(service.invoke(client, "home.taskList", { cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+    await chmod(f.tronHome, 0o755);
+    const cold = await f.restart();
+    const fenced = new GatewayService({ sessions: cold, home: cold.homeOwner() } as unknown as GatewayServiceDependencies);
+    await chmod(f.tronHome, 0o700);
+    await expect(fenced.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
+    evidence.push({ case: "task-list-pages", first, second, third, staleCursorRefused: true, recoveryFenceRefused: true });
   }, 20_000);
 });
 
@@ -1421,7 +1470,7 @@ describe("Home task production dispatch", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
     await f.registry.dispose();
-    await rm(join(f.tronHome, "gateway/home/tasks/task-one.json"));
+    await rm(await taskFile(f, "task-one"));
     let constructions = 0;
     const cold = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -1561,7 +1610,7 @@ describe("Home task production dispatch", () => {
     await (await dispatch(f)).completion;
     const store = new HomeTaskStore(f.tronHome, (f.registry as any).workspace);
     const before = await store.restoreEpoch();
-    const taskPath = join(f.tronHome, "gateway/home/tasks/task-one.json");
+    const taskPath = await taskFile(f, "task-one");
     const tempPath = `${taskPath}.tmp`;
     await writeFile(tempPath, await readFile(taskPath), { mode: 0o600 }); await rename(tempPath, taskPath);
     expect(await store.restoreEpoch()).toBe(before);

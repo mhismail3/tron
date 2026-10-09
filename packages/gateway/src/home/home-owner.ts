@@ -3,7 +3,7 @@ import { readCanonicalSession } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { HomeTaskStore } from "./home-task-store.js";
+import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -292,6 +292,16 @@ export class HomeOwner {
     const entries = report && task.sessionId ? await this.options.taskSessions!.readTaskEvidence(task.sessionId) : [];
     const entry = report && entries.find(entry => entry.id === report.entryId);
     return { task, text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
+  }
+
+  async taskList(input: { limit?: number; cursor?: string }) {
+    const owner = await this.taskOwner();
+    if (this.unavailable) throw new GatewayError("conflict", "Home is unavailable", false, { reason: this.unavailable });
+    try { return await owner.store.page(input); }
+    catch (error) {
+      if (error instanceof HomeTaskStoreError) throw new GatewayError("conflict", "Home task list refused", false, { reason: error.code });
+      throw error;
+    }
   }
 
   async taskResult(taskId: string) {

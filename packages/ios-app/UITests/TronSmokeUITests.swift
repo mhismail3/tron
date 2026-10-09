@@ -5,6 +5,103 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testHomeTaskListStopSteerAndRedelivery() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-tasks"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap(); app.buttons["home-controls"].tap()
+        XCTAssertTrue(app.buttons["Tasks and permissions"].waitForExistence(timeout: 3))
+        app.buttons["Tasks and permissions"].tap()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-task-list")
+        app.buttons["home-task-active"].tap()
+        XCTAssertTrue(app.staticTexts["Unpriced"].waitForExistence(timeout: 5))
+        app.textFields["Steering message"].tap(); app.textFields["Steering message"].typeText("Use the exact task")
+        app.buttons["Send steer"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        XCTAssertTrue(app.buttons["Stop task"].waitForExistence(timeout: 5)); app.buttons["Stop task"].tap()
+        XCTAssertTrue(app.staticTexts["interrupted"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-task-stopped")
+        app.buttons["home-sheet-done-task"].tap()
+        XCTAssertTrue(app.buttons["home-task-terminal"].waitForExistence(timeout: 5)); app.buttons["home-task-terminal"].tap()
+        XCTAssertTrue(app.staticTexts["final"].waitForExistence(timeout: 5))
+        app.buttons["Redeliver result"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
+        XCTAssertTrue(app.staticTexts["pending"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-task-redelivered")
+    }
+
+    @MainActor
+    func testHomeTaskPermissionsRevokeDecideAndReconfirm() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-tasks"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap(); app.buttons["home-controls"].tap()
+        app.buttons["Tasks and permissions"].tap()
+        XCTAssertTrue(app.buttons["Permissions"].waitForExistence(timeout: 5)); app.buttons["Permissions"].tap()
+        XCTAssertTrue(app.buttons["Reconfirm permissions"].waitForExistence(timeout: 5)); app.buttons["Reconfirm permissions"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        app.buttons["Revoke scope scope-one"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
+        app.swipeUp(); app.buttons["Revoke grant grant-one"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
+        app.buttons["Review request request-approve"].tap()
+        XCTAssertTrue(app.staticTexts["/trusted/project"].waitForExistence(timeout: 5))
+        chooseHomeGrantExpiry(app)
+        app.buttons["Approve request"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:4", timeout: 5))
+        app.buttons["home-sheet-done-grant"].tap()
+        XCTAssertTrue(app.buttons["Review request request-deny"].waitForExistence(timeout: 5)); app.buttons["Review request request-deny"].tap()
+        chooseHomeGrantExpiry(app)
+        app.buttons["Deny request"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:5", timeout: 5))
+        keepScreenshot(named: "home-task-permission-denied")
+    }
+
+    @MainActor
+    func testHomeTaskEmptyAndRecoveryFence() {
+        continueAfterFailure = false
+        for state in ["tasks-empty", "task-fenced"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-\(state)"]
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap(); app.buttons["home-controls"].tap(); app.buttons["Tasks and permissions"].tap()
+            if state == "tasks-empty" {
+                XCTAssertTrue(app.staticTexts["No tasks"].waitForExistence(timeout: 5))
+                keepScreenshot(named: "home-tasks-empty")
+                app.buttons["Permissions"].tap()
+                XCTAssertTrue(app.staticTexts["Home task namespace refused: not-initialized"].waitForExistence(timeout: 5))
+                XCTAssertFalse(app.buttons["Reconfirm permissions"].exists)
+            } else {
+                XCTAssertTrue(app.staticTexts["Task recovery needed"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["unsafe-state"].exists)
+                XCTAssertFalse(app.buttons["home-task-active"].exists)
+                keepScreenshot(named: "home-task-recovery-fenced")
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    private func chooseHomeGrantExpiry(_ app: XCUIApplication) {
+        let picker = app.descendants(matching: .any)["home-grant-expiry"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 3), app.debugDescription)
+        picker.buttons.firstMatch.tap()
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
+        let formatter = DateFormatter(); formatter.dateFormat = "EEEE, MMMM d"
+        let day = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", formatter.string(from: tomorrow))).firstMatch
+        XCTAssertTrue(day.waitForExistence(timeout: 3), app.debugDescription)
+        day.tap()
+        // Dismiss the native compact DatePicker popover without touching a control.
+        app.buttons["PopoverDismissRegion"].tap()
+    }
+
+    @MainActor
     func testHomeMemorySettingsSelectsPhysicalModel() {
         continueAfterFailure = false
         let app = XCUIApplication()

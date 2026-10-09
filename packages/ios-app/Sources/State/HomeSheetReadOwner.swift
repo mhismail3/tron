@@ -125,11 +125,13 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case status
+    case tasks(String?), task(String), permissions
     case memory(HomeMemoryPageDTO.Continuation?)
     case evidence(HomeMemoryEvidenceDTO, offset: Int)
 }
 
 enum HomeSheetContent {
+    case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
     case status(HomeStatusDTO), memory(HomeMemoryPageDTO), evidence(HomeMemoryEvidencePageDTO)
 }
 

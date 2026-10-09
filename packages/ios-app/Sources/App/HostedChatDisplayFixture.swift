@@ -325,6 +325,11 @@ private actor HostedHomeShellGateway {
     private let sheetState: String?
     private var browserReads = 0
     private var configuredModel: ModelRef?
+    private var taskStopped = false
+    private var taskRedelivered = false
+    private var scopeRevoked = false
+    private var grantRevoked = false
+    private var taskDecisions: [String: JSONValue] = [:]
     init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
@@ -358,6 +363,49 @@ private actor HostedHomeShellGateway {
             return (.object(["models": .array(sheetState == "empty-models" ? [] : [model("memory-a", name: "Memory Model A"), model("memory-b", name: "Memory Model B"),
                 model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
+        case "home.taskList":
+            return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
+        case "home.taskStatus":
+            guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
+            return (taskRecord(id), nil)
+        case "home.taskPermissions":
+            if sheetState == "tasks-empty" {
+                return (nil, .object(["code": .string("conflict"), "message": .string("Home task namespace refused: not-initialized"), "retryable": .bool(false)]))
+            }
+            return (taskPermissions(), nil)
+        case "home.stopTask", "home.steerTask":
+            guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "active",
+                  params["operationId"]?.stringValue == "task-operation", params["controllerGeneration"]?.intValue == 7,
+                  !taskStopped, method != "home.steerTask" || params["text"]?.stringValue == "Use the exact task" else { return taskRefusal() }
+            controlCount += 1
+            if method == "home.stopTask" { taskStopped = true }
+            return (.object(["accepted": .bool(true)]), nil)
+        case "home.redeliverTaskResult":
+            guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "terminal",
+                  params["homeId"]?.stringValue == "home-fixture", params["routeGeneration"]?.intValue == 2 else { return taskRefusal() }
+            taskRedelivered = true; controlCount += 1; return (.object(["accepted": .bool(true)]), nil)
+        case "home.revokeTaskScope", "home.revokeTaskGrant", "home.reconfirmPermissions":
+            guard params["commandId"]?.stringValue != nil else { return taskRefusal() }
+            if method == "home.revokeTaskScope" {
+                guard params["scopeId"]?.stringValue == "scope-one" else { return taskRefusal() }; scopeRevoked = true
+            }
+            if method == "home.revokeTaskGrant" {
+                guard params["grantId"]?.stringValue == "grant-one" else { return taskRefusal() }; grantRevoked = true
+            }
+            controlCount += 1; return (.object(["accepted": .bool(true)]), nil)
+        case "home.decideTaskGrant":
+            guard params["commandId"]?.stringValue != nil, let id = params["requestId"]?.stringValue,
+                  ["request-approve", "request-deny"].contains(id), taskDecisions[id] == nil,
+                  let approved = params["approved"]?.boolValue, let expires = params["expiresAt"]?.intValue,
+                  Double(expires) > Date.now.timeIntervalSince1970 * 1000 else { return taskRefusal() }
+            let decision: JSONValue = .object(["id": params["commandId"]!, "requestId": .string(id), "approved": .bool(approved),
+                "decidedAt": .number(Double(Int(Date.now.timeIntervalSince1970 * 1000))), "expiresAt": .number(Double(expires))])
+            var grant = taskBinding().objectValue!
+            grant["id"] = .string("grant-\(id)"); grant["decisionId"] = params["commandId"]!
+            grant["expiresAt"] = .number(Double(expires)); grant["state"] = .string("available")
+            let result: JSONValue = .object(["decision": decision, "grant": approved ? .object(grant) : .null])
+            taskDecisions[id] = result; controlCount += 1
+            return (result, nil)
         case "home.memory.page":
             browserReads += 1
             if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
@@ -441,6 +489,61 @@ private actor HostedHomeShellGateway {
         }
     }
 
+    private func taskRefusal() -> (JSONValue?, JSONValue?) {
+        (nil, .object(["code": .string("conflict"), "message": .string("Task fixture binding refused"), "retryable": .bool(false)]))
+    }
+    private func taskSpend() -> JSONValue {
+        .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12), "outputTokens": .number(3),
+            "knownCostUSD": .null, "pricingProvenance": .null, "unpriced": .bool(true)])
+    }
+    private func taskSummary(_ id: String) -> JSONValue {
+        let terminal = id == "terminal" || taskStopped
+        return .object(["taskId": .string(id), "createdAt": .number(id == "active" ? 2000 : 1000), "updatedAt": .number(3000),
+            "title": .string(id == "active" ? "Active finite work" : "Finished finite work"), "target": .string("/trusted/project"),
+            "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
+            "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
+    }
+    private func taskRecord(_ id: String) -> JSONValue {
+        var record = taskSummary(id).objectValue!
+        record["version"] = .number(1); record["revision"] = .number(1)
+        record["homeId"] = .string("home-fixture"); record["generation"] = .number(1); record["routeGeneration"] = .number(1)
+        record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["workerProfile"] = .string("home-task-v1")
+        record["policyRevision"] = .number(1); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
+        record["sessionId"] = .string("worker-session"); record["stopIntent"] = .null
+        record["reportRefs"] = id == "terminal" ? .array([.object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
+            "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))])]) : .null
+        record["intent"] = .object(["revision": .number(1), "text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
+        record["operationId"] = .string("task-operation"); record["controllerGeneration"] = .number(7)
+        let terminal = id == "terminal" || taskStopped
+        record["terminalEvidence"] = terminal ? .object(["outcome": .string(id == "active" ? "interrupted" : "final"), "reason": .string("explicit-report"), "sessionId": .string("worker-session"), "entryIds": .array([.string("terminal-entry")])]) : .null
+        record["wake"] = terminal ? .object(["state": .string(id == "terminal" && !taskRedelivered ? "blocked" : "pending"),
+            "routeGeneration": .number(taskRedelivered ? 2 : 1), "delivery": .null,
+            "eventId": .string("task-result-" + String(repeating: "b", count: 64)), "createdAt": .string("2026-01-01T00:00:00Z"),
+            "push": .string("decided"), "acknowledgedAt": .null, "redeliveries": .array([])]) : .null
+        for key in ["title", "outcome", "attention", "pendingGrant"] { record.removeValue(forKey: key) }
+        return .object(record)
+    }
+    private func taskBinding() -> JSONValue {
+        .object(["intentRevision": .number(1), "intentDigest": .string(String(repeating: "a", count: 64)),
+            "target": .string("/trusted/project"), "authorizationScope": .string("full-work"), "workerProfile": .string("home-task-v1"),
+            "policyRevision": .number(1), "restoreEpoch": .string("fixture-epoch")])
+    }
+    private func taskPermissions() -> JSONValue {
+        let ids = ["request-existing", "request-approve", "request-deny"]
+        let binding = taskBinding()
+        var decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
+            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(4102444800000)])]
+        decisions += taskDecisions.keys.sorted().map { taskDecisions[$0]!.objectValue!["decision"]! }
+        var grant = binding.objectValue!
+        grant["id"] = .string("grant-one"); grant["decisionId"] = .string("existing-decision")
+        grant["expiresAt"] = .number(4102444800000); grant["state"] = .string(grantRevoked ? "revoked" : "available")
+        var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
+            "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
+        if scopeRevoked { scope["revokedAt"] = .number(2000) }
+        return .object(["revision": .number(Double(controlCount + 1)), "scopes": .array([.object(scope)]),
+            "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)] + taskDecisions.keys.sorted().compactMap { taskDecisions[$0]!.objectValue!["grant"].flatMap { $0 == .null ? nil : $0 } })])
+    }
+
     private func model(_ id: String, name: String, virtual: Bool = false) -> JSONValue {
         .object(["provider": .string("fixture"), "id": .string(id), "name": .string(name), "reasoning": .bool(false),
                  "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
@@ -469,7 +572,8 @@ private actor HostedHomeShellGateway {
             : initialState == "missing-session" ? "missing-session" : "undesignated"
         let sessionPresent = designated || initialState == "disabled" || phase == "disabled"
         let enabled = designated || initialState == "missing-session"
-        return .object(["phase": .string(phase),
+        return .object(["taskRecovery": .object(["available": .bool(sheetState != "task-fenced"), "reason": .string("unsafe-state")]),
+            "routeGeneration": .number(2), "phase": .string(phase),
             "activation": emptyContext ? .object(["available": .bool(false)]) : .object(["available": .bool(true), "activationOpen": .bool(phase == "active"),
                 "effectiveTokens": .number(320), "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
             "readiness": .object(["ready": .bool(designated && phase == "ready"), "gaps": .array([])]),

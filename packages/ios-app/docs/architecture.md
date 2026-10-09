@@ -2720,3 +2720,41 @@ false. A resource sheet presented by a composer chip/catalog must regain its own
 primary scroll eligibility rather than inherit the covered chat's exclusion.
 `managedSheetRestoresStatusBarOwnership` exercises actual bool/item presentations
 and their native document scrolls; without the reset both variants fail.
+
+### Home task sheets
+
+The Home menu's fourth sheet uses #419's task contract from
+`packages/gateway/docs/home.md` (task persistence, authorization, task recovery,
+inbox/redelivery and shared control). `home.taskList` is a bounded newest-first
+summary, not a native task catalog; `home.taskStatus` supplies exact detail and
+execution authority. One page replaces another. Dates are store-reported Unix
+milliseconds; spend remains unavailable/unpriced when reported that way. Neither
+an unknown outcome nor a last assistant reply is labeled success.
+
+`HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
+placeholder and action owners as the other Home sheets. It first reads status to
+show the task-only recovery fence and reason without issuing a fenced list or
+permission read. An empty uninitialized task list does not imply a permission
+grant: permission listing may refuse `not-initialized`. The menu requires the
+Gateway's task-recovery projection; ordinary session presentation is unchanged.
+
+All task/list/permission reads use `HomeSheetReadOwner` and AppModel's immutable
+profile, connection, lifecycle, managed activity and exact latest-intent fence
+before and after **each** awaited subread. A covered/backgrounded/disposed sheet
+cannot publish old values, errors or loading. Sheet controls require their exact
+installed read; accepted commands remain with `HomeMutationCoordinator` and its
+command ID/receipt invocation after dismissal. Unknown completion allows only
+receipt checks, never automatic mutation replay.
+
+Stop and steer capture task, operation and controller generation from detail;
+there is no transfer/takeover or successor targeting. Permissions list standing
+scopes and one-use grant states/expiry. Revocation does not stop admitted work.
+Grant review displays the exact stored target, intent revision/digest, scope,
+worker profile, policy and restore epoch. Native DatePicker requires the
+maintainer to select a future expiry for both approve and deny; only request ID,
+boolean decision, expiry and command ID are sent, never a substituted binding.
+Approval does not replay refused work. Explicit reconfirmation re-stamps active
+standing scopes after restore, never renews one-use grants or revoked scopes.
+Redelivery captures current Home/route generation and is offered only for a
+same-Home, unadmitted result on an older route; uncertain admitted results are
+not replayable. Canonical reports/inbox and all authorization remain Gateway-owned.

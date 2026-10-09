@@ -66,6 +66,12 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let spentTokens: Int?
     }
 
+    struct TaskRecovery: Decodable, Equatable, Sendable {
+        let available: Bool
+        let reason: String?
+    }
+    let taskRecovery: TaskRecovery?
+    let routeGeneration: Int?
     let phase: Phase
     let activation: Activation
     let readiness: Readiness
@@ -82,7 +88,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
 
     static func decode(_ value: JSONValue) throws -> HomeStatusDTO {
         let status = try JSONDecoder().decode(HomeStatusDTO.self, from: JSONEncoder().encode(value))
-        guard status.readiness.gaps.count <= 128,
+        guard status.taskRecovery.map({ $0.available || ($0.reason.map { !$0.isEmpty && $0.utf8.count <= 1024 } ?? false) }) ?? true,
+              status.routeGeneration.map({ $0 > 0 }) ?? true,
+              status.readiness.gaps.count <= 128,
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
               status.memory.spentTokens.map({ $0 >= 0 }) ?? true,

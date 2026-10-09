@@ -209,7 +209,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.taskStatus", "home.stopTask", "home.memory.page", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.page", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -468,6 +468,12 @@ export class GatewayService {
       case "home.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
         return safeJson(await this.requireHome().status());
+      }
+      case "home.taskList": {
+        rejectUnknownFields(params, ["limit", "cursor"], method);
+        if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || (params.limit as number) < 1 || (params.limit as number) > 50)) throw new GatewayError("invalid_request", "Invalid task page limit");
+        return safeJson(await this.requireHome().taskList({ ...(params.limit === undefined ? {} : { limit: params.limit as number }),
+          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 1024 }) }) }));
       }
       case "home.taskStatus": {
         rejectUnknownFields(params, ["taskId"], method);
