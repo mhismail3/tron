@@ -1089,11 +1089,6 @@ export interface HomeMemoryEvidencePage {
   metadata: Record<string, JsonValue>;
 }
 
-/** `home.status`: the one bounded Home projection. It is a read and performs no
- * inference. `available` is false only when a stored record exists but cannot be
- * used, which `reason` explains; the preserved record is never overwritten.
- * `live` is whether the session holds a runtime right now; `sessionPresent` is
- * whether it exists at all, live or still on disk. */
 /** `home.open`: a logical route and its current physical binding. It does not
  * materialize a reserved chapter; clients attach physically only when an active
  * chapter exists. */
@@ -1106,6 +1101,11 @@ export interface HomeOpen {
   chapterState: "active" | "sealed" | "reserved" | "materializing";
 }
 
+/** `home.status`: the one bounded Home projection. It is a read and performs no
+ * inference. `available` is false only when a stored record exists but cannot be
+ * used, which `reason` explains; the preserved record is never overwritten.
+ * `live` is whether the session holds a runtime right now; `sessionPresent` is
+ * whether it exists at all, live or still on disk. */
 export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
@@ -1121,6 +1121,10 @@ export interface HomeStatus {
   enabled: boolean;
   homeId?: string;
   sessionId?: string;
+  /** The newest chapter a client may open: `sessionId` when it is present, or the
+   * sealed predecessor while `rollover-pending`. Absent when nothing is openable.
+   * Sends from it still go through `home.prompt`, which materializes the successor. */
+  openSessionId?: string;
   bindingRevision?: number;
   generation?: number;
   routeGeneration?: number;
@@ -1210,15 +1214,6 @@ export type HomeContextProjection =
     lastRefusalReason?: string;
     lastRefusalDetail?: string;
   };
-
-/** `home.designate`/`home.disable` result: the exact admitted identity. */
-export interface HomeOpen {
-  logicalSessionId: "home";
-  homeId: string;
-  bindingRevision: number;
-  sessionId: string;
-  generation: number;
-}
 
 export interface HomeDesignation {
   homeId: string;

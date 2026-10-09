@@ -37,7 +37,7 @@ export class SealedChapterMutationError extends GatewayError {
   }
 }
 
-/** The current Home record has one writable session; chapter support is not active. */
+/** A session the chapter ledger does not seal (ordinary sessions, and Home chapters before they are sealed) is writable. */
 export function unsealedHomeChapterState(sessionId: string): HomeChapterState {
   return { sessionId, sealed: false };
 }

@@ -15,6 +15,7 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
+import { crc32, deflateSync } from "node:zlib";
 import { once } from "node:events";
 import WebSocket from "ws";
 import { createRequire } from "node:module";
@@ -63,7 +64,7 @@ vi.mock("../home/home-session-recovery.js", async importOriginal => {
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
 import * as homeSource from "../episodic/home-source.js";
 import type { HomeRecord } from "../home/home-owner.js";
@@ -71,8 +72,9 @@ import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryPage, HomeMemoryEvidencePage } from "../protocol/types.js";
-import type { GatewayConfig } from "../config.js";
+import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { INLINE_IMAGE_BASE64_LIMIT_BYTES, UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -244,6 +246,8 @@ interface Fixture {
   runtime: ModelRuntime;
   registry: RuntimeRegistry;
   service: GatewayService;
+  /** The production upload store, when a test sends real attachments. */
+  uploads?: UploadStore;
   receipts: CommandReceiptStore;
   server?: GatewayServer;
   compactor: CompactorState;
@@ -283,7 +287,7 @@ function openRegistry(f: Fixture): void {
     settings: new SettingsService(f.agentDir, f.runtime),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
-    uploads: {
+    uploads: f.uploads ?? {
       acquire: async () => ({ release: () => {} }),
       materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }),
       removeSession: async () => {},
@@ -294,7 +298,7 @@ function openRegistry(f: Fixture): void {
   f.receipts = receipts;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -334,6 +338,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     registry: undefined!, service: undefined!, receipts: undefined!,
     openChatProvider: () => faux,
   };
+  if (options.realUploads) f.uploads = new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES);
   openRegistry(f);
   await f.registry.initialize();
   return f;
@@ -378,6 +383,36 @@ const responsesOf = (f: Fixture, requests: CapturedRequest[]) => (blob: string) 
   requests.push(record(context));
   return fauxAssistantMessage(blob);
 };
+
+/**
+ * A valid 1x1 PNG padded with an ancillary tEXt chunk to exactly `bytes`. Pi passes
+ * an image through unchanged when it fits the dimension limit and its base64 stays
+ * under 4.5 MiB, so this is a photo-sized upload that reaches the canonical line.
+ */
+function paddedPng(bytes: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(1, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const pixels = deflateSync(Buffer.from([0, 0, 0, 0]));
+  const build = (padding: number) => Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header),
+    chunk("IDAT", pixels),
+    chunk("tEXt", Buffer.concat([Buffer.from("pad\0", "latin1"), Buffer.alloc(padding, "x")])),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  return build(bytes - build(0).length);
+}
 
 async function sessionJsonl(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>): Promise<string> {
   return slot.sessionFile ? await readFile(slot.sessionFile, "utf8").catch(() => "") : "";
@@ -836,8 +871,10 @@ describe("Tron Home activations end to end", () => {
     await prepareThresholdFixture(f, slot, "initialize successful threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
     // Canonical custom entries bring the chapter near the byte boundary without
-    // crossing it; only the provider's finalized successful message crosses.
-    for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 40 * 1_024; index += 1) {
+    // crossing it; only the provider's finalized successful message crosses. The
+    // reply is sized to the remaining headroom, not to the boundary: a reply
+    // streamed at the fixture's pace costs about 40 chars per timer tick.
+    for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 58 * 1_024; index += 1) {
       slot.sessionManager.appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
     }
     const before = statSync(slot.sessionFile!).size;
@@ -857,7 +894,7 @@ describe("Tron Home activations end to end", () => {
       }
       return terminalize(...args);
     });
-    f.faux.setResponses([fauxAssistantMessage("successful response ".repeat(2_048))]);
+    f.faux.setResponses([fauxAssistantMessage("successful response ".repeat(410))]);
     const running = slot.prompt("cross only on the successful response");
     void running.catch(() => {});
     try {
@@ -2029,10 +2066,13 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => f.compactor.entered > 0);
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
-    const second = slot.prompt(longInput("stop activation two"));
-    await waitUntil(() => (f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId() ?? undefined) !== undefined);
+    const second = slot.prompt(longInput("stop activation two")).then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    // The memory wait starts only after Pi has appended the input. Admission
+    // (`currentOperationId`) comes earlier, and a Stop before the append revokes
+    // the prompt; that interleaving is covered by its own test below.
+    await waitUntil(async () => (await canonicalMessages(slot)).some((message) => JSON.stringify(message).includes("stop activation two")));
     await slot.abort("agent");
-    const outcome = await second.then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    const outcome = await second;
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const messages = await canonicalMessages(slot);
     const row = {
@@ -2058,6 +2098,121 @@ describe("Tron Home activations end to end", () => {
     expect(row.answeredAfterInput).toBe(false);
     expect(row.slotPhase).toBe("idle");
   }, 60_000);
+
+  it("revokes a Stop-admitted input that Pi has not appended: no canonical entry, no answer", async () => {
+    const f = await fixture("stop-before-append");
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-stop-before-append");
+    f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
+    // The admitted prompt parks at the owner's inbox seam, which runs after
+    // `admit` and before Pi appends the input. Stop lands in that window.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    const held = vi.spyOn(f.registry.homeOwner(), "admitTaskResults").mockImplementation(async () => {
+      entered = true;
+      await gate;
+    });
+    try {
+      const outcome = slot.prompt(longInput("stop before append")).then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+      await waitUntil(() => entered);
+      expect(f.registry.homeOwner().requestPolicyFor(slot.id)?.currentOperationId()).toBeDefined();
+      const stopped = slot.abort("agent");
+      release();
+      await stopped;
+      const settled = await outcome;
+      await waitUntil(() => slot.snapshot().configurationBlocker === null);
+      const messages = await canonicalMessages(slot);
+      const row = {
+        outcome: settled,
+        providerRequests: requests.length,
+        inputInLog: messages.some((message) => JSON.stringify(message).includes("stop before append")),
+        slotPhase: slot.snapshot().phase,
+      };
+      report.cases.push({ case: "stop-before-append", ...row });
+      expect(row.outcome).toBe("GatewayError: Prompt stopped before agent admission");
+      expect(row.providerRequests).toBe(0);
+      expect(row.inputInLog).toBe(false);
+      expect(row.slotPhase).toBe("idle");
+    } finally {
+      release();
+      held.mockRestore();
+    }
+  }, 60_000);
+
+  it("serves Home memory after a prompt whose canonical line exceeds 16 MiB", async () => {
+    const f = await fixture("large-line", { realUploads: true });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-large-line");
+    // Five pass-through photos of 3 MB each: their base64 is 20 MB in one user line.
+    const uploadIds: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      uploadIds.push((await f.uploads!.save(`photo-${index}.png`, "image/png", paddedPng(3_000_000))).id);
+    }
+    f.faux.setResponses([responsesOf(f, requests)("large photos received")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "large-line-command-one", text: "Look at these photos", uploadIds });
+    await waitUntil(async () => (await sessionJsonl(slot)).includes('"type":"image"'), 60_000);
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const imageLine = (await sessionJsonl(slot)).split("\n").find(line => line.includes('"type":"image"')) ?? "";
+    f.faux.setResponses([responsesOf(f, requests)("second reply after the large line")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "large-line-command-two", text: "Still remember this?" });
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      lineBytes: Buffer.byteLength(imageLine),
+      maximumLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+      providerRequests: requests.length,
+      memoryOpen: status.memory?.open ?? false,
+      memoryBlocked: status.memory?.blocked ?? null,
+    };
+    report.cases.push({ case: "large-canonical-line", ...row });
+    expect(row.lineBytes).toBeGreaterThan(16 * 1_048_576);
+    expect(row.lineBytes).toBeLessThanOrEqual(row.maximumLineBytes);
+    expect(row.memoryBlocked).toBeNull();
+    expect(row.memoryOpen).toBe(true);
+    expect(row.providerRequests).toBe(2);
+  }, 120_000);
+
+  // Pi, not Tron, shrinks an oversized photo (auto-resize, on by default). Tron's
+  // source bound assumes that limit, so this test uses Pi's real behaviour as the
+  // oracle: a drifted Pi limit leaves the photo's base64 above the mirror.
+  it("shrinks a photo over the inline limit, so its canonical line stays inside the source bound", async () => {
+    const f = await fixture("inline-limit", { realUploads: true });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-inline-limit");
+    const photo = paddedPng(6_000_000);
+    // The input must be over the mirrored limit, or the test would pass for any Pi limit.
+    expect(Math.ceil(photo.length / 3) * 4).toBeGreaterThan(INLINE_IMAGE_BASE64_LIMIT_BYTES);
+    const upload = await f.uploads!.save("oversized-photo.png", "image/png", photo);
+    f.faux.setResponses([responsesOf(f, requests)("oversized photo received")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "inline-limit-command-one", text: "Look at this photo", uploadIds: [upload.id] });
+    await waitUntil(async () => (await sessionJsonl(slot)).includes('"type":"image"'), 60_000);
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const imageLine = (await sessionJsonl(slot)).split("\n").find(line => line.includes('"type":"image"')) ?? "";
+    const persisted = (JSON.parse(imageLine).message.content as Array<{ type: string; data?: string }>).find(part => part.type === "image");
+    f.faux.setResponses([responsesOf(f, requests)("second reply after the shrunk photo")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "inline-limit-command-two", text: "Still remember this?" });
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      inputBase64Bytes: Math.ceil(photo.length / 3) * 4,
+      imageBase64Bytes: persisted?.data?.length ?? -1,
+      inlineLimitBytes: INLINE_IMAGE_BASE64_LIMIT_BYTES,
+      lineBytes: Buffer.byteLength(imageLine),
+      maximumLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+      memoryOpen: status.memory?.open ?? false,
+      memoryBlocked: status.memory?.blocked ?? null,
+    };
+    report.cases.push({ case: "pi-inline-limit-shrink", ...row });
+    expect(row.imageBase64Bytes).toBeGreaterThan(0);
+    expect(row.imageBase64Bytes).toBeLessThanOrEqual(row.inlineLimitBytes);
+    expect(row.lineBytes).toBeLessThanOrEqual(row.maximumLineBytes);
+    expect(row.memoryBlocked).toBeNull();
+    expect(row.memoryOpen).toBe(true);
+  }, 120_000);
 
   it("refuses an unconfigured memory, then serves the next activation once configured", async () => {
     const f = await fixture("configure");

@@ -104,6 +104,64 @@ final class SessionMutationService {
         return response.operationId
     }
 
+    /// Sends a composer submission through the logical route it was admitted
+    /// for. A Home submission never names a physical chapter: `home.prompt`
+    /// resolves the current one when the prompt is sent.
+    func submitComposer(
+        _ text: String,
+        route: ComposerSubmissionRoute,
+        sessionID: String,
+        uploadIDs: [String],
+        behavior: String?,
+        resourceInvocation: ComposerResourceInvocation?
+    ) async throws -> String {
+        switch route {
+        case .session:
+            try await prompt(
+                text,
+                sessionID: sessionID,
+                uploadIDs: uploadIDs,
+                behavior: behavior,
+                resourceInvocation: resourceInvocation
+            )
+        case .home:
+            try await homePrompt(
+                text,
+                uploadIDs: uploadIDs,
+                behavior: behavior,
+                resourceInvocation: resourceInvocation
+            )
+        }
+    }
+
+    private func homePrompt(
+        _ text: String,
+        uploadIDs: [String],
+        behavior: String?,
+        resourceInvocation: ComposerResourceInvocation?
+    ) async throws -> String {
+        struct Params: Codable {
+            let text: String
+            let uploadIds: [String]
+            let behavior: String?
+            let resourceInvocation: ComposerResourceInvocation?
+            let commandId: String
+        }
+        struct Response: Codable { let operationId: String }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            text: text,
+            uploadIds: uploadIDs,
+            behavior: behavior,
+            resourceInvocation: resourceInvocation,
+            commandId: commandID
+        )
+        let response: Response = try await executor.perform(method: "home.prompt", commandID: commandID) {
+            try await client.request("home.prompt", params, as: Response.self)
+        }
+        return response.operationId
+    }
+
     func setAttention(
         sessionID: String,
         unread: Bool,

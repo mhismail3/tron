@@ -7,9 +7,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import type { EpisodicSessionSource } from "./episodic-contract.js";
+import { resolveLimits, type EpisodicSessionSource, type EpisodicSourceCursor } from "./episodic-contract.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
+import type { EpisodicSourceDelta } from "./episodic-source.js";
 
 const roots: string[] = [];
 const memories: EpisodicMemory[] = [];
@@ -39,8 +40,7 @@ async function fixture() {
     branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
   };
   const open = async (sessionSource = source) => {
-    const memory = await EpisodicMemory.open({ workspace, sessionId: "home", sessionFile: chapters.at(-1)!.path,
-      sessionSource,
+    const memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource,
       summarizer: async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)),
       limits: { viewBytes: 4096, jobs: 2, retryMs: 1 }, sleep: async () => {},
     }); memories.push(memory); return memory;
@@ -98,6 +98,25 @@ it.each(["changed", "missing"])("blocks %s sealed evidence without changing prio
   expect(memory.status().blocked?.reason).toBe("source-unavailable");
   expect(memory.searchMessages("violet", 0, 10).matches).toBe(1);
   expect(memory.searchMessages("orange", 0, 10).matches).toBe(0);
+});
+
+it("keeps the next delta incremental when the chapter's last line is longer than the cursor's prefix window", async () => {
+  // The cursor proves the previous prefix by its last line. A line longer than the
+  // proof window must still be proven whole, or every later delta rereads the chapter.
+  const { chapters } = await fixture();
+  const snapshot = { homeId: "home", ledgerRevision: 2, chapters };
+  const limits = resolveLimits();
+  const deltas = async (cursor: EpisodicSourceCursor | null) => {
+    const out: EpisodicSourceDelta[] = [];
+    for await (const delta of readCanonicalHomeDeltas(snapshot, cursor, limits)) out.push(delta);
+    return out;
+  };
+  await appendFile(chapters[1]!.path, entry("long", "d", "long ".repeat(4_096)));
+  const cursor = (await deltas(null)).at(-1)!.cursor;
+  await appendFile(chapters[1]!.path, entry("after", "long", "after the long line"));
+  const next = (await deltas(cursor)).find(delta => delta.scopeSessionId === "two");
+  expect(next?.incremental).toBe(true);
+  expect(next?.projected.map(message => message.text).join("\n")).toContain("after the long line");
 });
 
 it("preserves and refuses an older Home cursor format instead of rebuilding it", async () => {

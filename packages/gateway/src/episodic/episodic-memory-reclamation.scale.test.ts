@@ -15,13 +15,16 @@ import { EpisodicMemory } from "./episodic-memory.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { EPISODIC_DEFAULTS, EPISODIC_STORE_VERSION, type EpisodicMessageRecord } from "./episodic-contract.js";
 
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const roots: string[] = [];
 const owners: TronWorkspace[] = [];
 afterEach(async () => {
   await Promise.all(owners.splice(0).map(owner => owner.dispose()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
-const summarizer: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-120));
+// A provider's reply is a fresh string. A slice of the prompt would keep the whole
+// prompt alive with each node's summary, which is not what a production summary does.
+const summarizer: EpisodicSummarizer = async request => fauxAssistantMessage(Buffer.from(request.turns.at(-1)!.text.slice(-120), "utf8").toString("utf8"));
 
 async function namespaceBytes(path: string): Promise<number> {
   let total = 0;
@@ -216,7 +219,7 @@ describe("episodic memory reclamation scale", () => {
       manager.appendMessage({ role: "user", content: "stable final message", timestamp: Date.now() });
       const workspace = new TronWorkspace(join(root, "home"));
       owners.push(workspace);
-      const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
+      const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
       await memory.entriesCommitted(manager.getSessionId());
       const target = manager.getBranch().find(entry => entry.type === "message")!;
       for (let edit = 0; edit < edits; edit += 1) {
@@ -262,7 +265,7 @@ describe("episodic memory reclamation scale", () => {
       owners.push(workspace);
       const sessionId = manager.getSessionId();
       const sessionFile = manager.getSessionFile()!;
-      let memory: EpisodicMemory | null = await EpisodicMemory.open({ workspace, sessionId, sessionFile, summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
+      let memory: EpisodicMemory | null = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
       await memory.entriesCommitted(sessionId);
       const target = manager.getBranch().find(entry => entry.type === "message")!;
       for (let edit = 0; edit < edits; edit += 1) manager.appendContextEdit(target.id, { content: `fixed live replacement ${"x".repeat(128 * 1024)}` });
@@ -281,7 +284,7 @@ describe("episodic memory reclamation scale", () => {
       const sampler = setInterval(() => { peak = Math.max(peak, process.memoryUsage().heapUsed); }, 1);
       let reopened: EpisodicMemory | undefined;
       try {
-        reopened = await EpisodicMemory.open({ workspace, sessionId, sessionFile, summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
+        reopened = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { retryMs: 1, jobs: 4 }, sleep: async () => {} });
         peak = Math.max(peak, process.memoryUsage().heapUsed);
         expect(reopened.status().messages).toBe(100);
         liveNodeCounts.push(reopened.status().nodes.total);
@@ -314,7 +317,7 @@ describe("episodic memory reclamation scale", () => {
       const store = new EpisodicStore(workspace, sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes);
       const base: EpisodicMessageRecord = {
         revision: 1, index: 0, entryId: "one-live-message", kind: "user", text: "x".repeat(900), omitted: false, omissions: [],
-        sourceDigest: "source", projectedDigest: "projection", sessionId,
+        sourceDigest: "source", projectedDigest: "projection", timestamp: "2026-01-01T00:00:00.000Z", sessionId,
       };
       await store.appendCatalog(base);
       await store.saveState({ version: EPISODIC_STORE_VERSION, generation: 0, cursor: null, blocked: null, spend: 0 });
@@ -378,7 +381,7 @@ describe("episodic memory reclamation scale", () => {
       owners.push(workspace);
       const sessionId = manager.getSessionId();
       const sessionFile = manager.getSessionFile()!;
-      const memory = await EpisodicMemory.open({ workspace, sessionId, sessionFile, summarizer, limits: { nodeBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {} });
+      const memory = await EpisodicMemory.open({ workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer, limits: { nodeBytes: 512, jobs: 4, retryMs: 1 }, sleep: async () => {} });
       await memory.entriesCommitted(sessionId);
       await memory.whenReady(memory.status().messages);
       const targetId = manager.getBranch().find(entry => entry.type === "message")!.id;

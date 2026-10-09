@@ -6,7 +6,7 @@ Home does today: its designation record, its curated runtime, its memory, and th
 request seam that sends each activation the memory's view instead of the
 canonical transcript. Home delegates finite project work through `delegate` into
 ordinary worker sessions with explicit immutable reports, shared task controls
-and durable spend status. Results wait in Home's durable inbox for the next user message, with one advisory push at most. Home's own client surface is a later slice. Ordinary sessions
+and durable spend status. Results wait in Home's durable inbox for the next user message, with one advisory push at most. Home has an iOS surface and the terminal client; both drive the `home.*` RPCs documented here. Ordinary sessions
 are unaffected by every rule here.
 
 ## Physical chapter mutation boundary
@@ -169,15 +169,41 @@ rolls over before binding its command receipt. Every physical prompt (including
 explicit terminal targets, held prompts and steer/follow-up admissions) rechecks
 the policy in its slot lane after admission awaits, before invocation/SDK effects;
 a full physical target refuses without silently redirecting. Ordinary sessions
-are not subject to Home thresholds. The exact Stop owner synchronously records
-its reason on the live invocation before cancellation yields. Every terminal
+are not subject to Home thresholds. The exact Gateway-owned stop owner (chapter
+limit, task report, task Stop, deadline) synchronously records its reason on the
+live invocation before cancellation yields; a user Stop records only its intent,
+so an ordinary session's receipt is the SDK's settled outcome, as on main. Every terminal
 observer reads that reason at the common receipt boundary, so a successful
 assistant crossing is interrupted with `chapter-limit`, never `user-abort`,
 regardless of completion/abort settlement ordering. Receipt retirement owns
 retirement of that volatile reason; no parallel cancellation-reason map exists.
 
-Home memory remains one bounded projection keyed by stable `homeId`, not by a
-physical chapter. Its canonical source reads active, sealed, and materializing
+Home memory is one projection keyed by stable `homeId`, not by a physical
+chapter. Its size is bounded per record and per cursor, but not per history:
+
+- Bounded: each projected user, assistant or event text (`recordCapChars`, 128 Ki
+  characters by default), each tool result (`capChars`), the context view
+  (`viewBytes`), and the raw source, which is read one line at a time under
+  `maxSourceLineBytes` (about 46 MiB). That bound is the largest prompt line
+  (`maximumPromptLineBytes`: its inline images, text and envelope). The inline-image
+  term mirrors Pi's unexported inline limit (4.5 MiB, `image-resize-core`), and
+  `shrinks a photo over the inline limit` in `home-activation.e2e.test.ts` checks the
+  persisted base64 of an oversized photo against that mirror, so a Pi change the
+  mirror misses fails there. Task results
+  and assistant turns are bounded by the model's budgets rather than by a
+  constant, so the bound is not a guarantee for them.
+- Grows: the catalog keeps every projected message of the history in memory
+  (`messages`, `nodes`, `entryIndex`), so live heap grows with Home's message
+  count. Paging the catalog is a follow-up, not current behavior.
+- Measured (`home-source.scale.test.ts`, production caps, 2,000 messages in four
+  chapters): about 8 MB of live heap while the memory is open, about 4 KB per
+  message, against an average projected text of about 1.25 KB. The catalog's own
+  records (`messages`, `nodes`, `entryIndex`) are what remain. An earlier 97 KB per
+  message was a fixture artifact: its summaries were slices of the summary prompt,
+  which kept each 128 KB context block alive. Cold ingestion ran at about 70–80 ms
+  per message (1,000 messages in 69 s). The 20,000-message case is not measured; a
+  linear extrapolation would be about 25 minutes to ingest and about 80 MB of live
+  heap, and must not be taken as a result. Its canonical source reads active, sealed, and materializing
 chapters in ledger order and retains each physical session ID as provenance.
 Delta ingestion streams and caps each entry before retaining a chapter projection;
 it never concatenates raw chapter histories. Per-chapter cursors continue linear
@@ -199,10 +225,14 @@ no migration or automatic rebuild. Ordinary session formats are unchanged.
 
 `home-source.e2e.test.ts` retains `test-results/home-memory/continuity.json` for
 cross-chapter replay, restart, navigation and frozen-cut proof.
-`home-source.scale.test.ts` retains `test-results/home-memory/heap.json` for four
-chapters containing at least 64 MiB of canonical payload, with post-GC live heap
-samples at ingestion cuts and a retained heap sample. Regenerate with the named
-file and `vitest.scale.config.ts`; the heap report does not claim an allocation
+`home-source.scale.test.ts` retains three reports under `test-results/home-memory/`,
+regenerated with `vitest.scale.config.ts`. `heap.json` covers four chapters with
+at least 64 MiB of canonical payload at a reduced record cap, proving the raw
+source's streamed bound. `heap-production.json` (run with `-t production`, about
+one minute) covers 2,000 messages at production caps. `heap-over-cap.json` covers
+20 messages of 2 MiB each at production caps: each message's catalog cost is its
+capped text (about 256 KB), not its source. Each report holds post-GC live heap
+samples at ingestion cuts and a retained heap sample; none claims an allocation
 peak or power-loss proof.
 
 A reserved chapter contributes nothing until canonical evidence exists. If an SDK
@@ -310,7 +340,10 @@ unsafe, oversized or contradictory records preserve bytes and refuse with a
 typed `HomeTaskStoreError`. `home.task.store-refused` names only the bounded
 reason. A visible publication whose durability is uncertain fences the store
 instance; a fresh owner must securely reload it rather than continue with stale
-state. Failed pre-rename writes remove only their own temporary artifacts.
+state. Failed pre-rename writes remove only their own temporary artifacts. A crash
+can leave a staged `<name>.json.<pid>.<12 hex>.tmp` behind: enumeration skips it,
+and startup recovery removes it under the store mutex, but only when it is this
+user's regular file; any other entry in the namespace refuses recovery.
 The fixed creation filename survives every replacement; task-ID lookup scans names
 only and refuses multiple matching suffixes before reading a record. Creation time
 in the name and record must agree. Older unreleased `<taskId>.json` layouts and
@@ -318,7 +351,14 @@ records missing timestamps are preserved and refused; no migration is performed.
 Enumeration streams bounded directory entries in one pass, reads each file at
 its parsed name, and refuses a second name for any task ID anywhere in the
 directory; it validates every file: no second task catalog, growing task
-snapshot, total task-count cap, or silent pruning. Never-initialized absence is an empty read, not setup or a diagnostic
+snapshot, total task-count cap, or silent pruning. By-ID operations (`read`,
+`put`, `update`, `updateWake`) list names only, read the target record, and check
+its authority references against one read of `authorization.json`; their file
+reads do not grow with task count. A namespace scan reads authority once, and a
+record that cites authority published after that read is refreshed once. Authority
+saves may only append or mark records, so a save that removes a scope or grant
+that any task may cite is refused. Never-initialized absence is an empty read, not
+setup or a diagnostic
 refusal; missing-after-initialization still blocks. A listing that later refuses
 is not a publishable complete projection.
 
@@ -349,15 +389,9 @@ There is no deletion API yet.
 
 **Rollback contract:** A build older than the record format refuses the record
 (Home unavailable) and preserves it unchanged; there is no down-conversion.
-The unreleased held pre-route build rejects the required `routeGeneration` field
-in v2 without changing the format version or adding a version gate. Home is
-unavailable for the Home-workspace cwd; ordinary chats elsewhere are unaffected.
-`home-task-rollback.integration.test.ts` executes that build's actual
-`home-owner.ts` from the held base ref against populated task and authorization
-files. It verifies unavailable status, unchanged record/namespace/marker bytes,
-and that the current owner afterwards still reads the enabled Home record. This
-is an owner-level rollback integration proof, not a full installed older Gateway
-binary or power-loss test.
+Home is unavailable for the Home-workspace cwd; ordinary chats elsewhere are
+unaffected. `home-owner.test.ts` ("preserves an unknown-version record instead
+of migrating it") proves the refusal and the unchanged bytes at the owner.
 
 HomeOwner constructs the store, its authorization adapter and dispatcher beside
 Home's memory. Startup does not initialize the task namespace or enable a scope:
@@ -513,15 +547,21 @@ renews, revokes or re-stamps authority.
 
 Cold task recovery consumes the secure store stream one record at a time, settles and publishes that record before advancing, and retains no backlog array. Inbox recovery and settlement likewise release each task before the next; the store remains the only task catalog.
 
-Task recovery is an optional capability, not a Gateway startup dependency. The
-Dispatcher owns one per-process recovery result; all task surfaces join it. A
+Task recovery is an optional capability, not a Gateway startup dependency. It
+runs after the listener is serving, following attention recovery
+(`RuntimeRegistry.recoverHomeTasks`), so readiness never waits on a task
+abandoned by a prior process. Until it settles `taskRecovery` is `not-started`,
+which refuses task work exactly like a refusal. The Dispatcher owns one
+per-process recovery result; all task surfaces join it. A
 store/workspace refusal is retained with its typed reason until the next Gateway
 start (no in-process repair/retry), emits `home.task.store-refused` once, and
 leaves ordinary sessions functional. `home.status.taskRecovery` exposes
 `{ available: true }` or `{ available: false, reason }`, independently of the
 Home conversation's phase. Dispatch, task tools/status, steering/Stop, permission
-reconfirmation, redelivery and inbox admission/ack refuse with that same
-`conflict` reason while fenced; no task/inbox writes or effects are attempted.
+reconfirmation and redelivery refuse with that same `conflict` reason while
+fenced. Inbox admission and settlement are no-ops while fenced: nothing is
+delivered, nothing this process admitted needs settling, and the Home prompt still
+runs. No task/inbox writes or effects are attempted.
 A readable canonical task marker also refuses worker construction before any
 executable resources are loaded. If both the task namespace and canonical marker
 are unreadable/missing, ownership cannot be inferred: there is no second
@@ -591,6 +631,18 @@ result exceeds fresh-prefix headroom for the current model, Home receives an
 attributed immutable **reference** with task ID, outcome and full report byte
 size, rather than truncated content. The exact canonical reference and terminal
 proof acknowledge that event, allowing the next result to proceed in order.
+
+Delivery proof reads its chapter one line at a time under the shared
+`maxSourceLineBytes` bound and keeps only the entries that can belong to that one
+delivery: its result message, its terminal invocation receipt and the attribution
+receipt naming its task. A proof that cannot be read (an over-bound line, a torn
+tail, a source that is not this session) fails only that event: it becomes
+`outcome-unknown` with reason `admission-proof-unreadable` or
+`terminal-proof-unreadable`, and the activation proceeds. A transient read or
+fsync failure leaves the event in its current state for the next activation to
+re-prove; it is neither a refusal nor an uncertain outcome. A delivery whose admitted message was never appended (Stop
+between admission and append) returns to `pending` under the same mutex with
+reason `admission-aborted`; it is not an uncertain delivery.
 Home reads its full immutable report with `task { action: "report", taskId,
 offset, limit }`: UTF-8 byte offsets, `limit` 1–4096 bytes, complete characters,
 `nextOffset` or null at EOF. Invalid offsets/oversized pages refuse. Each page is
@@ -721,7 +773,7 @@ escape hatch, without rewriting an already immutable terminal task.
 `home.reconfirmPermissions { commandId }` is an explicit maintainer mutation;
 `/home reconfirm-permissions` is its terminal spelling. It is not a model tool,
 startup refresh, grant renewal or recovery replay. It fails closed if the physical
-namespace identity changes during the command. No iOS task surface is added here.
+namespace identity changes during the command. The iOS task sheet calls it too.
 
 ### Maintainer authorization RPC and terminal controls
 
@@ -864,7 +916,7 @@ browser endpoints below; `home.v1` alone does not promise a browser contract.
 
 - `home.status` is one bounded read that composes the record, memory status and
   `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
-  enabled, homeId?, sessionId?, generation?, routeGeneration?, model?, live, sessionPresent,
+  enabled, homeId?, sessionId?, openSessionId?, generation?, routeGeneration?, model?, live, sessionPresent,
   chapter?, memory }`. `chapter` contains a bounded ledger count, current canonical
   byte/entry measurements when available, and the current recovery decision. `phase` and the recovery action are derived on each read; they are
   not additional lifecycle state. Readiness gaps identify an unavailable record,
@@ -881,11 +933,22 @@ browser endpoints below; `home.v1` alone does not promise a browser contract.
   all — live, or still a canonical session in the catalog. A Gateway whose first
   catalog cut has not completed reports `sessionPresent: true`, because an
   unread catalog cannot prove absence.
+- `openSessionId` is the newest chapter a client may open. It is `sessionId`
+  when that chapter is present. While a successor is `reserved` or
+  `materializing` (`rollover-pending`), it is the sealed predecessor, because
+  the reserved successor has no session to open yet. It is absent when neither
+  is present, so a client routes by this one field. It never makes a sealed
+  chapter writable: `session.prompt` to the predecessor is still refused with
+  `sealed-chapter`, and only `home.prompt` materializes the successor.
 - `home.open` returns the logical Home route and current binding without
   creating a runtime or materializing a reserved successor. `home.prompt` binds
   one command receipt to that route before effects, materializes a reserved
   chapter only when needed, rechecks the exact binding, and returns the physical
-  session and operation identity.
+  session and operation identity. `home.prompt` takes the composer's whole
+  prompt contract, admitted by the same code as `session.prompt`: `text`,
+  `uploadIds` (at most 10, materialized into the resolved chapter),
+  `behavior` (`steer`/`followUp` while a turn runs), `resourceInvocation` and
+  `commandId`. Extension commands cannot carry attachments on either route.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
@@ -1025,8 +1088,13 @@ callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 ## The terminal client
 
 `tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the terminal
-client, and today it is the only surface that can designate Home, configure its
-memory and recover it. With no explicit `--session`, it first asks for the
+client. The iOS Home surface designates, configures and pauses Home's memory,
+reads status, and runs the task controls through the same `home.*` RPCs. An
+ordinary iOS chat sends `session.prompt` to the session it shows. The Home
+chat opens the route `openSessionId` names and sends `home.prompt`, so its next
+send materializes a reserved successor and the chat follows `sessionId`; it
+never sends `session.prompt` to a sealed chapter. The terminal client prompts the logical route the same way.
+With no explicit `--session`, it first asks for the
 logical Home route; while Home is enabled, ordinary input goes through
 `home.prompt` even as physical chapters change. A reserved successor is not
 opened just to attach the terminal: its first runtime is created only when a
@@ -1317,7 +1385,9 @@ explicitly resuming never discards completed summaries.
 An activation waits for the memory before it sends anything (the recipe's "wait,
 don't cut"): the wait covers the lines the view will carry, so an unbuilt line is
 never sent, and it is abortable, so the user's Stop cancels it and leaves their
-message in the log unanswered. Later steps of the same activation reuse the frozen
+message in the log unanswered. A Stop that lands before Pi appends the input is a
+different case: the admitted prompt is revoked before Pi starts it, so it writes no
+entry and no request is sent. Later steps of the same activation reuse the frozen
 text byte-for-byte.
 
 ## The memory tools
@@ -1382,10 +1452,11 @@ are byte-identical across activations: they are the head of every cached prefix,
 and only the summaries below the preamble move. The summaries themselves stay
 request-local evidence, never instructions.
 
-A `date` for a message whose catalog record was written before that field
-existed is answered from the source by entry id — every parsed entry, not only
-the branch — so a record that has since left the branch still answers, and only an
-entry the file no longer holds is `timestamp-unavailable`.
+A `date` answers the instant its catalog record holds, and every record holds one
+(the store refuses a catalog record without it). A catalog that lacks instants is
+not read from the source message by message: its store is refused on open, and the
+tools answer `memory-unavailable`. An instant the local date formatter cannot read
+answers `timestamp-unavailable`; the memory never invents a time.
 
 `memory_search` is a Tron addition to the recipe's tools, not a recipe section.
 The recipe's tree navigation is otherwise unchanged, and both surfaces are
@@ -1399,7 +1470,6 @@ src/sessions/home-provider-runtime.e2e.test.ts`.
 
 ## Not built yet
 
-Home has no iOS surface of its own and no
-scheduled or background work. It is one conversation whose turns run on its
+Home has no scheduled or background work. It is one conversation whose turns run on its
 memory. Those are separately approved slices of the same epic, and none of them
 changes the rules above without updating this document.

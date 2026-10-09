@@ -272,6 +272,12 @@ export class EpisodicStore {
     await assertOwnerDirectory(join(stateRoot, "episodic"), true);
     await assertOwnerDirectory(paths.root, true);
     if (!(await fileExists(paths.initialized))) {
+      // The marker turns a later missing container into lost state, so each
+      // directory entry on its path must be durable first. This call may have
+      // just created `state/` and `episodic/`, so their parents are synced too.
+      for (const directory of [dirname(stateRoot), stateRoot, join(stateRoot, "episodic")]) {
+        await syncDirectory(directory, this.fileSystem);
+      }
       await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
       // The feature record tells a later start that a missing shared container
       // is lost state rather than a fresh installation.
@@ -568,11 +574,9 @@ function isCatalogRecord(value: Record<string, unknown>): boolean {
   return isRevision(value.revision) && isRevision(value.index) && typeof value.entryId === "string"
     && (value.kind === "user" || value.kind === "talk" || value.kind === "echo" || value.kind === "event")
     && typeof value.text === "string" && typeof value.omitted === "boolean" && isStringArray(value.omissions)
-    // Absent on a record written before the field existed: the memory reads the
-    // source for that entry's instant instead of refusing the store. Its shape is
-    // not validated beyond the type, exactly as `entryId` is not: the source
-    // either proves an instant or `date` answers that it cannot.
-    && (value.timestamp === undefined || typeof value.timestamp === "string")
+    // Every catalog record carries its entry's instant. Its text is not parsed
+    // here: `date` reports an instant it cannot read as unavailable.
+    && typeof value.timestamp === "string"
     && typeof value.sourceDigest === "string" && typeof value.projectedDigest === "string" && typeof value.sessionId === "string";
 }
 

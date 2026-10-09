@@ -562,8 +562,8 @@ export interface RuntimeSlotDependencies {
   /** One model applied to a live Home session, so the Home record keeps the
    * single source of truth for the model a re-enable restores. */
   homeModelChanged?: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
-  /** Physical chapter state is consulted only by mutation owners. Current Home
-   * records report unsealed until the chapter ledger is introduced. */
+  /** Physical chapter state is consulted only by mutation owners. The registry
+   * answers it from the Home chapter ledger; any other session is unsealed. */
   homeChapterState?: (sessionId: string) => HomeChapterState;
 }
 
@@ -907,6 +907,8 @@ export class RuntimeSlot {
   private suppressQueueEvents = false;
   /** Abort intent is recorded before SDK cancellation can synchronously settle. */
   private readonly abortedOperations = new Set<string>();
+  /** Retirement waiters parked until this slot may have settled. */
+  private readonly settleWaiters = new Set<() => void>();
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
@@ -1227,7 +1229,10 @@ export class RuntimeSlot {
     return this.runtime.session.modelRuntime;
   }
 
-  /** Actionable work only; decorative presentation must not block trust/delete. */
+  /** Actionable work only; decorative presentation must not block trust/delete.
+   * True from slot admission, which precedes the SDK's agent admission: a Stop in
+   * that window revokes the prompt. A test that Stops a run waits for the run's own
+   * entry, not for this. */
   get isBusy(): boolean {
     return this.isBusyExceptWorkToken();
   }
@@ -1380,6 +1385,7 @@ export class RuntimeSlot {
   }
 
   private settleOperationWork(operationId: string | undefined): void {
+    this.releaseSettleWaiters();
     if (!operationId) return;
     this.lifecycle.cancelPreflight(operationId);
     // PendingPrompt is a provisional projection, not independent ownership.
@@ -3354,9 +3360,11 @@ export class RuntimeSlot {
     this.pendingReceiptWrites.add(write);
     void write.then(() => {
       this.pendingReceiptWrites.delete(write);
+      this.releaseSettleWaiters();
       if (derived) work.settle();
     }, error => {
       this.pendingReceiptWrites.delete(write);
+      this.releaseSettleWaiters();
       // A confirmed contradictory identity rejects before any new write. Only
       // an unresolved persistence outcome keeps the derived owner admitted.
       if (derived && !isUncertainOutcome(error)) work.settle();
@@ -3512,7 +3520,12 @@ export class RuntimeSlot {
     if (this.handedOffInvocations.has(receipt.invocationId)) return;
     await this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
     if (receipt.receiptKind === "terminal" && this.homeRequestPolicy) {
-      await this.dependencies.homeInboxSettlement?.(this.id, receipt.operationId);
+      // The terminal receipt is already canonical. A failed settlement leaves its
+      // delivery admitted for the next activation to re-prove; it must not strand
+      // this operation's work entry or its terminal observers.
+      await this.dependencies.homeInboxSettlement?.(this.id, receipt.operationId).catch(error => {
+        this.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+      });
     }
   }
 
@@ -3743,6 +3756,7 @@ export class RuntimeSlot {
       this.startPendingManualCompaction();
     })().finally(() => {
       this.pendingReceiptWrites.delete(operation);
+      this.releaseSettleWaiters();
       if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
       this.settleRetiredOperationWork();
     });
@@ -7379,6 +7393,7 @@ export class RuntimeSlot {
   }
 
   publishSnapshot(): void {
+    this.releaseSettleWaiters();
     if (this.disposed || this.trustReloadPending) return;
     // This publication already carries every change a pending coalesced frame
     // was scheduled for; letting that timer fire would rebroadcast the same
@@ -8465,8 +8480,11 @@ export class RuntimeSlot {
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) {
       const invocation = this.invocationForOperation(invocationOperationId);
-      if (invocation) {
-        // A limit crossing is authoritative even if a user Stop races it.
+      // Only a Gateway-owned stop is attributed on the invocation; it outranks the
+      // SDK's own outcome. A user Stop stays an intent (`abortedOperations`), so
+      // the settled SDK outcome decides the receipt exactly as it does on main.
+      if (invocation && terminalErrorCode !== "user-abort") {
+        // A limit crossing is authoritative even if another Gateway stop races it.
         if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
       }
       this.abortedOperations.add(invocationOperationId);
@@ -9752,10 +9770,37 @@ export class RuntimeSlot {
   }
 
   /** Queue a retirement barrier behind admitted lane work without disposing the
-   * slot. The Registry remains the sole owner of disposal and publication. Work
-   * running on this lane must never await this barrier. */
+   * slot, then wait (bounded by the ownership grace) until the admitted operation
+   * has settled. The lane alone releases while a run is still in flight, and the
+   * Gateway settles its terminal after the SDK idles, so eligibility checked
+   * earlier would refuse a runtime about to become idle. On timeout the caller's
+   * own eligibility check still refuses retryably. The Registry remains the sole
+   * owner of disposal and publication. Work running on this lane must never await
+   * this barrier. */
   async retireAfterSettled(): Promise<void> {
-    await this.lane.run(() => {});
+    const deadline = performance.now() + DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
+    for (;;) {
+      await this.lane.run(() => {});
+      // The same predicate disposeIf enforces: canonical receipt writes gate
+      // disposal as well as busy state.
+      if (!this.isBusy && this.pendingReceiptWrites.size === 0) return;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) return;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => wake(), remaining);
+        const wake = () => {
+          clearTimeout(timer);
+          this.settleWaiters.delete(wake);
+          resolve();
+        };
+        this.settleWaiters.add(wake);
+      });
+    }
+  }
+
+  /** Wakes `retireAfterSettled` waiters so each rechecks settled state. */
+  private releaseSettleWaiters(): void {
+    for (const wake of [...this.settleWaiters]) wake();
   }
 
   async dispose(exceptWorkToken?: string): Promise<void> {
@@ -10061,9 +10106,6 @@ export class RuntimeSlot {
     }
   }
 
-  /** `exceptWorkToken` is the initiating request's own work entry, which is not
-   * the session running. Every other entry, including a different request's,
-   * still makes this busy. */
   private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
     const state = this.dependencies.homeChapterState?.(manager.getSessionId());
     if (!state) return;
@@ -10121,23 +10163,34 @@ export class RuntimeSlot {
     const crossing = { operationId, boundary, crossingBytes: bytes, crossingEntries: entries } as const;
     this.homeLimitStop = crossing;
     void this.abort("agent", operationId, "chapter-limit").then(() => {
-      const settledBytes = path ? statSync(path).size : 0;
-      const settledEntries = this.canonicalEntryCount;
-      this.hooks.homeChapterLimitStopped?.({
-        chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
-        boundary,
-        crossingBytes: crossing.crossingBytes,
-        crossingEntries: crossing.crossingEntries,
-        settledBytes,
-        settledEntries,
-      });
-      if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+      try {
+        const settledBytes = path ? statSync(path).size : 0;
+        const settledEntries = this.canonicalEntryCount;
+        this.hooks.homeChapterLimitStopped?.({
+          chapterOrdinal: this.dependencies.homeChapterState?.(this.id)?.ordinal ?? 0,
+          boundary,
+          crossingBytes: crossing.crossingBytes,
+          crossingEntries: crossing.crossingEntries,
+          settledBytes,
+          settledEntries,
+        });
+      } finally {
+        // The Stop has settled, so the fence is no longer needed even if the
+        // crossing record could not be read.
+        if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+      }
     }, error => {
       // If exact-operation Stop could not settle, preserve the admission fence.
+      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
+    }).catch(error => {
+      // A failure after the Stop settled must not be an unhandled rejection.
       this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
     });
   }
 
+  /** `exceptWorkToken` is the initiating request's own work entry, which is not
+   * the session running. Every other entry, including a different request's,
+   * still makes this busy. */
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
     this.assertChapterWritable();

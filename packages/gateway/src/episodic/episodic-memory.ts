@@ -18,10 +18,7 @@ import {
   createModelRuntimeSummarizer, emptyReplyDetail, leafStep, mergeStep, sizeFeedback,
   summarizerText, usageTokens, withFeedback,
 } from "./episodic-compactor.js";
-import {
-  EpisodicSourceChangedError, projectBranch, readCanonicalBranchAtCursor, readCanonicalEntryInstants, readCanonicalSession, readCanonicalSimpleAppend, episodicDigest,
-  type EpisodicCanonicalCut,
-} from "./episodic-source.js";
+import { EpisodicSourceChangedError, episodicDigest, type EpisodicSourceDelta } from "./episodic-source.js";
 import { EpisodicStore, type EpisodicStoreSnapshot } from "./episodic-store.js";
 import {
   EPISODIC_MAX_LEVEL, decodeContextRuns, encodeNodeCode, foldViewSliced, freeNodeText, mergedFreeText, nodeAddress, rebalanceView,
@@ -32,9 +29,9 @@ import {
 /*
  * The owner of one source session's memory: the projected catalog, the binary
  * summary tree, the view, and the pump that builds nodes (departures 3 and 5 of
- * the brief). It never subscribes to a session; `entriesCommitted` re-reads the
- * canonical file after its cursor and drains the pump, and `whenReady` is what a
- * request layer waits on.
+ * the brief). It never subscribes to a session; `entriesCommitted` asks its
+ * `sessionSource` for the deltas after its cursor and drains the pump, and
+ * `whenReady` is what a request layer waits on.
  *
  * Ingestion, invalidation and `resume` are serialized behind one mutex. The pump
  * is not: it may still be building when the next commit invalidates nodes, so
@@ -72,10 +69,6 @@ interface Waiter {
   signal?: AbortSignal;
   onAbort?: () => void;
 }
-
-/** One message's instant, as Home's `date` tool reports it. `unavailable` is the
- * source's own answer that it can no longer prove it: never a guessed time. */
-export type EpisodicTimestampResult = { kind: "timestamp"; timestamp: string } | { kind: "unavailable" };
 
 /** One search's outcome (`EPISODIC_SEARCH_HITS` lines, the whole range's match
  * count, and how much of the range could contribute no searchable text at all, so
@@ -158,10 +151,6 @@ export class EpisodicMemory {
   private draining: Promise<void> | null = null;
   private appending: Promise<void> = Promise.resolve();
   private storeKey: string | undefined;
-  /** Instants read from the canonical source for catalog records written before
-   * the optional `timestamp` existed. Read at most once per memory: an entry's
-   * instant never changes. */
-  private legacyTimestamps: Promise<Map<string, string>> | undefined;
   private closed = false;
   private checkpointFailure: Error | undefined;
 
@@ -302,32 +291,17 @@ export class EpisodicMemory {
     const cursor = this.sourceCursor;
     if (!cursor) return undefined;
     try {
-      if (this.dependencies.sessionSource) {
-        let result = 0;
-        let found: number | undefined;
-        for await (const entry of this.dependencies.sessionSource.branchAtCursor(cursor, this.limits)) {
-          const index = this.entryIndex.get(entry.id);
-          if (index !== undefined) {
-            if (this.messages.get(index)?.sessionId !== entry.sourceSessionId) return undefined;
-            result = Math.max(result, index + 1);
-          }
-          if (entry.id === entryId) found = result;
-        }
-        return found;
-      }
-      const branch = await readCanonicalBranchAtCursor({
-        path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId,
-        maxLineBytes: this.limits.maxSourceLineBytes, cursor,
-      });
-      if (!branch) return undefined;
       let result = 0;
-      let found = false;
-      for (const entry of branch) {
+      let found: number | undefined;
+      for await (const entry of this.dependencies.sessionSource.branchAtCursor(cursor, this.limits)) {
         const index = this.entryIndex.get(entry.id);
-        if (index !== undefined && index + 1 > result) result = index + 1;
-        if (entry.id === entryId) { found = true; break; }
+        if (index !== undefined) {
+          if (this.messages.get(index)?.sessionId !== entry.sourceSessionId) return undefined;
+          result = Math.max(result, index + 1);
+        }
+        if (entry.id === entryId) found = result;
       }
-      return found ? result : undefined;
+      return found;
     } catch { return undefined; }
   }
 
@@ -440,25 +414,11 @@ export class EpisodicMemory {
     });
   }
 
-  /**
-   * The canonical instant of one message: the catalog record's own field, or —
-   * for a record written before that field existed — the instant the source proves
-   * for that entry id. That proof covers every parsed entry of the file, not only
-   * the branch the last entry follows, so an entry that has left the branch is
-   * still dated; the read is the bounded canonical reader the owner already uses,
-   * it is not `SessionManager`, and it happens at most once per memory because an
-   * entry's instant never changes. `unavailable` is the source's answer that it
-   * holds no such entry (or that it cannot read the file at all): the memory never
-   * invents a time. `undefined` means this memory holds no such message.
-   */
-  async entryTimestamp(id: number): Promise<EpisodicTimestampResult | undefined> {
+  /** The canonical instant of one message, as its catalog record holds it.
+   * `undefined` means this memory holds no such message. */
+  entryTimestamp(id: number): string | undefined {
     this.assertOpen();
-    const message = this.messages.get(id);
-    if (!message) return undefined;
-    if (message.timestamp !== undefined) return { kind: "timestamp", timestamp: message.timestamp };
-    const timestamps = await this.canonicalTimestamps();
-    const timestamp = timestamps.get(message.entryId);
-    return timestamp === undefined ? { kind: "unavailable" } : { kind: "timestamp", timestamp };
+    return this.messages.get(id)?.timestamp;
   }
 
   /**
@@ -601,31 +561,10 @@ export class EpisodicMemory {
   // ---- ingestion -----------------------------------------------------------------
 
   private async ingest(): Promise<void> {
-    let cut: EpisodicCanonicalCut;
     try {
-      if (this.dependencies.sessionSource) {
-        for await (const delta of this.dependencies.sessionSource.read(this.sourceCursor, this.limits)) {
-          await this.ingestCut(delta);
-          if (this.blocked || this.closed) return;
-        }
-        return;
-      }
-      cut = this.sourceCursor ? await readCanonicalSimpleAppend({
-          path: this.dependencies.sessionFile,
-          sessionId: this.dependencies.sessionId,
-          maxLineBytes: this.limits.maxSourceLineBytes,
-          cursor: this.sourceCursor,
-        }) ?? await readCanonicalSession({
-          path: this.dependencies.sessionFile,
-          sessionId: this.dependencies.sessionId,
-          maxLineBytes: this.limits.maxSourceLineBytes,
-        }) : await readCanonicalSession({
-          path: this.dependencies.sessionFile,
-          sessionId: this.dependencies.sessionId,
-          maxLineBytes: this.limits.maxSourceLineBytes,
-        });
-      if (cut.incremental && cut.branch.some(entry => this.entryIndex.has(entry.id))) {
-        cut = await readCanonicalSession({ path: this.dependencies.sessionFile, sessionId: this.dependencies.sessionId, maxLineBytes: this.limits.maxSourceLineBytes });
+      for await (const delta of this.dependencies.sessionSource.read(this.sourceCursor, this.limits)) {
+        await this.ingestCut(delta);
+        if (this.blocked || this.closed) return;
       }
     } catch (error) {
       // A concurrent in-place rewrite can make a syntactically invalid read a
@@ -643,10 +582,9 @@ export class EpisodicMemory {
       }
       throw error;
     }
-    await this.ingestCut(cut);
   }
 
-  private async ingestCut(cut: EpisodicCanonicalCut): Promise<void> {
+  private async ingestCut(cut: EpisodicSourceDelta): Promise<void> {
     if (cut.sessionId !== this.dependencies.sessionId) {
       await this.block("source-unavailable", "Canonical source belongs to another memory owner");
       return;
@@ -659,7 +597,7 @@ export class EpisodicMemory {
       return;
     }
 
-    const projection = cut.projected ?? projectBranch(cut, this.limits);
+    const projection = cut.projected;
     const changed: number[] = [];
     const seen = new Set<string>();
     try {
@@ -807,29 +745,6 @@ export class EpisodicMemory {
       if (node.sourceDigest !== episodicDigest(`${message.kind}: ${message.text}`)) changed.push(node.index);
     }
     if (changed.length > 0) await this.invalidate(changed);
-  }
-
-  /**
-   * The instants of every entry the canonical file holds, keyed by entry id, for
-   * catalog records written before the optional `timestamp` existed. One bounded
-   * read (the reader the owner already uses, which never repairs or migrates),
-   * remembered for the life of this memory. A read that fails is not remembered:
-   * the next question asks the source again, and the answer in the meantime is
-   * `unavailable` rather than a guess.
-   */
-  private canonicalTimestamps(): Promise<Map<string, string>> {
-    // Home's strict cursor format only admits catalogs that carry instants.
-    // Historical legacy reads belong solely to ordinary single-file memory.
-    if (this.dependencies.sessionSource) return Promise.resolve(new Map());
-    this.legacyTimestamps ??= readCanonicalEntryInstants({
-      path: this.dependencies.sessionFile,
-      sessionId: this.dependencies.sessionId,
-      maxLineBytes: this.limits.maxSourceLineBytes,
-    }).catch(() => {
-      this.legacyTimestamps = undefined;
-      return new Map<string, string>();
-    });
-    return this.legacyTimestamps;
   }
 
   /** Revoke changed leaves and their transitive dependent closure. */

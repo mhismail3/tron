@@ -1,4 +1,7 @@
 import { HOME_MAX_CHAPTERS } from "../home/home-chapter-state.js";
+import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
+import { maximumPromptLineBytes } from "../machine/upload-store.js";
+import { PROMPT_TEXT_MAX_BYTES } from "../sessions/resource-invocation.js";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 /*
@@ -45,7 +48,9 @@ export interface EpisodicLimits {
    * block nor retry, and every turn waiting on that node would wait for the life
    * of the process. 0 disables the bound (tests that drive the pump by hand). */
   compactorTimeoutMs: number;
-  /** One canonical JSONL line larger than this refuses the read. */
+  /** One canonical JSONL line larger than this refuses the read. Home's sources
+   * hold every line the prompt path writes, so this is at least that producer's
+   * largest line (`maximumPromptLineBytes`). */
   maxSourceLineBytes: number;
   /** One stored JSONL record larger than this refuses the store. */
   maxStoreLineBytes: number;
@@ -69,7 +74,7 @@ export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   // visible state with an operator resume, so a call that is simply gone has to
   // become a block instead of an unbounded wait.
   compactorTimeoutMs: 120_000,
-  maxSourceLineBytes: 16 * 1_024 * 1_024,
+  maxSourceLineBytes: maximumPromptLineBytes(DEFAULT_MAX_UPLOAD_BYTES, PROMPT_TEXT_MAX_BYTES),
   maxStoreLineBytes: 1_024 * 1_024,
 };
 
@@ -159,9 +164,8 @@ export interface EpisodicMessageRecord {
   /** The entry contributes no text of its own (a null context edit, or a
    * navigation that left the branch). Never sent to the model. */
   omitted: boolean;
-  /** The canonical entry's instant. Absent on a record written before this
-   * field existed: `entryTimestamp` reads the source for it instead. */
-  timestamp?: string;
+  /** The canonical entry's instant, as the source projected it. */
+  timestamp: string;
 }
 
 /**
@@ -326,7 +330,7 @@ export type EpisodicCompactorDependency =
 
 /** Delta ingestion and frozen historical lookup are deliberately distinct. */
 export interface EpisodicSessionSource {
-  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicCanonicalCut>;
+  read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-source.js").EpisodicSourceDelta>;
   branchAtCursor(cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }>;
 }
 
@@ -334,10 +338,8 @@ export type EpisodicMemoryDependencies = {
   workspace: import("../workspace/tron-workspace.js").TronWorkspace;
   /** The canonical session this memory is over; also its store namespace. */
   sessionId: string;
-  /** The canonical session JSONL path. Read only, never repaired. */
-  sessionFile: string;
-  /** Ordered canonical source for a multi-chapter Home namespace. */
-  sessionSource?: EpisodicSessionSource;
+  /** The ordered canonical chapters this memory reads. Read only, never repaired. */
+  sessionSource: EpisodicSessionSource;
   /** Optional admission authority owned by Home, never persisted in this store. */
   isPaused?: () => boolean;
   limits?: Partial<EpisodicLimits>;

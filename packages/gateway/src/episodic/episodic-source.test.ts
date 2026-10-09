@@ -7,9 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { EpisodicMemoryError, type EpisodicDiagnostic, type EpisodicSummarizer } from "./episodic-contract.js";
+import { EPISODIC_DEFAULTS, EpisodicMemoryError, type EpisodicDiagnostic, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import { readCanonicalSession } from "./episodic-source.js";
+import { readCanonicalSession, visitCanonicalSessionEntries } from "./episodic-source.js";
+import { EpisodicStore } from "./episodic-store.js";
 
 /*
  * The read-only canonical reader (departure 2): it must never repair, migrate
@@ -18,6 +19,7 @@ import { readCanonicalSession } from "./episodic-source.js";
  * whole rather than silently dropping data.
  */
 
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const roots: string[] = [];
 const owners: TronWorkspace[] = [];
 afterEach(async () => {
@@ -61,7 +63,7 @@ function memoryFor(fx: SourceFixture, limits: { maxSourceLineBytes?: number } = 
   return EpisodicMemory.open({
     workspace: fx.workspace,
     sessionId: fx.sessionId,
-    sessionFile: fx.sessionFile,
+    sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile),
     summarizer: stubSummarizer,
     limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, ...limits },
     ...(diagnostic ? { diagnostic } : {}),
@@ -96,12 +98,11 @@ describe("episodic canonical source reader", () => {
     const sessionId = manager.getSessionId();
     const cut = await readCanonicalSession({ path: sessionFile, sessionId, maxLineBytes: 1_024 * 1_024 });
     expect(cut.branch).toEqual([]);
-    expect(cut.leafEntryId).toBeNull();
 
     const workspace = new TronWorkspace(join(root, "home"));
     owners.push(workspace);
     const memory = await EpisodicMemory.open({
-      workspace, sessionId, sessionFile, summarizer: stubSummarizer,
+      workspace, sessionId, sessionSource: singleChapterSource(sessionId, sessionFile), summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
     });
     await memory.entriesCommitted(sessionId);
@@ -153,7 +154,7 @@ describe("episodic canonical source reader", () => {
     await expect(readCanonicalSession({ path: broken, sessionId: fx.sessionId, maxLineBytes: 1_024 })).rejects.toThrowError(/not JSON/u);
     const stableInvalidDiagnostics: EpisodicDiagnostic[] = [];
     const stableInvalidMemory = await EpisodicMemory.open({
-      workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: broken,
+      workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, broken),
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
       diagnostic: record => stableInvalidDiagnostics.push(record),
@@ -168,7 +169,7 @@ describe("episodic canonical source reader", () => {
     await expect(readCanonicalSession({ path: oversized, sessionId: fx.sessionId, maxLineBytes: 1_024 })).rejects.toThrowError(/exceeds/u);
     // The refusal is visible to the memory as a blocked source, not a silent skip.
     const memory = await EpisodicMemory.open({
-      workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: oversized,
+      workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, oversized),
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1, maxSourceLineBytes: 1_024 }, sleep: async () => {},
     });
@@ -176,6 +177,24 @@ describe("episodic canonical source reader", () => {
     expect(memory.status().blocked?.reason).toBe("source-unavailable");
     expect(memory.status().messages).toBe(0);
     await memory.dispose();
+  });
+
+  it("streams every complete entry in file order and refuses what the whole-file reader refuses", async () => {
+    const fx = await fixture("stream");
+    const raw = await readFile(fx.sessionFile, "utf8");
+    const expected = raw.trimEnd().split("\n").slice(1).map(line => (JSON.parse(line) as { id: string }).id);
+    const visited: string[] = [];
+    await visitCanonicalSessionEntries({ path: fx.sessionFile, sessionId: fx.sessionId, maxLineBytes: 1_048_576, visit: entry => { visited.push(entry.id); } });
+    expect(visited).toEqual(expected);
+
+    const header = raw.split("\n")[0]!;
+    const oversized = join(fx.root, "stream-oversized.jsonl");
+    await writeFile(oversized, `${header}\n${JSON.stringify({ type: "custom", id: "wide", parentId: null, timestamp: new Date().toISOString(), customType: "test", data: { text: "x".repeat(4_000) } })}\n`);
+    await expect(visitCanonicalSessionEntries({ path: oversized, sessionId: fx.sessionId, maxLineBytes: 1_024, visit: () => {} })).rejects.toThrowError(/exceeds 1024 bytes/u);
+    const torn = join(fx.root, "stream-torn.jsonl");
+    await writeFile(torn, `${header}\n{"type":"message","id":"partial"`);
+    await expect(visitCanonicalSessionEntries({ path: torn, sessionId: fx.sessionId, maxLineBytes: 1_048_576, visit: () => {} })).rejects.toThrowError(/incomplete tail/u);
+    await expect(visitCanonicalSessionEntries({ path: fx.sessionFile, sessionId: "another-session", maxLineBytes: 1_048_576, visit: () => {} })).rejects.toThrowError(/different session/u);
   });
 
   it("follows the branch from the last complete entry and keeps off-branch indices", async () => {
@@ -195,9 +214,8 @@ describe("episodic canonical source reader", () => {
     fx.manager.appendMessage(userMessage("navigated prompt"));
     await memory.entriesCommitted(fx.sessionId);
     expect(memory.status().messages).toBe(14);
-    const catalog = catalogRecords(await readFile(fx.catalogPath, "utf8"));
-    const latest = new Map<number, Record<string, unknown>>();
-    for (const record of catalog) latest.set(record.index as number, record);
+    // The store's merged catalog: a checkpoint may already have folded the log.
+    const latest = (await new EpisodicStore(fx.workspace, fx.sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes).read()).messages;
     const navigated = [...latest.values()].find(record => record.text === "navigated prompt")!;
     expect(navigated.index).toBe(13);
     // The seven entries the branch left behind keep their index and become
@@ -282,7 +300,7 @@ describe("episodic canonical source reader", () => {
   it("records a read failure of a missing file as a blocked source", async () => {
     const fx = await fixture("missing");
     const memory = await EpisodicMemory.open({
-      workspace: fx.workspace, sessionId: fx.sessionId, sessionFile: join(fx.root, "absent.jsonl"),
+      workspace: fx.workspace, sessionId: fx.sessionId, sessionSource: singleChapterSource(fx.sessionId, join(fx.root, "absent.jsonl")),
       summarizer: stubSummarizer,
       limits: { viewBytes: 4_096, jobs: 2, retryMs: 1 }, sleep: async () => {},
     });
@@ -329,32 +347,5 @@ describe("episodic canonical source reader", () => {
     await memory.whenReady(2);
     await expect(memory.whenReady(3)).rejects.toThrowError(/beyond/u);
     await memory.dispose();
-  });
-
-  it("continues at the cursor when the file only grew", async () => {
-    const fx = await fixture("incremental");
-    const first = await readCanonicalSession({ path: fx.sessionFile, sessionId: fx.sessionId, maxLineBytes: 1_024 * 1_024 });
-    expect(first.incremental).toBe(false);
-    fx.manager.appendMessage(userMessage("appended after the first read"));
-    const second = await readCanonicalSession({
-      path: fx.sessionFile, sessionId: fx.sessionId, maxLineBytes: 1_024 * 1_024,
-      previous: { cursor: first.cursor, branch: first.branch },
-    });
-    expect(second.incremental).toBe(true);
-    expect(second.branch.map(entry => entry.id)).toEqual(fx.manager.getBranch().map(entry => entry.id));
-    expect(second.completeBytes).toBeGreaterThan(first.completeBytes);
-    // A rewrite that changes the line before the offset falls back to the whole
-    // file rather than extending a prefix that is no longer there.
-    const rewritten = join(fx.root, "rewritten.jsonl");
-    const raw = await readFile(fx.sessionFile, "utf8");
-    const lines = raw.split("\n").filter(line => line !== "");
-    lines[lines.length - 1] = lines[lines.length - 1]!.replace("appended after the first read", "rewritten later on");
-    await writeFile(rewritten, `${lines.join("\n")}\n`);
-    const reread = await readCanonicalSession({
-      path: rewritten, sessionId: fx.sessionId, maxLineBytes: 1_024 * 1_024,
-      previous: { cursor: second.cursor, branch: second.branch },
-    });
-    expect(reread.incremental).toBe(false);
-    expect(reread.branch.at(-1)!.id).toBe(second.branch.at(-1)!.id);
   });
 });

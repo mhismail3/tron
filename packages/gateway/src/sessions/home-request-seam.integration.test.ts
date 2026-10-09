@@ -1538,7 +1538,10 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       memory: true,
       settings: { compaction: { enabled: true, reserveTokens: 120_000, keepRecentTokens: 0, instructions: "Retain the API contract" } },
     });
-    item.faux.setResponses([item.response("Prior work ".repeat(8_000)), item.response("must never be produced")]);
+    // The refusal is decided at admission, so the reply only needs to be a real
+    // prior turn. An 88 KB reply streamed as ~2,200 paced faux chunks took most
+    // of the 10 s wait below on its own.
+    item.faux.setResponses([item.response("Prior work ".repeat(400)), item.response("must never be produced")]);
     await item.slot.prompt(longInput("C15 activation input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const callsBefore = item.faux.state.callCount;
@@ -1557,6 +1560,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     item.record("C15", row);
     expect(row.providerRequests).toBe(0);
     expect(row.compactionEntries).toBe(0);
+    expect(row.compactOutcome).toBe("GatewayError: Tron Home keeps its own history; manual compaction is unavailable");
     expect(row.slotPhase).toBe("idle");
   }, 60_000);
 });

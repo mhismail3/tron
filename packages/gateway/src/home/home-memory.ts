@@ -81,7 +81,7 @@ const UNAVAILABLE_TEXT: Readonly<Record<HomeMemoryUnavailableReason, string>> = 
   "memory-not-configured": "Tron Home's memory is not configured, so it cannot answer.",
   "memory-unavailable": "Tron Home's memory is not open, so it cannot answer.",
   "memory-blocked": "Tron Home's memory is stopped, so it cannot answer.",
-  "timestamp-unavailable": "That message's date is no longer available from the source.",
+  "timestamp-unavailable": "That message's recorded date cannot be read.",
 };
 
 /** The Home memory's configured model. */
@@ -117,12 +117,12 @@ export interface HomeMemoryOptions {
   /** The canonical source identity this memory is over; also its store namespace. */
   sessionId: string;
   workspace: TronWorkspace;
-  /** The canonical session JSONL this memory reads, resolved when it opens: the
-   * session exists before it has a line, and a runtime may be evicted while the
-   * memory stays open. */
+  /** The canonical session JSONL that must exist before the store opens, resolved
+   * when it opens: the session exists before it has a line, and a runtime may be
+   * evicted while the memory stays open. The source reads the chapters. */
   sessionFile: () => Promise<string | undefined>;
   /** Separate chapter-delta ingestion and frozen cursor-scoped branch lookup. */
-  sessionSource?: EpisodicSessionSource;
+  sessionSource: EpisodicSessionSource;
   /** Resolves the compactor's model the way Knowledge resolves the model for its
    * own model calls: from the Gateway's ModelRuntime, never a session's. */
   modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
@@ -224,9 +224,8 @@ export class HomeMemory {
       this.config = { model: { ...config.model } };
       this.summarizer = summarizer;
       this.failure = undefined;
-      const sessionFile = await this.existingSessionFile();
-      if (!sessionFile) return;
-      await this.openStore(sessionFile, modelChanged);
+      if (!await this.hasCanonicalFile()) return;
+      await this.openStore(modelChanged);
     });
   }
 
@@ -435,16 +434,15 @@ export class HomeMemory {
 
   /** The recipe's `date`: the local date and time of one message. */
   async date(id: number): Promise<HomeMemoryToolResult> {
-    return await this.toolRead(async (memory) => {
-      const found = await memory.entryTimestamp(id);
+    return await this.toolRead((memory) => {
+      const timestamp = memory.entryTimestamp(id);
       // A message's view line is `id+1`, so a refused date names the line it is
       // about the same way a refused zoom does.
-      if (!found) return { outcome: "invalid-arguments", text: `No line ${id}+1.` };
-      // An unparsable instant is the same answer as a source that cannot prove
-      // one: the memory never invents a time.
-      const text = found.kind === "unavailable" ? undefined : localTimestampText(found.timestamp);
+      if (timestamp === undefined) return { outcome: "invalid-arguments", text: `No line ${id}+1.` };
+      // An unparsable instant is refused as unavailable: the memory never invents a time.
+      const text = localTimestampText(timestamp);
       if (text === undefined) {
-        return homeMemoryToolUnavailable("timestamp-unavailable", `The date of message ${id} is no longer available from the source.`);
+        return homeMemoryToolUnavailable("timestamp-unavailable", `The recorded date of message ${id} cannot be read.`);
       }
       return { outcome: "ok", text: `${id}+0|${text}` };
     });
@@ -545,24 +543,23 @@ export class HomeMemory {
     if (!this.config || !this.summarizer) {
       throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     }
-    const sessionFile = await this.existingSessionFile();
-    if (!sessionFile) {
+    if (!await this.hasCanonicalFile()) {
       throw new HomeMemoryRefusal("memory-unavailable", "the Home session has no canonical file to read yet");
     }
-    return await this.openStore(sessionFile, false);
+    return await this.openStore(false);
   }
 
   /** The canonical file, when the session already has one. A session exists
    * before its first canonical line, so configuration recorded against one is
    * held, not refused, and the store opens at the first activation. */
-  private async existingSessionFile(): Promise<string | undefined> {
+  private async hasCanonicalFile(): Promise<boolean> {
     const path = await this.options.sessionFile();
-    if (!path) return undefined;
+    if (!path) return false;
     const info = await stat(path).catch(() => undefined);
-    return info?.isFile() ? path : undefined;
+    return info?.isFile() ?? false;
   }
 
-  private async openStore(sessionFile: string, modelChanged: boolean): Promise<MemoryBinding> {
+  private async openStore(modelChanged: boolean): Promise<MemoryBinding> {
     const summarizer = this.summarizer;
     const config = this.config;
     if (!summarizer || !config) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
@@ -571,8 +568,7 @@ export class HomeMemory {
       memory = await EpisodicMemory.open({
         workspace: this.options.workspace,
         sessionId: this.options.sessionId,
-        sessionFile,
-        ...(this.options.sessionSource ? { sessionSource: this.options.sessionSource } : {}),
+        sessionSource: this.options.sessionSource,
         summarizer,
         ...(this.options.isPaused ? { isPaused: this.options.isPaused } : {}),
         ...(this.options.limits ? { limits: this.options.limits } : {}),

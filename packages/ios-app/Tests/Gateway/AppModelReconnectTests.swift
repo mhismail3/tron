@@ -1687,7 +1687,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "home-session"))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let read = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1711,7 +1711,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "ordinary-session"))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
             let read = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1742,7 +1742,7 @@ struct AppModelReconnectTests {
 
             let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
             presentation.register(chat, parent: nil)
-            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "ordinary-session"))
+            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
             for _ in 0..<20 { await Task.yield() }
             #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
             fixture.model.unmountHomeStatus(surfaceToken: dashboard)
@@ -1762,7 +1762,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "home-session"))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let claim = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1771,6 +1771,106 @@ struct AppModelReconnectTests {
             let refresh = try await waitForMethod("home.status", on: socket, afterIndex: claim.index + 1)
             await socket.enqueue(successResponse(id: refresh.id, result: homeStatusResult()))
             fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("a chat opened on the sealed predecessor during rollover claims the status it opens, not the reserved successor")
+    func rolloverPredecessorChatClaimsStatus() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.predecessor-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+            let rollover = homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
+            let claim = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: claim.id, result: rollover))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            #expect(fixture.model.homeStatus.status?.openSessionId == "predecessor-session")
+
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "predecessor-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: claim.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: rollover))
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("an ordinary chat on the sealed predecessor during rollover neither claims the status nor reads it")
+    func ordinaryChatOnRolloverPredecessorNeitherClaimsNorReads() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            // The dashboard holds the rollover status, so the chat sees a known status.
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let ordinaryChat = PresentationSurfaceToken(id: "chat.predecessor-session", generation: UUID())
+            presentation.register(ordinaryChat, parent: nil)
+            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: ordinaryChat, activityCoordinator: presentation, route: .ordinary(sessionID: "predecessor-session")))
+            for _ in 0..<20 { await Task.yield() }
+            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1, "an ordinary chat on the sealed predecessor reads nothing")
+            #expect(fixture.model.homeStatus.status?.openSessionId == "predecessor-session", "the dashboard keeps the status it already read")
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
+        }
+    }
+
+    @Test("a Home follow carries the sealed chapter's unsent text to the successor route")
+    func homeFollowCarriesUnsentTextToSuccessor() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let sealedRoute = try fixture.model.navigationRouteForHome(profileID: profile.id, status: try #require(fixture.model.homeStatus.status))
+            #expect(sealedRoute.sessionID == "predecessor-session")
+            let sealedDraft = ComposerDraftScope(profileID: profile.id, sessionID: "predecessor-session")
+            fixture.model.composerDrafts.setText("typed after the send", for: sealedDraft)
+
+            // Home names the successor once the logical prompt materializes it.
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "predecessor-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: read.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "successor-session")))
+            for _ in 0..<200 where fixture.model.homeStatus.status?.openSessionId != "successor-session" {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let materialized = try #require(fixture.model.homeStatus.status)
+            #expect(materialized.openSessionId == "successor-session")
+
+            let followed = try #require(try fixture.model.followedHomeRoute(from: sealedRoute, profileID: profile.id, status: materialized))
+            #expect(followed.sessionID == "successor-session")
+            #expect(followed.isHome)
+            let successorDraft = ComposerDraftScope(profileID: profile.id, sessionID: "successor-session")
+            #expect(fixture.model.composerDrafts.text(for: successorDraft) == "typed after the send",
+                    "the successor composer opens with the unsent text the Home route carried")
+            #expect(fixture.model.composerDrafts.text(for: sealedDraft) == "typed after the send", "the sealed chapter keeps its own draft")
+            #expect(try fixture.model.followedHomeRoute(from: followed, profileID: profile.id, status: materialized) == nil,
+                    "a route that already opens the named chapter does not follow")
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
         }
     }
 
@@ -1787,7 +1887,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "ordinary-session"))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
             let claim = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1814,7 +1914,7 @@ struct AppModelReconnectTests {
             let presentation = PresentationActivityCoordinator()
             let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
             presentation.register(chat, parent: nil)
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, sessionID: "home-session"))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let read = try await waitForMethod("home.status", on: socket)
 
             presentation.retire(chat)
@@ -2022,7 +2122,8 @@ struct AppModelReconnectTests {
             #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
             let route = try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
             #expect(route.sessionID == "home-session")
-            #expect(route.id == "\(profile.id):home-session")
+            #expect(route.isHome)
+            #expect(route.id == "\(profile.id):home-session:home")
 
             let oldFrames = await first.sentFrames()
             let newFrames = await replacement.sentFrames()
@@ -2396,7 +2497,8 @@ struct AppModelReconnectTests {
 
             let route = try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
             #expect(route.sessionID == "home-session")
-            #expect(route.id == "\(profile.id):home-session")
+            #expect(route.isHome)
+            #expect(route.id == "\(profile.id):home-session:home")
             #expect(fixture.model.ownsNavigationRoute(route))
             fixture.model.unmountHomeStatus(surfaceToken: token)
         }
@@ -2811,14 +2913,16 @@ struct AppModelReconnectTests {
         ])
     }
 
-    private func homeStatusResult() -> JSONValue {
+    /// `sessionId` is the reserved successor and `openSessionID` the chapter a route
+    /// opens; they differ only while a rollover is pending.
+    private func homeStatusResult(sessionID: String = "home-session", openSessionID: String = "home-session") -> JSONValue {
         .object([
             "phase": .string("ready"),
             "activation": .object(["available": .bool(false)]),
             "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
             "recovery": .object(["action": .string("none")]),
             "available": .bool(true), "enabled": .bool(true), "homeId": .string("home"),
-            "sessionId": .string("home-session"), "generation": .number(1),
+            "sessionId": .string(sessionID), "openSessionId": .string(openSessionID), "generation": .number(1),
             "live": .bool(false), "sessionPresent": .bool(true),
             "memory": .object(["configured": .bool(true), "open": .bool(true)]),
         ])

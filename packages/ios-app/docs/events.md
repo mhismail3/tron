@@ -125,7 +125,11 @@ admits and reduces mounted-session topics:
   Cached rows may show stale offline attention but never own it, while foreground and background
   profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
   broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
-  the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
+  the shared traversal dirty instead of cancel/restarting it. Home status is invalidated by these
+  two events: a `session.summary` for Home's current `sessionId` triggers one immediate
+  `home.status` read, and every `session.listChanged` does too, because a chapter rollover or
+  designation changes the Home projection without changing the row a summary names. Neither event
+  is a Home status payload; both only request the same fenced read the mounted surface runs. User-scoped 500-row pagination
   has named page/item/cursor bounds and publishes atomically. A traversal whose connection already published a catalog projection
   token re-reads it conditionally: the first page names that token and the Gateway answers `notModified` with no rows, so the
   retained rows, selection, and scroll stay untouched and the traversal still counts as authoritative. The token spans the whole

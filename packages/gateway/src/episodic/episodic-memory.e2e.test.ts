@@ -28,6 +28,7 @@ import { waitFor } from "../../test-support/wait-for.js";
  * The retained artifact is packages/gateway/test-results/episodic-memory/report.json.
  */
 
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-memory/report.json");
 const IMAGE_BASE64 = `iVBORw0KGgoAAAANSUhEUg${"QUJD".repeat(120)}`;
@@ -380,7 +381,7 @@ async function openMemory(fx: Fixture, summarizer?: EpisodicSummarizer): Promise
   return EpisodicMemory.open({
     workspace: fx.workspace,
     sessionId: fx.sessionId,
-    sessionFile: fx.sessionFile,
+    sessionSource: singleChapterSource(fx.sessionId, fx.sessionFile),
     modelRuntime: fx.modelRuntime,
     model: fx.model,
     limits: fx.limits,

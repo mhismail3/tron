@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
+import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
 import { makeInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -114,6 +115,63 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     if (mode === "contradictory") f.entries[0].details.resultRefs = [{ resultId: "forged" }];
     await f.owner.settle(f.route, "activation");
     expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
+  });
+
+  it("settles a delivery whose proof cannot be read as outcome-unknown without failing the activation", async () => {
+    const f = await fixture();
+    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    f.receipt();
+    vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", `Canonical session line exceeds ${EPISODIC_DEFAULTS.maxSourceLineBytes} bytes`));
+    await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
+    expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
+    // A later activation recovers the rest of the namespace; the unreadable event is not replayed.
+    await expect(f.reopen().recover(f.route)).resolves.toBeUndefined();
+    expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
+    expect(f.entries.filter(entry => entry.type === "custom_message")).toHaveLength(1);
+  });
+
+  it("keeps a delivery whose proof read fails transiently admitted, so the next activation proves and acknowledges it", async () => {
+    const f = await fixture();
+    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    f.receipt();
+    vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new Error("EIO while syncing the chapter"));
+    await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
+    expect((await f.store.read("task"))?.wake?.state).toBe("admitted");
+    vi.restoreAllMocks();
+    await f.reopen().recover(f.route);
+    expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");
+  });
+
+  it("refuses the activation only for the delivery whose proof is unreadable during recovery", async () => {
+    const f = await fixture();
+    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    f.receipt();
+    await f.owner.settle(f.route, "activation");
+    expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");
+    const second = await fixture();
+    await second.owner.admit(second.route, "activation", second.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    second.receipt();
+    vi.spyOn(second.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
+    await expect(second.reopen().recover(second.route)).resolves.toBeUndefined();
+    expect((await second.store.read("task"))?.wake?.state).toBe("outcome-unknown");
+  });
+
+  it("returns a delivery aborted before its canonical append to pending, with no delivery and no append", async () => {
+    const f = await fixture();
+    const controller = new AbortController();
+    const update = (f.store as any).updateWake.bind(f.store);
+    vi.spyOn(f.store as any, "updateWake").mockImplementation(async (id: string, change: (wake: any) => any) => {
+      const result = await update(id, change);
+      if (result.wake?.state === "admitted") controller.abort(new Error("Stop before append"));
+      return result;
+    });
+    await expect(f.owner.admit(f.route, "activation", f.append, async () => ({ signal: controller.signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })))
+      .rejects.toThrow(/Stop before append/);
+    expect(f.entries).toHaveLength(0);
+    expect((await f.store.read("task"))?.wake).toMatchObject({ state: "pending", delivery: null });
+    vi.restoreAllMocks();
+    await f.owner.admit(f.route, "next-activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    expect(f.entries.filter(entry => entry.type === "custom_message")).toHaveLength(1);
   });
 
   it("waits while disabled, blocks replacement and refuses stale-route acknowledgement", async () => {

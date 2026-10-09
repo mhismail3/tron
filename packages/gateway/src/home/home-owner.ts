@@ -1,5 +1,5 @@
-import { WakeInboxOwner, type HomeWakeMessage, type HomeWakeRoute } from "./home-wake-inbox.js";
-import { readCanonicalSession } from "../episodic/episodic-source.js";
+import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute } from "./home-wake-inbox.js";
+import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -149,8 +149,8 @@ export interface HomeOwnerOptions {
  * durable record under `<tronHome>/gateway/home/home.json`, the neutral working
  * directory beside it, and the profile decision for every session id.
  *
- * Designation is keyed by session id, so a fork of the Home session is an
- * ordinary session with no further work.
+ * Designation is keyed by session id: any session id that is not Home's current
+ * chapter is an ordinary session, so a fork never inherits Home's designation.
  *
  * Home also owns its memory (one `EpisodicMemory` over the Home session's
  * canonical entries) and the request seam that turns each activation into fresh
@@ -176,8 +176,6 @@ export class HomeOwner {
   private designating = false;
   private record: HomeRecord | undefined;
   private unavailable: string | undefined;
-  /** The fenced owner retains retirement work; a slot-lane writer must not await work queued on that same lane. */
-  private publicationRetirement: Promise<void> | undefined;
   private readonly tasks: HomeTaskDispatcher | undefined;
   private readonly inbox: WakeInboxOwner | undefined;
 
@@ -198,7 +196,7 @@ export class HomeOwner {
         ...(options.machineId ? { machineId: options.machineId } : {}),
         ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
         result: taskId => this.immutableTaskReport(taskId),
-        evidence: sessionIds => this.inboxEvidence(sessionIds),
+        evidence: scope => this.inboxEvidence(scope),
       });
       this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
     }
@@ -215,8 +213,8 @@ export class HomeOwner {
     return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
   }
 
-  /** Registry startup only, after workspace/catalog initialization and before
-   * admission. Recovery has no executable session lifetime to resurrect. */
+  /** Post-listen startup only (see `RuntimeRegistry.recoverHomeTasks`). Recovery
+   * has no executable session lifetime to resurrect. */
   async recoverTasks(): Promise<void> { await this.tasks?.recover(); }
 
   private async taskOwner(): Promise<HomeTaskDispatcher> {
@@ -315,18 +313,23 @@ export class HomeOwner {
       enabled: record.enabled, sessionId: homeSessionId(record) };
   }
 
+  /** Inbox delivery needs the task namespace's proof. While task recovery is
+   * refused, nothing is delivered (and nothing this process admitted needs
+   * settling), so the Home conversation itself stays usable. */
+  private async inboxAvailable(): Promise<boolean> {
+    return this.tasks !== undefined && (await this.tasks.recoveryStatus()).available;
+  }
+
   async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<void> {
-    await this.taskOwner();
     const route = this.wakeRoute(sessionId);
-    if (!route?.enabled || !this.inbox) return;
+    if (!route?.enabled || !this.inbox || !(await this.inboxAvailable())) return;
     await this.inbox.recover(route);
     await this.inbox.admit(route, operationId, append, envelope);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
-    await this.taskOwner();
     const route = this.wakeRoute(sessionId);
-    if (route && this.inbox) await this.inbox.settle(route, operationId);
+    if (route && this.inbox && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {
@@ -339,22 +342,23 @@ export class HomeOwner {
     });
   }
 
-  private async inboxEvidence(sessionIds: string[]): Promise<import("./home-wake-inbox.js").HomeWakeEvidence[]> {
-    const entries: import("./home-wake-inbox.js").HomeWakeEvidence[] = [];
-    for (const chapter of this.record?.chapters ?? []) {
-      if (!sessionIds.includes(chapter.sessionId)) continue;
-      const path = await this.options.sessions.sessionFile(chapter.sessionId);
-      if (!path) continue;
-      // SDK append proves visibility, not power-loss durability. The inbox may
-      // retire only after canonical bytes and their directory entry are synced.
-      for (const durablePath of [path, dirname(path)]) {
-        const handle = await open(durablePath, "r");
-        try { await syncDurably(handle); } finally { await handle.close(); }
-      }
-      const cut = await readCanonicalSession({ path, sessionId: chapter.sessionId, maxLineBytes: 1024 * 1024 });
-      if (cut.tornBytes) throw new GatewayError("conflict", "Home inbox canonical evidence is torn");
-      for (const entry of cut.branch) entries.push({ ...entry.raw, type: entry.type, id: entry.id, sessionId: chapter.sessionId } as import("./home-wake-inbox.js").HomeWakeEvidence);
+  /** Streams one chapter and keeps only this delivery's proof entries. A chapter
+   * that is not part of this Home yields none, so its delivery is unproven. */
+  private async inboxEvidence(scope: HomeWakeEvidenceScope): Promise<HomeWakeEvidence[]> {
+    if (!this.record?.chapters.some(chapter => chapter.sessionId === scope.sessionId)) return [];
+    const path = await this.options.sessions.sessionFile(scope.sessionId);
+    if (!path) return [];
+    // SDK append proves visibility, not power-loss durability. The inbox may
+    // retire only after canonical bytes and their directory entry are synced.
+    for (const durablePath of [path, dirname(path)]) {
+      const handle = await open(durablePath, "r");
+      try { await syncDurably(handle); } finally { await handle.close(); }
     }
+    const entries: HomeWakeEvidence[] = [];
+    await visitCanonicalSessionEntries({ path, sessionId: scope.sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, visit: entry => {
+      const evidence = { ...entry.raw, type: entry.type, id: entry.id, sessionId: scope.sessionId } as HomeWakeEvidence;
+      if (isWakeEvidence(scope, evidence)) entries.push(evidence);
+    } });
     return entries;
   }
 
@@ -393,6 +397,14 @@ export class HomeOwner {
     const currentChapter = record.chapters.at(-1)!;
     const live = this.options.sessions.hasLiveRuntime(sessionId);
     const sessionPresent = await this.options.sessions.sessionPresent(sessionId);
+    // The newest chapter a client may open. A reserved or materializing successor
+    // has no session to open yet, so the sealed predecessor is the openable route
+    // until the first logical prompt materializes the successor.
+    const openable = currentChapter.state === "reserved" || currentChapter.state === "materializing"
+      ? record.chapters.at(-2) : currentChapter;
+    const openSessionPresent = openable === undefined ? false
+      : openable === currentChapter ? sessionPresent : await this.options.sessions.sessionPresent(openable.sessionId);
+    const openSessionId = openable !== undefined && openSessionPresent ? openable.sessionId : undefined;
     // Missing-session recovery is a status, never zero-valued admission metrics.
     const activeMetrics = sessionPresent && currentChapter.state === "active" && this.options.sessions.chapterMetrics
       ? await this.options.sessions.chapterMetrics(currentChapter.sessionId)
@@ -420,6 +432,7 @@ export class HomeOwner {
       enabled: record.enabled,
       homeId: record.homeId,
       sessionId,
+      ...(openSessionId === undefined ? {} : { openSessionId }),
       bindingRevision: record.bindingRevision,
       generation: record.generation,
       routeGeneration: record.routeGeneration,
@@ -1295,7 +1308,6 @@ export class HomeOwner {
             this.options.diagnostic?.({ outcome: "unavailable", reason: "publication-retirement-failed" });
             throw error;
           });
-        this.publicationRetirement = retirement;
         void retirement.catch(() => {});
       }
       if (error instanceof Error && error.message === "JSON document exceeds its byte limit") {

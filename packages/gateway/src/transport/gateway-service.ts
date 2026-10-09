@@ -15,6 +15,7 @@ import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } f
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeSlot } from "../sessions/runtime-slot.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
 import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
@@ -33,7 +34,7 @@ import {
   type WorkspaceHistoryScope,
 } from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
-import type { UploadStore } from "../machine/upload-store.js";
+import { MAXIMUM_PROMPT_ATTACHMENTS, type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -1566,9 +1567,9 @@ export class GatewayService {
           return { deleted: true };
         });
       case "home.prompt": {
-        rejectUnknownFields(params, ["commandId", "text"], method);
-        if (typeof params.text !== "string") throw new GatewayError("invalid_request", "Home prompt requires text");
-        const text = admitPromptText(params.text);
+        // The logical route accepts the composer's whole prompt contract; the
+        // shared admission below validates it against the slot it resolves to.
+        rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocation"], method);
         let binding: CommandReceiptBinding | undefined;
         return this.mutation(client, method, params, async () => {
           if (!binding) throw new GatewayError("internal", "Home route binding was not persisted before dispatch");
@@ -1587,17 +1588,7 @@ export class GatewayService {
             bindingRevision: binding.bindingRevision,
             physicalSessionId: binding.physicalSessionId,
           });
-          let resolveAdmission!: (result: { operationId: string }) => void;
-          let rejectAdmission!: (error: unknown) => void;
-          const admission = new Promise<{ operationId: string }>((resolve, reject) => {
-            resolveAdmission = resolve;
-            rejectAdmission = reject;
-          });
-          const execution = slot.prompt(text, [], undefined, {
-            text, attachmentEnvelope: "", attachmentCount: 0,
-          }, resolveAdmission);
-          void execution.then(resolveAdmission, rejectAdmission);
-          const accepted = await admission;
+          const accepted = await this.admitPrompt(slot, params);
           return safeJson({
             logicalSessionId: "home", homeId: binding.homeId, bindingRevision: binding.bindingRevision,
             sessionId: binding.physicalSessionId, operationId: accepted.operationId,
@@ -1618,70 +1609,7 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
-          if (params.text !== undefined && typeof params.text !== "string") {
-            throw new GatewayError("invalid_request", "text must be a string");
-          }
-          const text = params.text === undefined ? "" : admitPromptText(params.text);
-          const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
-          const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
-            ? undefined : admitResourceInvocation(params.resourceInvocation);
-          const resourceSource = resourceInvocation?.source;
-          const resourceName = resourceInvocation?.name;
-          const resourceArguments = resourceInvocation?.arguments;
-          if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
-            throw new GatewayError("invalid_request", "Prompt text or attachments are required");
-          }
-          if (resourceInvocation !== undefined && resourceArguments !== text) {
-            throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
-          }
-          const catalogResourceName = resourceSource === undefined
-            ? undefined : canonicalResourceName(resourceSource, resourceName!);
-          if (resourceSource !== undefined) {
-            const commands = slot.commands();
-            if (resourceSource === "extension" && uploadIds.length > 0) {
-              throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
-            }
-            const matches = commands.filter(
-              (command) => command.source === resourceSource && command.name === catalogResourceName,
-            );
-            const shadowed = resourceSource !== "extension" && commands.some(
-              (command) => command.source === "extension" && command.name === catalogResourceName,
-            );
-            if (matches.length !== 1 || shadowed) {
-              throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-            }
-          }
-          const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-          const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
-          const prompt = resourceSource === undefined
-            ? visiblePrompt
-            : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
-          const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
-          let resolveAdmission!: (result: { operationId: string }) => void;
-          let rejectAdmission!: (error: unknown) => void;
-          const admission = new Promise<{ operationId: string }>((resolve, reject) => {
-            resolveAdmission = resolve;
-            rejectAdmission = reject;
-          });
-          const execution = slot.prompt(prompt, attachments.images, behavior, {
-            text,
-            inputSource: "rpc",
-            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
-            ...(resourceSource === undefined ? {} : {
-              resourceInvocation: {
-                source: resourceSource,
-                name: resourceName!,
-                arguments: resourceArguments!,
-              },
-            }),
-            attachmentEnvelope: attachments.envelope,
-            attachmentCount: uploadIds.length,
-            ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
-            ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
-            ...(attachments.attachments.length > 0 ? { attachments: attachments.attachments } : {}),
-          }, resolveAdmission);
-          void execution.then(resolveAdmission, rejectAdmission);
-          return safeJson(await admission);
+          return safeJson(await this.admitPrompt(slot, params));
         }, false, true).finally(releaseSession);
       }
       case "session.abort":
@@ -2313,6 +2241,78 @@ export class GatewayService {
       id: string(value.id, "expectedModel.id", { max: 300 }),
     };
     return { runtimeGeneration, model };
+  }
+
+  /** The composer's prompt admission, shared by `session.prompt` and
+   * `home.prompt`. A logical Home route accepts exactly the physical prompt
+   * contract: text, attachments, resource invocations and steering behavior are
+   * all validated against the slot the prompt will run in, before any attachment
+   * is materialized. */
+  private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>): Promise<{ operationId: string }> {
+    if (params.text !== undefined && typeof params.text !== "string") {
+      throw new GatewayError("invalid_request", "text must be a string");
+    }
+    const text = params.text === undefined ? "" : admitPromptText(params.text);
+    const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", MAXIMUM_PROMPT_ATTACHMENTS);
+    const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
+      ? undefined : admitResourceInvocation(params.resourceInvocation);
+    const resourceSource = resourceInvocation?.source;
+    const resourceName = resourceInvocation?.name;
+    const resourceArguments = resourceInvocation?.arguments;
+    if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
+      throw new GatewayError("invalid_request", "Prompt text or attachments are required");
+    }
+    if (resourceInvocation !== undefined && resourceArguments !== text) {
+      throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
+    }
+    const catalogResourceName = resourceSource === undefined
+      ? undefined : canonicalResourceName(resourceSource, resourceName!);
+    if (resourceSource !== undefined) {
+      const commands = slot.commands();
+      if (resourceSource === "extension" && uploadIds.length > 0) {
+        throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
+      }
+      const matches = commands.filter(
+        (command) => command.source === resourceSource && command.name === catalogResourceName,
+      );
+      const shadowed = resourceSource !== "extension" && commands.some(
+        (command) => command.source === "extension" && command.name === catalogResourceName,
+      );
+      if (matches.length !== 1 || shadowed) {
+        throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
+      }
+    }
+    const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
+    const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
+    const prompt = resourceSource === undefined
+      ? visiblePrompt
+      : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
+    const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
+    let resolveAdmission!: (result: { operationId: string }) => void;
+    let rejectAdmission!: (error: unknown) => void;
+    const admission = new Promise<{ operationId: string }>((resolve, reject) => {
+      resolveAdmission = resolve;
+      rejectAdmission = reject;
+    });
+    const execution = slot.prompt(prompt, attachments.images, behavior, {
+      text,
+      inputSource: "rpc",
+      commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+      ...(resourceSource === undefined ? {} : {
+        resourceInvocation: {
+          source: resourceSource,
+          name: resourceName!,
+          arguments: resourceArguments!,
+        },
+      }),
+      attachmentEnvelope: attachments.envelope,
+      attachmentCount: uploadIds.length,
+      ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
+      ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
+      ...(attachments.attachments.length > 0 ? { attachments: attachments.attachments } : {}),
+    }, resolveAdmission);
+    void execution.then(resolveAdmission, rejectAdmission);
+    return admission;
   }
 
   private async openedSlot(client: ClientContext, params: Record<string, unknown>) {

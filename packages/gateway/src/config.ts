@@ -61,6 +61,8 @@ function valueAfter(args: string[], name: string): string | undefined {
 }
 
 export const DEFAULT_MAX_LIVE_RUNTIMES = 128;
+/** The upload bytes one prompt may carry in total; Home's source bound is derived from it. */
+export const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1_048_576;
 
 function parseRuntimeCapacity(raw: string | undefined): number {
   if (raw === undefined) return DEFAULT_MAX_LIVE_RUNTIMES;
@@ -442,7 +444,7 @@ export async function loadConfig(
     machineGroupID,
     machineName: next.machineName,
     maxFrameBytes: 1_048_576,
-    maxUploadBytes: 25 * 1_048_576,
+    maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
     terminalReplayBytes: 768 * 1_024,
     idleRuntimeMs: 10 * 60_000,
     maxConnections: 32,

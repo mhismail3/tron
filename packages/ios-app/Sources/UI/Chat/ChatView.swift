@@ -10,6 +10,9 @@ struct ChatView: View {
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
     private let initialSearchResult: SessionSearchResult?
+    /// The Home conversation's logical route: sends go through `home.prompt`,
+    /// and the Home header belongs to this chat whichever chapter it opens.
+    private let isHomeRoute: Bool
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -70,6 +73,7 @@ struct ChatView: View {
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
         initialSearchResult: SessionSearchResult? = nil,
+        isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -81,6 +85,7 @@ struct ChatView: View {
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
         self.initialSearchResult = initialSearchResult
+        self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
@@ -106,6 +111,7 @@ struct ChatView: View {
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
         initialSearchResult: SessionSearchResult? = nil,
+        isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
@@ -116,6 +122,7 @@ struct ChatView: View {
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
         self.initialSearchResult = initialSearchResult
+        self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
@@ -152,7 +159,7 @@ struct ChatView: View {
                    profileID == model.profiles.selected?.id,
                    model.homeStatus.isCapabilityEnabled,
                    let status = model.homeStatus.status,
-                   status.sessionId == sessionID,
+                   HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
                    status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                     HomeChatHeader(
                         status: status,
@@ -3395,6 +3402,7 @@ struct ChatView: View {
                     target: target,
                     behavior: behavior,
                     resourceInvocation: resourceInvocation,
+                    route: isHomeRoute ? .home : .session,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? [],
                     runtimeGeneration: selectedAuthoritativeSnapshot?.runtimeGeneration

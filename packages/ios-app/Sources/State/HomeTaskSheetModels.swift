@@ -97,7 +97,7 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     }
 }
 
-struct HomeTaskPermissionsDTO: Decodable, Equatable, Sendable {
+struct HomeTaskPermissionsDTO: Equatable, Sendable {
     struct Binding: Decodable, Equatable, Sendable {
         let intentRevision: Int
         let intentDigest: String
@@ -151,26 +151,49 @@ struct HomeTaskPermissionsDTO: Decodable, Equatable, Sendable {
     let requests: [Request]
     let decisions: [Decision]
     let grants: [Grant]
-    var pendingRequests: [Request] { requests.filter { request in !decisions.contains { $0.requestId == request.id } } }
+    /// Requests no decision has answered, computed once during admission.
+    let pendingRequests: [Request]
+
+    private struct Wire: Decodable {
+        let revision: Int
+        let scopes: [Scope]
+        let requests: [Request]
+        let decisions: [Decision]
+        let grants: [Grant]
+    }
 
     static func decode(_ value: JSONValue) throws -> Self {
-        let permissions = try value.decode(Self.self)
-        let allIDs = [permissions.scopes.map(\.id), permissions.requests.map(\.id), permissions.decisions.map(\.id), permissions.grants.map(\.id)]
-        guard permissions.revision > 0, allIDs.allSatisfy({ $0.count <= 10000 && Set($0).count == $0.count && $0.allSatisfy(homeID) }),
-              Set(permissions.decisions.map(\.requestId)).count == permissions.decisions.count,
-              Set(permissions.grants.map(\.decisionId)).count == permissions.grants.count,
-              permissions.scopes.allSatisfy({ homeID($0.restoreEpoch) && safeHomeCount($0.createdAt)
+        let wire = try value.decode(Wire.self)
+        let allIDs = [wire.scopes.map(\.id), wire.requests.map(\.id), wire.decisions.map(\.id), wire.grants.map(\.id)]
+        // Identifiers are unique before any index is built, so the lookups below
+        // cannot trap or pick an ambiguous record.
+        guard wire.revision > 0, allIDs.allSatisfy({ $0.count <= 10000 && Set($0).count == $0.count && $0.allSatisfy(homeID) }) else {
+            throw invalidHomeTask()
+        }
+        let requestsByID = Dictionary(uniqueKeysWithValues: wire.requests.map { ($0.id, $0) })
+        let decisionsByID = Dictionary(uniqueKeysWithValues: wire.decisions.map { ($0.id, $0) })
+        let decidedRequestIDs = Set(wire.decisions.map(\.requestId))
+        guard decidedRequestIDs.count == wire.decisions.count,
+              Set(wire.grants.map(\.decisionId)).count == wire.grants.count,
+              wire.scopes.allSatisfy({ homeID($0.restoreEpoch) && safeHomeCount($0.createdAt)
                   && ($0.revokedAt.map { safeHomeCount($0) } ?? true) && ($0.active || $0.revokedAt != nil) }),
-              permissions.requests.allSatisfy({ $0.request.valid }),
-              permissions.decisions.allSatisfy({ decision in safeHomeCount(decision.decidedAt) && safeHomeCount(decision.expiresAt)
-                  && permissions.requests.contains { $0.id == decision.requestId } }),
-              permissions.grants.allSatisfy({ grant in
+              wire.requests.allSatisfy({ $0.request.valid }),
+              wire.decisions.allSatisfy({ decision in safeHomeCount(decision.decidedAt) && safeHomeCount(decision.expiresAt)
+                  && requestsByID[decision.requestId] != nil }),
+              wire.grants.allSatisfy({ grant in
                   guard grant.binding.valid, safeHomeCount(grant.expiresAt),
-                        let decision = permissions.decisions.first(where: { $0.id == grant.decisionId }), decision.approved,
-                        let request = permissions.requests.first(where: { $0.id == decision.requestId }) else { return false }
+                        let decision = decisionsByID[grant.decisionId], decision.approved,
+                        let request = requestsByID[decision.requestId] else { return false }
                   return grant.expiresAt == decision.expiresAt && grant.binding == request.request
               }) else { throw invalidHomeTask() }
-        return permissions
+        return Self(
+            revision: wire.revision,
+            scopes: wire.scopes,
+            requests: wire.requests,
+            decisions: wire.decisions,
+            grants: wire.grants,
+            pendingRequests: wire.requests.filter { !decidedRequestIDs.contains($0.id) }
+        )
     }
 }
 

@@ -1,0 +1,118 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { vi } from "vitest";
+import { TrustService } from "../src/admin/trust-service.js";
+import type { NotificationService } from "../src/notifications/notification-service.js";
+import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
+import { delegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
+
+// Registered runtime roots of the current test file. Each file's afterEach calls
+// disposeFixtures(), so a fixture is retired with the file that created it.
+const fixtures: Array<{ registry: RuntimeRegistry; root: string }> = [];
+export async function disposeFixtures(): Promise<void> {
+  for (const fixture of fixtures.splice(0)) {
+    await fixture.registry.dispose();
+    await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}
+
+export async function fixture(providerVersion?: string, codemode = false, contextWindow?: number, managed = false) {
+  const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "project");
+  const tronHome = join(root, "tron");
+  await mkdir(agentDir); await mkdir(cwd);
+  // jiti transpiles pi and managed extensions into os.tmpdir(). Keep that cache in this
+  // fixture's root so disposal removes it instead of leaking into the host's temp.
+  const temporary = join(root, "tmp");
+  await mkdir(temporary);
+  vi.stubEnv("TMPDIR", temporary);
+  // Pacing 0 streams by microtask. A timer per chunk waits at least 1 ms in Node, so a
+  // 64 KB tool call alone took about 5 s here.
+  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 0, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
+  const model = faux.getModel();
+  const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
+  if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
+  if (codemode) {
+    settings.defaultTools = ["+codemode"];
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await mkdir(extensionDir, { recursive: true });
+    await writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))}; export default createCodemodeExtension({ mode: "on" });`);
+  }
+  if (providerVersion) {
+    const packageRoot = join(agentDir, "npm/node_modules/pi-subagents");
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "pi-subagents", version: providerVersion, pi: { extensions: ["index.ts"] } }));
+    await writeFile(join(packageRoot, "index.ts"), `import { writeFileSync } from 'node:fs'; export default function(pi) {
+      pi.registerTool({name:'subagent',label:'Subagent',description:'Test producer boundary',parameters:{type:'object',properties:{}},
+        execute:async (_id,input) => { writeFileSync(${JSON.stringify(join(cwd, "subagent-effect.json"))}, JSON.stringify(input)); return {content:[{type:'text',text:'producer admitted'}]}; }});
+      pi.registerTool({name:'bg_wait',label:'Background Wait',description:'Test versioned wait boundary',parameters:{type:'object',properties:{}},
+        execute:async (_id,input) => {
+          writeFileSync(${JSON.stringify(join(cwd, "wait-effect.json"))}, JSON.stringify(input));
+          return {content:[{type:'text',text:'wait finished'}]}; }});
+    }`);
+    settings.packages = [`npm:pi-subagents@${providerVersion}`];
+  }
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify(settings));
+  const trust = new TrustService(agentDir);
+  await trust.set(cwd, true);
+  const signals: Array<Record<string, unknown>> = [];
+  const notifications: Array<Record<string, unknown>> = [];
+  if (managed) {
+    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+    vi.stubEnv("PI_SUBAGENTS_TEMP_ROOT", delegatedArtifactRoot(tronHome));
+  }
+  const managedSubagents = managed ? ManagedSubagents.activateForStartup(tronHome) : undefined;
+  // Fixture runtimes never idle-evict; an omitted idle lifetime would make the cutoff NaN.
+  const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+    modelRuntimeFactory: async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider); return runtime;
+    },
+    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    notifications: { enqueue: async (input: Record<string, unknown>) => { notifications.push(input); return "queued"; },
+      suppressAutomatic: async () => "suppressed", markSessionInboxRead: async () => {} } as unknown as NotificationService,
+    homeTaskDiagnostic: record => signals.push(record as unknown as Record<string, unknown>),
+    homeRequestDiagnostic: record => signals.push(record as unknown as Record<string, unknown>),
+    scheduleToolOperations: { execute: async () => {
+      await writeFile(join(cwd, "schedule-effect"), "producer called");
+      return { message: "schedule read", details: { status: "ok" } };
+    } },
+    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("bounded summary") }),
+  });
+  const registry = createRegistry();
+  const owned = { registry, root };
+  fixtures.push(owned);
+  await bringUpToReadiness(registry);
+  await registry.recoverHomeTasks();
+  const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
+  // Readiness only: task recovery runs after listen, as in gateway-main.
+  const restartToReadiness = async () => {
+    await owned.registry.dispose();
+    await owned.registry.administrativeWorkRegistry.waitUntilSettled();
+    owned.registry = createRegistry();
+    await bringUpToReadiness(owned.registry);
+    return owned.registry;
+  };
+  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust, restartToReadiness,
+    restart: async () => {
+      const cold = await restartToReadiness();
+      await cold.recoverHomeTasks();
+      return cold;
+    } };
+}
+
+async function bringUpToReadiness(registry: RuntimeRegistry): Promise<void> {
+  await registry.initialize();
+  await (registry as any).sessionCatalog.whenPublished();
+}
+
+export const reportCall = (id = "report-one", text = "Verified result") => fauxToolCall("report", { resultId: id, outcome: "final", text, evidence: ["focused check passed"] }, { id: `call-${id}` });
+export async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-one") {
+  return f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
+}

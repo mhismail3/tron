@@ -21,6 +21,7 @@ import { decodeContextRuns, encodeContextRuns, foldView, foldViewSliced, nodeAdd
  */
 
 import { fileURLToPath } from "node:url";
+import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-memory/scale.json");
 const PLACEHOLDER_BYTES = Buffer.byteLength("(not summarized yet: zoom it)", "utf8");
@@ -138,7 +139,7 @@ describe("episodic memory scale", () => {
       return base(request);
     };
     const memory = await EpisodicMemory.open({
-      workspace, sessionId: manager.getSessionId(), sessionFile: manager.getSessionFile()!, modelRuntime, model,
+      workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!), modelRuntime, model,
       summarizer,
       limits: { viewBytes: 8_192, jobs: 8, retryMs: 1 }, sleep: async () => {},
     });

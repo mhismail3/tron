@@ -8,6 +8,23 @@ import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { WakeInboxOwner } from "./home-wake-inbox.js";
 import { HomeTaskStore, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
 
+// Counts the task-directory files the store reads. The wrapper is transparent;
+// only the cost cases below switch the counter on.
+const fileReads = vi.hoisted(() => ({ active: false, tasks: 0, authority: 0 }));
+vi.mock("../util/secure-json.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../util/secure-json.js")>();
+  return {
+    ...actual,
+    readSecureJson: (async (path: string, maximumBytes: number) => {
+      if (fileReads.active && path.includes("/gateway/home/tasks/")) {
+        if (path.endsWith("/authorization.json")) fileReads.authority += 1;
+        else fileReads.tasks += 1;
+      }
+      return actual.readSecureJson(path, maximumBytes);
+    }) as typeof actual.readSecureJson,
+  };
+});
+
 /** Seams over the directory scan and birth-time identity; the real filesystem
  * answers everything else. */
 const fsSeam = vi.hoisted(() => ({ entriesVisited: 0, zeroBirthtimePaths: new Set<string>() }));
@@ -480,5 +497,117 @@ describe("Home task recency pages", () => {
     await rm(duplicate); const oldPath = join(f.directory, "task-1.json"); await rename(join(f.directory, name), oldPath);
     await expect(f.store.page({})).rejects.toMatchObject({ code: "invalid-record" });
     expect(await readFile(oldPath)).toEqual(original);
+  });
+});
+
+describe("HomeTaskStore staged publications", () => {
+  // A crash between the temporary write and its rename leaves this name behind.
+  const leftover = (name: string) => `${name}.4242.0123456789ab.tmp`;
+
+  it("skips a crash-leftover temporary in every enumeration and removes it only at recovery", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    const record = (await f.store.read("task-1"))!;
+    const taskTemporary = join(f.directory, leftover(`${String(record.createdAt + 1).padStart(13, "0")}-task-2.json`));
+    const authorizationTemporary = join(f.directory, leftover("authorization.json"));
+    await writeFile(taskTemporary, "{\"partial\":", { mode: 0o600 });
+    await writeFile(authorizationTemporary, "{", { mode: 0o600 });
+    expect((await listed(f.store)).map(row => row.taskId)).toEqual(["task-1"]);
+    expect((await f.store.page({})).items.map(row => row.taskId)).toEqual(["task-1"]);
+    expect(await f.store.read("task-1")).toMatchObject({ taskId: "task-1" });
+    const streamed: string[] = [];
+    for await (const row of f.store.records()) streamed.push(row.taskId);
+    expect(streamed).toEqual(["task-1"]);
+    await f.store.put({ ...task(), taskId: "task-3" }, null);
+    expect(await readFile(taskTemporary, "utf8")).toBe("{\"partial\":");
+    await f.store.removeAbandonedTemporaries();
+    expect((await readdir(f.directory)).filter(name => name.endsWith(".tmp"))).toEqual([]);
+    expect((await listed(f.store)).map(row => row.taskId).sort()).toEqual(["task-1", "task-3"]);
+  });
+
+  it("refuses recovery for a staged name that is not this user's regular file, and removes nothing", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    const outside = join(f.root, "outside.json");
+    await writeFile(outside, "{}", { mode: 0o600 });
+    const linked = join(f.directory, leftover("authorization.json"));
+    await symlink(outside, linked);
+    await expect(f.store.removeAbandonedTemporaries()).rejects.toMatchObject({ code: "unsafe-state" });
+    expect(await readFile(outside, "utf8")).toBe("{}");
+    expect((await lstat(linked)).isSymbolicLink()).toBe(true);
+  });
+});
+
+function terminalTask(taskId: string): HomeTaskWrite {
+  return { ...task(), taskId, lifecycle: "terminal", revision: 1, terminalEvidence: { outcome: "unknown", sessionId: null, entryIds: [], reason: "cold-no-report" },
+    wake: { eventId: `task-result-${createHash("sha256").update(taskId).digest("hex")}`, routeGeneration: 1, createdAt: new Date(1_000).toISOString(),
+      state: "pending", push: "pending", delivery: null, acknowledgedAt: null, redeliveries: [] } };
+}
+
+async function fileReadsDuring(operation: () => Promise<unknown>): Promise<{ tasks: number; authority: number }> {
+  fileReads.tasks = 0; fileReads.authority = 0; fileReads.active = true;
+  try { await operation(); } finally { fileReads.active = false; }
+  return { tasks: fileReads.tasks, authority: fileReads.authority };
+}
+
+describe("HomeTaskStore operation cost", () => {
+  it("reads only the target record and authority for each by-ID operation, at any task count", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    await f.store.put(terminalTask("task-terminal"), null);
+    let tokens = 0;
+    const byIdCosts = async () => {
+      const current = (await f.store.read("task-1"))!;
+      const { createdAt: _createdAt, updatedAt: _updatedAt, ...write } = current;
+      const state = await f.store.authorization.load();
+      return {
+        read: await fileReadsDuring(() => f.store.read("task-1")),
+        put: await fileReadsDuring(() => f.store.put({ ...write, revision: current.revision + 1 }, current.revision)),
+        update: await fileReadsDuring(() => f.store.update("task-1", record => ({ ...record,
+          spend: { sourceDigest: "a".repeat(64), inputTokens: ++tokens, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } }))),
+        updateWake: await fileReadsDuring(() => f.store.updateWake("task-terminal", wake => ({ ...wake, push: "decided" }))),
+        authorityLoad: await fileReadsDuring(() => f.store.authorization.load()),
+        authoritySave: await fileReadsDuring(() => f.store.authorization.save(state)),
+      };
+    };
+    const small = await byIdCosts();
+    for (let index = 2; index <= 299; index++) await f.store.put({ ...task(), taskId: `task-${index}` }, null);
+    const large = await byIdCosts();
+    expect(small.read).toEqual({ tasks: 1, authority: 1 });
+    expect(large).toEqual(small);
+  }, 60_000);
+
+  it("reads authorization once per full scan, not once per record", async () => {
+    const f = await fixture(); await f.store.initialize();
+    for (let index = 1; index <= 300; index++) await f.store.put({ ...task(), taskId: `task-${index}` }, null);
+    const cost = await fileReadsDuring(async () => { for await (const _record of f.store.records()) { /* drain */ } });
+    expect(cost.authority).toBe(1);
+  }, 60_000);
+
+  it("yields a record that cites authority published after the scan's authority read", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put({ ...task(), taskId: "task-a" }, null);
+    await f.store.put({ ...task(), taskId: "task-b" }, null);
+    const stream = f.store.records();
+    try {
+      const first = (await stream.next()).value as HomeTaskRecord;
+      const other = first.taskId === "task-a" ? "task-b" : "task-a";
+      const grant = await issueGrant(authorization(f.store), request, { decisionId: "decision-1", expiresAt: 2_000 });
+      const current = (await f.store.read(other))!;
+      const { createdAt: _createdAt, updatedAt: _updatedAt, ...write } = current;
+      await f.store.put({ ...write, revision: current.revision + 1, grantRef: grant.id }, current.revision);
+      const second = await stream.next();
+      expect(second.value).toMatchObject({ taskId: other, grantRef: grant.id });
+    } finally { await stream.return(undefined); }
+  });
+
+  it("refuses an authority save that removes a scope a task references", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const scope = await authorization(f.store).enableInitialScope("epoch-1");
+    await f.store.put({ ...task(), scopeRef: scope.id }, null);
+    const before = await readFile(f.authPath, "utf8");
+    const state = await f.store.authorization.load();
+    await expect(f.store.authorization.save({ ...state, scopes: [] })).rejects.toMatchObject({ code: "invalid-record" });
+    expect(await readFile(f.authPath, "utf8")).toBe(before);
   });
 });
