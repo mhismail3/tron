@@ -112,16 +112,23 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
 }
 
 /// The chat route that a status claim and the Home header both decide for. A
-/// Home route presents the chapter Home opens (`openSessionId`, the sealed
-/// predecessor during a rollover). An ordinary chat presents the chapter it is
-/// (`sessionId`, the reserved successor during a rollover).
-struct HomeChatRouteKey: Equatable, Sendable {
-    let sessionID: String
-    let isHome: Bool
+/// Home route always presents Home, even when no chapter is openable, so its
+/// recovery state stays visible. An ordinary chat presents only the chapter it
+/// is (`sessionId`), so an ordinary chat on the sealed predecessor during a
+/// rollover neither claims the status nor shows the header.
+enum HomeChatRouteKey: Equatable, Sendable {
+    case home
+    case ordinary(sessionID: String)
+
+    static func forChat(sessionID: String, isHome: Bool) -> HomeChatRouteKey {
+        isHome ? .home : .ordinary(sessionID: sessionID)
+    }
 
     func matches(_ status: HomeStatusDTO) -> Bool {
-        if isHome { return status.openSessionId == sessionID }
-        return status.sessionId == sessionID
+        switch self {
+        case .home: true
+        case .ordinary(let sessionID): status.sessionId == sessionID
+        }
     }
 }
 

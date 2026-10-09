@@ -25,10 +25,11 @@ struct HomeHeaderTests {
         #expect(HomePinnedRowPolicy.action(for: status) == .open(sessionID: "predecessor"))
     }
 
-    /// The Home claim and the Home header both ask `HomeChatRouteKey`. Each row is a
-    /// Gateway shape: normal (both keys name one chapter), the sealed predecessor
+    /// The Home claim and the Home header both ask `HomeChatRouteKey`. A Home route
+    /// always presents Home; an ordinary chat presents the chapter it is. Rows are
+    /// Gateway shapes: normal (both keys name one chapter), the sealed predecessor
     /// during `rollover-pending`, and no openable chapter.
-    @Test("a Home route follows the chapter Home opens, an ordinary chat the chapter it is")
+    @Test("a Home route always presents Home, an ordinary chat only the chapter it is")
     func routeKeyDecidesClaimAndHeaderPerPhase() throws {
         let normal = try HomeStatusDTO.decode(statusValue(
             phase: "ready", live: true, sessionPresent: true, sessionId: "chapter", openSessionId: "chapter"
@@ -40,21 +41,29 @@ struct HomeHeaderTests {
             phase: "undesignated", live: false, sessionPresent: false, sessionId: "chapter", openSessionId: nil
         ))
         let table: [(status: HomeStatusDTO, route: HomeChatRouteKey, expected: Bool)] = [
-            (normal, HomeChatRouteKey(sessionID: "chapter", isHome: true), true),
-            (normal, HomeChatRouteKey(sessionID: "chapter", isHome: false), true),
-            (normal, HomeChatRouteKey(sessionID: "other", isHome: true), false),
-            (normal, HomeChatRouteKey(sessionID: "other", isHome: false), false),
-            (rollover, HomeChatRouteKey(sessionID: "predecessor", isHome: true), true),
-            (rollover, HomeChatRouteKey(sessionID: "predecessor", isHome: false), false),
-            (rollover, HomeChatRouteKey(sessionID: "successor", isHome: true), false),
-            (rollover, HomeChatRouteKey(sessionID: "successor", isHome: false), true),
-            (noOpenable, HomeChatRouteKey(sessionID: "chapter", isHome: true), false),
-            (noOpenable, HomeChatRouteKey(sessionID: "chapter", isHome: false), true),
+            (normal, .home, true),
+            (normal, .ordinary(sessionID: "chapter"), true),
+            (normal, .ordinary(sessionID: "other"), false),
+            (rollover, .home, true),
+            (rollover, .ordinary(sessionID: "predecessor"), false),
+            (rollover, .ordinary(sessionID: "successor"), true),
+            (noOpenable, .home, true),
+            (noOpenable, .ordinary(sessionID: "chapter"), true),
         ]
         for row in table {
             #expect(row.route.matches(row.status) == row.expected,
-                    "route \(row.route.sessionID) isHome=\(row.route.isHome) in phase \(row.status.phase)")
+                    "route \(row.route) in phase \(row.status.phase)")
         }
+    }
+
+    /// A chapter that goes missing while a Home chat is open must keep the Home
+    /// header, because its recovery state is the only Home control in that chat.
+    @Test("a Home route with no openable chapter still presents Home")
+    func homeRouteWithoutOpenableChapterStillPresentsHome() throws {
+        let missing = try HomeStatusDTO.decode(statusValue(
+            phase: "missing-session", live: false, sessionPresent: false, sessionId: "chapter", openSessionId: nil
+        ))
+        #expect(HomeChatRouteKey.home.matches(missing))
     }
 
     private func statusValue(

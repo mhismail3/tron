@@ -159,7 +159,7 @@ struct ChatView: View {
                    profileID == model.profiles.selected?.id,
                    model.homeStatus.isCapabilityEnabled,
                    let status = model.homeStatus.status,
-                   HomeChatRouteKey(sessionID: sessionID, isHome: isHomeRoute).matches(status),
+                   HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
                    status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                     HomeChatHeader(
                         status: status,

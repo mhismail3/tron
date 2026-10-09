@@ -224,7 +224,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
         let claimed = expectation(description: "claim read")
         let reconnected = expectation(description: "read after connection admission")
         var fetchCount = 0
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "home-session", isHome: true))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.home)) { _ in
             fetchCount += 1
             if fetchCount == 1 { claimed.fulfill() }
             if fetchCount == 2 { reconnected.fulfill() }
@@ -245,7 +245,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
 
     func testMatchingClaimPromotesToMountedCadence() async throws {
         var fetchCount = 0
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "home-session", isHome: true))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.home)) { _ in
             fetchCount += 1
             return try self.decodeStatus(sessionID: "home-session")
         }
@@ -266,7 +266,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     /// is claimed by what it opens, so it keeps the status surface.
     func testClaimOnSealedPredecessorIsPromotedDuringRollover() async throws {
         var fetchCount = 0
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "predecessor-session", isHome: true))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.home)) { _ in
             fetchCount += 1
             return try self.decodeStatus(sessionID: "successor-session", openSessionID: "predecessor-session")
         }
@@ -285,7 +285,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     /// publication, so the rollover predecessor's status is never read again for it.
     func testOrdinaryProbeOnRolloverPredecessorReleasesOnFirstPublication() async throws {
         var fetchCount = 0
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "predecessor-session", isHome: false))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.ordinary(sessionID: "predecessor-session"))) { _ in
             fetchCount += 1
             return try self.decodeStatus(sessionID: "successor-session", openSessionID: "predecessor-session")
         }
@@ -301,7 +301,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
 
     func testNonMatchingClaimReleasesEveryReadButKeepsStatus() async throws {
         var fetchCount = 0
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "ordinary-session", isHome: false))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.ordinary(sessionID: "ordinary-session"))) { _ in
             fetchCount += 1
             return try self.decodeStatus(sessionID: "home-session")
         }
@@ -329,7 +329,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     func testCoveredClaimReadRetriesOnceWhenSurfaceUncovers() async throws {
         var fetchCount = 0
         var gated: [CheckedContinuation<HomeStatusDTO, Error>] = []
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "home-session", isHome: true))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.home)) { _ in
             fetchCount += 1
             if fetchCount == 1 {
                 return try await withCheckedThrowingContinuation { gated.append($0) }
@@ -356,7 +356,7 @@ final class HomeStatusPresentationOwnerTests: XCTestCase {
     func testClaimCoverRetryRunsOnlyOncePerClaim() async throws {
         var fetchCount = 0
         var gated: [CheckedContinuation<HomeStatusDTO, Error>] = []
-        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(HomeChatRouteKey(sessionID: "home-session", isHome: true))) { _ in
+        let (owner, coordinator, token) = mountedOwner(cadence: .connectionOnly(.home)) { _ in
             fetchCount += 1
             if fetchCount <= 2 {
                 return try await withCheckedThrowingContinuation { gated.append($0) }

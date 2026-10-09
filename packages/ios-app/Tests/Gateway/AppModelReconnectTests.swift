@@ -1687,7 +1687,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "home-session", isHome: true)))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let read = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1711,7 +1711,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "ordinary-session", isHome: false)))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
             let read = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1742,7 +1742,7 @@ struct AppModelReconnectTests {
 
             let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
             presentation.register(chat, parent: nil)
-            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "ordinary-session", isHome: false)))
+            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
             for _ in 0..<20 { await Task.yield() }
             #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
             fixture.model.unmountHomeStatus(surfaceToken: dashboard)
@@ -1762,7 +1762,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "home-session", isHome: true)))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let claim = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1788,7 +1788,7 @@ struct AppModelReconnectTests {
             presentation.register(chat, parent: nil)
             let rollover = homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "predecessor-session", isHome: true)))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let claim = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: claim.id, result: rollover))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1821,7 +1821,7 @@ struct AppModelReconnectTests {
 
             let ordinaryChat = PresentationSurfaceToken(id: "chat.predecessor-session", generation: UUID())
             presentation.register(ordinaryChat, parent: nil)
-            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: ordinaryChat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "predecessor-session", isHome: false)))
+            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: ordinaryChat, activityCoordinator: presentation, route: .ordinary(sessionID: "predecessor-session")))
             for _ in 0..<20 { await Task.yield() }
             #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1, "an ordinary chat on the sealed predecessor reads nothing")
             #expect(fixture.model.homeStatus.status?.openSessionId == "predecessor-session", "the dashboard keeps the status it already read")
@@ -1887,7 +1887,7 @@ struct AppModelReconnectTests {
             let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
             presentation.register(chat, parent: nil)
 
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "ordinary-session", isHome: false)))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
             let claim = try await waitForMethod("home.status", on: socket)
             await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
             try await waitForHomePhase(.ready, model: fixture.model)
@@ -1914,7 +1914,7 @@ struct AppModelReconnectTests {
             let presentation = PresentationActivityCoordinator()
             let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
             presentation.register(chat, parent: nil)
-            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: HomeChatRouteKey(sessionID: "home-session", isHome: true)))
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
             let read = try await waitForMethod("home.status", on: socket)
 
             presentation.retire(chat)
