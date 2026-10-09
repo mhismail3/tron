@@ -7003,11 +7003,17 @@ export class RuntimeSlot {
     // remains authoritative and the cut is discarded after this snapshot.
     const canonicalBranch = session.sessionManager.getBranch();
     const canonicalTranscriptPage = this.transcriptPage(undefined, undefined, undefined, undefined, canonicalBranch);
+    // A replacement keeps its origin's live command, and the fork copies that
+    // command's start row under the origin's identity. Only a start receipt this
+    // session wrote may project the live lifecycle; the inherited row keeps its
+    // stored state while the origin owns the terminal receipt.
     const liveCommand = this.pendingExtensionCommand;
+    const liveCommandOwned = liveCommand !== undefined && invocationReceipts(canonicalBranch, this.id)
+      .some(receipt => receipt.receiptKind === "start" && receipt.operationId === liveCommand.id);
     const liveCommandLifecycle = this.ui.presentation.state().pendingInteractions.length > 0
       ? "waitingForInput" as const
       : "running" as const;
-    const transcriptPage: TranscriptPage = liveCommand
+    const transcriptPage: TranscriptPage = liveCommand && liveCommandOwned
       ? {
           ...canonicalTranscriptPage,
           items: canonicalTranscriptPage.items.map(item =>

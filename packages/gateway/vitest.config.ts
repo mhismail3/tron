@@ -1,10 +1,11 @@
 import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
+import { nestedTestFiles } from "./vitest.nested.config.js";
 
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
-    exclude: ["src/**/*.scale.test.ts"],
+    exclude: ["src/**/*.scale.test.ts", ...nestedTestFiles],
     environment: "node",
     // Durable filesystem/SQLite fixtures and SDK child processes share the
     // host. CPU-count fanout starves their owners; bound concurrency rather

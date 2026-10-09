@@ -206,8 +206,10 @@ merges and silently drop the work.
 
 ### Base failure modes
 
-`test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
-repositories, local bare remotes and the fake `gh`. The land fixtures disable
+`test_claim.py`, `test_land.py`, `test_cleanup.py` and `test_verify.py` check these against real
+repositories, local bare remotes and the fake `gh`. Each module builds its repository
+history once and every test copies it (`repo_template.py`), so setup costs no per-test Git
+processes while each test keeps its own repositories. The land fixtures disable
 Git auto-GC and automatic maintenance for every child Git process, so repository
 temporary-directory cleanup does not race detached maintenance.
 The fixture-level test process owner tracks every child process and applies the
@@ -294,9 +296,10 @@ the GitHub side.
 
 `scripts/tron work verify [--jobs N] [--post] [--evidence-manifest <json>]` validates the
 committed head of the current branch and writes a receipt for that exact commit.
-Before loading or selecting checks, it rejects inherited environment values that
-resolve into a live Tron home; the Gateway's shared path policy also guards its
-Vitest configurations and Node test scripts.
+Before loading or selecting checks, it refuses inherited `TRON_DATA_DIR` or `TRON_HOME_NAME`
+that select a live Tron home. Inherited path variables that point into one are removed, and each
+check runs without them; the Gateway's shared path policy applies the same rule to its Vitest
+configurations and Node test scripts.
 
 1. **Clean head.** A worktree with modified, staged or untracked files is
    refused, because the receipt describes a commit and not a working tree.
@@ -335,11 +338,13 @@ Vitest configurations and Node test scripts.
    code, wall time, log path, and the commit it was carried from, if any. The
    receipt passes only when every required check exited 0. If the head moves or
    the worktree changes while checks run, verify refuses and writes no receipt.
-6. **Incremental re-verify.** Verify looks for the nearest earlier passing
-   receipt whose commit `P` is an ancestor of the head and whose configuration
-   hash is identical. A required check is carried from `P` instead of run when it
-   passed there, it is not `always`, and none of the paths changed between `P`
-   and the head match its globs. Workers run `scripts/tron work verify` at
+6. **Incremental re-verify.** For each required check, verify looks for the
+   nearest receipt, on the head itself or an ancestor `P`, with an identical
+   configuration hash in which **that check** passed. The receipt as a whole
+   need not have passed, so re-running after one failed check reruns only the
+   checks that did not pass. A check is carried from `P` instead of run when it
+   is not `always` and none of the paths changed between `P` and the head match
+   its globs. Workers run `scripts/tron work verify` at
    their final commit, before handing off to `land`. A merge of the base carries
    unaffected checks, including already-carried checks with their original
    provenance; matching incoming paths rerun their checks. Those paths include everything an update from
@@ -361,6 +366,9 @@ Vitest configurations and Node test scripts.
    `<owner>/<repo><verify.evidenceRepositorySuffix>`, derived at run time,
    under `<issue>/<head>/`. They are not scrubbed and hold local paths, so
    verify uploads nothing unless GitHub reports that repository as private.
+   Each upload is a commit on that repository's branch. Concurrent lands race
+   for its head, so a lost race (HTTP 409) re-reads the file and re-applies the
+   same upload, at most five times; any other error fails the post.
 5. The public comment has a table of checks, commands, results, wall times and
    carried-from commits, plus the last `verify.excerptLines` lines of each
    failed log. The repository root and home directory are replaced by `<repo>`
@@ -433,10 +441,15 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   protocol fixtures and the pinned Node version. A lockfile change merged from
   the base branch therefore reruns it. It runs `npm ci`, the Pi SDK cohort check
   and the build, then `vitest related` when every changed Gateway path is
-  existing source or test support. A change that no test imports runs only the
-  build. Any other changed input, or a deleted or renamed Gateway file, runs the
-  full suite instead, because `vitest related` cannot select a test that still
-  imports a deleted module and the build excludes tests.
+  existing source or test support. That related selection runs twice, once per
+  Vitest config: the parallel main pass, then the nested pass
+  (`vitest.nested.config.ts`) that runs the files spawning nested Vitest or pi
+  children one at a time. A nested pass runs only when a changed file is one of
+  those tests or imports a changed module, and a change that no test imports runs
+  only the build. Any other changed input, or a deleted or renamed Gateway file,
+  runs the full suite (`npm test`, which runs both passes) instead, because
+  `vitest related` cannot select a test that still imports a deleted module and
+  the build excludes tests.
 - **Gateway scale** runs the dedicated scale suite when one of its own
   `*.scale.test.ts` files, `vitest.scale.config.ts`, or an explicitly exercised
   Knowledge source/helper changes. It stays separate from the ordinary source
@@ -458,20 +471,37 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   remains in CI's heavy run and explicit checkpoints. The simulator admission
   and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
   the check with exit 73; verify again once memory is free.
-- **Advisory hosted macOS CI** uses `scripts/ci_macos_scope.py` over the
-  available event-base and checkout trees (no merge-base required). Recognized
-  docs, work-tooling and push-relay-only changes skip macOS. Gateway inputs run
-  Gateway, the hosted iOS/Gateway boundary and Mac packaging; iOS inputs run iOS
-  and the boundary; Mac inputs run Mac. Shared workflow, protocol and toolchain
-  inputs, unknown paths, empty diffs and unavailable Git inputs run all four.
-  Deleted/renamed paths retain both owners. Manual dispatch runs all four, and
-  a failed classifier or missing output never skips coverage. An explicit
-  `!cancelled()` status check lets selected or missing-output jobs run even if
-  `policy` fails; an explicit `false` scope still skips, and workflow cancellation
-  stops advisory work. `test_ci_scope.py` exercises the CLI with real Git histories
-  and the workflow's selector shell, not GitHub's job dependency scheduler.
+- **Advisory hosted macOS CI** starts with the Linux `scope` job, which runs
+  `scripts/ci_macos_scope.py` over the available event-base and checkout trees
+  (no merge-base required). Recognized docs, work-tooling and push-relay-only
+  changes skip macOS. Gateway inputs run the Gateway job, the hosted iOS/Gateway
+  boundary and Mac packaging; iOS inputs run iOS and the boundary; Mac inputs run
+  Mac. Shared workflow, protocol and toolchain inputs, unknown paths, empty diffs
+  and unavailable Git inputs run all four. Deleted/renamed paths retain both
+  owners. Manual dispatch runs all four, and a failed classifier or missing output
+  never skips coverage. An explicit `!cancelled()` status check lets selected or
+  missing-output jobs run even if an earlier job fails; an explicit `false` scope
+  still skips, and workflow cancellation stops advisory work. `test_ci_scope.py`
+  exercises the CLI with real Git histories and the `scope` job's selector shell,
+  not GitHub's job dependency scheduler.
+  The required `gateway` job runs only Gateway's install, `check:pi-sdk`, build,
+  `npm test`, the Pi SDK rollback when the graph changed, and audit. The advisory
+  `gateway-tooling` job runs the pi-subagents provider checks, the dev-lifecycle
+  state tests, the profiler test and the payload-deploy test, each only when
+  `scripts/ci_verify_scope.py` selects its check. That selector matches the
+  `paths` of the same-named verify checks in `.github/work.json` through
+  `tools/work/verify.py`, so CI and `scripts/tron work verify` select alike. An
+  empty diff selects none, as verify does; a missing or unresolvable base, or any
+  selector error, runs every check. `scripts/test-ci-verify-scope.py` covers the
+  selector's real-Git cases in `policy`. `policy` needs `scope` and gates only its
+  slow `profiler`, `triage` and `work-tooling` test steps on the same selector; its
+  syntax checks and selector tests stay unconditional, and `!cancelled()` keeps it
+  running when selection fails.
+  The advisory macOS jobs also need `gateway`, so the required job never queues
+  for a macOS runner behind them; they still run when it fails or is skipped.
   Jobs keep real failure conclusions;
-  only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
+  only `policy`, `gateway` (`land.requiredChecks`) and `tron/verify` gate `land`.
+  The `main` ruleset remains
   unapplied by maintainer decision; no schedule or deployment is added.
   The workflow's concurrency group stays ref-scoped, and it cancels in progress
   only for `pull_request` events. A started base-branch push run therefore always
@@ -563,6 +593,8 @@ unrelated Gateway source does not.
 14. **A crash or partial post leaves a success status.** The status is
     `pending` before any lookup or upload, `success` is set only after the
     comment exists and only for a passing receipt, and any error sets `failure`.
+    A concurrent poster's evidence commit (HTTP 409) is re-applied rather than
+    stopping the post (`test_concurrent_evidence_commit_is_reapplied_not_fatal`).
 15. **Evidence leaks personal data.** Every public comment passes the scrub
     command first; excerpts are redacted; full logs go only to the evidence
     repository, and only when GitHub reports it as private.
@@ -817,6 +849,7 @@ Use these typed commands instead of direct `gh` writes:
 - `project add <issue>` adds the issue idempotently to the configured repository-linked work Project.
 - `project set <issue> [--status Proposed|Ready|Needs you|Blocked] [--priority P0|P1|P2|P3]` assigns only unclaimed statuses. `start` owns In progress, `land` owns In review and Done. Ready is only for maintainer-approved work inside approved scope after blockers close. Every requested live field and option is resolved before the first mutation; partial two-field updates report exactly which field succeeded if a request later fails, and rerunning is safe.
 - `issue parent <task> --epic <epic>` creates the native parent/sub-issue relationship after validating the labels. `issue block <issue> --blocked-by <blocker>` creates GitHub's native blocked-by relation. Both are idempotent.
+- `issue close <issue> --reason completed|not_planned --comment-file <md>` posts a closing comment, closes the issue with that reason, removes `needs-user-validation` if present, and sets Status to `land.doneStatus` when the issue is in the Project. The comment is bounded and privacy-checked before any GitHub call, and carries the work-session marker; `WORK_SESSION_ID` or `PI_SESSION_ID` is required. It refuses an epic, a closed issue that no earlier close of this reason and text commented on, and an open claim branch owned by another session, all before the first write. Each step is a separately audited `Gh` write, in that order.
 
 A new task normally follows this sequence: `issue create`, `project add`,
 `project set --status Proposed --priority P2`, and optional `issue parent` /
@@ -830,11 +863,52 @@ Each REST label delta and Project field mutation is audited separately; when a
 later request fails, the command identifies completed label deltas or fields.
 No generic argument passthrough is provided.
 
+### `issue close` failure modes
+
+Re-running `issue close` after a partial failure is safe. The command names the
+steps that completed (`completed: comment posted; ...`) before the failing one,
+and a re-run skips a comment already posted for the same reason and exact text,
+identified by a hidden `<!-- work:close reason=... digest=... -->` marker, as
+`land`'s handoff marker is. A close that already happened is resumed rather than
+refused as closed, so the label and Status still finish.
+
+82. **A privacy-refused or oversized closing comment reaches GitHub.** The text is
+    bounded and scrubbed before any `gh` call; a refusal names only the guard and
+    leaves no audit record. `test_tracking.py`
+    (`test_issue_close_refuses_guard_text_and_oversized_comments_before_any_github_call`)
+    proves no call and no audit file.
+83. **An epic, a closed issue or another session's claim is closed anyway.** These
+    refusals run before the first write, and the epic and closed-issue cases name
+    their reason. `test_issue_close_refuses_epics_without_any_write`,
+    `test_issue_close_refuses_a_closed_issue_that_no_earlier_close_commented_on` and
+    `test_issue_close_refuses_an_open_claim_owned_by_another_session_without_any_write`
+    check that no `issue comment`, `issue close` or other write is attempted.
+84. **A re-run after a failed close posts a second comment.** The comment carries the
+    close marker, so the re-run posts none.
+    `test_issue_close_rerun_after_failed_close_posts_no_second_comment` fails the
+    close after the comment and proves exactly one comment and one close.
+85. **A re-run is refused as closed, or leaves the label and Status behind.** Once
+    the close has happened, a re-run with the marker finishes the label removal and
+    the Status update instead of refusing. `test_issue_close_rerun_after_failed_label_removal_finishes_without_refusal_or_second_close`
+    fails the label removal and proves no second close.
+86. **A new closing text after a reopen is dropped.** The marker carries the reason
+    and a digest of the exact text, so a same-reason close with new text posts its
+    own comment. `test_issue_close_after_reopen_posts_changed_closing_text_instead_of_skipping_it`
+    proves two comments.
+87. **Steps run out of order, or Status is set for an issue outside the Project.**
+    The order is comment, close, label removal, then Status, and the Status step is
+    skipped when the issue has no Project item.
+    `test_issue_close_comments_then_closes_then_clears_validation_label_and_sets_done`
+    checks the write order and the audit; `test_issue_close_skips_the_status_step_when_the_issue_is_not_in_the_project`
+    checks the skip.
+
 `test_tracking.py` uses the real CLI boundary with an executable GitHub stand-in
 to exercise issue filing with multiple areas, taxonomy authorization, area
 preservation during unrelated flag changes, overlapping independent label
 additions, Project add and field selection, parent/blocker links, audit
-completeness, live-option preflight and partially completed Project updates.
+completeness, live-option preflight and partially completed Project updates. Its
+`issue close` tests cover the write order, refusals before any write, partial
+failure with an idempotent re-run, and the Project status step.
 Controlled reads prove concurrent flags survive on the remote fixture, and
 schema drift proves no field is changed before validation completes. The
 stand-in does not substitute for live API/schema validation.
@@ -927,13 +1001,30 @@ as does `acceptance` for the journeys it can run.
    that CI skipped because the change does not touch its inputs counts as
    passed, as in GitHub's own required-check rule. A required check that fails
    or is cancelled stops `land` and names the check. A timeout also stops it.
-   Neither merges.
+   A pull request that GitHub reports as conflicting stops `land` at its first
+   poll and names the base to merge; hosted checks never run on it. Neither
+   merges.
 7. **Base moves.** Once the checks pass, it fetches the base branch again.
    When the head no longer contains its tip, steps 2 to 6 repeat, at most
    `land.maxRounds` times in all, and the journeys run again against the new
    head. Until a branch rule requires up-to-date branches, this check is the
    only guard, and a move in the second between it and the merge call is not
    caught.
+   - No round is needed, and the head is merged as verified, when no
+     `--acceptance` journey was requested and all three hold: no path in `git diff --name-only --no-renames <merge-base> <tip>`
+     matches a non-always check in the receipt's `required` list (on the
+     current `verify.checks`); `.github/work.json` is not among those paths;
+     and `git merge-tree --write-tree <head> <tip>` exits 0. Then land prints
+     `moved:` naming the verified head and continues to the merge.
+   - This rests on the assumption that a check's globs cover every input its
+     result depends on, the same assumption verify's carry-over relies on. A
+     required check keeps its inputs, since no incoming path matches it. A check
+     the branch does not require had inputs the branch left untouched, and it
+     already passed on the base. Always-run checks read the branch diff, which the
+     move leaves alone. The merged tree itself is never checked; GitHub composes
+     it from the base and the branch's diff. A check whose globs miss an input it
+     reads can let such a move merge unverified. Journeys are cross-area runs
+     whose inputs no glob describes, so any move reruns them in a new round.
 8. **Merge.** It squash-merges with `--match-head-commit`, so GitHub merges
    only the commit that was verified. The subject is the pull request title
    plus ` (#N)` unless the title already has it, and the body is `Closes #N` or
@@ -1138,9 +1229,10 @@ Project state and records every call. The live E2E covers GitHub itself.
     A scope-skipped required job counts as passed; a cancelled one stops `land`.
     A failure or a timeout stops `land` without merging.
 36. **The base branch moves between the check and the merge.** A base tip
-    the head lacks once the checks pass starts another round, and the merge
-    names the new head. A conflict stops `land` with the merge left in
-    progress and nothing pushed.
+    the head lacks once the checks pass starts another round, unless step 7
+    finds that it shares no required check with the branch (failure mode 81);
+    the merge names the head it verified. A conflict stops `land` with the merge
+    left in progress and nothing pushed.
 37. **A pull request body leaks personal data.** The scrub command sees the
     title, summary and validation text before any GitHub write. The rest of
     the body is receipt fields that already passed the scrub of the receipt
@@ -1234,6 +1326,22 @@ Project state and records every call. The live E2E covers GitHub itself.
     Valid non-bug summaries remain unchanged;
     stewarding and merged-resume paths preserve the generated Verification and
     Maintainer validation sections.
+80. **A conflicting pull request waits out the timeout.** GitHub reports a pull
+    request that conflicts with its base as `CONFLICTING` and runs no checks on
+    it, so waiting never finishes. `land` stops at the first poll, names the
+    base and says to merge it into the branch, resolve, commit and run land
+    again. Nothing merges. `UNKNOWN` (GitHub still computing mergeability) keeps
+    waiting.
+81. **A base move merges unverified, or costs a round it cannot affect.** Step 7
+    merges a moved base without another round only when its three conditions
+    hold. `test_land.py` (`BaseMoveTests`) runs the real `land` against the fake
+    GitHub. A move into a path a required check covers starts another round, and
+    so does one touching `.github/work.json` or one that conflicts textually with
+    a branch path that only always-run checks cover; that last round stops at the
+    merge conflict. A move into paths no required check covers merges with one
+    round, and the `moved:` line names the verified head. With `--acceptance`,
+    any base move starts another round: journeys are cross-area runs whose inputs
+    no glob describes.
 
 ## `cleanup`
 

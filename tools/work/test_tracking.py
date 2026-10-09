@@ -11,6 +11,11 @@ live Project option is discovered only after another requested field commits;
 updates; (9) typed issue filing cannot represent multiple valid areas, zero
 areas or undeclared areas; (10) a fake GitHub reader parses truncated shared
 state instead of waiting for the existing remote-state owner lock.
+
+`issue close` failure modes are 82-87 in README.md (`issue close`): privacy and
+bounds before any write, refused epics/closed issues/foreign claims with no write,
+no second comment on re-run, resume after a later failure, changed text after a
+reopen, and step order with the Project status.
 """
 from __future__ import annotations
 
@@ -78,6 +83,17 @@ def output(value, code=0):
  print(json.dumps(value)); sys.exit(code)
 if args[:2] == ['repo','view']:
  output({'id':'REPO_NODE','nameWithOwner':'owner/repo','owner':{'login':'owner'}})
+if args[:2] == ['issue','comment']:
+ def change(current):
+  current.setdefault('comments',[]).append(sys.stdin.read()); current['writes'].append({'gh':'comment'})
+ update_state(change); sys.exit(0)
+if args[:2] == ['issue','close']:
+ if os.environ.get('TRACKING_FAIL_CLOSE'):
+  print('HTTP 422 rejected issue close',file=sys.stderr); sys.exit(1)
+ reason=args[args.index('--reason')+1]
+ def change(current):
+  current['issue_state']='closed'; current['writes'].append({'gh':'close','reason':reason})
+ update_state(change); sys.exit(0)
 if args and args[0]=='api' and args[1]!='graphql':
  method='GET'
  for i,a in enumerate(args[:-1]):
@@ -87,13 +103,16 @@ if args and args[0]=='api' and args[1]!='graphql':
  if path.endswith('/issues') and method=='POST':
   state['labels']=body['labels']; state['writes'].append({'method':method,'path':path,'body':body}); save()
   output({'number':101,'node_id':'ISSUE_101','title':body['title'],'labels':[{'name':x} for x in body['labels']]})
+ if path.endswith('/comments') and method=='GET':
+  output([[{'body':x} for x in state.get('comments',[])]])
  if '/issues/' in path and method=='GET':
   number=int(path.rsplit('/',1)[-1]); labels=list(state['labels']) if number==101 else (['epic'] if number==154 else ['task'])
   barrier=os.environ.get('TRACKING_LABEL_BARRIER'); worker=os.environ.get('TRACKING_LABEL_WORKER')
   if barrier and worker:
    open(os.path.join(barrier,worker+'-read'),'w').close()
    wait_for(os.path.join(barrier,'a-read')); wait_for(os.path.join(barrier,'b-read'))
-  output({'number':number,'node_id':f'ISSUE_{number}','labels':[{'name':x} for x in labels]})
+  issue_state=state.get('issue_state','open') if number==101 else 'open'
+  output({'number':number,'node_id':f'ISSUE_{number}','state':issue_state,'labels':[{'name':x} for x in labels]})
  if '/issues/' in path and (method=='PATCH' or (method=='POST' and path.endswith('/labels'))):
   worker=os.environ.get('TRACKING_LABEL_WORKER'); barrier=os.environ.get('TRACKING_LABEL_BARRIER')
   if worker=='b' and barrier: wait_for(os.path.join(barrier,'a-written'))
@@ -105,6 +124,8 @@ if args and args[0]=='api' and args[1]!='graphql':
   if worker=='a' and barrier: open(os.path.join(barrier,'a-written'),'w').close()
   output({'number':101,'labels':[{'name':x} for x in latest['labels']]})
  if '/issues/' in path and method=='DELETE' and '/labels/' in path:
+  if os.environ.get('TRACKING_FAIL_LABEL_DELETE'):
+   print('HTTP 422 rejected label removal',file=sys.stderr); sys.exit(1)
   from urllib.parse import unquote
   label=unquote(path.rsplit('/',1)[-1])
   def change(current):
@@ -187,6 +208,52 @@ class TypedTrackingCommandTests(unittest.TestCase):
 
     def state_json(self):
         return json.loads(self.state.read_text())
+
+    def remote_writes(self):
+        return self.state_json()['writes'] if self.state.exists() else []
+
+    def gh_calls(self):
+        return [json.loads(line) for line in self.trace.read_text(encoding='utf-8').splitlines()] if self.trace.exists() else []
+
+    def set_remote(self, **changes):
+        state = self.state_json()
+        state.update(changes)
+        self.state.write_text(json.dumps(state))
+
+    def create_task_in_project(self, labels=()):
+        self.assertEqual(self.cli('issue', 'create', '--title', 'Bounded task', '--body-file', str(self.body),
+                                  '--kind', 'kind:maintenance', '--visibility', 'visibility:internal',
+                                  '--area', 'area:tooling').returncode, 0)
+        self.assertEqual(self.cli('project', 'add', '101').returncode, 0)
+        if labels:
+            self.set_remote(labels=self.state_json()['labels'] + list(labels))
+
+    def origin(self, foreign_session=None):
+        """A local bare remote holding main, and optionally another session's claim branch for issue 101."""
+        remote_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(remote_dir.cleanup)
+        remote = Path(remote_dir.name) / 'origin.git'
+        identity = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false']
+
+        def git(*args):
+            subprocess.run(['git', *args], cwd=self.root, check=True, capture_output=True, text=True)
+        subprocess.run(['git', 'init', '-q', '--bare', str(remote)], check=True)
+        git('remote', 'add', 'origin', str(remote))
+        git('symbolic-ref', 'HEAD', 'refs/heads/main')
+        git(*identity, 'commit', '-q', '--allow-empty', '-m', 'init')
+        git('push', '-q', 'origin', 'main')
+        if foreign_session:
+            git('checkout', '-q', '-b', 'feat/101-bounded-task')
+            git(*identity, 'commit', '-q', '--allow-empty', '-m',
+                f'chore: claim #101\n\nWork-Claim-Issue: 101\nWork-Claim-Session: {foreign_session}\n'
+                'Work-Claim-Base: main\n')
+            git('push', '-q', 'origin', 'feat/101-bounded-task')
+            git('checkout', '-q', 'main')
+
+    def close_issue(self, number, text='Closing evidence.', reason='completed', env=None):
+        comment = self.root / 'close.md'
+        comment.write_text(text, encoding='utf-8')
+        return self.cli('issue', 'close', str(number), '--reason', reason, '--comment-file', str(comment), env=env)
 
     def test_file_classify_project_and_relationship_writes_are_typed_and_audited(self):
         created = self.cli('issue', 'create', '--title', 'Bounded task', '--body-file', str(self.body),
@@ -490,6 +557,120 @@ finally:
         self.assertEqual([row['status'] for row in updates], ['succeeded', 'failed'])
         self.assertIn('Status updated', partial.stderr)
         self.assertIn('Priority failed', partial.stderr)
+
+    def test_issue_close_comments_then_closes_then_clears_validation_label_and_sets_done(self):
+        self.origin()
+        self.create_task_in_project(labels=['needs-user-validation'])
+        before = len(self.remote_writes())
+        closed = self.close_issue(101, 'Closing with evidence.')
+        self.assertEqual(closed.returncode, 0, closed.stderr)
+        state = self.state_json()
+        kinds = [write.get('gh') or write.get('method') or write.get('mutation')
+                 for write in state['writes'][before:]]
+        self.assertEqual(kinds, ['comment', 'close', 'DELETE', 'updateProjectV2ItemFieldValue'])
+        self.assertEqual(state['writes'][before + 1]['reason'], 'completed')
+        self.assertEqual(state['issue_state'], 'closed')
+        self.assertNotIn('needs-user-validation', state['labels'])
+        self.assertEqual(state['fields'], {'STATUS_FIELD': 'DONE'})
+        self.assertEqual(len(state['comments']), 1)
+        self.assertIn('Closing with evidence.', state['comments'][0])
+        self.assertIn('<!-- work:comment session=fixture-session -->', state['comments'][0])
+        self.assertRegex(state['comments'][0], r'<!-- work:close reason=completed digest=[0-9a-f]{64} -->\n$')
+        audit = [json.loads(line) for line in (self.root / '.git/work/github-writes.jsonl').read_text().splitlines()]
+        attempts = [row['operation'] for row in audit if row['event'] == 'attempt'][-4:]
+        results = [row['status'] for row in audit if row['event'] == 'result'][-4:]
+        self.assertEqual(attempts, ['issue.comment', 'issue.close', 'api.DELETE', 'graphql.mutation'])
+        self.assertEqual(results, ['succeeded'] * 4)
+        self.assertNotIn('Closing with evidence.', json.dumps(audit))
+
+    def test_issue_close_refuses_guard_text_and_oversized_comments_before_any_github_call(self):
+        refused = self.close_issue(101, 'BLOCKED_TEXT')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('refused by the privacy guard', refused.stderr)
+        oversized = self.close_issue(101, 'x' * (64 * 1024 + 1))
+        self.assertNotEqual(oversized.returncode, 0)
+        self.assertIn('64 KiB', oversized.stderr)
+        self.assertFalse(self.trace.exists())
+        self.assertFalse((self.root / '.git/work/github-writes.jsonl').exists())
+
+    def test_issue_close_refuses_epics_without_any_write(self):
+        self.origin()
+        closed = self.close_issue(154)
+        self.assertNotEqual(closed.returncode, 0)
+        self.assertIn('epic', closed.stderr)
+        self.assertEqual(self.remote_writes(), [])
+        self.assertFalse([call for call in self.gh_calls() if call[:2] in (['issue', 'comment'], ['issue', 'close'])])
+
+    def test_issue_close_refuses_a_closed_issue_that_no_earlier_close_commented_on(self):
+        self.origin()
+        self.create_task_in_project()
+        self.set_remote(issue_state='closed')
+        before = len(self.remote_writes())
+        closed = self.close_issue(101)
+        self.assertNotEqual(closed.returncode, 0)
+        self.assertIn('is closed', closed.stderr)
+        self.assertEqual(self.remote_writes()[before:], [])
+
+    def test_issue_close_refuses_an_open_claim_owned_by_another_session_without_any_write(self):
+        self.origin(foreign_session='other-session')
+        self.create_task_in_project()
+        before = len(self.remote_writes())
+        refused = self.close_issue(101)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('claimed by another session', refused.stderr)
+        self.assertEqual(self.remote_writes()[before:], [])
+
+    def test_issue_close_rerun_after_failed_close_posts_no_second_comment(self):
+        self.origin()
+        self.create_task_in_project()
+        failed = self.close_issue(101, 'Closing with evidence.', env=dict(self.env, TRACKING_FAIL_CLOSE='1'))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('completed: comment posted; close failed or is uncertain', failed.stderr)
+        self.assertEqual(len(self.state_json()['comments']), 1)
+        rerun = self.close_issue(101, 'Closing with evidence.')
+        self.assertEqual(rerun.returncode, 0, rerun.stderr)
+        state = self.state_json()
+        self.assertEqual(len(state['comments']), 1)
+        self.assertEqual(state['issue_state'], 'closed')
+        self.assertEqual([w['reason'] for w in state['writes'] if w.get('gh') == 'close'], ['completed'])
+
+    def test_issue_close_rerun_after_failed_label_removal_finishes_without_refusal_or_second_close(self):
+        self.origin()
+        self.create_task_in_project(labels=['needs-user-validation'])
+        failed = self.close_issue(101, env=dict(self.env, TRACKING_FAIL_LABEL_DELETE='1'))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('completed: comment posted; issue closed; label removal failed or is uncertain', failed.stderr)
+        self.assertEqual(self.state_json()['issue_state'], 'closed')
+        rerun = self.close_issue(101)
+        self.assertEqual(rerun.returncode, 0, rerun.stderr)
+        state = self.state_json()
+        self.assertNotIn('needs-user-validation', state['labels'])
+        self.assertEqual(state['fields'], {'STATUS_FIELD': 'DONE'})
+        self.assertEqual(len(state['comments']), 1)
+        self.assertEqual(len([w for w in state['writes'] if w.get('gh') == 'close']), 1)
+
+    def test_issue_close_after_reopen_posts_changed_closing_text_instead_of_skipping_it(self):
+        self.origin()
+        self.create_task_in_project()
+        self.assertEqual(self.close_issue(101, 'First closing evidence.').returncode, 0)
+        self.set_remote(issue_state='open')
+        second = self.close_issue(101, 'Second closing evidence.')
+        self.assertEqual(second.returncode, 0, second.stderr)
+        state = self.state_json()
+        self.assertEqual(len(state['comments']), 2)
+        self.assertIn('Second closing evidence.', state['comments'][1])
+
+    def test_issue_close_skips_the_status_step_when_the_issue_is_not_in_the_project(self):
+        self.origin()
+        self.assertEqual(self.cli('issue', 'create', '--title', 'Bounded task', '--body-file', str(self.body),
+                                  '--kind', 'kind:maintenance', '--visibility', 'visibility:internal',
+                                  '--area', 'area:tooling').returncode, 0)
+        before = len(self.remote_writes())
+        closed = self.close_issue(101)
+        self.assertEqual(closed.returncode, 0, closed.stderr)
+        kinds = [write.get('gh') or write.get('mutation') for write in self.remote_writes()[before:]]
+        self.assertEqual(kinds, ['comment', 'close'])
+        self.assertEqual(self.state_json()['fields'], {})
 
 
 if __name__ == '__main__':

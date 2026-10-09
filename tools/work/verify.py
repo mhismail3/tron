@@ -132,21 +132,22 @@ def _work_dir(repo: Path) -> Path:
     return Path(_git(repo, "rev-parse", "--absolute-git-dir").strip()) / "work"
 
 
-def _prior_receipt(repo: Path, receipts: Path, head: str, digest: str) -> Optional[dict]:
-    """The nearest passing receipt on an ancestor of head under the same configuration."""
-    best: Optional[Tuple[int, dict]] = None
+def _prior_receipts(repo: Path, receipts: Path, head: str, digest: str) -> List[dict]:
+    """Receipts on head or an ancestor under the same configuration, nearest first.
+
+    Carry-over is decided per check, so a receipt that failed overall still
+    proves every check that passed in it.
+    """
+    found: List[Tuple[int, dict]] = []
     for path in receipts.glob("*.json") if receipts.is_dir() else []:
         try:
             receipt = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        if (receipt.get("passed") is not True or receipt.get("configHash") != digest
-                or not _is_ancestor(repo, receipt["head"], head)):
+        if receipt.get("configHash") != digest or not _is_ancestor(repo, receipt["head"], head):
             continue
-        distance = int(_git(repo, "rev-list", "--count", f"{receipt['head']}..{head}"))
-        if best is None or distance < best[0]:
-            best = (distance, receipt)
-    return best[1] if best else None
+        found.append((int(_git(repo, "rev-list", "--count", f"{receipt['head']}..{head}")), receipt))
+    return [receipt for _, receipt in sorted(found, key=lambda item: item[0])]
 
 
 def _physical_memory() -> int:
@@ -171,7 +172,7 @@ def worker_count(jobs: Optional[int]) -> int:
 
 
 @contextlib.contextmanager
-def _run_check(root: Path, prelude: str, command: str, log_path: Path):
+def _run_check(root: Path, prelude: str, command: str, log_path: Path, environment: Dict[str, str]):
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with log_path.open("w") as log:
@@ -179,7 +180,8 @@ def _run_check(root: Path, prelude: str, command: str, log_path: Path):
         log.flush()
         process = subprocess.Popen(
             ["bash", "-c", f"set -eo pipefail\n{prelude}\n{command}"],
-            cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+            cwd=root, env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             yield process, started
@@ -207,7 +209,7 @@ class RunningCheck:
     group: Optional[str]
 
 
-def _run_checks(root: Path, pending: list, prelude: str, jobs: int) -> Dict[str, dict]:
+def _run_checks(root: Path, pending: list, prelude: str, jobs: int, environment: Dict[str, str]) -> Dict[str, dict]:
     results: Dict[str, dict] = {}
     running: List[RunningCheck] = []
     # The invocation owns every started check. No threads or background queue
@@ -230,7 +232,7 @@ def _run_checks(root: Path, pending: list, prelude: str, jobs: int) -> Dict[str,
                     continue
                 owner = invocation.enter_context(contextlib.ExitStack())
                 print(f"  {check.name}: running", flush=True)
-                process, started = owner.enter_context(_run_check(root, prelude, command, log_path))
+                process, started = owner.enter_context(_run_check(root, prelude, command, log_path, environment))
                 running.append(RunningCheck(check, process, started, owner, group))
                 pending.remove(task)
             for item in running[:]:
@@ -407,7 +409,10 @@ def branch_base(root: Path, config: dict) -> str:
         raise VerifyError(str(error)) from None
 
 
-def _preflight_tron_home_environment() -> None:
+def _check_environment() -> Dict[str, str]:
+    """The inherited environment every check runs with: live-home paths dropped
+    (the policy lists them), selectors refused. Checks never see the caller's
+    live-home pointers, so a Stable agent shell can run them."""
     policy = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
     try:
         result = subprocess.run(["node", str(policy)], capture_output=True, text=True)
@@ -416,11 +421,13 @@ def _preflight_tron_home_environment() -> None:
     if result.returncode != 0:
         message = result.stderr.strip() or "inherited environment resolves into a live Tron home"
         raise VerifyError(message)
+    dropped = set(result.stdout.split())
+    return {name: value for name, value in os.environ.items() if name not in dropped}
 
 
 def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
            jobs: Optional[int] = None) -> dict:
-    _preflight_tron_home_environment()
+    check_environment = _check_environment()
     workers = worker_count(jobs)
     settings, claim = config["verify"], config["claim"]
     remote = claim["remote"]
@@ -448,24 +455,28 @@ def verify(repo: Path, config: dict, evidence_manifest: Optional[Path] = None,
     work = _work_dir(root)
     receipts = work / "receipts"
     artifacts = _receipt_media(root, work, head, evidence_manifest)
-    prior = _prior_receipt(root, receipts, head, digest)
-    since_prior = _changed(root, prior["head"], head) if prior else []
+    priors = _prior_receipts(root, receipts, head, digest)
+    since: Dict[str, List[str]] = {}
 
     results: Dict[str, dict] = {}
     pending = []
     for check in required:
-        earlier = (prior or {}).get("checks", {}).get(check.name)
-        if (earlier and earlier["exitCode"] == 0 and not check.always
-                and not any(check.matches(path) for path in since_prior)):
-            results[check.name] = {**earlier, "carriedFrom": earlier["carriedFrom"] or prior["head"]}
-            continue
+        # The nearest receipt in which this check passed, not only a passing receipt.
+        prior = next((r for r in priors if r.get("checks", {}).get(check.name, {}).get("exitCode") == 0), None)
+        if prior is not None and not check.always:
+            if prior["head"] not in since:
+                since[prior["head"]] = _changed(root, prior["head"], head)
+            if not any(check.matches(path) for path in since[prior["head"]]):
+                earlier = prior["checks"][check.name]
+                results[check.name] = {**earlier, "carriedFrom": earlier["carriedFrom"] or prior["head"]}
+                continue
         present = [str(root / p) for p in matched[check.name] if (root / p).exists()]
         command = (check.command.replace("{paths}", " ".join(shlex.quote(p) for p in present))
                    .replace("{merge_base}", merge_base))
         log_path = work / "logs" / head / f"{check.name}.log"
         pending.append((check, command, log_path, check.group_for(matched[check.name])))
 
-    executed = _run_checks(root, pending, settings.get("prelude", ""), workers)
+    executed = _run_checks(root, pending, settings.get("prelude", ""), workers, check_environment)
     for check in required:
         if check.name in executed:
             results[check.name] = {**executed[check.name],
@@ -564,15 +575,27 @@ def scrub(root: Path, command: str, text: str) -> None:
         raise VerifyError(f"the scrub command refused the evidence text; nothing was posted\n{detail}")
 
 
+_UPLOAD_CONFLICTS = 5
+
+
 def _upload(gh: Gh, repository: str, path: str, content: bytes, message: str) -> None:
     api = f"repos/{repository}/contents/{path}"
-    body = {"message": message, "content": base64.b64encode(content).decode()}
-    try:
-        body["sha"] = gh.rest("GET", api)["sha"]
-    except GhError as error:
-        if "HTTP 404" not in str(error):
-            raise
-    gh.rest("PUT", api, body)
+    # Each PUT is a commit on the evidence branch: a compare-and-swap on its head.
+    # Concurrent lands lose it with HTTP 409; that is re-read and re-applied, not
+    # a failure. Every other error, and a bounded run of conflicts, still raises.
+    for attempt in range(_UPLOAD_CONFLICTS):
+        body = {"message": message, "content": base64.b64encode(content).decode()}
+        try:
+            body["sha"] = gh.rest("GET", api)["sha"]
+        except GhError as error:
+            if "HTTP 404" not in str(error):
+                raise
+        try:
+            gh.rest("PUT", api, body)
+            return
+        except GhError as error:
+            if "HTTP 409" not in str(error) or attempt == _UPLOAD_CONFLICTS - 1:
+                raise
 
 
 def open_pull(gh: Gh, branch: str) -> Optional[dict]:
