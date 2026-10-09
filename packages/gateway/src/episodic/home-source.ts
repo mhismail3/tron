@@ -31,27 +31,36 @@ function sameFile(a: Stats, b: Stats): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
 }
 
-/** One line at a time. No batch of raw strings survives a parse/project step. */
+/** One line at a time. No batch of raw strings survives a parse/project step. A
+ * line can be tens of megabytes (an inline image), so its reads are kept as pieces
+ * and joined once: joining each read onto the pending bytes copies the line once
+ * per read. */
 async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number, signal?: AbortSignal) {
   const buffer = Buffer.alloc(64 * 1024);
-  let pending = Buffer.alloc(0);
+  let pieces: Buffer[] = [];
+  let pendingBytes = 0;
   let position = start;
   while (position < end) {
     signal?.throwIfAborted();
     const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, end - position), position);
     if (bytesRead === 0) throw new EpisodicSourceChangedError();
     position += bytesRead;
-    let chunk = Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
+    const chunk = buffer.subarray(0, bytesRead);
+    let from = 0;
     let newline = chunk.indexOf(10);
     while (newline >= 0) {
-      if (newline > maxLineBytes) fail("Home canonical line exceeds the source bound");
-      yield chunk.subarray(0, newline);
-      chunk = chunk.subarray(newline + 1);
-      newline = chunk.indexOf(10);
+      if (pendingBytes + newline - from > maxLineBytes) fail("Home canonical line exceeds the source bound");
+      yield Buffer.concat([...pieces, chunk.subarray(from, newline)]);
+      pieces = []; pendingBytes = 0;
+      from = newline + 1;
+      newline = chunk.indexOf(10, from);
     }
-    if (chunk.length > maxLineBytes) fail("Home canonical line exceeds the source bound");
+    if (pendingBytes + bytesRead - from > maxLineBytes) fail("Home canonical line exceeds the source bound");
     // Copy the tail: it must not retain the reused read buffer.
-    pending = Buffer.from(chunk);
+    if (from < bytesRead) {
+      pieces.push(Buffer.from(chunk.subarray(from)));
+      pendingBytes += bytesRead - from;
+    }
   }
   // A trailing partial line is a live writer's append, or a crash's: it is not an
   // entry until its newline lands. It stays unread, so the next delta ingests it

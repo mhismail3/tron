@@ -34,7 +34,7 @@ import {
   type WorkspaceHistoryScope,
 } from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
-import type { UploadStore } from "../machine/upload-store.js";
+import { MAXIMUM_PROMPT_ATTACHMENTS, type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -2253,7 +2253,7 @@ export class GatewayService {
       throw new GatewayError("invalid_request", "text must be a string");
     }
     const text = params.text === undefined ? "" : admitPromptText(params.text);
-    const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
+    const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", MAXIMUM_PROMPT_ATTACHMENTS);
     const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
       ? undefined : admitResourceInvocation(params.resourceInvocation);
     const resourceSource = resourceInvocation?.source;

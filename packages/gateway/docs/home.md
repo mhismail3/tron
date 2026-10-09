@@ -183,8 +183,10 @@ chapter. Its size is bounded per record and per cursor, but not per history:
 
 - Bounded: each projected user, assistant or event text (`recordCapChars`, 128 Ki
   characters by default), each tool result (`capChars`), the context view
-  (`viewBytes`), and the raw source, which is read one line at a time under a
-  16 MiB line bound.
+  (`viewBytes`), and the raw source, which is read one line at a time under
+  `maxSourceLineBytes` (about 46 MiB). That bound is the largest line one prompt
+  can write (`maximumPromptLineBytes`: its inline images, text and envelope), so
+  no line the prompt path produces can block the memory.
 - Grows: the catalog keeps every projected message of the history in memory
   (`messages`, `nodes`, `entryIndex`), so live heap grows with Home's message
   count. Paging the catalog is a follow-up, not current behavior.

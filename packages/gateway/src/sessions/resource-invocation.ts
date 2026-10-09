@@ -102,7 +102,10 @@ export function canonicalResourceName(source: ResourceInvocation["source"], name
   return name;
 }
 
-export function admitPromptText(value: string, maximumBytes = 192 * 1_024): string {
+/** The UTF-8 bytes one prompt's text may carry. Home's source bound is derived from it. */
+export const PROMPT_TEXT_MAX_BYTES = 192 * 1_024;
+
+export function admitPromptText(value: string, maximumBytes = PROMPT_TEXT_MAX_BYTES): string {
   return admittedText(value, "text", maximumBytes);
 }
 

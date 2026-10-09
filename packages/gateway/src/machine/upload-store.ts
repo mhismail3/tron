@@ -24,6 +24,32 @@ const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 // rejects is replayed by every later request in the session (#407). Any other
 // image type (HEIC, TIFF, ...) is a file attachment the agent can open by path.
 const INLINE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+/** Attachments one prompt may carry. Every prompt route admits at most this many. */
+export const MAXIMUM_PROMPT_ATTACHMENTS = 10;
+// Pi's inline image limit (pi-coding-agent `image-resize-core`, `DEFAULT_MAX_BYTES`):
+// with auto-resize on, an image whose base64 reaches it is re-encoded below it, and
+// one already within limits passes through only while it is below it.
+const INLINE_IMAGE_BASE64_LIMIT_BYTES = 4.5 * 1_048_576;
+// An attachment's envelope entry carries its name (at most 160 characters, 4 bytes
+// each), MIME type (at most 200) and owned path (at most 1 KiB), each escaped at up
+// to six bytes per byte, plus the element's framing.
+const ENVELOPE_BYTES_PER_ATTACHMENT = 6 * (160 * 4 + 200 + 1_024) + 128;
+
+/**
+ * The largest canonical line one prompt can write, which Home's source must read.
+ * The line holds the prompt's inline images as base64: either auto-resize keeps each
+ * under the inline limit, or it is off and the 4/3 expansion of the whole upload
+ * total applies. Its text is at most `maximumTextBytes`, escaped at six bytes per
+ * byte, and its envelope lists the attachments. Callers pass the configured limits,
+ * so the bound follows them rather than a second copy of the numbers.
+ */
+export function maximumPromptLineBytes(maximumUploadBytes: number, maximumTextBytes: number): number {
+  const inlineImages = Math.max(
+    4 * Math.ceil(maximumUploadBytes / 3) + 4 * MAXIMUM_PROMPT_ATTACHMENTS,
+    MAXIMUM_PROMPT_ATTACHMENTS * INLINE_IMAGE_BASE64_LIMIT_BYTES,
+  );
+  return inlineImages + 6 * maximumTextBytes + MAXIMUM_PROMPT_ATTACHMENTS * ENVELOPE_BYTES_PER_ATTACHMENT;
+}
 
 interface UploadMetadata {
   version: 2;
@@ -829,7 +855,7 @@ export class UploadStore {
     fileAttachmentCount: number;
     attachments: PromptAttachmentState[];
   }> {
-    if (ids.length > 10) throw new GatewayError("invalid_request", "At most 10 attachments may be sent with one prompt");
+    if (ids.length > MAXIMUM_PROMPT_ATTACHMENTS) throw new GatewayError("invalid_request", `At most ${MAXIMUM_PROMPT_ATTACHMENTS} attachments may be sent with one prompt`);
     if (new Set(ids).size !== ids.length) throw new GatewayError("invalid_request", "Prompt attachment ids must be unique");
     return this.serialize(async () => {
       const metadata = await Promise.all(ids.map((id) => this.metadata(id)));

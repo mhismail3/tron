@@ -15,6 +15,7 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
+import { crc32, deflateSync } from "node:zlib";
 import { once } from "node:events";
 import WebSocket from "ws";
 import { createRequire } from "node:module";
@@ -63,7 +64,7 @@ vi.mock("../home/home-session-recovery.js", async importOriginal => {
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
-import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
 import * as homeSource from "../episodic/home-source.js";
 import type { HomeRecord } from "../home/home-owner.js";
@@ -73,6 +74,7 @@ import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-
 import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryPage, HomeMemoryEvidencePage } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "../transport/server.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -244,6 +246,8 @@ interface Fixture {
   runtime: ModelRuntime;
   registry: RuntimeRegistry;
   service: GatewayService;
+  /** The production upload store, when a test sends real attachments. */
+  uploads?: UploadStore;
   receipts: CommandReceiptStore;
   server?: GatewayServer;
   compactor: CompactorState;
@@ -283,7 +287,7 @@ function openRegistry(f: Fixture): void {
     settings: new SettingsService(f.agentDir, f.runtime),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
-    uploads: {
+    uploads: f.uploads ?? {
       acquire: async () => ({ release: () => {} }),
       materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }),
       removeSession: async () => {},
@@ -294,7 +298,7 @@ function openRegistry(f: Fixture): void {
   f.receipts = receipts;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -334,6 +338,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     registry: undefined!, service: undefined!, receipts: undefined!,
     openChatProvider: () => faux,
   };
+  if (options.realUploads) f.uploads = new UploadStore(tronHome, 25 * 1_048_576);
   openRegistry(f);
   await f.registry.initialize();
   return f;
@@ -378,6 +383,36 @@ const responsesOf = (f: Fixture, requests: CapturedRequest[]) => (blob: string) 
   requests.push(record(context));
   return fauxAssistantMessage(blob);
 };
+
+/**
+ * A valid 1x1 PNG padded with an ancillary tEXt chunk to exactly `bytes`. Pi passes
+ * an image through unchanged when it fits the dimension limit and its base64 stays
+ * under 4.5 MiB, so this is a photo-sized upload that reaches the canonical line.
+ */
+function paddedPng(bytes: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(1, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const pixels = deflateSync(Buffer.from([0, 0, 0, 0]));
+  const build = (padding: number) => Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header),
+    chunk("IDAT", pixels),
+    chunk("tEXt", Buffer.concat([Buffer.from("pad\0", "latin1"), Buffer.alloc(padding, "x")])),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  return build(bytes - build(0).length);
+}
 
 async function sessionJsonl(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>): Promise<string> {
   return slot.sessionFile ? await readFile(slot.sessionFile, "utf8").catch(() => "") : "";
@@ -2103,6 +2138,40 @@ describe("Tron Home activations end to end", () => {
       held.mockRestore();
     }
   }, 60_000);
+
+  it("serves Home memory after a prompt whose canonical line exceeds 16 MiB", async () => {
+    const f = await fixture("large-line", { realUploads: true });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const slot = await designateHome(f, "e2e-designate-large-line");
+    // Five pass-through photos of 3 MB each: their base64 is 20 MB in one user line.
+    const uploadIds: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      uploadIds.push((await f.uploads!.save(`photo-${index}.png`, "image/png", paddedPng(3_000_000))).id);
+    }
+    f.faux.setResponses([responsesOf(f, requests)("large photos received")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "large-line-command-one", text: "Look at these photos", uploadIds });
+    await waitUntil(async () => (await sessionJsonl(slot)).includes('"type":"image"'), 60_000);
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const imageLine = (await sessionJsonl(slot)).split("\n").find(line => line.includes('"type":"image"')) ?? "";
+    f.faux.setResponses([responsesOf(f, requests)("second reply after the large line")]);
+    await f.service.invoke(client, "home.prompt", { commandId: "large-line-command-two", text: "Still remember this?" });
+    await waitUntil(() => slot.snapshot().phase === "idle", 60_000);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      lineBytes: Buffer.byteLength(imageLine),
+      maximumLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes,
+      providerRequests: requests.length,
+      memoryOpen: status.memory?.open ?? false,
+      memoryBlocked: status.memory?.blocked ?? null,
+    };
+    report.cases.push({ case: "large-canonical-line", ...row });
+    expect(row.lineBytes).toBeGreaterThan(16 * 1_048_576);
+    expect(row.lineBytes).toBeLessThanOrEqual(row.maximumLineBytes);
+    expect(row.memoryBlocked).toBeNull();
+    expect(row.memoryOpen).toBe(true);
+    expect(row.providerRequests).toBe(2);
+  }, 120_000);
 
   it("refuses an unconfigured memory, then serves the next activation once configured", async () => {
     const f = await fixture("configure");

@@ -80,11 +80,14 @@ interface LineBatch {
   tornBytes: number;
 }
 
-/** Read complete lines from the start of the file, bounded per line. */
+/** Read complete lines from the start of the file, bounded per line. A line's reads
+ * are kept as pieces and joined once, as in the Home source's reader, because a
+ * canonical line can be tens of megabytes. */
 async function readLines(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, maxLineBytes: number, endExclusive?: number): Promise<LineBatch> {
   const lines: string[] = [];
   const buffer = Buffer.alloc(1_024 * 1_024);
-  let pending = Buffer.alloc(0);
+  let pieces: Buffer[] = [];
+  let pendingBytes = 0;
   let offset = 0;
   for (;;) {
     if (endExclusive !== undefined && offset >= endExclusive) break;
@@ -92,18 +95,23 @@ async function readLines(handle: { read(buffer: Buffer, offset: number, length: 
     const read = await handle.read(buffer, 0, length, offset);
     if (read.bytesRead === 0) break;
     offset += read.bytesRead;
-    let chunk = Buffer.concat([pending, buffer.subarray(0, read.bytesRead)]);
+    const chunk = buffer.subarray(0, read.bytesRead);
+    let from = 0;
     let newline = chunk.indexOf(0x0a);
     while (newline >= 0) {
-      if (newline > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
-      lines.push(chunk.subarray(0, newline).toString("utf8"));
-      chunk = chunk.subarray(newline + 1);
-      newline = chunk.indexOf(0x0a);
+      if (pendingBytes + newline - from > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
+      lines.push(Buffer.concat([...pieces, chunk.subarray(from, newline)]).toString("utf8"));
+      pieces = []; pendingBytes = 0;
+      from = newline + 1;
+      newline = chunk.indexOf(0x0a, from);
     }
-    if (chunk.length > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
-    pending = chunk;
+    if (pendingBytes + chunk.length - from > maxLineBytes) throw new EpisodicMemoryError("source", `Canonical session line exceeds ${maxLineBytes} bytes`);
+    if (from < chunk.length) {
+      pieces.push(Buffer.from(chunk.subarray(from)));
+      pendingBytes += chunk.length - from;
+    }
   }
-  return { lines, tornBytes: pending.length };
+  return { lines, tornBytes: pendingBytes };
 }
 
 export function extendPrefixDigest(prefix: string, lineBytes: Buffer): string {
