@@ -122,7 +122,14 @@ async function refuseUnjoinedFixture(root: string): Promise<void> {
 
 async function copyPayload(payload: string): Promise<void> {
   await mkdir(payload);
-  for (const file of ["src", "test-support", "vitest.config.ts", "package.json"]) {
+  // A nested leg runs only this file. Copying the other test files was over half
+  // of each leg's cost under host load; the source modules it imports are all kept.
+  const ownTestFile = "managed-subagents.rollback.test.ts";
+  await cp(join(gatewayRoot, "src"), join(payload, "src"), {
+    recursive: true,
+    filter: (source) => !source.endsWith(".test.ts") || source.endsWith(ownTestFile),
+  });
+  for (const file of ["test-support", "vitest.config.ts", "package.json"]) {
     await cp(join(gatewayRoot, file), join(payload, file), { recursive: true });
   }
   await symlink(join(gatewayRoot, "node_modules"), join(payload, "node_modules"));
