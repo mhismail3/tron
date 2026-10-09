@@ -206,8 +206,10 @@ merges and silently drop the work.
 
 ### Base failure modes
 
-`test_claim.py`, `test_land.py` and `test_cleanup.py` check these against real
-repositories, local bare remotes and the fake `gh`. The land fixtures disable
+`test_claim.py`, `test_land.py`, `test_cleanup.py` and `test_verify.py` check these against real
+repositories, local bare remotes and the fake `gh`. Each module builds its repository
+history once and every test copies it (`repo_template.py`), so setup costs no per-test Git
+processes while each test keeps its own repositories. The land fixtures disable
 Git auto-GC and automatic maintenance for every child Git process, so repository
 temporary-directory cleanup does not race detached maintenance.
 The fixture-level test process owner tracks every child process and applies the
@@ -458,20 +460,35 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   remains in CI's heavy run and explicit checkpoints. The simulator admission
   and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
   the check with exit 73; verify again once memory is free.
-- **Advisory hosted macOS CI** uses `scripts/ci_macos_scope.py` over the
-  available event-base and checkout trees (no merge-base required). Recognized
-  docs, work-tooling and push-relay-only changes skip macOS. Gateway inputs run
-  Gateway, the hosted iOS/Gateway boundary and Mac packaging; iOS inputs run iOS
-  and the boundary; Mac inputs run Mac. Shared workflow, protocol and toolchain
-  inputs, unknown paths, empty diffs and unavailable Git inputs run all four.
-  Deleted/renamed paths retain both owners. Manual dispatch runs all four, and
-  a failed classifier or missing output never skips coverage. An explicit
-  `!cancelled()` status check lets selected or missing-output jobs run even if
-  `policy` fails; an explicit `false` scope still skips, and workflow cancellation
-  stops advisory work. `test_ci_scope.py` exercises the CLI with real Git histories
-  and the workflow's selector shell, not GitHub's job dependency scheduler.
+- **Advisory hosted macOS CI** starts with the Linux `scope` job, which runs
+  `scripts/ci_macos_scope.py` over the available event-base and checkout trees
+  (no merge-base required). Recognized docs, work-tooling and push-relay-only
+  changes skip macOS. Gateway inputs run the Gateway job, the hosted iOS/Gateway
+  boundary and Mac packaging; iOS inputs run iOS and the boundary; Mac inputs run
+  Mac. Shared workflow, protocol and toolchain inputs, unknown paths, empty diffs
+  and unavailable Git inputs run all four. Deleted/renamed paths retain both
+  owners. Manual dispatch runs all four, and a failed classifier or missing output
+  never skips coverage. An explicit `!cancelled()` status check lets selected or
+  missing-output jobs run even if an earlier job fails; an explicit `false` scope
+  still skips, and workflow cancellation stops advisory work. `test_ci_scope.py`
+  exercises the CLI with real Git histories and the `scope` job's selector shell,
+  not GitHub's job dependency scheduler.
+  The required `gateway` job runs only Gateway's install, `check:pi-sdk`, build,
+  `npm test`, the Pi SDK rollback when the graph changed, and audit. The advisory
+  `gateway-tooling` job runs the pi-subagents provider checks, the dev-lifecycle
+  state tests, the profiler test and the payload-deploy test, each only when
+  `scripts/ci_verify_scope.py` selects its check. That selector matches the
+  `paths` of the same-named verify checks in `.github/work.json` through
+  `tools/work/verify.py`, so CI and `scripts/tron work verify` select alike. An
+  empty diff selects none, as verify does; a missing or unresolvable base, or any
+  selector error, runs every check. `scripts/test-ci-verify-scope.py` covers the
+  selector's real-Git cases in `policy`. `policy` needs `scope` and gates only its
+  slow `profiler`, `triage` and `work-tooling` test steps on the same selector; its
+  syntax checks and selector tests stay unconditional, and `!cancelled()` keeps it
+  running when selection fails.
   Jobs keep real failure conclusions;
-  only Linux `policy` and `tron/verify` gate `land`. The `main` ruleset remains
+  only `policy`, `gateway` (`land.requiredChecks`) and `tron/verify` gate `land`.
+  The `main` ruleset remains
   unapplied by maintainer decision; no schedule or deployment is added.
   The workflow's concurrency group stays ref-scoped, and it cancels in progress
   only for `pull_request` events. A started base-branch push run therefore always
@@ -927,7 +944,9 @@ as does `acceptance` for the journeys it can run.
    that CI skipped because the change does not touch its inputs counts as
    passed, as in GitHub's own required-check rule. A required check that fails
    or is cancelled stops `land` and names the check. A timeout also stops it.
-   Neither merges.
+   A pull request that GitHub reports as conflicting stops `land` at its first
+   poll and names the base to merge; hosted checks never run on it. Neither
+   merges.
 7. **Base moves.** Once the checks pass, it fetches the base branch again.
    When the head no longer contains its tip, steps 2 to 6 repeat, at most
    `land.maxRounds` times in all, and the journeys run again against the new
@@ -1234,6 +1253,12 @@ Project state and records every call. The live E2E covers GitHub itself.
     Valid non-bug summaries remain unchanged;
     stewarding and merged-resume paths preserve the generated Verification and
     Maintainer validation sections.
+80. **A conflicting pull request waits out the timeout.** GitHub reports a pull
+    request that conflicts with its base as `CONFLICTING` and runs no checks on
+    it, so waiting never finishes. `land` stops at the first poll, names the
+    base and says to merge it into the branch, resolve, commit and run land
+    again. Nothing merges. `UNKNOWN` (GitHub still computing mergeability) keeps
+    waiting.
 
 ## `cleanup`
 

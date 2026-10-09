@@ -87,7 +87,7 @@ class MacOSScopeTests(unittest.TestCase):
         workflow = SCRIPT.parent.parent / ".github/workflows/ci.yml"
         shell = subprocess.check_output([
             "ruby", "-ryaml", "-e",
-            'puts YAML.load_file(ARGV[0])["jobs"]["policy"]["steps"].find { |s| s["id"] == "macos-scope" }["run"]',
+            'puts YAML.load_file(ARGV[0])["jobs"]["scope"]["steps"].find { |s| s["id"] == "macos-scope" }["run"]',
             str(workflow)], text=True)
         self.change("docs/guide.md")
         target = self.repo / "scripts/ci_macos_scope.py"

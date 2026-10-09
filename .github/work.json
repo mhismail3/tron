@@ -276,8 +276,11 @@
         "paths": [
           "tools/work/**",
           ".github/work.json",
+          ".github/workflows/ci.yml",
           "scripts/ci_macos_scope.py",
-          ".github/workflows/ci.yml"
+          "packages/mac-app/.gitignore",
+          "packages/gateway/src/tron-home-environment-policy.mjs",
+          "packages/gateway/test-support/tron-home-environment-preflight.mjs"
         ],
         "command": "python3 -m unittest discover -s tools/work"
       },
@@ -412,9 +415,13 @@
           "scripts/ios_verify_test_selection.py",
           "scripts/test-ios-verify-test-selection.py",
           "scripts/ci_ios_infra_scope.py",
-          "scripts/test-ci-ios-infra-scope.py"
+          "scripts/test-ci-ios-infra-scope.py",
+          "scripts/ci_verify_scope.py",
+          "scripts/test-ci-verify-scope.py",
+          "tools/work/verify.py",
+          ".github/work.json"
         ],
-        "command": "python3 scripts/test-ios-verify-test-selection.py && python3 scripts/test-ci-ios-infra-scope.py"
+        "command": "python3 scripts/test-ios-verify-test-selection.py && python3 scripts/test-ci-ios-infra-scope.py && python3 scripts/test-ci-verify-scope.py"
       },
       {
         "name": "mac",
@@ -731,6 +738,7 @@
     "ciWorkflow": "ci.yml",
     "advisoryJobs": [
       "gateway",
+      "gateway-tooling",
       "ios",
       "pi-sdk-e2e",
       "mac"
