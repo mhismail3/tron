@@ -24,9 +24,12 @@ it("attributes real workflow completion and supervisor delivery to their managed
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
+  // An inherited PI_SUBAGENT_CHILD (a delegated agent's shell) makes the managed
+  // provider act as a child, so the parent's subagent tool is never registered.
   const names = ["PI_CODING_AGENT_DIR", "PI_SUBAGENTS_TEMP_ROOT", "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT",
-    "NODE_OPTIONS", "TRON_TEST_PROCESS_OWNER", "TRON_TEST_PROCESS_OWNER_FAILURE"];
+    "NODE_OPTIONS", "TRON_TEST_PROCESS_OWNER", "TRON_TEST_PROCESS_OWNER_FAILURE", "PI_SUBAGENT_CHILD"];
   const previous = names.map(name => process.env[name]);
+  delete process.env.PI_SUBAGENT_CHILD;
   let registry: RuntimeRegistry | undefined;
   let server: Server | undefined;
   let release: (() => void) | undefined;
