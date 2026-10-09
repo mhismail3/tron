@@ -497,6 +497,8 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   slow `profiler`, `triage` and `work-tooling` test steps on the same selector; its
   syntax checks and selector tests stay unconditional, and `!cancelled()` keeps it
   running when selection fails.
+  The advisory macOS jobs also need `gateway`, so the required job never queues
+  for a macOS runner behind them; they still run when it fails or is skipped.
   Jobs keep real failure conclusions;
   only `policy`, `gateway` (`land.requiredChecks`) and `tron/verify` gate `land`.
   The `main` ruleset remains
@@ -847,6 +849,7 @@ Use these typed commands instead of direct `gh` writes:
 - `project add <issue>` adds the issue idempotently to the configured repository-linked work Project.
 - `project set <issue> [--status Proposed|Ready|Needs you|Blocked] [--priority P0|P1|P2|P3]` assigns only unclaimed statuses. `start` owns In progress, `land` owns In review and Done. Ready is only for maintainer-approved work inside approved scope after blockers close. Every requested live field and option is resolved before the first mutation; partial two-field updates report exactly which field succeeded if a request later fails, and rerunning is safe.
 - `issue parent <task> --epic <epic>` creates the native parent/sub-issue relationship after validating the labels. `issue block <issue> --blocked-by <blocker>` creates GitHub's native blocked-by relation. Both are idempotent.
+- `issue close <issue> --reason completed|not_planned --comment-file <md>` posts a closing comment, closes the issue with that reason, removes `needs-user-validation` if present, and sets Status to `land.doneStatus` when the issue is in the Project. The comment is bounded and privacy-checked before any GitHub call, and carries the work-session marker; `WORK_SESSION_ID` or `PI_SESSION_ID` is required. It refuses an epic, a closed issue that no earlier close of this reason and text commented on, and an open claim branch owned by another session, all before the first write. Each step is a separately audited `Gh` write, in that order.
 
 A new task normally follows this sequence: `issue create`, `project add`,
 `project set --status Proposed --priority P2`, and optional `issue parent` /
@@ -860,11 +863,52 @@ Each REST label delta and Project field mutation is audited separately; when a
 later request fails, the command identifies completed label deltas or fields.
 No generic argument passthrough is provided.
 
+### `issue close` failure modes
+
+Re-running `issue close` after a partial failure is safe. The command names the
+steps that completed (`completed: comment posted; ...`) before the failing one,
+and a re-run skips a comment already posted for the same reason and exact text,
+identified by a hidden `<!-- work:close reason=... digest=... -->` marker, as
+`land`'s handoff marker is. A close that already happened is resumed rather than
+refused as closed, so the label and Status still finish.
+
+82. **A privacy-refused or oversized closing comment reaches GitHub.** The text is
+    bounded and scrubbed before any `gh` call; a refusal names only the guard and
+    leaves no audit record. `test_tracking.py`
+    (`test_issue_close_refuses_guard_text_and_oversized_comments_before_any_github_call`)
+    proves no call and no audit file.
+83. **An epic, a closed issue or another session's claim is closed anyway.** These
+    refusals run before the first write, and the epic and closed-issue cases name
+    their reason. `test_issue_close_refuses_epics_without_any_write`,
+    `test_issue_close_refuses_a_closed_issue_that_no_earlier_close_commented_on` and
+    `test_issue_close_refuses_an_open_claim_owned_by_another_session_without_any_write`
+    check that no `issue comment`, `issue close` or other write is attempted.
+84. **A re-run after a failed close posts a second comment.** The comment carries the
+    close marker, so the re-run posts none.
+    `test_issue_close_rerun_after_failed_close_posts_no_second_comment` fails the
+    close after the comment and proves exactly one comment and one close.
+85. **A re-run is refused as closed, or leaves the label and Status behind.** Once
+    the close has happened, a re-run with the marker finishes the label removal and
+    the Status update instead of refusing. `test_issue_close_rerun_after_failed_label_removal_finishes_without_refusal_or_second_close`
+    fails the label removal and proves no second close.
+86. **A new closing text after a reopen is dropped.** The marker carries the reason
+    and a digest of the exact text, so a same-reason close with new text posts its
+    own comment. `test_issue_close_after_reopen_posts_changed_closing_text_instead_of_skipping_it`
+    proves two comments.
+87. **Steps run out of order, or Status is set for an issue outside the Project.**
+    The order is comment, close, label removal, then Status, and the Status step is
+    skipped when the issue has no Project item.
+    `test_issue_close_comments_then_closes_then_clears_validation_label_and_sets_done`
+    checks the write order and the audit; `test_issue_close_skips_the_status_step_when_the_issue_is_not_in_the_project`
+    checks the skip.
+
 `test_tracking.py` uses the real CLI boundary with an executable GitHub stand-in
 to exercise issue filing with multiple areas, taxonomy authorization, area
 preservation during unrelated flag changes, overlapping independent label
 additions, Project add and field selection, parent/blocker links, audit
-completeness, live-option preflight and partially completed Project updates.
+completeness, live-option preflight and partially completed Project updates. Its
+`issue close` tests cover the write order, refusals before any write, partial
+failure with an idempotent re-run, and the Project status step.
 Controlled reads prove concurrent flags survive on the remote fixture, and
 schema drift proves no field is changed before validation completes. The
 stand-in does not substitute for live API/schema validation.

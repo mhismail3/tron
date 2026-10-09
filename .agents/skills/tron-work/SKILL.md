@@ -174,7 +174,11 @@ took. If they ask for options, list the top three and wait.
    and closes as many issues as possible. Keep that install separate from the
    handoff's validation check, which asks only for its irreducible part. Offer
    the checkpoint only when no agent work is running: a Stable restart drains
-   and pauses it. Close an issue only on the evidence its handoff asked for.
+   and pauses it. Close an issue only on the evidence its handoff asked for; the typed path is
+   `scripts/tron work issue close <n> --reason completed|not_planned --comment-file <md>`,
+   which posts the closing comment, closes the issue, clears
+   `needs-user-validation` and sets Status Done. It refuses an issue another
+   session's claim holds. Do not call `gh issue close` directly.
 
 ## Plan larger work
 

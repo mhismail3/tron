@@ -1,14 +1,18 @@
 """Typed issue, Project and native relationship writes for agent work."""
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from contextlib import nullcontext
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
 import bootstrap
+import claim as claims
+import comments
+import start
 from gh import Gh, GhError
 
 
@@ -300,3 +304,83 @@ def add_blocker(gh: Gh, repo: Path, config: dict, issue_number: int, blocker_num
         issue=issue["node_id"], blocker=blocker["node_id"],
     )
     print(f"linked blocker #{blocker_number} to issue #{issue_number}")
+
+
+_CLOSE_REASONS = {"completed": "completed", "not_planned": "not planned"}
+
+
+def _close_marker(reason: str, text: str) -> str:
+    # One close is identified by its reason and exact public text: a re-run of
+    # the same close finds its comment, while a new close after a reopen posts its own.
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return f"<!-- work:close reason={reason} digest={digest} -->"
+
+
+def _finish_step(finished: List[str], done: str, failed: str, action: Callable[[], object]) -> None:
+    try:
+        action()
+    except GhError as error:
+        if finished:
+            raise TrackingError(f"completed: {'; '.join(finished)}; {failed} failed or is uncertain; "
+                                "re-run the same command to finish") from error
+        raise TrackingError(f"{failed} failed or is uncertain") from error
+    finished.append(done)
+
+
+def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comment_file: Path) -> None:
+    """Comment, close, clear the validation handoff, and set Status Done, refusing before any write.
+
+    Re-running after a partial failure is safe: a comment already posted for this
+    reason and text is not posted again, and a close that already happened is not
+    refused as closed.
+    """
+    if number <= 0:
+        raise TrackingError("issue numbers must be positive")
+    session = comments.session_identity()
+    text = comments.prepared_body(repo, config, comment_file)
+    marker = _close_marker(reason, text)
+    rules, settings = config["claim"], config["land"]
+    owner, name = _repository(gh)
+    repository = f"{owner}/{name}"
+    issue = _issue(gh, repository, number)
+    labels = {label["name"] for label in issue.get("labels", [])}
+    if config["dashboard"]["epicLabel"] in labels:
+        raise TrackingError(f"#{number} is an epic; work issue close refuses epics")
+    posted = any(marker in (comment.get("body") or "")
+                 for comment in gh.rest_pages(f"repos/{repository}/issues/{number}/comments"))
+    is_open = issue.get("state") == "open"
+    if not is_open and not posted:
+        raise TrackingError(f"#{number} is closed; work issue close only finishes a close it started")
+    foreign = [claim for claim in claims.existing_claims(repo, rules["remote"], rules["baseBranch"], number)
+               if claim.session != session]
+    if foreign:
+        owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in foreign)
+        raise TrackingError(f"#{number} is claimed by another session: {owners}")
+
+    done_status = settings["doneStatus"]
+    _, project = _project(gh, repo, config)
+    items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
+    status_item = None
+    if items:
+        field = next((f for f in project["fields"]["nodes"] if f and f["name"] == rules["statusField"]), None)
+        if field is None or done_status not in {option["name"] for option in field.get("options", [])}:
+            raise TrackingError(f"Project has no configured {rules['statusField']} option {done_status!r}; "
+                                "run work bootstrap")
+        status_item = {"id": items[0]["id"], "project": {"id": project["id"], "field": field}}
+
+    finished: List[str] = []
+    if not posted:
+        _finish_step(finished, "comment posted", "comment",
+                     lambda: gh.run("issue", "comment", str(number), "--body-file", "-", stdin=text + marker + "\n"))
+    if is_open:
+        _finish_step(finished, "issue closed", "close",
+                     lambda: gh.run("issue", "close", str(number), "--reason", _CLOSE_REASONS[reason]))
+    validation_label = settings["userValidationLabel"]
+    if validation_label in labels:
+        _finish_step(finished, "validation label removed", "label removal",
+                     lambda: gh.rest("DELETE", f"repos/{repository}/issues/{number}/labels/"
+                                               f"{quote(validation_label, safe='')}"))
+    if status_item is not None:
+        _finish_step(finished, f"Status set to {done_status}", "Status update",
+                     lambda: start.set_status(gh, status_item, done_status))
+    print(f"closed issue #{number} as {_CLOSE_REASONS[reason]}")
