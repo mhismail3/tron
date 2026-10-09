@@ -7,6 +7,7 @@ Run: python3 -m unittest discover -s tools/work
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import importlib.util
 import json
@@ -434,11 +435,12 @@ class ParallelCheckTests(VerifyFixture):
     instead of hanging; a passing run never waits on them.
     """
 
-    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), peers=(1, 1, 1), hold=False):
+    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), peers=(1, 1, 1), hold=False,
+                       heavy=(False, False, False)):
         if (self.repo / "app/a.txt").read_text() != "two\n":
             self.commit(self.repo, "app/a.txt", "two\n")
         checks = []
-        for name, group, code, need in zip(("first", "second", "third"), groups, codes, peers):
+        for name, group, code, need, heavy_check in zip(("first", "second", "third"), groups, codes, peers, heavy):
             script = self.tmp / f"{name}.py"
             script.write_text(textwrap.dedent(f"""\
                 import os, pathlib, sys, time
@@ -469,6 +471,8 @@ class ParallelCheckTests(VerifyFixture):
                      "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"}
             if group:
                 check["exclusiveGroup"] = group
+            if heavy_check:
+                check["heavy"] = True
             checks.append(check)
         self.config["verify"]["checks"] = checks
 
@@ -662,6 +666,27 @@ class ParallelCheckTests(VerifyFixture):
                     with contextlib.suppress(ProcessLookupError):
                         os.killpg(int(path.read_text()), signal.SIGKILL)
 
+    def test_waiting_heavy_check_does_not_stall_an_independent_check(self):
+        # F4: `second` is refused the only slot held by `first`; `third` (light) must still run alongside first.
+        self.prepare_checks(peers=(2, 1, 2), heavy=(True, True, False))
+        self.config["verify"]["heavySlots"] = 1
+        self.assertTrue(verify.verify(self.repo, self.config, jobs=3)["passed"])
+        self.assertTrue(self.before("first", "second"))
+
+    def test_invalid_heavy_settings_refuse_before_launch(self):
+        # F6: nothing starts when the pool size or a heavy flag is malformed.
+        self.prepare_checks()
+        for slots in (0, -1, True, "2", 1.5):
+            self.config["verify"]["heavySlots"] = slots
+            with self.subTest(heavySlots=slots), self.assertRaises(verify.VerifyError):
+                self.verify()
+        self.config["verify"]["heavySlots"] = 2
+        for heavy in ("yes", 1, None):
+            self.config["verify"]["checks"][0]["heavy"] = heavy
+            with self.subTest(heavy=heavy), self.assertRaises(verify.VerifyError):
+                self.verify()
+        self.assertEqual(list(self.counts.iterdir()), [])
+
     def test_carried_result_survives_unrelated_merge_with_original_provenance(self):
         first = self.commit(self.repo, "app/a.txt", "two\n")
         self.verify()
@@ -743,6 +768,180 @@ class ParallelCheckTests(VerifyFixture):
         self.assertTrue(receipt["passed"])
         self.assertIn("mac-bundle-rebuild", receipt["required"])
         self.assertIn("mac-bundle-rebuild", calls.read_text().splitlines())
+
+
+class HeavySlotTests(VerifyFixture):
+    """Host-wide heavy-check slots. Failure modes, enumerated before the change:
+
+    F1 heavy checks of two invocations (two worktrees of one repository) overlap beyond heavySlots;
+    F2 a slot is released before its check's process group is retired;
+    F3 a slot is never released (settlement or interruption), starving later verifies;
+    F4 a heavy check waiting for a slot stalls an independent check;
+    F5 a slot descriptor is inherited by a check child and outlives verify;
+    F6 an invalid heavySlots or heavy value launches checks;
+    F7 a heavy check gets the wrong CPU share, or a light check gets one;
+    F8 execution-only pool settings change the configuration hash and invalidate receipts.
+
+    Oracles are event logs, the waiting line verify prints, and flock state; never wall time.
+    Each bounded wait exists only so a broken scheduler fails instead of hanging.
+    """
+
+    def holder_script(self, name: str) -> str:
+        script = self.tmp / f"{name}-holder.py"
+        script.write_text(
+            "import os, pathlib, sys, time\n"
+            f"counts = pathlib.Path({str(self.counts)!r})\n"
+            f"name = {name!r}\n"
+            "(counts / f'{name}.group').write_text(str(os.getpgrp()))\n"
+            "def event(kind):\n"
+            "    fd = os.open(counts / 'events.log', os.O_WRONLY | os.O_APPEND | os.O_CREAT)\n"
+            "    os.write(fd, f'{kind} {name}\\n'.encode())\n"
+            "    os.close(fd)\n"
+            "event('start')\n"
+            "deadline = time.monotonic() + 60\n"
+            "while not (counts / 'release').exists():\n"
+            "    if time.monotonic() > deadline:\n"
+            "        sys.exit(99)\n"
+            "    time.sleep(0.01)\n"
+            "event('end')\n")
+        return f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+
+    def setUp(self):
+        super().setUp()
+        self.invocations = []
+
+    def heavy_checks(self, *names: str) -> list:
+        return [{"name": name, "paths": ["app/**"], "heavy": True, "command": self.holder_script(name)}
+                for name in names]
+
+    def slot_is_free(self, index: int = 0) -> bool:
+        directory = Path(git(self.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "work" / "slots"
+        descriptor = os.open(directory / f"{index}.lock", os.O_RDWR)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        finally:
+            os.close(descriptor)
+        return True
+
+    def spawn_invocation(self, repo: Path, tag: str, heavy_slots: int, names: tuple) -> subprocess.Popen:
+        """One verify in its own process, so two invocations really share only the host and the slot files."""
+        config = {**self.config, "verify": {**self.config["verify"], "heavySlots": heavy_slots,
+                                            "checks": self.heavy_checks(*names)}}
+        config_path = self.tmp / f"{tag}.json"
+        config_path.write_text(json.dumps(config))
+        code = (f"import sys, json; sys.path.insert(0, {str(Path(verify.__file__).parent)!r}); "
+                f"from pathlib import Path; import verify; "
+                f"verify.verify(Path({str(repo)!r}), json.loads(Path({str(config_path)!r}).read_text()), jobs=2)")
+        output = self.tmp / f"{tag}.out"
+        with output.open("w") as log:
+            process = subprocess.Popen([sys.executable, "-c", code], stdout=log, stderr=subprocess.STDOUT)
+        self.invocations.append(process)
+        return process
+
+    def tearDown(self):
+        # Before the temp tree goes: holders and invocations this test started must not outlive it.
+        for process in self.invocations:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+        for path in self.counts.glob("*.group"):
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(int(path.read_text()), signal.SIGKILL)
+        super().tearDown()
+
+    def run_two_invocations(self, heavy_slots: int) -> None:
+        """Start one check in each worktree, release the holder once the second shows its state, then settle."""
+        self.commit(self.repo, "app/a.txt", "two\n")
+        other = self.tmp / "other"
+        git(self.repo, "worktree", "add", "-q", "--detach", str(other))
+        processes = [self.spawn_invocation(self.repo, "a", heavy_slots, ("first",)),
+                     self.spawn_invocation(other, "b", heavy_slots, ("second",))]
+        deadline = time.monotonic() + 60
+        while True:
+            starts = [line for line in self.events_text() if line.startswith("start")]
+            waiting = any("waiting for a heavy slot" in path.read_text()
+                          for path in self.tmp.glob("[ab].out"))
+            if len(starts) == 2 or waiting:
+                break
+            self.assertLess(time.monotonic(), deadline, "neither overlap nor a heavy-slot wait was observed")
+            time.sleep(0.02)
+        (self.counts / "release").touch()
+        for process in processes:
+            self.assertEqual(process.wait(timeout=60), 0)
+
+    def events_text(self) -> list:
+        path = self.counts / "events.log"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_two_worktrees_share_one_heavy_slot(self):
+        # F1 and F2: the second invocation's check starts only after the first's end event.
+        self.run_two_invocations(heavy_slots=1)
+        kinds = [tuple(line.split()) for line in self.events_text()]
+        self.assertEqual([kind for kind, _ in kinds], ["start", "end", "start", "end"])
+        self.assertEqual(kinds[0][1], kinds[1][1])
+        self.assertEqual(kinds[2][1], kinds[3][1])
+        self.assertNotEqual(kinds[0][1], kinds[2][1])
+        self.assertTrue(self.slot_is_free())
+
+    def test_negative_control_two_slots_let_the_invocations_overlap(self):
+        # The same harness with two slots must observe overlap; otherwise the test above proves nothing.
+        self.run_two_invocations(heavy_slots=2)
+        self.assertEqual([line.split()[0] for line in self.events_text()[:2]], ["start", "start"])
+
+    def test_interrupt_releases_the_heavy_slot(self):
+        # F3: the interrupted invocation's holder is retired, and its slot is free for the next verify.
+        self.commit(self.repo, "app/a.txt", "two\n")
+        self.config["verify"]["heavySlots"] = 1
+        self.config["verify"]["checks"] = self.heavy_checks("first", "second")
+        sleep, interrupted = time.sleep, False
+
+        def interrupt(seconds):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt
+            sleep(seconds)
+
+        with mock.patch.object(verify.time, "sleep", side_effect=interrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                verify.verify(self.repo, self.config, jobs=2)
+        self.assertTrue(self.slot_is_free())
+        self.assertEqual(list(self.receipts().glob("*.json")), [])
+
+    def test_slot_descriptor_is_not_inherited_by_checks(self):
+        # F5: a non-inheritable descriptor cannot keep the slot alive in a check child after verify exits.
+        (self.tmp / "slots").mkdir()
+        pool = verify.HeavyPool(self.tmp / "slots", 1)
+        descriptor = pool.acquire()
+        self.addCleanup(os.close, descriptor)
+        self.assertFalse(os.get_inheritable(descriptor))
+        self.assertIsNone(pool.acquire())
+
+    def test_heavy_checks_get_their_cpu_share_and_others_do_not(self):
+        # F7: with 18 CPUs and two slots, a heavy check sees 9; a light check sees nothing.
+        self.commit(self.repo, "app/a.txt", "two\n")
+        record = self.counts / "share.log"
+        self.config["verify"]["heavySlots"] = 2
+        self.config["verify"]["checks"] = [
+            {"name": "heavy", "paths": ["app/**"], "heavy": True,
+             "command": f"echo heavy=${{VERIFY_CPU_SHARE-unset}} >> {record}"},
+            {"name": "light", "paths": ["app/**"],
+             "command": f"echo light=${{VERIFY_CPU_SHARE-unset}} >> {record}"},
+        ]
+        with mock.patch.object(verify.os, "cpu_count", return_value=18):
+            self.assertTrue(self.verify()["passed"])
+        self.assertEqual(sorted(record.read_text().splitlines()), ["heavy=9", "light=unset"])
+
+    def test_pool_settings_do_not_invalidate_receipts(self):
+        # F8: heavy admission is an execution choice; changing the command is not.
+        before = verify.config_hash(self.config)
+        self.config["verify"]["heavySlots"] = 3
+        self.config["verify"]["checks"][0]["heavy"] = True
+        self.assertEqual(verify.config_hash(self.config), before)
+        self.config["verify"]["checks"][0]["command"] = "true"
+        self.assertNotEqual(verify.config_hash(self.config), before)
 
 
 class PostFixture(VerifyFixture):
