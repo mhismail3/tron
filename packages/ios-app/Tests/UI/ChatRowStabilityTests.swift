@@ -2579,13 +2579,14 @@ private func recordReduceMotionScenario(
 enum ChatMotionScenario: String, CaseIterable {
     case arrive, replace, resize, depart, move, stopTwoSteers, control
 
-    var isKnownUnanimated: Bool { self == .depart || self == .move || self == .stopTwoSteers }
+    var isKnownUnanimated: Bool { self == .depart || self == .move || self == .stopTwoSteers || self == .control }
     var isAnimated: Bool { self == .arrive || self == .replace || self == .resize }
     var knownIssue: String {
         switch self {
         case .depart: "MO-5 adds departing rows to the spine; current row disappearance is atomic."
         case .move: "MO-6 animates queue reorder; current physical row order changes atomically."
         case .stopTwoSteers: "MO-5 retains the departing queue rows during the Stop redelivery sequence."
+        case .control: "MO-4 (#274, row motion owner) must animate the tool-capsule row resize; current install steps by 37.7 pt."
         default: ""
         }
     }

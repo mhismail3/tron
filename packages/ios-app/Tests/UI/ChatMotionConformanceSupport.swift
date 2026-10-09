@@ -4,13 +4,12 @@ import UIKit
 @testable import TronMobileCore
 @testable import TronMobile
 
-/// Shared bounds for the hosted chat-motion measurements. The 160 ms streaming
-/// and replacement curves span roughly ten 60 Hz display boundaries; a 40 pt
-/// one-frame ceiling admits the largest 37.7 pt tool-capsule state step measured
-/// in the hosted fixture while rejecting larger structural jumps. Tail positioning
+/// Shared bounds for hosted chat motion. A 20 pt step leaves margin above the
+/// largest correctly animated samples (14.67 pt arrive, 13.33 pt replace, 12 pt
+/// resize) without admitting a near-atomic tool-capsule resize. Tail positioning
 /// already has a 12 pt hosted geometry contract.
 enum ChatMotionConformanceBounds {
-    static let maximumGeometryStep: CGFloat = 40
+    static let maximumGeometryStep: CGFloat = 20
     static let minimumAnimatedFrames = 4
     static let minimumPixelChangingFrames = 2
     static let maximumTailDistance: CGFloat = 12
