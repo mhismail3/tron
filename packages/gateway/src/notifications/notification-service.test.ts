@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -22,7 +22,11 @@ function fakeRelay(outcomes: RelayNotificationOutcome[] = ["accepted_by_apns"]) 
     client: {
       available: true,
       relayOrigin: "https://push.example.test",
-      async send(input: unknown) { sent.push(input); return outcomes.shift() ?? "accepted_by_apns"; },
+      async send(input: { relayEnvelope: string }) {
+        sent.push(JSON.parse(input.relayEnvelope));
+        const status = outcomes.shift() ?? "accepted_by_apns";
+        return { status, ...(status === "rate_limited" ? { reason: "daily_limit" } : {}) };
+      },
       async revoke(grantId: string) { revoked.push(grantId); return "revoked" as const; },
     } as unknown as PushRelayClient,
   };
@@ -31,14 +35,14 @@ function fakeRelay(outcomes: RelayNotificationOutcome[] = ["accepted_by_apns"]) 
 async function fixture(
   outcomes?: RelayNotificationOutcome[],
   now: () => number = Date.now,
-  rateLimits?: { dailyIntents: number; sessionHourlyIntents: number; targetDailyIntents: number },
   inboxChanged: (payload: { revision: string; unreadCount: number }) => void = () => {},
+  deliverySignal: (signal: { kind: string; outcome: string; relayReason: string }) => void = () => {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "tron-notifications-"));
   const store = new NotificationGrantStore(root);
   await store.initialize();
   const relay = fakeRelay(outcomes);
-  const service = new NotificationService(store, relay.client, now, rateLimits, inboxChanged);
+  const service = new NotificationService(store, relay.client, now, inboxChanged, () => {}, deliverySignal);
   return { root, store, service, relay };
 }
 
@@ -69,6 +73,75 @@ function keyOf(item: { createdAt: string; id: string }): string { return `${Date
 function ascending(index: number): string { return new Date(Date.parse("2025-12-01T00:00:00.000Z") + index * 1_000).toISOString(); }
 
 describe("NotificationGrantStore and NotificationService", () => {
+  it("retires version-1 pending deliveries without replaying a changed relay body", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notification-migration-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const at = new Date().toISOString();
+    const expiresSoon = new Date(Date.now() + 15 * 60_000).toISOString();
+    const expiresLater = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+    const dedupeKey = notificationHash("ask\\0session-migration\\0source-migration");
+    await writeFile(join(root, "gateway", "notifications.json"), JSON.stringify({
+      version: 1,
+      policy: { notifyWhenAskPresented: true },
+      grants: [],
+      pending: [{
+        id: "intent_abcdefgh", dedupeKey, sessionKey: notificationHash("session\\0session-migration"), kind: "ask",
+        createdAt: at, expiresAt: expiresSoon,
+        targets: [{ grantId: "grant_abcdefgh", requestId: "request_abcdefgh", message: "Input needed", attempts: 1,
+          nextAttemptAt: at, outcome: "retryable" }],
+      }],
+      receipts: [{ dedupeKey, sessionKey: notificationHash("session\\0session-migration"), grantIds: [], createdAt: at,
+        expiresAt: expiresLater, result: "queued" }],
+      revocations: [],
+      inbox: [{ id: "intent_abcdefgh", dedupeKey, requestIds: ["request_abcdefgh"], kind: "ask", createdAt: at,
+        updatedAt: at, title: "Input needed", message: "Tron needs input", sessionId: "session-migration", outcome: "queued" }],
+    }));
+    const relay = fakeRelay();
+    const signals = vi.fn();
+    const service = new NotificationService(store, relay.client, Date.now, () => {}, () => {}, signals);
+    try {
+      await service.initialize();
+      expect(relay.sent).toEqual([]);
+      expect(signals).toHaveBeenCalledExactlyOnceWith({ kind: "ask", outcome: "failed", relayReason: "schema_upgrade" });
+      const document = await store.snapshot();
+      expect(document.pending).toEqual([]);
+      expect(document.inbox).toMatchObject([{ id: "intent_abcdefgh", outcome: "failed" }]);
+      expect(document.receipts).toMatchObject([{ result: "failed" }]);
+      expect(document.version).toBe(2);
+    } finally {
+      service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("retries the exact envelope admitted with each request ID", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notification-envelope-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    let sentEnvelope: string | undefined;
+    const relay = {
+      available: true, relayOrigin: grant.relayOrigin,
+      async send(input: { relayEnvelope: string }) { sentEnvelope = input.relayEnvelope; await hold; return { status: "accepted_by_apns" as const }; },
+      async revoke() { return "revoked" as const; },
+    } as unknown as PushRelayClient;
+    const service = new NotificationService(store, relay);
+    try {
+      await service.upsertGrant(grant);
+      await service.enqueue({ sessionId: "session-envelope", sourceId: "source-envelope", kind: "ask", message: "Input needed", interruptionLevel: "time-sensitive" });
+      await waitFor(() => sentEnvelope !== undefined, "the relay request body");
+      const target = (await store.snapshot()).pending[0]?.targets[0];
+      expect(target?.relayEnvelope).toBe(sentEnvelope);
+      expect(JSON.parse(sentEnvelope!)).toMatchObject({ notificationKind: "ask", interruptionLevel: "time-sensitive" });
+    } finally {
+      release();
+      await waitFor(async () => (await store.snapshot()).pending.length === 0, "the relay envelope settlement");
+      service.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("persists only the bounded grant capability, admits durably, redacts previews, and deduplicates tool calls", async () => {
     const { root, store, service, relay } = await fixture();
     await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
@@ -125,6 +198,17 @@ describe("NotificationGrantStore and NotificationService", () => {
     // until the phone transfers a replacement capability.
     const readmitted = await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
     expect(readmitted.requiresGrantRotation).toBe(true);
+  });
+
+  it("keeps a daily-cap refusal failed in the inbox and never retries it", async () => {
+    const signal = vi.fn();
+    const { service, relay, store } = await fixture(["rate_limited"], Date.now, undefined, signal);
+    await service.upsertGrant(grant);
+    await service.enqueue({ sessionId: "session-daily-cap", sourceId: "source-daily-cap", kind: "agent_finished", message: "Finished" });
+    await waitFor(async () => (await store.snapshot()).pending.length === 0, "the daily-cap refusal to settle");
+    expect(relay.sent).toHaveLength(1);
+    expect((await service.inbox()).notifications).toMatchObject([{ kind: "agent_finished", outcome: "failed" }]);
+    expect(signal).toHaveBeenCalledExactlyOnceWith({ kind: "agent_finished", outcome: "rate_limited", relayReason: "daily_limit" });
   });
 
   it("uses agent text only for a grant whose user enabled previews", async () => {
@@ -187,11 +271,7 @@ describe("NotificationGrantStore and NotificationService", () => {
   });
 
   it("does not charge a presentation-suppressed completion against delivery quota", async () => {
-    const { service, relay } = await fixture(undefined, Date.now, {
-      dailyIntents: 1,
-      sessionHourlyIntents: 1,
-      targetDailyIntents: 1,
-    });
+    const { service, relay } = await fixture();
     await service.upsertGrant(grant);
     await service.suppressAutomatic({
       sessionId: "session-observed",
@@ -210,7 +290,7 @@ describe("NotificationGrantStore and NotificationService", () => {
 
   it("keeps inbox invalidation callbacks outside canonical notification admission", async () => {
     let invoked = false;
-    const { service } = await fixture(undefined, Date.now, undefined, () => {
+    const { service } = await fixture(undefined, Date.now, () => {
       invoked = true;
       throw new Error("presentation failed");
     });
@@ -228,7 +308,7 @@ describe("NotificationGrantStore and NotificationService", () => {
   it("pages canonical inbox rows and owns idempotent read state by notification or APNs request identity", async () => {
     const changed = vi.fn();
     let clock = Date.parse("2026-01-01T00:00:00.000Z");
-    const { service, relay, store } = await fixture(undefined, () => clock++, undefined, changed);
+    const { service, relay, store } = await fixture(undefined, () => clock++, changed);
     const drains = vi.spyOn(service, "drain");
     await service.upsertGrant({ ...grant, previewsEnabled: true });
     for (let index = 0; index < 3; index += 1) {
@@ -316,7 +396,7 @@ describe("NotificationGrantStore and NotificationService", () => {
 
   it("marks an undeliverable inbox row failed when its final target is removed", async () => {
     const changed = vi.fn();
-    const { service, store } = await fixture(["retryable"], Date.now, undefined, changed);
+    const { service, store } = await fixture(["retryable"], Date.now, changed);
     await service.upsertGrant(grant);
     await service.enqueue({ sessionId: "session-remove", sourceId: "source-remove", kind: "explicit", message: "hello" });
     await waitFor(async () => (await store.snapshot()).pending[0]?.targets[0]?.outcome === "retryable", "the retryable delivery outcome");
@@ -419,29 +499,19 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect(snapshot.revocations.map((item) => item.grantId)).toEqual([grant.grantId]);
   });
 
-  it("enforces the durable per-session hourly quota", async () => {
-    const { service } = await fixture(undefined, Date.now, {
-      dailyIntents: 10,
-      sessionHourlyIntents: 2,
-      targetDailyIntents: 10,
-    });
+  it("does not impose a routine session quota below bounded pending capacity", async () => {
+    const { service } = await fixture();
     await service.upsertGrant(grant);
-    for (let index = 0; index < 2; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       await expect(service.enqueue({ sessionId: "session-quota", sourceId: `tool-${index}`, kind: "explicit", message: "hello" })).resolves.toBe("queued");
     }
-    await expect(service.enqueue({ sessionId: "session-quota", sourceId: "tool-over-limit", kind: "explicit", message: "hello" })).resolves.toBe("rate_limited");
   });
 
   it("does not persist rate-limited attempts or let them consume another session's quota", async () => {
-    const { service, store } = await fixture(undefined, Date.now, {
-      dailyIntents: 3,
-      sessionHourlyIntents: 2,
-      targetDailyIntents: 3,
-    });
+    const { service, store } = await fixture();
     await service.upsertGrant(grant);
     await expect(service.enqueue({ sessionId: "session-quota-a", sourceId: "tool-a1", kind: "explicit", message: "hello" })).resolves.toBe("queued");
     await expect(service.enqueue({ sessionId: "session-quota-a", sourceId: "tool-a2", kind: "explicit", message: "hello" })).resolves.toBe("queued");
-    await expect(service.enqueue({ sessionId: "session-quota-a", sourceId: "tool-a3", kind: "explicit", message: "hello" })).resolves.toBe("rate_limited");
     expect((await store.snapshot()).receipts).toHaveLength(2);
     await expect(service.enqueue({ sessionId: "session-quota-b", sourceId: "tool-b1", kind: "explicit", message: "hello" })).resolves.toBe("queued");
   });
@@ -735,6 +805,7 @@ describe("canonical inbox keyset paging, retention and reads", () => {
         expiresAt: "2025-12-31T23:30:00.000Z",
         targets: [{
           grantId: "grant_abcdefgh", requestId: "request-abcd1234", message: "An update",
+          relayEnvelope: JSON.stringify({ version: 1, kind: "agent_alert", notificationKind: "explicit", requestId: "request-abcd1234", message: "An update", expiresAt: "2025-12-31T23:30:00.000Z" }),
           attempts: 0, nextAttemptAt: lapsed, outcome: "pending",
         }],
       });
@@ -821,7 +892,7 @@ describe("canonical inbox keyset paging, retention and reads", () => {
     try {
       const changed = vi.fn();
       let clock = Date.parse("2026-01-01T00:00:00.000Z");
-      const { service } = await fixture(["accepted_by_apns"], () => clock++, undefined, changed);
+      const { service } = await fixture(["accepted_by_apns"], () => clock++, changed);
       await service.upsertGrant(grant);
       const drains = vi.spyOn(service, "drain");
       await expect(service.enqueue({

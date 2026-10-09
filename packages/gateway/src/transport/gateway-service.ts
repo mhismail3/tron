@@ -792,7 +792,7 @@ export class GatewayService {
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
         // Identical registrations are naturally idempotent and write nothing at
         // all, so they are answered before the receipt owner opens one.
-        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"]);
         if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
         const notifications = this.requireNotifications();
         // `commandId` stays required here so an unchanged registration is still
@@ -806,6 +806,8 @@ export class GatewayService {
           previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
           relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
           ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
+          ...(params.notifyWhenFinished === undefined ? {} : { notifyWhenFinished: boolean(params.notifyWhenFinished, "notifyWhenFinished") }),
+          ...(params.notifyWhenWaiting === undefined ? {} : { notifyWhenWaiting: boolean(params.notifyWhenWaiting, "notifyWhenWaiting") }),
         };
         // An identical registration is naturally idempotent and writes nothing,
         // not even a command receipt, so it is answered before the receipt owner
@@ -1504,6 +1506,8 @@ export class GatewayService {
           });
           const execution = slot.prompt(prompt, attachments.images, behavior, {
             text,
+            inputSource: "rpc",
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(resourceSource === undefined ? {} : {
               resourceInvocation: {
                 source: resourceSource,

@@ -30,6 +30,7 @@ export interface AvailableSubagent {
 export interface SubagentCatalog {
   subagents: AvailableSubagent[];
   diagnostic?: string;
+  invalidDefinitionCount?: number;
 }
 
 export interface SubagentCatalogRequest {
@@ -151,13 +152,23 @@ export async function loadSubagentCatalog(request: SubagentCatalogRequest): Prom
     const packageRoot = request.managedSubagents?.verify();
     if (!packageRoot) return unavailable(`managed ${SUBAGENT_PACKAGE} is not installed`);
     const discovery = await (request.loadDiscovery ?? loadPiSubagentsDiscovery)(packageRoot);
-    return { subagents: collectSubagents(await discoverAgents(discovery, request.cwd)) };
+    const raw = await discoverAgents(discovery, request.cwd);
+    const reports = raw !== null && typeof raw === "object" ? (raw as { agentDiagnostics?: unknown }).agentDiagnostics : undefined;
+    const invalid = Array.isArray(reports) ? reports.filter((report): report is { error: string } =>
+      report !== null && typeof report === "object" && typeof report.error === "string" && report.error.length > 0) : [];
+    return { subagents: collectSubagents(raw), ...(invalid.length ? {
+      invalidDefinitionCount: invalid.length,
+      diagnostic: boundedDiagnostic(`${invalid.length} invalid subagent definition(s): ${invalid[0]!.error}`),
+    } : {}) };
   } catch (error) {
     return unavailable(error instanceof Error ? error.message : String(error));
   }
 }
 
 function unavailable(reason: string): SubagentCatalog {
-  const bounded = reason.length <= MAX_DIAGNOSTIC_CHARACTERS ? reason : `${reason.slice(0, MAX_DIAGNOSTIC_CHARACTERS)}…`;
-  return { subagents: [], diagnostic: `subagent catalog unavailable: ${bounded}` };
+  return { subagents: [], diagnostic: boundedDiagnostic(`subagent catalog unavailable: ${reason}`) };
+}
+
+function boundedDiagnostic(text: string): string {
+  return text.length <= MAX_DIAGNOSTIC_CHARACTERS ? text : `${text.slice(0, MAX_DIAGNOSTIC_CHARACTERS - 1)}…`;
 }

@@ -45,11 +45,12 @@ async function initializeAndSeed(): Promise<void> {
   });
 }
 
-async function signedNotification(input?: { requestId?: string; message?: string }): Promise<RequestInit> {
+async function signedNotification(input?: { requestId?: string; message?: string; notificationKind?: "ask" | "explicit" | "agent_finished" | "waiting" }): Promise<RequestInit> {
   const requestId = input?.requestId ?? "request-identifier-0001";
   const body = JSON.stringify({
     version: 1,
     kind: "agent_alert",
+    notificationKind: input?.notificationKind ?? "agent_finished",
     requestId,
     message: input?.message ?? "Tron needs your input.",
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
@@ -501,7 +502,7 @@ describe("v3 Worker boundary", () => {
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       const now = Math.floor(Date.now() / 1000);
       state.storage.sql.exec(
-        "INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 50, ?, 50, ?)",
+        "INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 120, ?, 1000, ?)",
         testGrant.installationId, Math.floor(now / 3600) * 3600, Math.floor(now / 86400) * 86400, now,
       );
     });
@@ -512,11 +513,27 @@ describe("v3 Worker boundary", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
+  test("exempts input-needed and explicit requests from the daily device backstop", async () => {
+    await initializeAndSeed();
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      const now = Math.floor(Date.now() / 1000);
+      state.storage.sql.exec("UPDATE grants SET daily_window = ?, daily_count = 1000 WHERE grant_id = ?", Math.floor(now / 86400) * 86400, testGrant.grantId);
+      state.storage.sql.exec("INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 0, ?, 1000, ?)", testGrant.installationId, Math.floor(now / 3600) * 3600, Math.floor(now / 86400) * 86400, now);
+    });
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const asks = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "ask-exempt-notification-01", notificationKind: "ask" }));
+    const explicit = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "explicit-exempt-notification1", notificationKind: "explicit" }));
+    expect((await asks.json() as { status: string }).status).toBe("accepted_by_apns");
+    expect((await explicit.json() as { status: string }).status).toBe("accepted_by_apns");
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+  });
+
   test.each(["hourly", "daily"] as const)("serializes concurrent %s grant quota admission", async (window) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-05T12:00:00Z"));
     await initializeAndSeed();
-    const limit = window === "hourly" ? 30 : 200;
+    const limit = window === "hourly" ? 120 : 1_000;
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       state.storage.sql.exec(
         `UPDATE grants SET ${window}_count = ? WHERE grant_id = ?`,
@@ -610,12 +627,12 @@ describe("v3 Worker boundary", () => {
     await initializeAndSeed();
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       const now = Math.floor(Date.now() / 1000);
-      state.storage.sql.exec("UPDATE grants SET hourly_window = ?, hourly_count = 30 WHERE grant_id = ?", Math.floor(now / 3600) * 3600, testGrant.grantId);
+      state.storage.sql.exec("UPDATE grants SET hourly_window = ?, hourly_count = 120 WHERE grant_id = ?", Math.floor(now / 3600) * 3600, testGrant.grantId);
     });
     const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", providerFetch);
     const limited = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "quota-request-00000001" }));
-    expect(await limited.json()).toMatchObject({ status: "rate_limited", reason: "rate_limited" });
+    expect(await limited.json()).toMatchObject({ status: "rate_limited", reason: "hourly_limit" });
     expect(providerFetch).not.toHaveBeenCalled();
 
     const path = `https://push.test/v3/grants/${testGrant.grantId}`;

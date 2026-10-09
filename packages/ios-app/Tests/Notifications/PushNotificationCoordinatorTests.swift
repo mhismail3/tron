@@ -90,6 +90,8 @@ struct PushNotificationCoordinatorTests {
         #expect(status.enabledDeviceCount == 1)
         #expect(status.pendingCount == 0)
         #expect(status.notifyWhenAskPresented)
+        #expect(status.notifyWhenFinished)
+        #expect(status.notifyWhenWaiting)
         #expect(status.relayOrigin == "https://push.example.test")
         #expect(status.requiresGrantRotation == false)
     }
@@ -482,6 +484,18 @@ struct PushNotificationCoordinatorTests {
         #expect(coordinator.diagnostic == .complete)
         #expect(store.value?.grants[profile.id]?.acknowledgedRegistrationRevision == "grant-revision-one")
 
+        let sentBeforePolicy = await socket.sentFrames().count
+        let changedPolicy = PushNotificationPolicy(inputNeeded: false, finished: false, waiting: true)
+        let policyUpdate = Task { try await coordinator.updateNotificationPolicy(changedPolicy) }
+        let policyRequest = try await gatewayRequest(socket, method: "push.registration.upsert", after: sentBeforePolicy)
+        let policyFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: try #require(await socket.sentFrames().last))
+        #expect(policyFrame.objectValue?["params"]?.objectValue?["notifyWhenAskPresented"]?.boolValue == false)
+        #expect(policyFrame.objectValue?["params"]?.objectValue?["notifyWhenFinished"]?.boolValue == false)
+        #expect(policyFrame.objectValue?["params"]?.objectValue?["notifyWhenWaiting"]?.boolValue == true)
+        await socket.enqueue(registrationStatusResponse(id: policyRequest, notifyWhenAskPresented: false, notifyWhenFinished: false, notifyWhenWaiting: true))
+        try await policyUpdate.value
+        #expect(coordinator.notificationPolicy == changedPolicy)
+
         // The same Gateway runtime still holds this exact grant and advertises
         // the same grant revision, so the reconnect sends nothing at all.
         let sentBefore = await socket.sentFrames().count
@@ -491,7 +505,7 @@ struct PushNotificationCoordinatorTests {
         )
         try await waitUntil { coordinator.readiness == .ready }
         try await Task.sleep(for: .milliseconds(30))
-        #expect(try await upsertRequests(socket) == [firstUpsert])
+        #expect(try await upsertRequests(socket) == [firstUpsert, policyRequest])
         #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one")
 
         // A restarted Gateway runtime owns the credential document again, so
@@ -508,7 +522,7 @@ struct PushNotificationCoordinatorTests {
         await socket.enqueue(registrationStatusResponse(id: restartedUpsert))
         await restarted.value
         try await waitUntil { store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-two" }
-        #expect(try await upsertRequests(socket) == [firstUpsert, restartedUpsert])
+        #expect(try await upsertRequests(socket) == [firstUpsert, policyRequest, restartedUpsert])
 
         // The relay rejected a delivery and the Gateway disabled the grant on
         // this same runtime: only the advertised revision announces that, so the
@@ -525,7 +539,7 @@ struct PushNotificationCoordinatorTests {
         await socket.enqueue(registrationStatusResponse(id: disabledUpsert, requiresGrantRotation: true))
         await resent.value
         try await waitUntil { store.value?.grants[profile.id] == nil }
-        #expect(try await upsertRequests(socket) == [firstUpsert, restartedUpsert, disabledUpsert])
+        #expect(try await upsertRequests(socket) == [firstUpsert, policyRequest, restartedUpsert, disabledUpsert])
         #expect(coordinator.readiness == .pending)
     }
 
@@ -672,7 +686,13 @@ struct PushNotificationCoordinatorTests {
         ]))
     }
 
-    private func registrationStatusResponse(id: String, requiresGrantRotation: Bool = false) -> Data {
+    private func registrationStatusResponse(
+        id: String,
+        requiresGrantRotation: Bool = false,
+        notifyWhenAskPresented: Bool = true,
+        notifyWhenFinished: Bool = true,
+        notifyWhenWaiting: Bool = true
+    ) -> Data {
         try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("response"),
             "id": .string(id),
@@ -683,7 +703,9 @@ struct PushNotificationCoordinatorTests {
                 "deviceRegistered": .bool(true),
                 "enabledDeviceCount": .number(1),
                 "pendingCount": .number(0),
-                "notifyWhenAskPresented": .bool(true),
+                "notifyWhenAskPresented": .bool(notifyWhenAskPresented),
+                "notifyWhenFinished": .bool(notifyWhenFinished),
+                "notifyWhenWaiting": .bool(notifyWhenWaiting),
                 "relayOrigin": .string("https://push.example.test"),
                 "requiresGrantRotation": .bool(requiresGrantRotation),
             ]),

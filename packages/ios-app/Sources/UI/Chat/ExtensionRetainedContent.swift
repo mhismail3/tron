@@ -50,20 +50,6 @@ struct ExtensionRetainedContent: Equatable {
     static let unknownProducer = "Unknown extension"
 }
 
-enum ExtensionOwnerIdentity {
-    static let piSubagentsPackage = "npm:pi-subagents"
-
-    /// Gateway owner-attribution emits npm sources with an optional version.
-    /// Normalize only that owned package identity; unknown sources remain
-    /// presentable instead of being guessed away by title or content matching.
-    static func isPiSubagents(_ source: String?) -> Bool {
-        guard let source else { return false }
-        let normalized = source.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized == piSubagentsPackage
-            || normalized.hasPrefix(piSubagentsPackage + "@")
-    }
-}
-
 enum ExtensionRetainedContentPolicy {
     /// A string widget is presentable only if it has visible, sanitized content.
     /// Empty or detail-hint-only widgets must not create an empty sheet.
@@ -111,7 +97,7 @@ enum ExtensionRetainedContentPolicy {
     ) -> ExtensionRetainedContent {
         var entries: [ExtensionRetainedContent.Entry] = []
         for widget in widgets ?? [] {
-            guard !ExtensionOwnerIdentity.isPiSubagents(widget.owner?.source) else { continue }
+            guard widget.owner?.kind != .subagent else { continue }
             let lines = presentableWidgetLines(widget)
             guard !lines.isEmpty else { continue }
             // The authoritative widget array order is stable across updates
@@ -123,7 +109,7 @@ enum ExtensionRetainedContentPolicy {
             ))
         }
         for surface in presentableSurfaces(surfaces ?? []) {
-            guard !ExtensionOwnerIdentity.isPiSubagents(surface.provenance?.source) else { continue }
+            guard surface.provenance?.kind != .subagent else { continue }
             entries.append(.init(
                 id: "surface:\(surface.id)",
                 producer: surfaceProvenanceTitle(surface.provenance?.source),
@@ -135,7 +121,7 @@ enum ExtensionRetainedContentPolicy {
         // The key stays out of the visible card: the section header already names
         // the producer, and the key is an extension-internal slot name.
         for status in presentableStatuses(statuses) {
-            guard !ExtensionOwnerIdentity.isPiSubagents(statusOwners?[status.key]?.source) else { continue }
+            guard statusOwners?[status.key]?.kind != .subagent else { continue }
             entries.append(.init(
                 id: "status:\(status.key)",
                 producer: statusOwners?[status.key]?.title ?? ExtensionRetainedContent.unknownProducer,

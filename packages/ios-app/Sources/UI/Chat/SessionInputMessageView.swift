@@ -193,7 +193,8 @@ struct InboundContextMessagePresentation: Equatable {
     let detailsTitle: String
 
     init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
-        if let status = Self.subagentStatus(customType: customType, details: details) {
+        if let status = Self.subagentStatus(customType: customType, details: details)
+            ?? (origin?.kind == .subagent ? "Update" : nil) {
             title = "Subagent"
             self.status = status
             tone = .subagent
@@ -227,6 +228,8 @@ struct InboundContextMessagePresentation: Equatable {
             // A wake subscription is a category of subagent message, not proof
             // that the referenced execution completed successfully.
             return "Wait Update"
+        case "subagent-incremental-child-notify":
+            return "Child Update"
         case "subagent-notify":
             // This emitter omits structured status and can report successful,
             // failed, paused, or grouped results. Never infer success from prose.
