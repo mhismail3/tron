@@ -126,7 +126,8 @@ admits and reduces mounted-session topics:
   profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
   broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
   the shared traversal dirty instead of cancel/restarting it. Home status is invalidated by these
-  two events: a `session.summary` for Home's current `sessionId` triggers one immediate
+  two events: a `session.summary` for Home's current `sessionId`, or for the chapter it opens
+  (`openSessionId`, the sealed predecessor during a rollover), triggers one immediate
   `home.status` read, and every `session.listChanged` does too, because a chapter rollover or
   designation changes the Home projection without changing the row a summary names. Neither event
   is a Home status payload; both only request the same fenced read the mounted surface runs. User-scoped 500-row pagination

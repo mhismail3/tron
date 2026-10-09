@@ -2,8 +2,9 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Typed subset of the Gateway's complete bounded `home.status` projection.
-/// Required structural sections and closed enums make protocol drift fail closed.
+/// Typed projection of the Gateway's bounded `home.status`. It decodes exactly the
+/// fields the app reads: required sections and the closed `Phase` fail closed on
+/// drift, and every other Gateway field is ignored.
 struct HomeStatusDTO: Decodable, Equatable, Sendable {
     enum Phase: String, Decodable, Sendable {
         case unavailable, undesignated, disabled, missingSession = "missing-session"
@@ -44,15 +45,10 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     }
 
     struct Readiness: Decodable, Equatable, Sendable {
-        let ready: Bool
         let gaps: [String]
     }
 
     struct Recovery: Decodable, Equatable, Sendable {
-        enum Action: String, Decodable, Sendable {
-            case inspectRecord = "inspect-record", designate, configureMemory = "configure-memory", resumeMemory = "resume-memory", none
-        }
-        let action: Action
         let reason: String?
     }
 
@@ -85,9 +81,11 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     /// rollover is pending. Nil when nothing is openable.
     let openSessionId: String?
     let generation: Int?
-    let live: Bool
     let sessionPresent: Bool
     let memory: Memory
+
+    /// Task and permission reads are admitted only while the Gateway's task recovery is open.
+    var admitsTaskReads: Bool { available && taskRecovery?.available == true }
 
     static func decode(_ value: JSONValue) throws -> HomeStatusDTO {
         let status = try JSONDecoder().decode(HomeStatusDTO.self, from: JSONEncoder().encode(value))
@@ -132,6 +130,38 @@ enum HomeChatRouteKey: Equatable, Sendable {
     }
 }
 
+/// Home does not appear in the ordinary session catalog. Its explicit states
+/// keep unavailable and stale session identities from becoming route targets.
+enum HomePinnedRowAction: Equatable {
+    case checkReceipt
+    case designate
+    case open(sessionID: String)
+    case unavailable
+}
+
+/// The one owner of whether a Home status is routable. `AppModel.navigationRouteForHome`
+/// consumes this action rather than re-deciding it.
+enum HomePinnedRowPolicy {
+    static func action(
+        for status: HomeStatusDTO?,
+        hasUnresolvedCommand: Bool = false
+    ) -> HomePinnedRowAction {
+        if hasUnresolvedCommand { return .checkReceipt }
+        guard let status else { return .unavailable }
+        switch status.phase {
+        case .undesignated, .disabled, .missingSession:
+            return .designate
+        case .unavailable:
+            return .unavailable
+        case .ready, .active, .blocked, .paused, .rolloverPending:
+            // `openSessionId` is the only route target: during a rollover it names
+            // the sealed predecessor, because the reserved successor is not openable.
+            guard status.enabled, let sessionID = status.openSessionId, !sessionID.isEmpty else { return .unavailable }
+            return .open(sessionID: sessionID)
+        }
+    }
+}
+
 struct HomeStatusReadFence: Equatable, Sendable {
     let profileID: String
     let connectionID: String
@@ -151,7 +181,6 @@ final class HomeStatusPresentationOwner {
     /// The latest read reached a Gateway whose status this client could not read
     /// or admit. It is cleared with the status and by the next publication.
     private(set) var isStatusUnavailable = false
-    var isCapabilityEnabled: Bool { capabilityEnabled }
     @ObservationIgnored private var readGeneration: UInt64 = 0
     @ObservationIgnored private var surfaceGeneration: UInt64 = 0
     @ObservationIgnored private var latestFence: HomeStatusReadFence?
@@ -204,6 +233,9 @@ final class HomeStatusPresentationOwner {
         suspended = false
     }
 
+    /// Installs the lifecycle's current identity: the selected profile, its
+    /// authenticated connection (nil until one is admitted), and the Home capability.
+    /// A changed profile or connection retires the previous status and reads again.
     func configure(profileID: String, connectionID: String?, capabilityEnabled: Bool) {
         let identityChanged = self.profileID != profileID || self.connectionID != connectionID
         if identityChanged { stopWork(clearStatus: true) }
@@ -232,21 +264,6 @@ final class HomeStatusPresentationOwner {
         connectionID = nil
         capabilityEnabled = false
         stopWork(clearStatus: true)
-    }
-
-    /// Called only after the lifecycle has admitted a fresh authenticated hello.
-    func connectionAvailable(profileID: String, connectionID: String, capabilityEnabled: Bool) {
-        let identityChanged = self.profileID != profileID || self.connectionID != connectionID
-        if identityChanged { stopWork(clearStatus: true) }
-        self.profileID = profileID
-        self.connectionID = connectionID
-        self.capabilityEnabled = capabilityEnabled
-        suspended = false
-        guard capabilityEnabled else {
-            stopWork(clearStatus: true)
-            return
-        }
-        startWorkIfActive()
     }
 
     /// Presentation coordinator changes are re-evaluated at the same owner

@@ -925,7 +925,7 @@ struct SessionShellView: View {
         // reads that scroll owner's geometry.
         return ScrollViewReader { proxy in
             List {
-                if model.homeStatus.isCapabilityEnabled {
+                if model.homeStatus.capabilityEnabled {
                     Section {
                         homePinnedButton
                     }
@@ -1129,7 +1129,7 @@ struct SessionShellView: View {
         } label: {
             HomePinnedRow(
                 status: model.homeStatus.status,
-                isDesignating: model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? ""),
+                isChanging: model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? ""),
                 hasUnresolvedCommand: model.homeMutations.ownsUnresolvedCommand(
                     profileID: model.profiles.selected?.id ?? ""
                 ),

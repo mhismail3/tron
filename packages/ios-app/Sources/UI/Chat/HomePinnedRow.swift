@@ -1,39 +1,11 @@
 import SwiftUI
 import TronMobileCore
 
-// Home does not appear in the ordinary session catalog. Its explicit states
-// keep unavailable and stale session identities from becoming route targets.
-enum HomePinnedRowAction: Equatable {
-    case checkReceipt
-    case designate
-    case open(sessionID: String)
-    case unavailable
-}
-
-enum HomePinnedRowPolicy {
-    static func action(
-        for status: HomeStatusDTO?,
-        hasUnresolvedCommand: Bool = false
-    ) -> HomePinnedRowAction {
-        if hasUnresolvedCommand { return .checkReceipt }
-        guard let status else { return .unavailable }
-        switch status.phase {
-        case .undesignated, .disabled, .missingSession:
-            return .designate
-        case .unavailable:
-            return .unavailable
-        case .ready, .active, .blocked, .paused, .rolloverPending:
-            // `openSessionId` is the only route target: during a rollover it names
-            // the sealed predecessor, because the reserved successor is not openable.
-            guard status.enabled, let sessionID = status.openSessionId, !sessionID.isEmpty else { return .unavailable }
-            return .open(sessionID: sessionID)
-        }
-    }
-}
-
 struct HomePinnedRow: View {
     let status: HomeStatusDTO?
-    let isDesignating: Bool
+    /// A Home command is running for this profile. It and `hasUnresolvedCommand`
+    /// are exclusive: the mutation coordinator holds one state per profile.
+    let isChanging: Bool
     var hasUnresolvedCommand = false
     /// The mounted read reached a Gateway whose status could not be read or
     /// admitted; the row must not keep saying it is loading.
@@ -43,7 +15,7 @@ struct HomePinnedRow: View {
         HomePinnedRowPolicy.action(for: status, hasUnresolvedCommand: hasUnresolvedCommand)
     }
     private var detail: String {
-        if isDesignating { return hasUnresolvedCommand ? "Checking Home change…" : "Setting up Home…" }
+        if isChanging { return "Updating Home…" }
         if hasUnresolvedCommand { return "Home change pending · Tap to check" }
         guard let status else { return isStatusUnavailable ? "Home status unavailable" : "Loading Home status…" }
         switch status.phase {
@@ -63,7 +35,7 @@ struct HomePinnedRow: View {
     }
 
     private var trailing: String {
-        if isDesignating { return hasUnresolvedCommand ? "Checking" : "Setting up" }
+        if isChanging { return "Updating" }
         if hasUnresolvedCommand { return "Check status" }
         switch action {
         case .checkReceipt: return "Check status"
@@ -140,7 +112,7 @@ struct HomePinnedRow: View {
 
     private var trailingLabel: some View {
         HStack(spacing: 5) {
-            if isDesignating {
+            if isChanging {
                 ProgressView()
                     .controlSize(.mini)
                     .accessibilityHidden(true)

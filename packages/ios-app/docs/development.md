@@ -32,11 +32,11 @@ Row identity, search state, and managed-sheet/mutation owners remain dashboard-o
 
 Home status is an observable disposable projection, separate from the ordinary Sessions catalogue. The dashboard surface passes its exact `PresentationSurfaceToken` and shared coordinator to `AppModel`; status reads consult that managed activity before admission and again after every await. Retirement names the matching token so delayed callbacks cannot retire a newer surface. The AppModel lifecycle retires the connection-bound projection on disconnect/profile replacement and re-admits a fresh `home.status` read on the authenticated reconnect only when `home.v1` is present. Backgrounding suspends reads until foreground reconciliation. Matching Home-session summary and session-list invalidations trigger immediate reads; an active mounted surface also runs one sequential five-second fallback. A chat opened before any Home status is known starts a `connectionOnly(HomeChatRouteKey)` probe: it reads per connection admission and retries once after a covering discards its read, but it never polls. `HomeChatRouteKey` is the one predicate for a chat's claim and its Home header: a Home route always presents Home, and an ordinary chat matches `sessionId`. The first published status decides the probe: a match promotes it to the mounted cadence (fallback, session-summary invalidation and mutation refresh), and a miss releases it to make no further reads, keeping the status for the dashboard. A known status decides the chat by the same key alone, so an ordinary chat on the sealed predecessor during a rollover never reads or shows the header. Home status and designation identity are never persisted as separate Home route state. The open Home chat is a logical route whose physical session follows `home.status`; it is not persisted across launches.
 
-When supported, Sessions puts a pinned Home row above the existing catalogue without changing ordinary row/filter/sort behavior. The row opens only the current enabled session ID from `home.status`; disabled, missing-session, and undesignated states use the confirmed `home.designate` mutation owner and require a fresh status projection before routing. Designation is receipt-only: pending or uncertain receipts keep their command ID and profile ownership in the mutation coordinator (one pending slot per profile), and the next explicit attempt queries that same receipt. A missing receipt on a completion check is final for the admitted Gateway: the change retires as not applied (`home_change_not_found`), the status projection is reloaded, and nothing is replayed. A missing receipt during the original attempt stays uncertain and unresolved. Backgrounding does not replay an accepted mutation, and duplicate in-flight designation is refused. The current route is the profile-qualified `ChatView` with `isHome` set; its exact managed surface owns Home status while open, and route retirement restores dashboard status ownership. The row opens `openSessionId`, so it stays routable while a rollover is pending. Sends from the Home route go through `home.prompt`; a materialized successor replaces the route. `HomeStatusPresentationOwnerTests` also covers the first-pairing read (a dashboard mounted before pairing), profile-retirement capability reset, and the typed unavailable state for an unadmittable status. `HomePinnedRowPolicyTests` and `HomeHeaderTests` pin routing to `openSessionId` for each phase, including the real `rollover-pending` shape with `sessionPresent: false`. `HomeHeaderTests` also holds the claim/header truth table (`routeKeyDecidesClaimAndHeaderPerPhase`: a Home route and an ordinary chat, across normal, rollover and no-openable statuses) and `homeRouteWithoutOpenableChapterStillPresentsHome`, and `AppModelReconnectTests.ordinaryChatOnRolloverPredecessorNeitherClaimsNorReads` proves an ordinary chat on the sealed predecessor reads nothing. `SessionMutationServiceTests` proves a Home submission is sent as `home.prompt` with its attachments and no physical session. The hosted journey `testHomeRolloverPendingRoutesSendAndFollowsSuccessor` opens the sealed predecessor from the row, sends through `home.prompt`, and asserts the chat follows the successor. `AppModelReconnectTests.homeFollowCarriesUnsentTextToSuccessor` and `ComposerDraftCoordinatorTests.homeFollowCarriesUnsentTextWithoutReplacingSuccessorDraft` cover the follow's draft carry. The hosted journey cannot type a draft between the admitted send and the follow: the composer does not take focus in that window. `HomeStatusPresentationOwnerTests` covers protocol bounds, observation, stale generations/connections, exact surface retirement, activity changes, and cadence; `HomePinnedRowPolicyTests` proves receipt checks outrank both routeable and unavailable status. `AppModelReconnectTests` drives the real `HomeMutationCoordinator` through initial-connection expiry, queued client cancellation, and a possibly-sent interruption followed by missing, pending, and completed receipts; `homeControlMissingCompletionRetiresWithoutReplay` covers a missing answer on the completion check, and `homeReceiptStaysWithItsProfileAcrossSwitch` covers per-profile pending ownership across switches. These journeys assert observable command ownership, stable receipt ID, a fresh status read before the profile-qualified route, and a single designation mutation. The suite also covers status reconnect, refusal, and duplicate admission. Hosted UI route tests mount the production `SessionShellView` with a scripted Gateway-backed `AppModel`, exercise capability absence, ordinary-session `ChatView` routing, real Home designation, and Home `ChatView` routing. A hosted Settings-sheet test verifies status reads remain quiet while covered for longer than the five-second fallback, then resume after dismissal without Gateway events or reconnect. Production-shell UI scenarios separately cover ready, undesignated, disabled, missing-session, and capability-absent profiles. Standalone row captures are appearance evidence only; blocked-state accessibility is covered separately.
+When supported, Sessions puts a pinned Home row above the existing catalogue without changing ordinary row/filter/sort behavior. The row opens only the current enabled session ID from `home.status`; disabled, missing-session, and undesignated states use the confirmed `home.designate` mutation owner and require a fresh status projection before routing. Designation is receipt-only: pending or uncertain receipts keep their command ID and profile ownership in the mutation coordinator (one pending slot per profile), and the next explicit attempt queries that same receipt. A missing receipt on a completion check is final for the admitted Gateway: the change retires as not applied (`home_change_not_found`), the status projection is reloaded, and nothing is replayed. A missing receipt during the original attempt stays uncertain and unresolved. Backgrounding does not replay an accepted mutation, and duplicate in-flight designation is refused. The current route is the profile-qualified `ChatView` with `isHome` set; its exact managed surface owns Home status while open, and route retirement restores dashboard status ownership. The row opens `openSessionId`, so it stays routable while a rollover is pending. Sends from the Home route go through `home.prompt`; a materialized successor replaces the route. `HomeStatusPresentationOwnerTests` also covers the first-pairing read (a dashboard mounted before pairing), profile-retirement capability reset, and the typed unavailable state for an unadmittable status. `HomePinnedRowPolicyTests` pins routing to `openSessionId` for each phase, including the real `rollover-pending` shape with `sessionPresent: false`; the policy is the single owner, and `AppModelReconnectTests.homeRouteRefusesStatusThatRowDoesNotOpen` proves the route admission consumes it. `HomeChatRouteKeyTests` holds the ordinary-chat claim truth table (normal, rollover and no-openable statuses), and `AppModelReconnectTests.ordinaryChatOnRolloverPredecessorNeitherClaimsNorReads` proves an ordinary chat on the sealed predecessor reads nothing. `SessionMutationServiceTests` proves a Home submission is sent as `home.prompt` with its attachments and no physical session. The hosted journey `testHomeRolloverPendingRoutesSendAndFollowsSuccessor` opens the sealed predecessor from the row, sends through `home.prompt`, and asserts the chat follows the successor. `AppModelReconnectTests.homeFollowCarriesUnsentTextToSuccessor` and `ComposerDraftCoordinatorTests.homeFollowCarriesUnsentTextWithoutReplacingSuccessorDraft` cover the follow's draft carry. The hosted journey cannot type a draft between the admitted send and the follow: the composer does not take focus in that window. `HomeStatusPresentationOwnerTests` covers protocol bounds (a field the app does not read cannot fail a status), observation, stale generations/connections, exact surface retirement, activity changes, and cadence; `HomePinnedRowPolicyTests` proves receipt checks outrank both routeable and unavailable status. `AppModelReconnectTests` drives the real `HomeMutationCoordinator` through initial-connection expiry, queued client cancellation, and a possibly-sent interruption followed by missing, pending, and completed receipts; `homeControlMissingCompletionRetiresWithoutReplay` covers a missing answer on the completion check, and `homeReceiptStaysWithItsProfileAcrossSwitch` covers per-profile pending ownership across switches. These journeys assert observable command ownership, stable receipt ID, a fresh status read before the profile-qualified route, and a single designation mutation. The suite also covers status reconnect, refusal, and duplicate admission. Hosted UI route tests mount the production `SessionShellView` with a scripted Gateway-backed `AppModel`, exercise capability absence, ordinary-session `ChatView` routing, real Home designation, and Home `ChatView` routing. A hosted Settings-sheet test verifies status reads remain quiet while covered for longer than the five-second fallback, then resume after dismissal without Gateway events or reconnect. Production-shell UI scenarios separately cover ready, undesignated, disabled, missing-session, and capability-absent profiles. Row appearance captures come from the production dashboard fixture, which renders the same `HomePinnedRow`; blocked-state accessibility is covered separately.
 
 The Home header/controls share `HomeMutationCoordinator` with designation.
-`HomeHeaderTests` admits the Gateway's paused and chapter-recovery phases without
-guessing task states. Focused `AppModelReconnectTests` journeys exercise all four
+`HomePinnedRowPolicyTests` admits the Gateway's paused, blocked and rollover-pending
+phases as openable chapters without guessing task states. Focused `AppModelReconnectTests` journeys exercise all four
 control methods (configure, pause, resume, disable), command IDs, duplicate
 admission, unresolved missing/pending/completed receipts, authority replacement,
 and old reads arriving after a completion refresh. A user action captures the
@@ -54,11 +54,10 @@ controls fail bounded assertions rather than hanging on unanswered responses.
 Run these with `TRON_IOS_TEST_TIER=ui-validation` through `scripts/tron-ios-test`;
 screenshots are xcresult attachments, not public source.
 These fixtures prove native wiring, not durable Gateway pause semantics (owned
-by Gateway Home activation E2E) or physical iPhone behavior. Preparing/task-state
-contracts remain separate work.
-`testHomeHeaderLightDarkAndAccessibilityCaptures` mounts the production chat in
-light/dark at normal and accessibility Dynamic Type, captures its wrapping memory
-copy, and checks menu/composer reachability. Export its attachments with
+by Gateway Home activation E2E) or physical iPhone behavior.
+The matrix's header captures (`home-header-<appearance>-<type>`) mount the production chat
+in light/dark at normal and accessibility Dynamic Type, check its wrapping memory copy and
+menu/composer reachability, and export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
 These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
 
@@ -70,7 +69,8 @@ and a hosted reconnect on the tasks sheet each start a fresh authoritative read:
 `fixture.home-task-list-reads` counts the Gateway's `home.taskList` calls. The Home
 fixture forwards scene transitions to the lifecycle as production does, and
 `-home-reconnect-after-task-list` reconnects the hosted lifecycle once after the sheet's
-first read. The same run covers the capability-off ordinary session. The header state,
+first read. The capability-off ordinary session is covered by
+`testHomePinnedRowCapabilityDesignationAndExactProfileRoute`. The header state,
 background and task journeys run with it:
 
 ```bash
@@ -88,21 +88,20 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderKeepsOrdinaryChatAndControls \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredSettingsSheet \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatOpenedBeforeStatusShowsHeaderAfterClaim
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatOpenedBeforeStatusShowsHeaderAfterClaim \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowNamesRunningDesignationAsUpdate
 ```
 
 Selecting another profile through `AppModel.switchGateway` ends the chat route in the
 dashboard's profile route owner, which releases a presented Home sheet with it;
 `testHomeSheetDismissesWhenProfileSwitches` is a regression guard for the route-owned lifetime.
-No failing variant (a sheet owned above the route) has been recorded for it, so it does not
-by itself prove that owner order.
 
 Matrix attachments are named `proof-<appearance>-<type>-<item>` and retained in the
 result bundle; export them with `xcrun xcresulttool export attachments` into private
 evidence. Simulator stills do not prove VoiceOver, live Gateway semantics, real
 reconnect after a dropped transport, or physical-iPhone behavior.
 
-The three Home sheets are covered by `HomeSheetTests` (bounded DTOs, exact
+Memory Settings, Home Context and Browse Memory are covered by `HomeSheetTests` (bounded DTOs, exact
 canonical evidence identity/offsets, latest-request and managed-lifecycle
 publication) and these focused hosted journeys:
 
@@ -141,7 +140,7 @@ projection, continuation invalidation, byte bounds, partial source failures,
 summary settlement, cancellation and disabled/restarted read-only behavior.
 Neither suite claims live Gateway/physical-iPhone validation or VoiceOver proof.
 
-To inspect the Home row visual fixture, run `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowLightDarkAndAccessibilityCaptures`. The four retained XCTest screenshot attachments are private simulator captures; export them from that command's `.xcresult` to a private evidence directory with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`. Do not add captures to the public source tree.
+To inspect the Home row appearance captures, run `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowLightDarkAndAccessibilityCaptures`. The four retained XCTest screenshot attachments are private simulator captures; export them from that command's `.xcresult` to a private evidence directory with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`. Do not add captures to the public source tree.
 
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
 Settings and configuration actions; Filter/Search and view-specific controls;
@@ -2996,7 +2995,7 @@ Mac-first installation before the real-device post-Stop check.
 
 ### Focused Home tasks verification
 
-The fourth Home sheet consumes `home.taskList`, `home.taskStatus`, and
+The Tasks sheet consumes `home.taskList`, `home.taskStatus`, and
 `home.taskPermissions` from the Gateway's Home contract. Run the focused owners:
 
 ```bash

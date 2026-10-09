@@ -4780,41 +4780,8 @@ final class AppModel {
     func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
         guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
               !Task.isCancelled, isCurrent() else { throw CancellationError() }
-        // Each task sheet consumes status first, so a recovery refusal remains
-        // visible without attempting a fenced task/authorization read.
-        if case .tasks = query { return try await readHomeTasks(query, identity: identity, isCurrent: isCurrent) }
-        if case .task = query { return try await readHomeTasks(query, identity: identity, isCurrent: isCurrent) }
-        if case .permissions = query { return try await readHomeTasks(query, identity: identity, isCurrent: isCurrent) }
-        let method: String
-        let params: JSONValue
-        switch query {
-        case .tasks, .task, .permissions: throw CancellationError()
-        case .status: method = "home.status"; params = .object([:])
-        case .memory(let continuation):
-            method = "home.memory.page"
-            var values: [String: JSONValue] = ["limit": .number(20)]
-            if let continuation { values["cursor"] = .string(continuation.cursor) }
-            params = .object(values)
-        case .evidence(let source, let offset):
-            method = "home.memory.evidence"
-            params = .object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
-        }
-        if query != .status, lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") != true {
-            throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
-        }
-        let value = try await lifecycle.client.requestValue(method, params,
-            expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
-        guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
-              !Task.isCancelled, isCurrent() else { throw CancellationError() }
-        switch query {
-        case .tasks, .task, .permissions: throw CancellationError()
-        case .status: return .status(try HomeStatusDTO.decode(value))
-        case .memory(let continuation): return .memory(try HomeMemoryPageDTO.decode(value, continuation: continuation))
-        case .evidence(let source, let offset): return .evidence(try HomeMemoryEvidencePageDTO.decode(value, evidence: source, offset: offset))
-        }
-    }
-
-    private func readHomeTasks(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
+        // Every request is fenced by the same identity and sheet currency before it is
+        // sent and again before its answer is published.
         func read(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
             guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
                   !Task.isCancelled, isCurrent() else { throw CancellationError() }
@@ -4824,18 +4791,39 @@ final class AppModel {
                   !Task.isCancelled, isCurrent() else { throw CancellationError() }
             return value
         }
-        let status = try HomeStatusDTO.decode(try await read("home.status"))
-        let canRead = status.available && status.taskRecovery?.available == true
+        // Each task sheet consumes status first, so a recovery refusal remains
+        // visible without attempting a fenced task/authorization read.
+        func readTaskStatus() async throws -> HomeStatusDTO {
+            try HomeStatusDTO.decode(try await read("home.status"))
+        }
+        func requireMemoryBrowser() throws {
+            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
+            }
+        }
         switch query {
+        case .status:
+            return .status(try HomeStatusDTO.decode(try await read("home.status")))
         case .tasks(let cursor):
+            let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]
             if let cursor { params["cursor"] = .string(cursor) }
-            return .tasks(canRead ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
+            return .tasks(status.admitsTaskReads ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
         case .task(let id):
-            return .task(canRead ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
+            let status = try await readTaskStatus()
+            return .task(status.admitsTaskReads ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
         case .permissions:
-            return .permissions(canRead ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
-        default: throw CancellationError()
+            let status = try await readTaskStatus()
+            return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
+        case .memory(let continuation):
+            try requireMemoryBrowser()
+            var values: [String: JSONValue] = ["limit": .number(20)]
+            if let continuation { values["cursor"] = .string(continuation.cursor) }
+            return .memory(try HomeMemoryPageDTO.decode(try await read("home.memory.page", .object(values)), continuation: continuation))
+        case .evidence(let source, let offset):
+            try requireMemoryBrowser()
+            let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
+            return .evidence(try HomeMemoryEvidencePageDTO.decode(try await read("home.memory.evidence", params), evidence: source, offset: offset))
         }
     }
 
@@ -4849,10 +4837,9 @@ final class AppModel {
         guard lifecycle.selectedProfileID == profileID,
               connectionState == .connected,
               gatewayInfo?.capabilities.contains("home.v1") == true,
-              homeStatus.isCapabilityEnabled,
+              homeStatus.capabilityEnabled,
               homeStatus.status == status,
-              status.enabled,
-              let sessionID = status.openSessionId, !sessionID.isEmpty else {
+              case .open(let sessionID) = HomePinnedRowPolicy.action(for: status) else {
             throw CancellationError()
         }
         return SessionNavigationRoute(
@@ -5673,7 +5660,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         guard admitsLifecycle(admission),
               let profileID = lifecycle.selectedProfileID,
               let connectionID = admission.connectionID else { return }
-        homeStatus.connectionAvailable(
+        homeStatus.configure(
             profileID: profileID,
             connectionID: String(connectionID),
             capabilityEnabled: gatewayInfo?.capabilities.contains("home.v1") == true
