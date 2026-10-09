@@ -18,7 +18,6 @@ import { statSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
 import { once } from "node:events";
 import WebSocket from "ws";
-import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1743,7 +1742,7 @@ describe("Tron Home activations end to end", () => {
     });
   });
 
-  // progress.md C12 (#466), the property Home exists for: the full history grows
+  // The property Home exists for (#466): the full history grows
   // to several model windows while every request stays bounded, carries no
   // earlier activation's native messages, and its view still covers message 0.
   it("keeps every request bounded while the full history grows to several model windows", async () => {
@@ -2627,16 +2626,9 @@ describe("Tron Home activations end to end", () => {
     };
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
-    const testRoot = join(f.root, "terminal-client");
-    await mkdir(testRoot, { recursive: true });
-    const typescript = createRequire(import.meta.url).resolve("typescript");
-    const loaderPath = join(testRoot, "typescript-loader.mjs");
-    await writeFile(loaderPath, `import ts from ${JSON.stringify(pathToFileURL(typescript).href)};\nimport { readFile } from "node:fs/promises";\nexport async function resolve(specifier, context, nextResolve) {\n  try { return await nextResolve(specifier, context); } catch (error) {\n    if (specifier.endsWith(".js") && (error?.code === "ERR_MODULE_NOT_FOUND" || error?.code === "ERR_UNSUPPORTED_DIR_IMPORT")) return nextResolve(specifier.slice(0, -3) + ".ts", context);\n    throw error;\n  }\n}\nexport async function load(url, context, nextLoad) {\n  if (url.endsWith(".ts")) { const source = await readFile(new URL(url), "utf8"); return { format: "module", shortCircuit: true, source: ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText }; }\n  return nextLoad(url, context);\n}\n`);
-
-    const terminal = spawn(process.execPath, [
-      "--experimental-loader", loaderPath, join(process.cwd(), "src/client/terminal-chat.ts"),
-      "--session", slot.id,
-    ], {
+    const preload = pathToFileURL(join(process.cwd(), "test-support/home-ledger-crash-preload.mjs")).href;
+    const terminal = spawn(process.execPath, ["--experimental-transform-types", "--import", preload,
+      join(process.cwd(), "src/client/terminal-chat.ts"), "--session", slot.id], {
       cwd: process.cwd(),
       env: {
         ...process.env,

@@ -13,7 +13,7 @@
  *
  * The retained artifact is `test-results/home-memory-tools/report.json`.
  *
- * Failure modes (progress.md, written before the code): F1 a stale projection, F2
+ * Failure modes these cases exist for: F1 a stale projection, F2
  * reasoning/credential/oversize leakage, F3 a stale child summary instead of the
  * placeholder, F4 an address that is not a line, F5 `[omitted]`, F6 a date from
  * the wrong source or a guess, F7 search misses/bounds/hidden omissions, F8 an

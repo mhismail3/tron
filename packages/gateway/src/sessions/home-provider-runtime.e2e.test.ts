@@ -136,7 +136,7 @@ describe.sequential("Home's chat runtime", () => {
     expect(ordinaryHasPackage).toBe(false);
   });
 
-  // A5 (review): Home's session-local context-window override must stay session-local.
+  // Home's session-local context-window override must stay session-local.
   // SessionContextWindowPolicy replaces `getModel` on the runtime it is given, so a
   // shared runtime would leak the override into Gateway-wide lookups and stack each
   // replaced runtime's lookup under the next.

@@ -26,8 +26,7 @@
  * Every case writes a row into `test-results/home-activation/seam-report.json`
  * and prints a one-line summary.
  *
- * Failure modes these cases exist for (written down before the code, in
- * progress.md): F1 a prior activation leaks into a request, F2 the memory view is
+ * Failure modes these cases exist for: F1 a prior activation leaks into a request, F2 the memory view is
  * persisted, F3 the cut is taken at the last user message and loses the tool
  * loop, F4 a queued follow-up is dropped or split off, F5 an SDK retry re-expands
  * the request, F6 SDK compaction re-sends canonical history, F7 a policy refusal

@@ -326,7 +326,6 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("gives a new Home the curated first runtime and leaves ordinary sessions unchanged", async () => {
-    // Failure modes 12-17, 19, 21, 22.
     const f = await fixture("profile", { virtualModel: true });
     const ordinary = await f.registry.create(f.cwd);
     await ordinary.setModel(PROVIDER, MODEL_ID);
@@ -426,7 +425,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from Home", async () => {
-    // P3-6: the curated profile drops the agent-directory system prompt files
+    // The curated profile drops the agent-directory system prompt files
     // too, and an ordinary session in the same installation still loads them.
     const f = await fixture("systemprompt");
     await writeFile(join(f.agentDir, "SYSTEM.md"), `${SYSTEM_SENTINEL}\n`);
@@ -447,7 +446,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("refuses a profile change while the session is running, deterministically", async () => {
-    // P3-2: the run is held open by a response that waits for this test, so the
+    // The run is held open by a response that waits for this test, so the
     // refusal is not a race with a timed-out stream.
     const f = await fixture("busy");
     let release!: () => void;
@@ -475,7 +474,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("replaces the live runtime in place, keeping the slot, its subscribers and the session", async () => {
-    // P2-1/P2-5: a profile change never retires the slot, so the session (which
+    // A profile change never retires the slot, so the session (which
     // may never have been written) and its subscribers survive.
     const f = await fixture("lifecycle");
     const designation = await designate(f, "home-designate-lifecycle");
@@ -524,7 +523,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("keeps the transcript's declared loadout across a profile change, and setTools restores the tools", async () => {
-    // P2-4: the disable does not rewrite the chat's declared loadout, so the
+    // The disable does not rewrite the chat's declared loadout, so the
     // ACTIVE set stays Home's until the user changes it.
     const f = await fixture("loadout");
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
@@ -550,7 +549,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("mints a fresh Home session when the recorded session is gone", async () => {
-    // P1: designate and disable before any prompt, then restart the Gateway. The
+    // Designate and disable before any prompt, then restart the Gateway. The
     // never-written session is gone from the catalog, so the record is dangling.
     const f = await fixture("dangling");
     const designation = await designate(f, "home-designate-dangling");
@@ -622,7 +621,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("applies the recorded physical model when re-enabling a Home whose session moved on", async () => {
-    // P2-2: the model is resolved at re-enable (the request's, else the
+    // The model is resolved at re-enable (the request's, else the
     // record's), and the live session is brought back to it.
     const f = await fixture("model", { virtualModel: true });
     const designation = await designate(f, "home-designate-model");
@@ -651,7 +650,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("sends zero cache-warming requests for Home while an ordinary session still warms", async () => {
-    // Failure modes 23 and 24. The SDK's warmer calls the model runtime directly,
+    // The SDK's warmer calls the model runtime directly,
     // outside every request wrapper, and its extension decision listener fails
     // open, so tron-home must be the only answer for a Home session.
     const f = await fixture("warming", { cacheWarming: true });
