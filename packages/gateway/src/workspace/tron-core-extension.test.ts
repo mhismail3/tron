@@ -22,7 +22,10 @@ describe("Tron operating context", () => {
     expect(text).not.toContain("Use ask_user");
     const all = tronContext(descriptor, "/project", ["display", "notify", "ask_user", "subagent"]);
     expect(all).toContain("source.kind=internal_file");
-    expect(all).toContain("workflow: true");
+    expect(all).toContain("pass workflow as its path");
+    expect(all).toContain("'./path.js'");
+    expect(all).toContain("Never use workflow: true");
+    expect(all).not.toContain("Use workflow: true");
     expect(tronContext({ ...descriptor, available: false }, "/project", [])).toContain("Do not recreate");
   });
 
