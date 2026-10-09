@@ -497,6 +497,8 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   slow `profiler`, `triage` and `work-tooling` test steps on the same selector; its
   syntax checks and selector tests stay unconditional, and `!cancelled()` keeps it
   running when selection fails.
+  The advisory macOS jobs also need `gateway`, so the required job never queues
+  for a macOS runner behind them; they still run when it fails or is skipped.
   Jobs keep real failure conclusions;
   only `policy`, `gateway` (`land.requiredChecks`) and `tron/verify` gate `land`.
   The `main` ruleset remains
