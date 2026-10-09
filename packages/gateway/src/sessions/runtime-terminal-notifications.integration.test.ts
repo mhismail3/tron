@@ -246,7 +246,6 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       notifications,
       useAgentModels: true,
       managedSubagents: (tronHome) => {
-        delete process.env.PI_SUBAGENT_CHILD;
         delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
         return ManagedSubagents.activateForStartup(tronHome, logger);
       },

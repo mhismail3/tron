@@ -28,9 +28,8 @@ import { TrustService } from "./trust-service.js";
  * 4. A failed extension load or failed subagent discovery could fail the whole
  *    `packages.list` read, or silently empty the kinds that did resolve.
  * 5. An unbounded package could enlarge the response without a documented cap.
- * 6. An inherited PI_SUBAGENT_CHILD (a delegated agent's shell) makes pi-subagents
- *    behave as a child and register no parent tools, so the managed provider
- *    would appear to provide nothing.
+ * (An inherited PI_SUBAGENT_CHILD from a delegated agent's shell is removed for
+ *  every test by test-support/tron-home-environment-preflight.mjs.)
  */
 
 let previousEnvironment: NodeJS.ProcessEnv;
@@ -38,9 +37,7 @@ beforeEach(() => {
   previousEnvironment = {
     [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
     PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT,
-    PI_SUBAGENT_CHILD: process.env.PI_SUBAGENT_CHILD,
   };
-  delete process.env.PI_SUBAGENT_CHILD;
 });
 afterEach(() => {
   for (const [name, value] of Object.entries(previousEnvironment)) {
