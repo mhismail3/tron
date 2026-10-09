@@ -1392,7 +1392,12 @@ A worktree is provably done when all of these hold:
   rebase, cherry-pick, revert or bisect in progress;
 - every ignored file matches a `cleanup.regenerableIgnored` glob. These are
   Git `glob` pathspecs: `*` stays within one path segment and `**` crosses
-  segments. Any other ignored file keeps the worktree and is named;
+  segments. Any other ignored file keeps the worktree and is named. A nested
+  Git checkout, which Git lists as one `dir/` entry, matches by its own path,
+  and is regenerable only while it is clean and re-fetchable: no uncommitted,
+  untracked or ignored file, and no commit that no remote-tracking branch
+  contains (SwiftPM's checkouts under DerivedData are). Otherwise it keeps the
+  worktree and is named with its reason;
 - no process has its working directory inside the worktree (`lsof`), other
   than `cleanup` and its ancestors when the worktree is the one `cleanup` was
   started from. When `lsof` fails, nothing counts as proven.
@@ -1461,7 +1466,8 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     worktree.
 54. **Local data is lost with the worktree.** Modified, staged or untracked
     files, a non-regenerable ignored file, an operation in progress, or a lock
-    keeps it. Ignored files that match the regenerable globs do not.
+    keeps it. Ignored files that match the regenerable globs do not, and a
+    nested checkout that matches them keeps it while it is not clean (88-90).
 55. **A live process loses its working directory.** Another process with its
     working directory inside keeps the worktree, and so does an `lsof` that
     fails. The caller's own shell does not block its own cleanup, but an
@@ -1510,3 +1516,18 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     no pull request the claim commit is the whole proof, so the remote claim
     branch keeps its lease on exactly that commit, as for a merged worktree, and
     a dry run of the same proof changes nothing.
+88. **A clean nested checkout keeps a merged worktree.** SwiftPM's checkouts
+    under a build root's `SourcePackages` are Git repositories nested in an
+    ignored directory. `test_cleanup.py` removes a merged worktree holding a
+    clean, remote-backed one. Git lists it as one `dir/` entry, so the regenerable
+    globs match its path in the cleanup code; a pathspec does not apply to it.
+89. **A nested checkout's local data is removed with it.** A nested checkout in
+    a regenerable build root with a modified or untracked file, or an ignored
+    file of its own, keeps the worktree and is named with its reason.
+90. **Commits only a local ref holds are removed with a nested checkout.** A
+    nested checkout whose commit no remote-tracking ref contains, on any local
+    branch and not only its HEAD, keeps the worktree.
+91. **A nested checkout outside the regenerable globs is removed.** A clean,
+    remote-backed nested checkout that no regenerable glob matches keeps the
+    worktree, and so does one under a directory whose name only resembles
+    `build` (`packages/build-tools/`).
