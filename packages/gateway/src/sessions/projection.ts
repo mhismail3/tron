@@ -32,7 +32,7 @@ import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../util
 import type { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
-import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
+import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
@@ -2178,6 +2178,34 @@ function durableInvocationLifecycle(lifecycle: InvocationProjection["lifecycle"]
 }
 
 /**
+ * A fork copies its origin's command `start` rows, and those receipts name the
+ * origin, so the fork's own receipt fold never sees them. Each such row settles
+ * in the origin: with the origin's copied terminal when the fork's branch cut
+ * carries it, otherwise as `completed`, the only outcome the origin records for
+ * the forking command, whose terminal is written after the copy (#661).
+ */
+function inheritedCommandSettlements(
+  branch: readonly SessionEntry[],
+  sessionId: string | undefined,
+): ReadonlyMap<string, InvocationLifecycle> {
+  if (sessionId === undefined) return new Map();
+  const receipts = branch.flatMap((entry) => {
+    if (entry.type !== "custom" || entry.customType !== INVOCATION_RECEIPT_TYPE) return [];
+    const receipt = parseInvocationReceipt(entry.data);
+    return receipt ? [receipt] : [];
+  });
+  const terminals = new Map(receipts
+    .filter((receipt) => receipt.receiptKind === "terminal")
+    .map((receipt) => [receipt.invocationId, receipt.lifecycle] as const));
+  const settlements = new Map<string, InvocationLifecycle>();
+  for (const receipt of receipts) {
+    if (receipt.receiptKind !== "start" || receipt.source !== "extension" || receipt.sessionId === sessionId) continue;
+    settlements.set(receipt.invocationId, terminals.get(receipt.invocationId) ?? "completed");
+  }
+  return settlements;
+}
+
+/**
  * Enrich a canonical row only from the exact Gateway-authored invocation
  * binding. The receipt owns producer provenance; the role-based fallback in
  * projectMessage applies only when no durable binding exists.
@@ -2186,6 +2214,7 @@ function withInvocationSemantics(
   item: TranscriptItem,
   boundInvocation: InvocationProjection | undefined,
   invocationStates: ReadonlyMap<string, InvocationProjection["lifecycle"]>,
+  inheritedCommands: ReadonlyMap<string, InvocationLifecycle>,
 ): TranscriptItem {
   if (boundInvocation && item.semantic) {
     return { ...item, semantic: {
@@ -2201,6 +2230,12 @@ function withInvocationSemantics(
       ...(boundInvocation.submittedText === undefined ? {} : { submittedText: boundInvocation.submittedText }),
       lifecycle: boundInvocation.lifecycle,
     } };
+  }
+  const inheritedLifecycle = item.semantic?.kind === "command" && item.semantic.invocationId
+    ? inheritedCommands.get(item.semantic.invocationId)
+    : undefined;
+  if (item.semantic && inheritedLifecycle) {
+    return { ...item, semantic: { ...item.semantic, lifecycle: inheritedLifecycle, settledInOriginSession: true } };
   }
   if (item.semantic?.invocationId && invocationStates.has(item.semantic.invocationId)) {
     const lifecycle = invocationStates.get(item.semantic.invocationId)!;
@@ -2230,6 +2265,7 @@ export function projectTranscript(
   const invocationByCanonicalEntry = new Map(invocationValues
     .filter(value => value.canonicalEntryId !== undefined)
     .map(value => [value.canonicalEntryId!, value]));
+  const inheritedCommands = inheritedCommandSettlements(branch, manager.getSessionId?.());
   return entries.map((entry) => {
     const boundInvocation = invocationByCanonicalEntry.get(entry.id);
     const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
@@ -2247,7 +2283,7 @@ export function projectTranscript(
       manager.getSessionId?.(),
     );
     if (!projected) throw new Error(`projectable transcript entry produced no item: ${entry.type}`);
-    return withInvocationSemantics(projected, boundInvocation, invocationStates);
+    return withInvocationSemantics(projected, boundInvocation, invocationStates, inheritedCommands);
   });
 }
 
@@ -2302,6 +2338,7 @@ export function projectTranscriptPage(
   const invocationByCanonicalEntry = new Map(invocationValues
     .filter(value => value.canonicalEntryId !== undefined)
     .map(value => [value.canonicalEntryId!, value]));
+  const inheritedCommands = inheritedCommandSettlements(branch, manager.getSessionId?.());
   const forkBoundary = projectForkBoundary(branch, entries, forkAnchor);
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
   if (expectedNextEntryId !== undefined && entries[end]?.id !== expectedNextEntryId) {
@@ -2328,7 +2365,7 @@ export function projectTranscriptPage(
       manager.getSessionId?.(),
     );
     if (!item) throw new Error(`projectable transcript entry produced no item: ${entry.type}${entry.type === "message" ? `/${entry.message.role}` : ""}`);
-    const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);
+    const enriched = withInvocationSemantics(item, boundInvocation, invocationStates, inheritedCommands);
     const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {
@@ -2372,6 +2409,7 @@ export function projectTranscriptPageAfter(
   const invocationByCanonicalEntry = new Map(invocationValues
     .filter(value => value.canonicalEntryId !== undefined)
     .map(value => [value.canonicalEntryId!, value]));
+  const inheritedCommands = inheritedCommandSettlements(branch, manager.getSessionId?.());
   const forkBoundary = projectForkBoundary(branch, entries, forkAnchor);
   const start = Math.max(0, Math.min(after, entries.length));
   if (expectedPreviousEntryId !== undefined && entries[start - 1]?.id !== expectedPreviousEntryId) {
@@ -2389,7 +2427,7 @@ export function projectTranscriptPageAfter(
       contextDelivery.get(entry.id), toolSegmentIDs.get(entry.id), expectedSkillArguments,
       bashMetadata, manager.getSessionId?.());
     if (!item) throw new Error(`projectable transcript entry produced no item: ${entry.type}${entry.type === "message" ? `/${entry.message.role}` : ""}`);
-    const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);
+    const enriched = withInvocationSemantics(item, boundInvocation, invocationStates, inheritedCommands);
     const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {
