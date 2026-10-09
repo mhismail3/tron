@@ -282,8 +282,10 @@ enum ChatPhysicalTranscriptRowPolicy {
 
 enum ChatRowMotionTransition: Equatable {
     case none
+    case arrive
     case notification
     case promptContent
+    case streamingResize
 }
 
 private struct ChatPhysicalPromptEntrance: Equatable {
@@ -293,9 +295,11 @@ private struct ChatPhysicalPromptEntrance: Equatable {
 
 enum ChatRowMotionTransitionPolicy {
     static func select(
-        from previous: ChatPhysicalTranscriptRow,
-        to next: ChatPhysicalTranscriptRow
+        from previous: ChatPhysicalTranscriptRow?,
+        to next: ChatPhysicalTranscriptRow,
+        entranceAdmitted: Bool = false
     ) -> ChatRowMotionTransition {
+        guard let previous else { return entranceAdmitted ? .arrive : .none }
         guard previous.id == next.id else { return .none }
         if case .transcript(.notification(let old)) = previous.content,
            case .transcript(.notification(let new)) = next.content,
@@ -303,10 +307,15 @@ enum ChatRowMotionTransitionPolicy {
            !new.showsProgress {
             return .notification
         }
-        guard previous.usesQueuedCardVisual,
-              case .transcript(let item) = next.content,
-              item.isCanonicalUserPrompt else { return .none }
-        return .promptContent
+        if previous.usesQueuedCardVisual,
+           case .transcript(let item) = next.content,
+           item.isCanonicalUserPrompt {
+            return .promptContent
+        }
+        if previous.isStreamingMessage, next.isStreamingMessage, previous != next {
+            return .streamingResize
+        }
+        return .none
     }
 }
 
@@ -383,6 +392,7 @@ private struct ChatPhysicalTranscriptRowHost<Content: View>: View {
     let reduceMotion: Bool
     let viewportIsPositioning: Bool
     let promptEntrance: ChatPhysicalPromptEntrance?
+    let initialEntranceProgress: CGFloat
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
     let onPromptEntranceConsumed: (String) -> Void
     let onPromptContentReplacement: (String) -> Void
@@ -401,6 +411,7 @@ private struct ChatPhysicalTranscriptRowHost<Content: View>: View {
             reduceMotion: reduceMotion,
             viewportIsPositioning: viewportIsPositioning,
             promptEntrance: promptEntrance,
+            initialEntranceProgress: initialEntranceProgress,
             incomingContent: content(row, false, false),
             onPromptEntranceConsumed: onPromptEntranceConsumed,
             onPromptContentReplacement: onPromptContentReplacement,
@@ -437,6 +448,7 @@ private struct ChatRowMotionHost<Content: View>: View {
     @State private var promptReplacementProgress = 1.0
     @State private var replacedPromptSemanticID: String?
     @State private var promptReplacementRevision = 0
+    @State private var entranceProgress: CGFloat
     @State private var retainedPromptEntrance: ChatPhysicalPromptEntrance?
     @State private var presentedHeight: CGFloat?
     @State private var lastMeasurement: ChatRowMotionMeasurement?
@@ -447,6 +459,7 @@ private struct ChatRowMotionHost<Content: View>: View {
         reduceMotion: Bool,
         viewportIsPositioning: Bool,
         promptEntrance: ChatPhysicalPromptEntrance?,
+        initialEntranceProgress: CGFloat,
         incomingContent: Content,
         onPromptEntranceConsumed: @escaping (String) -> Void,
         onPromptContentReplacement: @escaping (String) -> Void,
@@ -461,11 +474,18 @@ private struct ChatRowMotionHost<Content: View>: View {
         self.onPromptContentReplacement = onPromptContentReplacement
         self.onPromptEntranceSettled = onPromptEntranceSettled
         self.content = content
+        let initialTransition = ChatRowMotionTransitionPolicy.select(
+            from: nil,
+            to: row,
+            entranceAdmitted: initialEntranceProgress < 1
+        )
+        _entranceProgress = State(initialValue: initialTransition == .arrive ? initialEntranceProgress : 1)
         _retainedPromptEntrance = State(initialValue: promptEntrance)
     }
 
     var body: some View {
         renderedContent
+            .environment(\.chatRowMotionEntranceAdmission, { admitEntrance() })
             .onChange(of: row) { previous, next in retarget(from: previous, to: next) }
     }
 
@@ -511,11 +531,14 @@ private struct ChatRowMotionHost<Content: View>: View {
         let incoming = replacementIncomingContent ?? incomingContent
         return ChatRowMotionLayout(
             progress: promptReplacementProgress,
+            arrivalProgress: entranceProgress,
             reduceMotion: reduceMotion,
             surfaceActive: presentationActivity.allowsContinuousAnimation,
             viewportIsPositioning: viewportIsPositioning
         ) {
-            incoming.opacity(promptReplacementProgress)
+            incoming
+                .chatEntranceGrowthClip(progress: entranceProgress)
+                .opacity(promptReplacementProgress)
             if let outgoingContent {
                 outgoingContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -530,8 +553,16 @@ private struct ChatRowMotionHost<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func admitEntrance() {
+        entranceProgress = 1
+    }
+
     private func retarget(from previous: ChatPhysicalTranscriptRow, to next: ChatPhysicalTranscriptRow) {
         switch ChatRowMotionTransitionPolicy.select(from: previous, to: next) {
+        case .arrive, .streamingResize:
+            // The row owner selected the transition from its installed before/
+            // after values; measured content below owns the admitted height.
+            break
         case .notification:
             if replacedPromptSemanticID == next.semanticID {
                 replacementIncomingContent = content(next, false, true)
@@ -599,7 +630,7 @@ private struct ChatRowMotionHost<Content: View>: View {
         let animation = ChatMotion.streamingResize
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             var transaction = Transaction(animation: animation)
-            transaction.admitsChatIncrementalGrowthAnimation = true
+            transaction.admitsChatMotionAnimation = true
             withTransaction(transaction) { presentedHeight = measurement.height }
         } completion: {
             if !row.isStreamingMessage { releaseHeight() }
@@ -636,6 +667,8 @@ private struct ChatRowMotionVerticalClip: Shape {
 private struct ChatRowMotionLayout: Layout, Animatable {
     /// 1 = the canonical row, 0 = the outgoing card.
     var progress: CGFloat
+    /// 0 = the row's first admitted pixel, 1 = its natural height.
+    var arrivalProgress: CGFloat
     /// `ChatRowMotionPolicy`'s shared gate; the owner decides with
     /// the heights the layout measures. A replacement that may not interpolate
     /// (Reduce Motion, a covered surface, or a change too large to animate)
@@ -644,9 +677,12 @@ private struct ChatRowMotionLayout: Layout, Animatable {
     var surfaceActive: Bool
     var viewportIsPositioning: Bool
 
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(progress, arrivalProgress) }
+        set {
+            progress = newValue.first
+            arrivalProgress = newValue.second
+        }
     }
 
     struct Cache {
@@ -670,7 +706,10 @@ private struct ChatRowMotionLayout: Layout, Animatable {
     ) -> CGSize {
         let width = proposal.width ?? Self.naturalWidth(subviews)
         let measured = measure(width: width, subviews: subviews, cache: &cache)
-        return CGSize(width: width, height: height(measured, progress: progress))
+        return CGSize(
+            width: width,
+            height: height(measured, progress: progress, arrivalProgress: arrivalProgress)
+        )
     }
 
     func placeSubviews(
@@ -696,17 +735,31 @@ private struct ChatRowMotionLayout: Layout, Animatable {
 
     private func height(
         _ measured: (incoming: CGFloat, outgoing: CGFloat),
-        progress: CGFloat
+        progress: CGFloat,
+        arrivalProgress: CGFloat
     ) -> CGFloat {
-        guard ChatRowMotionPolicy.canInterpolate(
-            from: measured.outgoing,
+        let incoming: CGFloat
+        if ChatRowMotionPolicy.canInterpolate(
+            from: 0,
             to: measured.incoming,
             reduceMotion: reduceMotion,
             surfaceActive: surfaceActive,
             viewportIsPositioning: viewportIsPositioning
-        ) else { return measured.incoming }
+        ) {
+            let clampedArrival = arrivalProgress.isFinite ? min(1, max(0, arrivalProgress)) : 1
+            incoming = min(measured.incoming, max(1, measured.incoming * clampedArrival))
+        } else {
+            incoming = measured.incoming
+        }
+        guard ChatRowMotionPolicy.canInterpolate(
+            from: measured.outgoing,
+            to: incoming,
+            reduceMotion: reduceMotion,
+            surfaceActive: surfaceActive,
+            viewportIsPositioning: viewportIsPositioning
+        ) else { return incoming }
         let clamped = progress.isFinite ? min(1, max(0, progress)) : 1
-        return measured.outgoing + (measured.incoming - measured.outgoing) * clamped
+        return measured.outgoing + (incoming - measured.outgoing) * clamped
     }
 
     private func measure(
@@ -1037,6 +1090,37 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .id("earlier-messages")
     }
 
+    private func initialEntranceProgress(
+        for row: ChatPhysicalTranscriptRow,
+        installed: InstalledChatTranscript
+    ) -> CGFloat {
+        guard admitsGeometryCallbacks else { return 1 }
+        let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
+        switch row.content {
+        case .transcript:
+            guard !entranceSuppressed, !canonicalSubmissionIDs.contains(row.semanticID) else { return 1 }
+            return transcriptPresentation.entranceState(for: row.semanticID) == .none ? 1 : 0
+        case .pending(let pending) where pending.promptBehavior.isQueuedKind:
+            let animates = ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                isReady: isReady,
+                entranceSuppressed: entranceSuppressed,
+                hasIdentityAlias: false
+            ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: row.id)
+            return animates ? 0 : 1
+        case .queued(let entry):
+            let aliasID = installed.queuePresentationIDByOperationID[entry.message.id]
+            let hasIdentityAlias = aliasID != nil || canonicalSubmissionIDs.contains(row.id)
+            let animates = ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                isReady: isReady,
+                entranceSuppressed: entranceSuppressed,
+                hasIdentityAlias: hasIdentityAlias
+            ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: row.id)
+            return animates ? 0 : 1
+        default:
+            return 1
+        }
+    }
+
     private func promptEntrance(
         for row: ChatPhysicalTranscriptRow,
         installed: InstalledChatTranscript
@@ -1081,6 +1165,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             reduceMotion: reduceMotion,
             viewportIsPositioning: scrollCoordinator.isViewportBeingPositioned,
             promptEntrance: entrance,
+            initialEntranceProgress: initialEntranceProgress(for: row, installed: installed),
             hostedRecorder: hostedRecorder,
             onPromptEntranceConsumed: { lifecycleID in
                 transcriptPresentation.consumeLifecycleEntrance(id: lifecycleID)

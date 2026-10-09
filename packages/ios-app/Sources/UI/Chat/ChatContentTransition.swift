@@ -130,7 +130,7 @@ struct ChatComposerStructuralHost<Content: View>: View {
             let animation = submissionAnimation
                 ?? ChatMotion.composerAccessoryResize
             var transaction = Transaction()
-            transaction.admitsChatIncrementalGrowthAnimation = true
+            transaction.admitsChatMotionAnimation = true
             withTransaction(transaction) {
                 withAnimation(animation, completionCriteria: .logicallyComplete) {
                     presentedHeight = measurement.height
@@ -294,34 +294,16 @@ extension ChatContentEntranceTransform.Anchor {
     }
 }
 
-/// Complete transcript snapshots install atomically while explicitly tagged row,
-/// prompt, tool-chip, and continuous native-control animations pass through.
-private enum ChatToolChipAnimationTransactionKey: TransactionKey {
-    static let defaultValue = false
-}
-
-private enum ChatEntranceAnimationTransactionKey: TransactionKey {
-    static let defaultValue = false
-}
-
-private enum ChatIncrementalGrowthAnimationTransactionKey: TransactionKey {
+/// Complete transcript snapshots install atomically while explicit chat motion
+/// transactions, including native controls, pass through.
+private enum ChatMotionAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
 
 extension Transaction {
-    var admitsChatToolChipAnimation: Bool {
-        get { self[ChatToolChipAnimationTransactionKey.self] }
-        set { self[ChatToolChipAnimationTransactionKey.self] = newValue }
-    }
-
-    var admitsChatEntranceAnimation: Bool {
-        get { self[ChatEntranceAnimationTransactionKey.self] }
-        set { self[ChatEntranceAnimationTransactionKey.self] = newValue }
-    }
-
-    var admitsChatIncrementalGrowthAnimation: Bool {
-        get { self[ChatIncrementalGrowthAnimationTransactionKey.self] }
-        set { self[ChatIncrementalGrowthAnimationTransactionKey.self] = newValue }
+    var admitsChatMotionAnimation: Bool {
+        get { self[ChatMotionAnimationTransactionKey.self] }
+        set { self[ChatMotionAnimationTransactionKey.self] = newValue }
     }
 }
 
@@ -334,9 +316,7 @@ private struct ChatStableTranscriptUpdateModifier<ProjectionIdentity: Equatable>
             // changes. Native Liquid Glass begins with a discrete touch-down
             // transaction before its continuous drag updates; an unconditional
             // transaction transform was erasing that first animation.
-            if !transaction.admitsChatToolChipAnimation,
-               !transaction.admitsChatEntranceAnimation,
-               !transaction.admitsChatIncrementalGrowthAnimation {
+            if !transaction.admitsChatMotionAnimation {
                 transaction.animation = nil
             }
         }

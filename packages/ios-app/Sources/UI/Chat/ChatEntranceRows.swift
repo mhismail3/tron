@@ -36,25 +36,9 @@ enum ChatEntranceGrowthPolicy {
     static let settledOverflow: CGFloat = DisplayInlineLayoutPolicy.maximumViewportHeight
         + DisplayInlineLayoutPolicy.controlTouchTarget
         + effectOverflow
-    /// Height interpolation is a layout optimization for compact arrivals, not
-    /// a transcript admission requirement. Keeping very tall rows at their
-    /// natural height prevents a single large prompt or Markdown response from
-    /// moving the lazy stack by tens of thousands of points per animation.
-    static let maximumAnimatedHeight: CGFloat = ChatRowMotionPolicy.maximumAnimatedHeight
-
     static func normalizedProgress(_ progress: CGFloat) -> CGFloat {
         guard progress.isFinite else { return 0 }
         return min(1, max(0, progress))
-    }
-
-    static func height(natural: CGFloat, progress: CGFloat) -> CGFloat {
-        guard natural.isFinite, natural > 0 else { return 0 }
-        guard natural <= maximumAnimatedHeight else { return natural }
-        // A zero-height run of pending compact pills can be culled by the
-        // lazy stack before placement, preventing the geometry that admits
-        // their entrance. Keep an invisible layout footprint, not a new view
-        // identity or retry; opacity still hides the pending content.
-        return min(natural, max(1, natural * normalizedProgress(progress)))
     }
 
     /// The admission clip: vertically inset while the row is still being
@@ -123,73 +107,6 @@ enum ChatTranscriptEntrancePresentationPolicy {
     }
 }
 
-private struct ChatEntranceGrowthLayout: Layout, Animatable {
-    struct Cache {
-        var proposedWidth: CGFloat?
-        var naturalSize: CGSize?
-    }
-
-    var progress: CGFloat
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func makeCache(subviews: Subviews) -> Cache { Cache() }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        // Payload and Dynamic Type changes invalidate the intrinsic measurement.
-        // Animating `progress` alone does not, so the lazy row can reuse one
-        // exact measurement for every frame of its short height reveal.
-        cache = Cache()
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGSize {
-        guard let subview = subviews.first else { return .zero }
-        let natural = naturalSize(width: proposal.width, subview: subview, cache: &cache)
-        return CGSize(
-            width: proposal.width ?? natural.width,
-            height: ChatEntranceGrowthPolicy.height(
-                natural: natural.height,
-                progress: progress
-            )
-        )
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) {
-        guard let subview = subviews.first else { return }
-        let natural = naturalSize(width: bounds.width, subview: subview, cache: &cache)
-        subview.place(
-            at: CGPoint(x: bounds.minX, y: bounds.maxY - natural.height),
-            anchor: .topLeading,
-            proposal: ProposedViewSize(width: bounds.width, height: natural.height)
-        )
-    }
-
-    private func naturalSize(
-        width: CGFloat?,
-        subview: LayoutSubview,
-        cache: inout Cache
-    ) -> CGSize {
-        if cache.proposedWidth == width, let naturalSize = cache.naturalSize {
-            return naturalSize
-        }
-        let measured = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
-        cache.proposedWidth = width
-        cache.naturalSize = measured
-        return measured
-    }
-}
-
 private struct ChatEntranceGrowthClipShape: Shape {
     var progress: CGFloat
 
@@ -200,6 +117,17 @@ private struct ChatEntranceGrowthClipShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         Path(ChatEntranceGrowthPolicy.clipRect(in: rect, progress: progress))
+    }
+}
+
+private struct ChatRowMotionEntranceAdmissionKey: EnvironmentKey {
+    static let defaultValue: (@MainActor @Sendable () -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var chatRowMotionEntranceAdmission: (@MainActor @Sendable () -> Void)? {
+        get { self[ChatRowMotionEntranceAdmissionKey.self] }
+        set { self[ChatRowMotionEntranceAdmissionKey.self] = newValue }
     }
 }
 
@@ -237,6 +165,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
     let onEntranceSettled: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
+    @Environment(\.chatRowMotionEntranceAdmission) private var admitMotionEntrance
 
     init(
         state: ChatTranscriptEntranceState,
@@ -262,41 +191,41 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
             for: kind,
             reduceMotion: reduceMotion
         )
-        let progress: CGFloat = revealed || reduceMotion ? 1 : 0
-        ChatEntranceGrowthLayout(progress: progress) {
-            content
-                .opacity(revealed ? 1 : 0)
-                .scaleEffect(
-                    revealed ? 1 : hidden.scale,
-                    anchor: hidden.anchor.unitPoint
-                )
-                .offset(
-                    x: revealed ? 0 : hidden.offsetX,
-                    y: revealed ? 0 : hidden.offsetY
-                )
-        }
-        .chatEntranceGrowthClip(progress: progress)
-        .onChange(of: state, initial: true) { _, state in
-            switch state {
-            case .pending:
-                break
-            case .admitted:
-                let animation = ChatMotion.transcriptReveal(reduceMotion: reduceMotion)
-                var transaction = Transaction()
-                transaction.admitsChatEntranceAnimation = true
-                withTransaction(transaction) {
-                    withAnimation(animation, completionCriteria: .logicallyComplete) {
+        content
+            .opacity(revealed ? 1 : 0)
+            .scaleEffect(
+                revealed ? 1 : hidden.scale,
+                anchor: hidden.anchor.unitPoint
+            )
+            .offset(
+                x: revealed ? 0 : hidden.offsetX,
+                y: revealed ? 0 : hidden.offsetY
+            )
+            .onChange(of: state, initial: true) { _, state in
+                switch state {
+                case .pending:
+                    break
+                case .admitted:
+                    let animation = ChatMotion.transcriptReveal(reduceMotion: reduceMotion)
+                    var transaction = Transaction()
+                    transaction.admitsChatMotionAnimation = true
+                    withTransaction(transaction) {
+                        withAnimation(animation, completionCriteria: .logicallyComplete) {
+                            revealed = true
+                            admitMotionEntrance?()
+                        } completion: {
+                            onEntranceSettled()
+                        }
+                    }
+                case .none:
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
                         revealed = true
-                    } completion: {
-                        onEntranceSettled()
+                        admitMotionEntrance?()
                     }
                 }
-            case .none:
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { revealed = true }
             }
-        }
     }
 }
 
@@ -357,7 +286,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         let animation = ChatMotion.promptArrive(reduceMotion: reduceMotion)
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             var transaction = Transaction(animation: animation)
-            transaction.admitsChatEntranceAnimation = true
+            transaction.admitsChatMotionAnimation = true
             withTransaction(transaction) { revealed = true }
         } completion: {
             reportSettlementOnce()
@@ -383,6 +312,7 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
     let onEntranceConsumed: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
+    @Environment(\.chatRowMotionEntranceAdmission) private var admitMotionEntrance
 
     init(
         animatesEntrance: Bool,
@@ -402,33 +332,35 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
             for: .queuedPrompt,
             reduceMotion: reduceMotion
         )
-        let progress: CGFloat = revealed || reduceMotion ? 1 : 0
-        ChatEntranceGrowthLayout(progress: progress) {
-            content
-                .opacity(revealed ? 1 : 0)
-                .scaleEffect(
-                    revealed ? 1 : hidden.scale,
-                    anchor: hidden.anchor.unitPoint
-                )
-                .offset(
-                    x: revealed ? 0 : hidden.offsetX,
-                    y: revealed ? 0 : hidden.offsetY
-                )
-        }
-        .chatEntranceGrowthClip(progress: progress)
-        .onAppear {
-            onEntranceConsumed()
-            guard animatesEntrance, !revealed else { return }
-            var transaction = Transaction(animation: ChatMotion.transcriptReveal(reduceMotion: reduceMotion))
-            transaction.admitsChatEntranceAnimation = true
-            withTransaction(transaction) { revealed = true }
-        }
-        .onChange(of: animatesEntrance) { _, enabled in
-            guard !enabled else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { revealed = true }
-        }
+        content
+            .opacity(revealed ? 1 : 0)
+            .scaleEffect(
+                revealed ? 1 : hidden.scale,
+                anchor: hidden.anchor.unitPoint
+            )
+            .offset(
+                x: revealed ? 0 : hidden.offsetX,
+                y: revealed ? 0 : hidden.offsetY
+            )
+            .onAppear {
+                onEntranceConsumed()
+                guard animatesEntrance, !revealed else { return }
+                var transaction = Transaction(animation: ChatMotion.transcriptReveal(reduceMotion: reduceMotion))
+                transaction.admitsChatMotionAnimation = true
+                withTransaction(transaction) {
+                    revealed = true
+                    admitMotionEntrance?()
+                }
+            }
+            .onChange(of: animatesEntrance) { _, enabled in
+                guard !enabled else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    revealed = true
+                    admitMotionEntrance?()
+                }
+            }
     }
 }
 

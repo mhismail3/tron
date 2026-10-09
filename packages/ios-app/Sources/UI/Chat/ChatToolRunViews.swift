@@ -476,7 +476,7 @@ private struct ToolActivityChip: View {
         }
         let animation = ChatMotion.toolValueReplace(reduceMotion: reduceMotion)
         var transaction = Transaction(animation: animation)
-        transaction.admitsChatToolChipAnimation = true
+        transaction.admitsChatMotionAnimation = true
         // Admit the shallow state in the same MainActor turn as the latest
         // projection. Native interactive glass remains the sole touch owner;
         // no deferred task may interrupt its press/drag transaction.
