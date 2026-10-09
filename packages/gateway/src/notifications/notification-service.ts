@@ -16,23 +16,10 @@ import {
   type NotificationReceipt,
   type PushGrant,
 } from "./grant-store.js";
-import { PushRelayClient, type RelayNotificationOutcome } from "./relay-client.js";
+import { PushRelayClient, type RelayNotificationOutcome, type RelayNotificationResult } from "./relay-client.js";
 
 const INTENT_TTL_MS = 15 * 60_000;
 const RECEIPT_TTL_MS = 24 * 60 * 60_000;
-interface NotificationRateLimits {
-  dailyIntents: number;
-  sessionHourlyIntents: number;
-  targetDailyIntents: number;
-}
-
-const DEFAULT_NOTIFICATION_RATE_LIMITS: NotificationRateLimits = {
-  // Receipts are bounded to 512 entries, so these remain enforceable abuse
-  // ceilings without throttling ordinary high-volume local agent workflows.
-  dailyIntents: 480,
-  sessionHourlyIntents: 240,
-  targetDailyIntents: 480,
-};
 const GENERIC_MESSAGE = "Tron has an update. Open Tron to view it.";
 const RETRY_DELAYS_MS = [5_000, 20_000, 60_000, 180_000] as const;
 const ACTIVE_OUTCOMES = new Set(["pending", "retryable"]);
@@ -51,6 +38,8 @@ export interface NotificationStatus {
   enabledDeviceCount: number;
   pendingCount: number;
   notifyWhenAskPresented: boolean;
+  notifyWhenFinished: boolean;
+  notifyWhenWaiting: boolean;
   relayOrigin?: string;
   requiresGrantRotation: boolean;
 }
@@ -206,6 +195,8 @@ export interface PushRegistrationInput {
   previewsEnabled: boolean;
   relayOrigin: string;
   notifyWhenAskPresented?: boolean;
+  notifyWhenFinished?: boolean;
+  notifyWhenWaiting?: boolean;
 }
 
 /** True when `previous` is exactly the grant this registration describes and the
@@ -226,6 +217,8 @@ function isUnchangedRegistration(
     && previous.previewsEnabled === input.previewsEnabled
     && previous.active && previous.disabledReason === undefined
     && (input.notifyWhenAskPresented === undefined || document.policy.notifyWhenAskPresented === input.notifyWhenAskPresented)
+    && (input.notifyWhenFinished === undefined || document.policy.notifyWhenFinished === input.notifyWhenFinished)
+    && (input.notifyWhenWaiting === undefined || document.policy.notifyWhenWaiting === input.notifyWhenWaiting)
     && before === JSON.stringify(document);
 }
 
@@ -261,18 +254,25 @@ export class NotificationService {
     private readonly store: NotificationGrantStore,
     private readonly relay: PushRelayClient,
     private readonly now: () => number = Date.now,
-    private readonly rateLimits: NotificationRateLimits = DEFAULT_NOTIFICATION_RATE_LIMITS,
     private readonly inboxChanged: (payload: NotificationInboxChanged) => void = () => {},
     private readonly inboxReadFailed: () => void = () => {},
+    private readonly deliverySignal: (signal: { kind: NotificationKind; outcome: "refused" | "failed" | "rate_limited"; relayReason: string }) => void = () => {},
   ) {}
 
   async initialize(): Promise<void> {
     await this.store.initialize();
+    for (const kind of this.store.takeMigratedLegacyKinds()) {
+      this.reportDelivery({ kind, outcome: "failed", relayReason: "schema_upgrade" });
+    }
     const now = this.now();
     await this.update((document) => retainRevocationAuthority(prune(document, now), now));
     this.timer = setInterval(() => void this.drain(), 2_000);
     this.timer.unref();
     void this.drain();
+  }
+
+  private reportDelivery(signal: { kind: NotificationKind; outcome: "refused" | "failed" | "rate_limited"; relayReason: string }): void {
+    try { this.deliverySignal(signal); } catch { /* observability cannot own admission or delivery */ }
   }
 
   /** Every notification-document write refreshes the advertised grant revision,
@@ -380,6 +380,8 @@ export class NotificationService {
       document.grants = [...document.grants.filter((grant) => grant.deviceId !== input.deviceId && grant.grantId !== input.grantId), next];
       if (document.grants.length > MAXIMUM_PUSH_GRANTS) throw new GatewayError("busy", "Too many notification-enabled devices are registered", true);
       if (input.notifyWhenAskPresented !== undefined) document.policy.notifyWhenAskPresented = input.notifyWhenAskPresented;
+      if (input.notifyWhenFinished !== undefined) document.policy.notifyWhenFinished = input.notifyWhenFinished;
+      if (input.notifyWhenWaiting !== undefined) document.policy.notifyWhenWaiting = input.notifyWhenWaiting;
       return document;
     });
     if (rotated) void this.drain();
@@ -466,6 +468,8 @@ export class NotificationService {
       enabledDeviceCount: active.length,
       pendingCount: document.pending.length,
       notifyWhenAskPresented: document.policy.notifyWhenAskPresented,
+      notifyWhenFinished: document.policy.notifyWhenFinished,
+      notifyWhenWaiting: document.policy.notifyWhenWaiting,
       ...(relayOrigin ? { relayOrigin } : {}),
       requiresGrantRotation: deviceGrant !== undefined && (deviceGrant.relayOrigin !== relayOrigin
         || !deviceGrant.active || deviceGrant.disabledReason === "invalid_token"),
@@ -654,6 +658,7 @@ export class NotificationService {
     kind: NotificationKind;
     message: string;
     title?: string;
+    interruptionLevel?: "time-sensitive";
     route?: { sessionId: string; machineId: string };
     /** Internal admission fence for semantic ask notifications. */
     requireAskPolicy?: boolean;
@@ -674,7 +679,9 @@ export class NotificationService {
       // admission transaction must recheck the canonical policy immediately
       // before appending an intent, otherwise a concurrent disable can still
       // deliver an ask notification.
-      if (input.requireAskPolicy && input.kind === "ask" && !current.policy.notifyWhenAskPresented) {
+      if (input.kind === "ask" && !current.policy.notifyWhenAskPresented
+        || input.kind === "agent_finished" && !current.policy.notifyWhenFinished
+        || input.kind === "waiting" && !current.policy.notifyWhenWaiting) {
         result = "suppressed";
         return undefined;
       }
@@ -687,37 +694,39 @@ export class NotificationService {
         result = "unavailable";
         return undefined;
       }
-      const day = now - 24 * 60 * 60_000;
-      const hour = now - 60 * 60_000;
-      const recent = current.receipts.filter((receipt) => Date.parse(receipt.createdAt) > day);
-      // Rejected and presentation-suppressed receipts never consume delivery
-      // quota or extend a lockout window.
-      const admitted = recent.filter((receipt) => receipt.result !== "rate_limited" && receipt.result !== "suppressed");
-      const targetLimited = grants.some((grant) => admitted
-        .filter((receipt) => receipt.grantIds.includes(grant.grantId)).length >= this.rateLimits.targetDailyIntents);
-      if (admitted.length >= this.rateLimits.dailyIntents
-        || admitted.filter((receipt) => receipt.sessionKey === sessionKey
-          && Date.parse(receipt.createdAt) > hour).length >= this.rateLimits.sessionHourlyIntents
-        || targetLimited || current.pending.length >= MAXIMUM_PENDING_INTENTS) {
+      if (current.pending.length >= MAXIMUM_PENDING_INTENTS) {
         // Rejection is returned synchronously but is not persisted: a rejected
         // attempt owns no delivery and must not displace durable quota authority.
         result = "rate_limited";
+        this.reportDelivery({ kind: input.kind, outcome: "refused", relayReason: "pending_capacity" });
         return undefined;
       }
       const intentId = randomUUID();
+      const expiresAt = iso(now + INTENT_TTL_MS);
       const targets = grants.map((grant) => {
         const exposesModelText = input.kind !== "explicit" || grant.previewsEnabled;
+        const targetMessage = exposesModelText ? message : GENERIC_MESSAGE;
+        const targetTitle = title ? exposesModelText ? title : "Tron" : undefined;
+        const requestId = notificationHash(`${intentId}\0${grant.grantId}`);
+        const relayEnvelope = JSON.stringify({
+          version: 1, kind: "agent_alert", notificationKind: input.kind,
+          ...(input.interruptionLevel ? { interruptionLevel: input.interruptionLevel } : {}),
+          requestId, message: targetMessage,
+          ...(targetTitle ? { title: targetTitle } : {}),
+          ...(route ? { sessionId: route.sessionId, machineId: route.machineId } : {}),
+          expiresAt,
+        });
         return {
-          grantId: grant.grantId,
-          requestId: notificationHash(`${intentId}\0${grant.grantId}`),
-          message: exposesModelText ? message : GENERIC_MESSAGE,
-          ...(title ? { title: exposesModelText ? title : "Tron" } : {}),
+          grantId: grant.grantId, requestId, relayEnvelope,
+          message: targetMessage,
+          ...(targetTitle ? { title: targetTitle } : {}),
+          ...(input.interruptionLevel ? { interruptionLevel: input.interruptionLevel } : {}),
           ...(route ? { route } : {}),
           attempts: 0, nextAttemptAt: iso(now), outcome: "pending" as const,
         };
       });
       current.pending.push({
-        id: intentId, dedupeKey, sessionKey, kind: input.kind, createdAt: iso(now), expiresAt: iso(now + INTENT_TTL_MS), targets,
+        id: intentId, dedupeKey, sessionKey, kind: input.kind, createdAt: iso(now), expiresAt, targets,
       });
       current.receipts.push(receiptFor({ dedupeKey, sessionKey, grantIds: grants.map((grant) => grant.grantId), now, result: "queued" }));
       const inboxExposesModelText = input.kind !== "explicit" || grants.every((grant) => grant.previewsEnabled);
@@ -769,6 +778,7 @@ export class NotificationService {
       kind: "ask",
       title: "Input needed",
       message: "Tron needs your input. Open Tron to respond.",
+      interruptionLevel: "time-sensitive",
       ...(input.machineId ? { route: { sessionId: input.sessionId, machineId: input.machineId } } : {}),
       requireAskPolicy: true,
     });
@@ -792,17 +802,19 @@ export class NotificationService {
         while (cursor < work.length) {
           const item = work[cursor++]!;
           if (!item.grant?.active) { await this.recordOutcome(item.intent.id, item.target.grantId, "permanent_failure"); continue; }
-          let outcome: RelayNotificationOutcome = "retryable";
+          let outcome: RelayNotificationResult = { status: "retryable", reason: "relay_error" };
           try {
             outcome = await this.relay.send({
               grantId: item.grant.grantId, secret: item.grant.secret, requestId: item.target.requestId,
-              message: item.target.message,
-              ...(item.target.title ? { title: item.target.title } : {}),
-              ...(item.target.route ? item.target.route : {}),
-              expiresAt: item.intent.expiresAt,
+              relayEnvelope: item.target.relayEnvelope,
             });
-          } catch { outcome = "retryable"; }
-          await this.recordOutcome(item.intent.id, item.target.grantId, outcome === "rate_limited" ? "retryable" : outcome);
+          } catch { outcome = { status: "retryable", reason: "relay_error" }; }
+          if (outcome.status === "rate_limited") {
+            this.reportDelivery({ kind: item.intent.kind, outcome: "rate_limited", relayReason: outcome.reason ?? "unknown" });
+          } else if (!["accepted_by_apns", "retryable", "in_progress"].includes(outcome.status)) {
+            this.reportDelivery({ kind: item.intent.kind, outcome: "failed", relayReason: outcome.reason ?? outcome.status });
+          }
+          await this.recordOutcome(item.intent.id, item.target.grantId, outcome);
         }
       });
       await Promise.all(workers);
@@ -815,12 +827,14 @@ export class NotificationService {
     } finally { this.draining = false; }
   }
 
-  private async recordOutcome(intentId: string, grantId: string, outcome: RelayNotificationOutcome): Promise<void> {
+  private async recordOutcome(intentId: string, grantId: string, result: RelayNotificationResult | RelayNotificationOutcome): Promise<void> {
+    let outcome: RelayNotificationOutcome = typeof result === "string" ? result : result.status;
     // The relay has already reserved this exact request ID. Poll an active
     // provider attempt through the ordinary bounded retry schedule; replaying
     // the ID cannot create a second APNs request. Other ambiguous results stay
     // terminal because the relay did not certify that ownership state.
-    if (outcome === "rate_limited" || outcome === "in_progress") outcome = "retryable";
+    if (outcome === "in_progress") outcome = "retryable";
+    if (outcome === "rate_limited") outcome = "permanent_failure";
     if (outcome === "invalid_grant") outcome = "invalid_token";
     const now = this.now();
     let inboxDidChange = false;

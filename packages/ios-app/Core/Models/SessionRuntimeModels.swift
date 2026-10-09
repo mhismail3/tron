@@ -727,11 +727,12 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
         package var resourceInvocation: ComposerResourceInvocation? = nil
+        package var semantic: ChatSemanticMetadata? = nil
 
         package init(
             id: String, behavior: Behavior, text: String, attachmentCount: Int,
             photoCount: Int? = nil, fileAttachmentCount: Int? = nil, attachments: [PromptAttachment]? = nil,
-            resourceInvocation: ComposerResourceInvocation? = nil
+            resourceInvocation: ComposerResourceInvocation? = nil, semantic: ChatSemanticMetadata? = nil
         ) {
             self.id = id
             self.behavior = behavior
@@ -741,6 +742,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
             self.fileAttachmentCount = fileAttachmentCount
             self.attachments = attachments
             self.resourceInvocation = resourceInvocation
+            self.semantic = semantic
         }
     }
 
@@ -755,11 +757,13 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
         package var resourceInvocation: ComposerResourceInvocation? = nil
+        package var semantic: ChatSemanticMetadata? = nil
 
         package init(
             id: String, createdAt: String?, behavior: QueuedMessage.Behavior?, text: String,
             attachmentCount: Int, photoCount: Int? = nil, fileAttachmentCount: Int? = nil,
-            attachments: [PromptAttachment]? = nil, resourceInvocation: ComposerResourceInvocation? = nil
+            attachments: [PromptAttachment]? = nil, resourceInvocation: ComposerResourceInvocation? = nil,
+            semantic: ChatSemanticMetadata? = nil
         ) {
             self.id = id
             self.createdAt = createdAt
@@ -770,10 +774,15 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
             self.fileAttachmentCount = fileAttachmentCount
             self.attachments = attachments
             self.resourceInvocation = resourceInvocation
+            self.semantic = semantic
         }
     }
 
-    package var displayedQueuedMessages: [QueuedMessage] { queuedItems }
+    /// Presentation is disposable; hidden inputs still belong to the authoritative
+    /// queue and count for admission/ordering just like any other queued input.
+    package var displayedQueuedMessages: [QueuedMessage] {
+        queuedItems.filter { $0.semantic?.direction != .hiddenInternal }
+    }
 }
 
 package enum SessionSnapshotTranscriptAdmissionPolicy {
@@ -854,11 +863,11 @@ package enum SessionSnapshotTranscriptAdmissionPolicy {
 
 package enum SessionSnapshotQueueAdmissionPolicy {
     package static func admit(_ snapshot: SessionSnapshot) -> Bool {
-        let displayed = snapshot.displayedQueuedMessages
-        guard displayed.count <= SessionSnapshot.maximumQueuedMessages else { return false }
-        let ids = displayed.map(\.id)
+        let queued = snapshot.queuedItems
+        guard queued.count <= SessionSnapshot.maximumQueuedMessages else { return false }
+        let ids = queued.map(\.id)
         guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else { return false }
-        guard displayed.allSatisfy({ message in
+        guard queued.allSatisfy({ message in
             admits(
                 message.resourceInvocation,
                 text: message.text,

@@ -147,11 +147,15 @@ const notifications = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
   Date.now,
-  undefined,
   (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
     event: "notification.inbox.read_failed", source: "notifications",
   }),
+  ({ kind, outcome, relayReason }) => logger.log(
+    outcome === "failed" || outcome === "refused" ? "warning" : "info",
+    `Push notification ${outcome}`,
+    { event: `notification.push.${outcome.replaceAll("_", "-")}`, source: "notifications", kind, outcome, reason: relayReason },
+  ),
 );
 await notifications.initialize();
 startupCheckpoint("notifications");
@@ -335,6 +339,11 @@ const sessions = new RuntimeRegistry({
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
+  ),
+  stopSteeringDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "failed" ? "warning" : "info",
+    `Stop continuation ${diagnostic.outcome}`,
+    { event: "session.stop-steering-continuation", source: "session", ...diagnostic },
   ),
   manualCompactionAdopted: (diagnostic) => logger.log(
     "info",

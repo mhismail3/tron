@@ -410,6 +410,15 @@ identity/generation, intent revision, worker session and exact operation. Cold
 runtime construction checks the reference before loading executable resources;
 missing/contradictory tasks are not recreated.
 
+Finite task Stop (report, explicit control, or deadline) is terminal, unlike
+ordinary chat Stop's queued-steering continuation. Accepted but unconsumed task
+steers are removed with their exact interrupted canonical invocation receipts
+and `task-stopped-before-delivery` error code. They are never delivered or
+replayed after task settlement. A steering preflight already in progress is
+fenced by the sealed/stopping report owner and receives its own refusal receipt.
+`home-task-dispatch.e2e.test.ts` covers these transitions and ordinary-session
+Stop continuation remains covered by `rpc-idle-admission.integration.test.ts`.
+
 Task workers are ordinary sessions and load the same Tron-managed subagent
 provider as ordinary chats; Home itself does not load it. The verified managed
 closure owns provider identity/version, not a user package manifest. In v1,
@@ -418,12 +427,15 @@ termination guarantee for operation-owned work. A provider-supported
 foreground-only contract will lift this. The first-party task extension refuses
 subagent executions (even `async:false`, whose pinned provider configuration can
 force async), revival/mutating management, and the schedule tool. Only proven
-read-only management from the verified `0.76.1-tron.4` provider is admitted:
+read-only management from the verified `0.76.1-tron.5` provider is admitted:
 `guide`, `children.list`, `status`, `list`, `get`, `models`, plus supervisor
 `status`, `pending`, `list`. The same provider's blocking `bg_wait` is allowed
 and is aborted/joined with the operation; `nonBlocking: true` is refused because
 its durable subscription can wake the session after report. Unknown versions or
-owners refuse all subagent, supervisor and `bg_wait` calls. Nested codemode
+owners refuse all subagent, supervisor and `bg_wait` calls. The tron.5 review
+retains tron.4's input schema/read-only actions: only context-only progress and
+child notes plus causing-tool lifecycle attribution changed; no execution route
+was added. A later pin requires a new explicit review before this gate changes. Nested codemode
 calls cross the same gate and explicit report/Stop boundary. Ordinary chats do
 not load this gate. Trusted extensions are not a sandbox:
 if the existing detached-work tracking still sees task-session work after
@@ -749,7 +761,9 @@ imported Registry target is ordinary unless the ledger names it.
 | Model runtime | a session-local view of the Gateway-wide user-scope runtime | one per session runtime |
 | Cache warming | zero requests | unchanged |
 
-The managed pi-subagents loader and admission apply only to ordinary runtimes.
+The managed pi-subagents async loader, producer-bound factories, wake admission
+and completed-load admission apply only to ordinary runtimes (including task
+workers).
 Home is delegate-only through Home tasks, not subagents: `session.resources`
 returns an empty subagent catalog without invoking provider discovery. This
 boundary follows the live runtime's profile through reload, profile replacement

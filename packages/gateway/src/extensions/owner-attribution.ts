@@ -50,6 +50,9 @@ const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>()
 const admittedCallbackOwners = new WeakMap<Function, Extension>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
+export function withExtensionOwner<T>(owner: ExtensionOwner, operation: () => T): T {
+  return ownerStorage.run(owner, operation);
+}
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
 export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
   return invocationStorage.run(context, operation);
@@ -123,15 +126,18 @@ export function extensionOwnerFor(extension: Extension): ExtensionOwner {
   const source = isManagedSubagentExtension(extension) ? MANAGED_SUBAGENTS_SOURCE : extension.path === TRON_ASK_USER_INLINE_PATH
     ? TRON_ASK_USER_SOURCE
     : extension.sourceInfo.source;
-  const identity = `${source}\0${extension.resolvedPath}`;
-  const id = `extension:${createHash("sha256").update(identity).digest("base64url")}`;
-  return { id, title: isManagedSubagentExtension(extension) ? "Subagents" : humanizedDisplayName(extension), source };
+  return producerIdentity(source, extension.resolvedPath, isManagedSubagentExtension(extension) ? "Subagents" : humanizedDisplayName(extension));
+}
+
+export function producerIdentity(source: string, path: string, title: string): ExtensionOwner {
+  const id = `extension:${createHash("sha256").update(`${source}\0${path}`).digest("base64url")}`;
+  return { id, title, source, kind: source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension" };
 }
 
 export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | "extension" {
-  // Canonical receipts carry the build identity captured at managed admission,
-  // rather than retaining a global registry of disposed extension owners.
-  return owner.source === MANAGED_SUBAGENTS_SOURCE ? "subagent" : "extension";
+  // Live admission and canonical receipt decoding supply the classification.
+  // Build provenance is not a second consumer-side capability discriminator.
+  return owner.kind ?? "extension";
 }
 
 /**

@@ -953,7 +953,10 @@ describe("Home task production dispatch", () => {
     let firstSteer: Promise<unknown> | undefined;
     let secondSteer: Promise<unknown> | undefined;
     const gate = new Promise<void>(resolve => { release = resolve; });
+    // Pi consumes steering one-at-a-time. Give both accepted controls a turn
+    // before report seals the task; queued controls after report are undelivered.
     f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }); },
+      fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f);
     const slot = await f.registry.acquire(run.sessionId);
@@ -1073,6 +1076,60 @@ describe("Home task production dispatch", () => {
       expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "stop", disposition: "persisted" }));
       evidence.push({ case: `task-preflight-stop-${owner}-${surface}`, providerCalls, intent: result.stopIntent, evidence: result.terminalEvidence });
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
+  }, 20_000);
+
+  // Failure mode: ordinary Stop recovery replays accepted steering after a
+  // finite task is sealed, or removes it without exact not-delivered receipts.
+  it.each(["taskRPC", "sessionStop", "deadline"] as const)("settles queued task steering without delivery or a new turn on %s", async surface => {
+    const f = await fixture();
+    let entered = false;
+    let calls = 0;
+    let release!: () => void;
+    let expire: (() => void) | undefined;
+    const originalTimer = globalThis.setTimeout;
+    if (surface === "deadline") {
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+        if (ms === OWNED_OPERATION_DEADLINE_MS) expire = callback;
+        return originalTimer(callback, ms, ...args);
+      }) as typeof setTimeout);
+    }
+    f.faux.setResponses([(_context, options) => new Promise(resolve => {
+      entered = true; calls += 1;
+      const finish = () => {
+        options?.signal?.removeEventListener("abort", finish);
+        resolve(fauxAssistantMessage("stopped provider"));
+      };
+      release = finish;
+      options?.signal?.addEventListener("abort", finish, { once: true });
+    }), () => { calls += 1; return fauxAssistantMessage("must not continue"); }]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    try {
+      await waitFor(() => entered, "task provider running before queued Stop");
+      const first = await slot.steerHomeTask({ taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 }, "not delivered Home steer");
+      const second = await slot.prompt("not delivered maintainer steer", [], "steer");
+      expect(slot.snapshot().queuedItems.map(item => item.id)).toEqual([first.operationId, second.operationId]);
+      if (surface === "taskRPC") await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 });
+      else if (surface === "sessionStop") await slot.abort("agent", run.operationId);
+      else { expect(expire).toBeDefined(); expire!(); }
+      const result = await run.completion;
+      expect(result.terminalEvidence?.outcome).toBe(surface === "deadline" ? "limited" : "interrupted");
+      const entries = slot.canonicalSessionEntries();
+      const terminals = entries.filter(entry => entry.type === "custom" && entry.customType === "tron.chat-invocation.v1"
+        && (entry.data as any)?.receiptKind === "terminal").map(entry => (entry as any).data);
+      expect(terminals.filter(row => row.operationId === run.operationId)).toHaveLength(1);
+      expect(terminals.find(row => row.operationId === run.operationId)?.lifecycle).toBe("interrupted");
+      for (const operationId of [first.operationId, second.operationId]) {
+        expect(terminals.filter(row => row.operationId === operationId)).toEqual([expect.objectContaining({
+          operationId, sessionId: slot.id, lifecycle: "interrupted", errorCode: "task-stopped-before-delivery",
+        })]);
+      }
+      expect(JSON.stringify(entries.filter(entry => entry.type === "message" && entry.message.role === "user"))).not.toContain("not delivered");
+      expect(slot.snapshot().queuedItems).toEqual([]);
+      expect(slot.isBusy).toBe(false);
+      expect(calls).toBe(1);
+      evidence.push({ case: `queued-task-stop-${surface}`, providerCalls: calls, terminals, noSteeringDelivered: true });
+    } finally { release?.(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
 
   it("refuses steering whose SDK preflight resumes after an immutable report", async () => {
@@ -1217,7 +1274,7 @@ describe("Home task production dispatch", () => {
     { label: "resume", version: "0.76.1-tron.4", input: { action: "resume", id: "run" }, allowed: false },
     { label: "scheduled", version: "0.76.1-tron.4", input: { action: "schedule.create", at: "later" }, allowed: false },
     { label: "unmanaged-read-only", version: "0.76.1-tron.4", input: { action: "guide" }, allowed: false },
-    { label: "unknown-version", version: "0.76.1-tron.5", input: { action: "guide" }, allowed: false },
+    { label: "unknown-version", version: "0.76.1-tron.6", input: { action: "guide" }, allowed: false },
   ])("gates task producer $label at the actual tool-call boundary", async ({ version, input, allowed, label }) => {
     const f = await fixture(version);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("subagent", input)], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
@@ -1230,7 +1287,7 @@ describe("Home task production dispatch", () => {
   it.each([
     { version: "0.76.1-tron.4", input: { id: "run", nonBlocking: true }, label: "subscription" },
     { version: "0.76.1-tron.4", input: { id: "run", nonBlocking: false }, label: "unmanaged known-version wait" },
-    { version: "0.76.1-tron.5", input: { id: "run", nonBlocking: false }, label: "unknown wait provider" },
+    { version: "0.76.1-tron.6", input: { id: "run", nonBlocking: false }, label: "unknown wait provider" },
   ])("refuses $label before bg_wait can install later work", async ({ version, input, label }) => {
     const f = await fixture(version);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bg_wait", input)], { stopReason: "toolUse" }), fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);

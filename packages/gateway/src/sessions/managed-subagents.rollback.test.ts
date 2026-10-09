@@ -11,6 +11,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import { GatewayError } from "../errors.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
@@ -131,10 +132,10 @@ async function copyPayload(payload: string): Promise<void> {
 // Valid closure bytes with an invalid manifest entry exercise the installer and
 // both admission paths. Installed-file tampering would only test digest refusal.
 it.skipIf(Boolean(leg)).each([
-  { entries: ["../outside.js"], reason: "extension entry escapes the verified root" },
-  { entries: ["./missing.js"], reason: "extension entry is missing or not a regular file inside the verified root" },
-  { entries: [], reason: "extension entries are absent or invalid" },
-])("refuses verified builds with invalid extension entries: $entries", async ({ entries, reason }) => {
+  { entries: ["../outside.js"] },
+  { entries: ["./missing.js"] },
+  { entries: [] },
+])("refuses verified builds with invalid extension entries: $entries", async ({ entries }) => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagents-invalid-entry-"));
   try {
     const payload = join(root, "payload");
@@ -167,7 +168,7 @@ it.skipIf(Boolean(leg)).each([
     await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "src/sessions/managed-subagents.rollback.test.ts", "--maxWorkers=2"], {
       cwd: payload, timeout: 15_000, maxBuffer: 1024 * 1024,
       env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
-        TRON_SUBAGENTS_ROLLBACK_LEG: "invalid", TRON_SUBAGENTS_ROLLBACK_FIXTURE: root, TRON_SUBAGENTS_ROLLBACK_REJECTION: reason,
+        TRON_SUBAGENTS_ROLLBACK_LEG: "invalid", TRON_SUBAGENTS_ROLLBACK_FIXTURE: root, TRON_SUBAGENTS_ROLLBACK_INVALID_ENTRY: "1",
         TRON_TEST_PROCESS_OWNER: root,
         TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
         NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
@@ -206,11 +207,12 @@ async function runLeg(): Promise<void> {
     expect(receipt).toMatchObject({ version: pin.version, sha512: pin.closure.sha512, forkCommit: pin.fork.commit });
     expect(installedRoot).toBe(join(await realpath(tronHome), "internal", "pi-subagents", pin.version));
     facts.receipt = receipt;
-    if (process.env.TRON_SUBAGENTS_ROLLBACK_REJECTION) {
-      const reason = process.env.TRON_SUBAGENTS_ROLLBACK_REJECTION;
+    if (process.env.TRON_SUBAGENTS_ROLLBACK_INVALID_ENTRY) {
       const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-      expect(() => managedSubagents.loaderOptions(settings)).toThrow(reason);
-      expect(() => managedSubagents.admit([])).toThrow(reason);
+      const before = await retainedFiles(installedRoot);
+      await expect(managedSubagents.loaderOptions(settings)).rejects.toMatchObject({ code: "conflict" });
+      expect(() => managedSubagents.admit([])).toThrow(GatewayError);
+      expect(await retainedFiles(installedRoot)).toEqual(before);
       facts.passed = true;
       return;
     }

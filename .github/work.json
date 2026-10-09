@@ -324,7 +324,8 @@
           "scripts/tron-ios-device-bind.test.mjs",
           "config/PushService.xcconfig"
         ],
-        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi"
+        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi",
+        "exclusiveGroup": "gateway-source-tree"
       },
       {
         "name": "pi-subagents",
@@ -336,7 +337,8 @@
           "packages/gateway/scripts/*pi-subagents*",
           ".node-version"
         ],
-        "command": "cd packages/gateway && npm run check:pi-subagents && npm run test:pi-subagents-scripts"
+        "command": "cd packages/gateway && npm run check:pi-subagents && npm run test:pi-subagents-scripts",
+        "exclusiveGroup": "gateway-source-tree"
       },
       {
         "name": "gateway-scale",
@@ -358,7 +360,8 @@
           "packages/gateway/test-support/connector-credentials.ts",
           "packages/gateway/vitest.scale.config.ts"
         ],
-        "command": "cd packages/gateway && npx vitest run --config vitest.scale.config.ts --maxWorkers=2"
+        "command": "cd packages/gateway && npx vitest run --config vitest.scale.config.ts --maxWorkers=2",
+        "exclusiveGroup": "gateway-source-tree"
       },
       {
         "name": "push-relay",
@@ -395,7 +398,13 @@
           "scripts/verify-ci-toolchain.sh",
           "scripts/install-ci-tools.sh"
         ],
-        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && python3 scripts/ios_verify_test_selection.py --merge-base {merge_base} {paths}"
+        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && python3 scripts/ios_verify_test_selection.py --merge-base {merge_base} {paths}",
+        "exclusiveGroup": "gateway-source-tree",
+        "exclusivePaths": [
+          "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift",
+          "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
+          "scripts/ios-gateway-fault-proxy.mjs"
+        ]
       },
       {
         "name": "work-selector-tests",
@@ -423,7 +432,8 @@
           "scripts/verify-ci-toolchain.sh",
           "scripts/install-ci-tools.sh"
         ],
-        "command": "scripts/generate-xcode-project mac && cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData && xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData -only-testing:TronMacTests"
+        "command": "scripts/generate-xcode-project mac && cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData && xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData -only-testing:TronMacTests",
+        "exclusiveGroup": "gateway-source-tree"
       },
       {
         "name": "mac-scripts",
@@ -442,7 +452,42 @@
           "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
+        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
+      },
+      {
+        "name": "mac-bundle-rebuild",
+        "paths": [
+          "packages/mac-app/scripts/bundle-gateway.sh",
+          "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",
+          "packages/mac-app/scripts/stage-gateway-app.sh",
+          "packages/mac-app/scripts/ensure-gateway-bundle.sh",
+          "packages/mac-app/scripts/verify-gateway-payload.sh",
+          "packages/mac-app/scripts/tron-gateway-launcher.c",
+          "packages/mac-app/scripts/verify-macho-architectures.sh",
+          "packages/mac-app/Sources/Resources/Library/LoginItems/**",
+          "packages/gateway/package.json",
+          "packages/gateway/package-lock.json",
+          "packages/gateway/pi-sdk-baseline.json",
+          "packages/gateway/pi-subagents-pin.json",
+          "packages/gateway/artifacts/pi-subagents-*",
+          "packages/gateway/scripts/check-pi-sdk.mjs",
+          "packages/gateway/scripts/check-pi-subagents.mjs",
+          "packages/gateway/scripts/install-pi-subagents.mjs",
+          "packages/gateway/scripts/ensure-node-pty-helper.mjs",
+          "scripts/hash-npm-runtime.py",
+          "scripts/gateway-install-inputs.mjs",
+          "scripts/gateway-payload-deploy.mjs",
+          "scripts/install-ci-tools.sh",
+          "scripts/validate-push-service-config.sh",
+          "scripts/verify-gateway-protocol-contract.py",
+          "scripts/gateway_protocol_contract.py",
+          "config/GatewayProtocol.json",
+          "config/PushService.xcconfig",
+          "config/ci-toolchain.env",
+          ".node-version"
+        ],
+        "command": "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",
+        "exclusiveGroup": "gateway-source-tree"
       },
       {
         "name": "mac-native-computer-control",
@@ -623,7 +668,8 @@
   },
   "land": {
     "requiredChecks": [
-      "policy"
+      "policy",
+      "gateway"
     ],
     "reviewStatus": "In review",
     "doneStatus": "Done",

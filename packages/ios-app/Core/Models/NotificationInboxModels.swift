@@ -4,7 +4,7 @@ import Foundation
 // bounds. The inbox coordinator that presents them stays in Notifications.
 
 package enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
-    case explicit, ask
+    case explicit, ask, waiting
     case agentFinished = "agent_finished"
 
     package var label: String {
@@ -12,6 +12,7 @@ package enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
         case .explicit: "Agent alert"
         case .ask: "Input needed"
         case .agentFinished: "Agent finished"
+        case .waiting: "Waiting on background work"
         }
     }
 
@@ -21,6 +22,7 @@ package enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
         case .ask: "questionmark.bubble.fill"
         // This category includes errors and interruptions, not just success.
         case .agentFinished: "stop.circle.fill"
+        case .waiting: "hourglass"
         }
     }
 }

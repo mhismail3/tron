@@ -27,6 +27,13 @@ describe("closed APNs payload", () => {
     expect(body).not.toContain("deviceToken");
   });
 
+  test("passes the exact Time Sensitive interruption level through to APNs", async () => {
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    await sendToApns(env as unknown as Env, { ...notification, interruptionLevel: "time-sensitive" }, target);
+    expect(JSON.parse(String(providerFetch.mock.calls[0]![1]?.body)).aps["interruption-level"]).toBe("time-sensitive");
+  });
+
   test("projects the product title and exact chat route for an agent completion", async () => {
     const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", providerFetch);

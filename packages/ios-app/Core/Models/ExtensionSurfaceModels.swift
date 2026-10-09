@@ -251,18 +251,29 @@ package struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// Gateway-admitted capability classification, independent of package provenance.
+package enum ExtensionProviderKind: String, Codable, Hashable, Sendable {
+    case subagent, `extension`, unknown
+    package init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
 package struct ExtensionOwner: Codable, Hashable, Sendable {
     package let id: String
     package let title: String
     package let source: String
+    package let kind: ExtensionProviderKind?
     package init(
         id: String,
         title: String,
-        source: String
+        source: String,
+        kind: ExtensionProviderKind? = nil
     ) {
         self.id = id
         self.title = title
         self.source = source
+        self.kind = kind
     }
 
 }
@@ -441,10 +452,12 @@ package struct ExtensionSurface: Codable, Hashable, Identifiable, Sendable {
     package struct Provenance: Codable, Hashable, Sendable {
         package var source: String?
         package var path: String?
+        package var kind: ExtensionProviderKind?
 
-        package init(source: String? = nil, path: String? = nil) {
+        package init(source: String? = nil, path: String? = nil, kind: ExtensionProviderKind? = nil) {
             self.source = source
             self.path = path
+            self.kind = kind
         }
     }
     package let id: String

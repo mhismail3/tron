@@ -37,9 +37,9 @@ Commands:
   work start <issue> [--session <id>]
                                     Claim a Ready issue: remote branch, Project
                                     status, claim comment, and its worktree
-  work verify [--post] [--evidence-manifest <json>]
-                                    Run diff-scoped checks and write a head-bound
-                                    receipt; optionally attach reviewed UI media.
+  work verify [--jobs N] [--post] [--evidence-manifest <json>]
+                                    Run diff-scoped checks concurrently (1 = sequential)
+                                    and write a head-bound receipt; attach reviewed UI media.
                                     --post publishes private evidence and status
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: needs-you,

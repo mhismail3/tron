@@ -1,9 +1,9 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-/** Reviewed provider contract at 57efaf57c8fef5e8908da1edd850875b4e41d351.
+/** Reviewed provider contract at a0ddb64531df574dedcda1686a7d8d2bb62bfbb2.
  * async:false is NOT a foreground guarantee: forceTopLevelAsync overrides it.
  * Do not enable execution until the provider has an operation-owned contract. */
-export const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.4";
+export const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.5";
 export type HomeTaskProducerRefusal = "subagent-execution" | "subagent-mutation" | "unverified-provider" | "schedule" | "wake-subscription";
 const READ_ONLY_ACTIONS = new Set(["guide", "children.list", "status", "list", "get", "models"]);
 

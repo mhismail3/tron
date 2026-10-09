@@ -55,6 +55,7 @@ import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
   ChatOrigin,
+  ChatSemanticMetadata,
   CommandDetail,
   CommandInfo,
   ExtensionRunActivity,
@@ -121,7 +122,8 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -166,6 +168,9 @@ import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from 
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
 const canonicalAppendOwner = Symbol("canonical-append-owner");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
+// Disposable exact child subscriptions travel with the admitted read, never
+// with canonical activity data or a separate slot-wide child registry.
+const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
 
 function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
   Object.defineProperty(value, EMBEDDED_LIFECYCLE_ARTIFACT, { configurable: false, enumerable: false, value: true, writable: false });
@@ -196,6 +201,8 @@ type RuntimeQueuedMessage = QueuedMessageState & {
   resourceInvocation?: ResourceInvocation;
   attachmentEnvelope: string;
   images: ImageContent[];
+  inputSource: "interactive" | "rpc" | "extension";
+  commandId?: string;
   ordinal: number;
 };
 
@@ -215,6 +222,8 @@ type PromptQueueDisplay = {
   photoCount?: number;
   fileAttachmentCount?: number;
   attachments?: QueuedMessageState["attachments"];
+  inputSource?: "interactive" | "rpc" | "extension";
+  commandId?: string;
 };
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
@@ -228,6 +237,7 @@ type HomeMaterializationAuthority = Readonly<{
 }>;
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
+  redelivery?: boolean;
   resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
 };
 
@@ -259,6 +269,7 @@ type PendingContextMessage = {
   targetEntryId?: string;
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
+  managedMessage?: ManagedMessageCapture;
   /** Live presentation owner bound to the triggered canonical entry at message_end. */
   toolSegmentOwnerId?: string;
 };
@@ -269,6 +280,7 @@ type PendingExtensionCanonicalEffect =
       targetEntryId: string;
       delivery: "stored" | "triggeredTurn";
       origin?: ExtensionToolOrigin;
+      managedMessage?: ManagedMessageCapture;
     }
   | {
       kind: "notification";
@@ -439,7 +451,8 @@ interface RuntimeSlotHooks {
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
-interface PromptOwnership {
+interface AutomationPromptOwnership {
+  kind?: never;
   operationId: string;
   taskFence?: import("../home/home-task-dispatcher.js").HomeTaskControlRequest;
   /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
@@ -448,6 +461,17 @@ interface PromptOwnership {
   onAdmitted?: (invocationId: string) => void;
   onTerminal: (terminal: OwnedOperationTerminal) => Promise<void> | void;
 }
+
+type PromptOwnership = AutomationPromptOwnership | {
+  kind: "subagentWake";
+  taskFence?: never;
+  expandPromptTemplates: boolean;
+  operationId: string;
+  origin: ChatOrigin;
+  signal?: never;
+  onAdmitted?: never;
+  onTerminal?: never;
+};
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
@@ -494,6 +518,7 @@ export interface RuntimeSlotDependencies {
   runtimeDisposalTimedOut?: (graceMs: number) => void;
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
+  stopSteeringDiagnostic?: (diagnostic: { sessionId: string; queuedSteerCount: number; outcome: "started" | "completed" | "stopped" | "failed" | "unknown" }) => void;
   manualCompactionAdopted?: (diagnostic: { sessionId: string; operationId: string; reason: "manual" | "threshold" | "overflow" }) => void;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
@@ -641,6 +666,11 @@ export class RuntimeSlot {
    * before publication never was one. */
   private published = false;
   private readonly stateChangeWaiters = new Set<() => void>();
+  private readonly stopSteeringRecoveryIDs = new Set<string>();
+  private readonly sdkQueuedSteeringIDs = new Set<string>();
+  private readonly stopRecoveryHoldIDs = new Set<string>();
+  private stopRecoveryQueueClosed = false;
+  private stopSteeringContinuation: { operationId?: string; queuedSteerCount: number } | undefined;
   private retainedLeaseCount = 0;
   private readonly ownedTerminalObservers = new Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
@@ -663,6 +693,7 @@ export class RuntimeSlot {
   /** Only an admitted agent_start may own a terminal candidate. Later SDK
    * progress can reconstruct a projection even for a drain-rejected run. */
   private notificationRun: { assistant?: AgentMessage } | undefined;
+  private waitingNotificationEpisode: string | undefined;
   /** One foreground-observation decision is shared by durable attention and
    * automatic completion notification policy for the same canonical entry. */
   private readonly completionDispositions = new Map<string, boolean>();
@@ -746,6 +777,8 @@ export class RuntimeSlot {
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
+    children: Map<string, FSWatcher>;
+    onChange: (eventType: string, filename: string | Buffer | null) => void;
     timer: NodeJS.Timeout | undefined;
     asyncDir: string;
     readRetries: number;
@@ -1085,7 +1118,7 @@ export class RuntimeSlot {
         }
         await this.persistCanonicalCustomEntry(
           CONTEXT_DELIVERY_RECEIPT_TYPE,
-          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin)),
+          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin, effect.delivery === "stored" ? effect.managedMessage?.wakeOperationId : undefined)),
           candidate.id,
         );
       }
@@ -1786,9 +1819,15 @@ export class RuntimeSlot {
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
       // Tron modules plus tron-home. An ordinary runtime is byte-for-byte what
       // it was: the Home branch changes nothing it would have built.
+      // Home delegates only through Home tasks, never through managed pi-subagents.
+      const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
+      const settingsManager = home ? undefined : SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
+        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
       const extensionFactories = home
         ? homeModuleFactories(tronModuleHost)
         : [
+            ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
               if (!operationId || !this.dependencies.mcpAuth) {
@@ -1807,10 +1846,6 @@ export class RuntimeSlot {
                 taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
             }) }] : []),
           ];
-      // Home delegates only through Home tasks, never through managed pi-subagents.
-      const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
-      const settingsManager = home ? undefined : SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
-      const managedLoaderOptions = settingsManager ? managedSubagents?.loaderOptions(settingsManager) : undefined;
       const services = await createAgentSessionServices({
         ...(settingsManager ? { settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager } : {}),
         cwd: trust.cwd,
@@ -1843,7 +1878,7 @@ export class RuntimeSlot {
       // mutations keep their canonical owner, never the filtered projection.
       if (settingsManager) {
         services.settingsManager = settingsManager;
-        managedSubagents?.reportIgnoredPackages(settingsManager);
+        await managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
       }
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
@@ -2028,8 +2063,10 @@ export class RuntimeSlot {
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
+    if (this.liveProfile() === "ordinary") {
+      await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
+    }
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
-    if (this.liveProfile() === "ordinary") this.dependencies.managedSubagents?.reportIgnoredPackages(session.settingsManager);
   }
 
   /** Pi's replacement hooks for each runtime this slot constructs. */
@@ -3148,6 +3185,8 @@ export class RuntimeSlot {
     const notifications = this.dependencies.notifications;
     if (!notifications) return;
     try {
+      const pendingBackgroundProcesses = this.pendingBackgroundProcesses();
+      const waitingEpisode = pendingBackgroundProcesses.join("\0");
       await notifyTronAgentTerminal({
         sessionId: this.id,
         sourceId,
@@ -3155,13 +3194,26 @@ export class RuntimeSlot {
         sessionTitle: this.notificationTitle(),
         ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
         observed: this.completionObserved(sourceId),
+        pendingBackgroundWork: pendingBackgroundProcesses.length,
+        waitingEpisode: waitingEpisode !== "" && waitingEpisode === this.waitingNotificationEpisode,
         suppressAutomatic: (input) => notifications.suppressAutomatic(input),
         enqueue: (input) => notifications.enqueue(input),
       });
+      this.waitingNotificationEpisode = waitingEpisode || undefined;
     } catch {
       // Push admission is best-effort and must never fail canonical settlement.
       this.emit("session.diagnostic", { code: "terminal-notification-failed" });
     }
+  }
+
+  /** The process activity projection owns live delegated work that may wake
+   * this session; paused and recent history are not pending work. */
+  private pendingBackgroundProcesses(): string[] {
+    return [...this.extensionActivities.values()]
+      .filter((activity) => this.extensionActivityOwnsLiveWork(activity)
+        && ["asynchronous", "workflow"].includes(activity.mode?.toLowerCase() ?? ""))
+      .map((activity) => `${activity.toolCallId}:${activity.runId ?? activity.activityId ?? activity.id}`)
+      .sort();
   }
 
   private takeAgentTerminal(operationId: string | undefined): { sourceId: string; outcome: AgentTerminalOutcome } | undefined {
@@ -4042,6 +4094,16 @@ export class RuntimeSlot {
         const terminalErrorCode = terminalLifecycle === "interrupted"
           ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
+        if (this.stopSteeringContinuation) {
+          this.dependencies.stopSteeringDiagnostic?.({
+            sessionId: this.id,
+            queuedSteerCount: this.stopSteeringContinuation.queuedSteerCount,
+            outcome: terminalLifecycle === "completed" ? "completed"
+              : terminalLifecycle === "interrupted" ? "stopped"
+                : terminalLifecycle === "failed" ? "failed" : "unknown",
+          });
+          this.stopSteeringContinuation = undefined;
+        }
         // Observation admission is issued only after the exact terminal receipt
         // path below settles; before that point canonical durability is still
         // provisional and must not be projected as memory coverage.
@@ -4357,6 +4419,7 @@ export class RuntimeSlot {
           // repeated text and crossing user callbacks cannot impersonate it.
           if (this.pendingPrompt && this.pendingPromptMessage === undefined) {
             this.pendingPromptMessage = event.message;
+            this.consumeStopSteeringRecoveryOwner(this.pendingPrompt.id);
           } else {
             // Pi removes steering from its string queue and emits queue_update
             // before this callback. Preserve that exact queue operation across
@@ -4415,6 +4478,7 @@ export class RuntimeSlot {
               });
               if (dequeuedSteeringOperationID) {
                 this.consumedSteeringOperationIDs.add(dequeuedSteeringOperationID);
+                this.consumeStopSteeringRecoveryOwner(dequeuedSteeringOperationID);
               }
             }
           }
@@ -4438,7 +4502,10 @@ export class RuntimeSlot {
           const storedTarget = latest && (latest.type === "custom_message"
               || (latest.type === "message" && latest.message.role === "custom"))
             ? latest.id : undefined;
-          const origin = this.currentExtensionContextOrigin();
+          const managedMessage = capturedManagedMessage(event.message.content);
+          const origin = isManagedProducerContent(event.message.content)
+            ? managedMessage?.origin
+            : this.currentExtensionContextOrigin();
           const toolSegmentOwnerId = event.message.display
             ? (storedTarget ? (this.presentationIDs.get(storedTarget) ?? storedTarget) : randomUUID())
             : undefined;
@@ -4451,6 +4518,7 @@ export class RuntimeSlot {
             delivery: storedTarget ? "stored" : "triggeredTurn",
             ...(storedTarget ? { targetEntryId: storedTarget } : {}),
             ...(origin ? { origin } : {}),
+            ...(managedMessage ? { managedMessage } : {}),
             ...(toolSegmentOwnerId ? { toolSegmentOwnerId } : {}),
           });
         }
@@ -4726,6 +4794,7 @@ export class RuntimeSlot {
               targetEntryId: pending.targetEntryId,
               delivery: pending.delivery,
               ...(pending.origin ? { origin: pending.origin } : {}),
+              ...(pending.managedMessage ? { managedMessage: pending.managedMessage } : {}),
             });
           } else if (pending) {
             queueMicrotask(() => {
@@ -4746,6 +4815,7 @@ export class RuntimeSlot {
                 targetEntryId: candidate.id,
                 delivery: pending.delivery,
                 ...(pending.origin ? { origin: pending.origin } : {}),
+                ...(pending.managedMessage ? { managedMessage: pending.managedMessage } : {}),
               });
             });
           }
@@ -4932,14 +5002,99 @@ export class RuntimeSlot {
     }
   }
 
-  private async readExtensionStatusArtifact(asyncDir: string): Promise<Record<string, unknown> | undefined> {
+  /** Released workflows keep execution details in their detached children's
+   * status, not the workflow edge. Join only exact reciprocal producer edges;
+   * root identity/order remains authoritative and every read is disposable. */
+  private async readWorkflowChildDetails(asyncDir: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (status.mode !== "workflow" || typeof status.runId !== "string" || !Array.isArray(status.steps)) return status;
+    const directories: string[] = [];
+    let unavailableChildren = 0;
+    const steps: unknown[] = [];
+    for (const value of status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) { steps.push(value); continue; }
+      const edge = value as Record<string, unknown>;
+      steps.push(edge);
+      if (edge.async !== true || typeof edge.runId !== "string" || !edge.runId
+        || Buffer.byteLength(edge.runId) > 256 || /[\\/\0]/u.test(edge.runId)
+        || typeof edge.workflowKey !== "string" || typeof edge.sessionOwnerId !== "string"
+        || typeof edge.sessionFile !== "string") continue;
+      const directory = join(dirname(asyncDir), edge.runId);
+      if (dirname(directory) !== dirname(asyncDir) || directory === asyncDir) continue;
+      // Observation follows the root edge, never the optional read result.
+      // Even an absent directory must remain subscribed for its first status.
+      directories.push(directory);
+      unavailableChildren += 1;
+      const child = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
+      if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
+        || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
+        || child.mode !== "single" || !Array.isArray(child.steps) || child.steps.length !== 1) continue;
+      const detail = child.steps[0];
+      if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
+      const source = detail as Record<string, unknown>;
+      if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
+        || !this.validateChildSessionFile(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
+      unavailableChildren -= 1;
+      // Do not copy child identity, declarations or control authority. Only
+      // provider-authored display facts cross this already verified edge.
+      const projected = { ...edge };
+      for (const key of ["model", "thinking", "currentTool", "currentPath", "lastActivityAt", "currentToolStartedAt",
+        "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
+        if (source[key] !== undefined) projected[key] = source[key];
+      }
+      // The released single-child snapshot omits a zero total until its first
+      // tool event; an explicitly empty recent-tools list proves that zero.
+      if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
+      steps[steps.length - 1] = projected;
+    }
+    const omission = status.lifecycleOmissions as { children?: number; byteLimitExceeded?: boolean } | undefined;
+    const omittedChildren = typeof omission?.children === "number" && Number.isSafeInteger(omission.children) && omission.children >= 0
+      ? omission.children : 0;
+    return Object.assign({ ...status, steps: [...steps, ...status.steps.slice(MAX_EXTENSION_RUN_CHILDREN)],
+      ...(unavailableChildren > 0 ? { lifecycleOmissions: {
+        children: omittedChildren + unavailableChildren,
+        byteLimitExceeded: omission?.byteLimitExceeded === true,
+      } } : {}),
+    }, { [WORKFLOW_CHILD_ARTIFACT_DIRECTORIES]: directories });
+  }
+
+  private syncWorkflowChildArtifactWatchers(toolCallId: string, value: Record<string, unknown>): void {
+    const tracked = this.extensionActivityWatchers.get(toolCallId);
+    if (!tracked) return;
+    const directories = (value as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_ARTIFACT_DIRECTORIES];
+    const next = new Set(Array.isArray(directories) ? directories as string[] : []);
+    for (const [directory, watcher] of tracked.children) if (!next.has(directory)) {
+      watcher.close();
+      tracked.children.delete(directory);
+    }
+    for (const directory of next) if (!tracked.children.has(directory)) {
+      try {
+        // Observe from the admitted parent's tree so a not-yet-created child
+        // directory and later atomic status writes share one edge subscription.
+        const childName = basename(directory);
+        const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
+          const path = filename?.toString();
+          if (path === undefined || path === childName || path === join(childName, "status.json")) {
+            tracked.onChange(eventType, "status.json");
+          }
+        });
+        // Failure stays local to this child's observation. Neither the root
+        // watcher nor its other authoritative edges are retired by that error.
+        watcher.on("error", () => tracked.onChange("change", "status.json"));
+        tracked.children.set(directory, watcher);
+      } catch {
+        // Optional observation cannot refuse otherwise valid root evidence.
+      }
+    }
+  }
+
+  private async readExtensionStatusArtifact(asyncDir: string, includeWorkflowChildren = true): Promise<Record<string, unknown> | undefined> {
     if (!this.extensionArtifactPathAllowed(asyncDir)) return undefined;
     const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
     if (!opened) return undefined;
     try {
-      // Modern status files are admitted from a small first-property read. The
-      // larger legacy read below occurs only after the first key is proven not
-      // to be lifecycleProjection, preserving the old header-less fallback.
+      // The compact header admits parent/run ownership. Native children and
+      // details come from the full bounded status, not the widget's eight-row
+      // summary. Keep the header as bounded lifecycle evidence on overflow.
       const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
       const { bytesRead: headerBytesRead } = await opened.handle.read(headerBuffer, 0, headerBuffer.length, 0);
       const headerBytes = headerBuffer.subarray(0, headerBytesRead);
@@ -4949,11 +5104,21 @@ export class RuntimeSlot {
         if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
         // The producer retains the original parent session identity across resumes.
         // Exact run/tool/path ownership does not authorize a header copied from another session.
-        if (projection.sessionId !== undefined && projection.sessionId !== this.id) {
+        const parentIdentity = this.sessionFile ? resolve(this.sessionFile) : this.id;
+        if (projection.sessionId !== undefined && projection.sessionId !== parentIdentity) {
           throw new ForeignExtensionArtifactSessionError();
         }
-        const projected = lifecycleProjectionArtifact(projection);
-        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
+        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+        const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+        const full: unknown = bytesRead <= MAX_EXTENSION_ARTIFACT_BYTES ? JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")) : undefined;
+        if (full !== undefined && (!full || typeof full !== "object" || Array.isArray(full))) throw new SyntaxError("Invalid full extension status");
+        const status = full as Record<string, unknown> | undefined;
+        if (status && (status.runId !== projection.runId
+          || (projection.toolCallId !== undefined && status.toolCallId !== projection.toolCallId))) throw new ForeignExtensionArtifactSessionError();
+        const projected = status ? { ...status, lifecycleArtifactVersion: EXTENSION_LIFECYCLE_ARTIFACT_VERSION }
+          : lifecycleProjectionArtifact({ ...projection, omitted: { ...projection.omitted, byteLimitExceeded: true } });
+        const detailed = includeWorkflowChildren ? await this.readWorkflowChildDetails(asyncDir, projected) : projected;
+        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, detailed, opened.directory);
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
         return markEmbeddedLifecycleArtifact(withProof);
       }
@@ -5360,6 +5525,10 @@ export class RuntimeSlot {
         return "transient";
       }
       const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
+      if (isEmbeddedLifecycleArtifact(rawValue) && raw.toolCallId !== undefined && raw.toolCallId !== boundToolCallId) {
+        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+        return "rejected";
+      }
       let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
         ? ([boundToolCallId, this.extensionActivities.get(boundToolCallId)] as const)
         : matchingEntries[0];
@@ -5536,6 +5705,7 @@ export class RuntimeSlot {
     if (!tracked) return;
     if (tracked.timer) clearTimeout(tracked.timer);
     tracked.watcher.close();
+    for (const watcher of tracked.children.values()) watcher.close();
     this.extensionActivityWatchers.delete(toolCallId);
   }
 
@@ -5761,6 +5931,7 @@ export class RuntimeSlot {
           return;
         }
       }
+      this.syncWorkflowChildArtifactWatchers(toolCallId, raw);
       const normalized = normalizeExtensionArtifact(raw, {
         now: new Date().toISOString(),
         fallbackStartedAt: previous.startedAt,
@@ -5934,7 +6105,7 @@ export class RuntimeSlot {
     }
     this.stopExtensionActivityWatcher(toolCallId);
     try {
-      const watcher = watch(realAsyncDir, (_eventType, filename) => {
+      const onChange = (_eventType: string, filename: string | Buffer | null) => {
         if (filename !== null && filename.toString() !== "status.json") return;
         const tracked = this.extensionActivityWatchers.get(toolCallId);
         if (!tracked) return;
@@ -5946,10 +6117,13 @@ export class RuntimeSlot {
           void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
         }, 50);
         tracked.timer.unref();
-      });
+      };
+      const watcher = watch(realAsyncDir, onChange);
       watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
       this.extensionActivityWatchers.set(toolCallId, {
         watcher,
+        children: new Map(),
+        onChange,
         timer: undefined,
         asyncDir: realAsyncDir,
         readRetries: 0,
@@ -6531,6 +6705,14 @@ export class RuntimeSlot {
     }, 20);
   }
 
+  private consumeStopSteeringRecoveryOwner(operationId: string): void {
+    if (!this.stopSteeringRecoveryIDs.delete(operationId)) return;
+    const retained = this.queuedMessages.filter((item) => item.id !== operationId);
+    if (retained.length === this.queuedMessages.length) return;
+    this.queuedMessages = retained;
+    this.queueRevision += 1;
+  }
+
   private reconcileQueuedMessages(): void {
     const session = this.runtime.session;
     const actual: Record<QueueBehavior, readonly string[]> = {
@@ -6578,11 +6760,26 @@ export class RuntimeSlot {
           runtimeText,
           attachmentEnvelope: admission?.attachmentEnvelope ?? "",
           images: admission?.images ?? [],
+          inputSource: admission?.inputSource ?? "interactive",
+          ...(admission?.commandId === undefined ? {} : { commandId: admission.commandId }),
           ordinal: this.nextQueueOrdinal++,
         });
       }
     }
 
+    const sdkPresentIDs = new Set(reconciled.map((item) => item.id));
+    const sdkPresentSteeringIDs = new Set(reconciled.filter((item) => item.behavior === "steer").map((item) => item.id));
+    const reconciledIDs = new Set(sdkPresentIDs);
+    for (const item of previous) {
+      if (this.stopSteeringRecoveryIDs.has(item.id) && !reconciledIDs.has(item.id)) {
+        if (this.sdkQueuedSteeringIDs.has(item.id) && item.behavior === "steer"
+          && !this.dequeuedSteeringOwners.includes(item.id)) {
+          this.dequeuedSteeringOwners.push(item.id);
+        }
+        reconciled.push(item);
+        reconciledIDs.add(item.id);
+      }
+    }
     reconciled.sort((left, right) => left.behavior === right.behavior
       ? left.ordinal - right.ordinal
       : left.behavior === "steer" ? -1 : 1);
@@ -6665,7 +6862,23 @@ export class RuntimeSlot {
         || JSON.stringify(item.attachments) !== JSON.stringify(next.attachments);
     });
     this.queuedMessages = reconciled;
+    this.sdkQueuedSteeringIDs.clear();
+    for (const id of sdkPresentSteeringIDs) this.sdkQueuedSteeringIDs.add(id);
     if (changed) this.queueRevision += 1;
+    const redeliveryAdmission = this.pendingQueueAdmission;
+    if (redeliveryAdmission?.redelivery && reconciled.some((item) => item.id === redeliveryAdmission.id)) {
+      this.pendingQueueAdmission = undefined;
+      redeliveryAdmission.resolveDisposition("queued");
+    }
+  }
+
+  private internalWakeSemantic(operationId: string): ChatSemanticMetadata | undefined {
+    const invocation = this.invocationForOperation(operationId);
+    return invocation?.source === "subagentWake" ? {
+      version: 1, kind: "prompt", direction: "hiddenInternal", contextEffect: "modelInput",
+      delivery: "stored", visibility: "hidden", origin: invocation.origin,
+      invocationId: invocation.invocationId, operationId, sequence: invocation.sequence,
+    } : undefined;
   }
 
   private projectedQueue(): QueuedMessageState[] {
@@ -6678,16 +6891,20 @@ export class RuntimeSlot {
       ...this.heldPrompts.filter((item) => !piQueued.has(item.id)),
     ].map(({
       id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocation,
-    }) => ({
-      id,
-      behavior,
-      text,
-      attachmentCount,
-      ...(photoCount === undefined ? {} : { photoCount }),
-      ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
-      ...(attachments === undefined ? {} : { attachments }),
-      ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
-    }));
+    }) => {
+      const semantic = this.internalWakeSemantic(id);
+      return {
+        id,
+        ...(semantic ? { semantic } : {}),
+        behavior,
+        text,
+        attachmentCount,
+        ...(photoCount === undefined ? {} : { photoCount }),
+        ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
+        ...(attachments === undefined ? {} : { attachments }),
+        ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
+      };
+    });
   }
 
   private static queueText(text: string, attachmentEnvelope: string): string {
@@ -6963,8 +7180,7 @@ export class RuntimeSlot {
       throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
     }
     try {
-      return {
-        ...projectTranscriptPage(
+      const page = projectTranscriptPage(
           this.runtime.session.sessionManager,
           this.dependencies.blobs,
           before,
@@ -6976,7 +7192,16 @@ export class RuntimeSlot {
           this.bashMetadata,
           this.forkBoundary,
           branchCut,
-        ),
+        );
+      return {
+        ...page,
+        // Exact presentation binding precedes receipt I/O. Retain the owning
+        // invocation's semantics in that interval without a second binding map.
+        items: page.items.map(item => {
+          const semantic = item.kind === "message" && item.role === "user" && !item.semantic?.invocationId
+            ? this.internalWakeSemantic(this.presentationIDs.get(item.id) ?? item.id) : undefined;
+          return semantic ? { ...item, semantic } : item;
+        }),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),
       };
@@ -7223,6 +7448,25 @@ export class RuntimeSlot {
     await this.abort("agent", operationId, reason);
   }
 
+  /** The managed provider uses user input to run Pi's normal before-agent-start
+   * lifecycle. Admit it through the prompt owner, never the SDK's unowned wake
+   * path: queued consumption and canonical binding retain this exact invocation. */
+  readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner, messages) => {
+    const operationId = randomUUID();
+    for (const message of messages) message.wakeOperationId = operationId;
+    try {
+      const text = typeof content === "string" ? content : content.filter(part => part.type === "text").map(part => part.text).join("\n");
+      const images = typeof content === "string" ? [] : content.filter((part): part is ImageContent => part.type === "image");
+      await this.prompt(text, images, options?.deliverAs, undefined, undefined, {
+        kind: "subagentWake", operationId, expandPromptTemplates: options?.expandPromptTemplates ?? false,
+        origin: { kind: "subagent", ownerId: owner.id, title: owner.title, confidence: "boundary" },
+      });
+    } catch (error) {
+      this.emit("session.extensionError", safeJson({ code: "subagent-wake-admission-failed",
+        message: error instanceof Error ? error.message : String(error), owner }));
+    }
+  };
+
   async prompt(
     text: string,
     images: ImageContent[] = [],
@@ -7231,6 +7475,11 @@ export class RuntimeSlot {
     onAdmitted?: (result: { operationId: string }) => void,
     ownership?: PromptOwnership,
   ): Promise<{ operationId: string }> {
+    // Once Stop closes Pi's queue, new client work stays Gateway-owned until
+    // the stopped originals are admitted as one serialized continuation.
+    if (!ownership && this.stopRecoveryQueueClosed) {
+      return this.holdPrompt(text, images, behavior, queueDisplay, true);
+    }
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
     this.assertHomePromptAdmission();
@@ -7261,6 +7510,7 @@ export class RuntimeSlot {
     images: ImageContent[],
     behavior: QueueBehavior | undefined,
     queueDisplay: PromptQueueDisplay | undefined,
+    stopRecovery = false,
   ): { operationId: string } {
     this.assertUsable();
     if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
@@ -7289,6 +7539,8 @@ export class RuntimeSlot {
       runtimeText: text,
       attachmentEnvelope: display.attachmentEnvelope,
       images,
+      inputSource: display.inputSource ?? "interactive",
+      ...(display.commandId === undefined ? {} : { commandId: display.commandId }),
       ordinal: this.nextQueueOrdinal++,
       admitting: false,
     };
@@ -7297,6 +7549,7 @@ export class RuntimeSlot {
     // it exactly as they wait for Pi's queue.
     this.beginOperationWork(entry.id, "queued-mutation");
     this.heldPrompts.push(entry);
+    if (stopRecovery) this.stopRecoveryHoldIDs.add(entry.id);
     this.queueRevision += 1;
     this.revision += 1;
     this.publishSnapshot();
@@ -7305,7 +7558,7 @@ export class RuntimeSlot {
 
   private scheduleHeldPromptFlush(): void {
     if (this.heldPromptFlush || this.heldPrompts.length === 0 || this.phase === "compacting"
-      || this.disposed || this.shuttingDown) return;
+      || this.stopRecoveryQueueClosed || this.disposed || this.shuttingDown) return;
     // Deferred: this runs from snapshot publication, which must finish
     // broadcasting before admission publishes its own transitions.
     this.heldPromptFlush = Promise.resolve()
@@ -7399,12 +7652,20 @@ export class RuntimeSlot {
     ownership: PromptOwnership | undefined,
     operationId: string,
     held?: HeldPrompt,
+    redelivery?: RuntimeQueuedMessage,
+    laneOwned = false,
   ): Promise<{ operationId: string }> {
-    return wait("session.prompt.runtime-lane", (acquired) => this.lane.run(async () => {
+    return wait("session.prompt.runtime-lane", (acquired) => {
+      const run = async () => {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
       this.assertHomePromptAdmission();
+      if (!ownership && this.stopRecoveryQueueClosed && !held && !redelivery) {
+        const heldAdmission = this.holdPrompt(text, images, behavior, queueDisplay, true);
+        onAdmitted?.(heldAdmission);
+        return heldAdmission;
+      }
       try {
         if (this.attentionBarrier) await this.attentionBarrier;
       } catch {
@@ -7461,7 +7722,7 @@ export class RuntimeSlot {
       // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const parsedCommand = parsePiLiteralCommand(text);
+      const parsedCommand = ownership?.kind === "subagentWake" ? undefined : parsePiLiteralCommand(text);
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -7480,14 +7741,18 @@ export class RuntimeSlot {
       if (ownership && this.ownedTerminalObservers.has(operationId)) {
         throw new GatewayError("conflict", "Automation operation is already registered", true);
       }
-      const invocationId = randomUUID();
-      const invocationSource: InvocationProjection["source"] = isExactExtensionCommand
+      const existingInvocation = redelivery ? this.invocationForOperation(operationId) : undefined;
+      if (redelivery && !existingInvocation) {
+        throw new GatewayError("conflict", "Accepted queued invocation identity is no longer available", true);
+      }
+      const invocationId = existingInvocation?.invocationId ?? randomUUID();
+      const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : isExactExtensionCommand
         ? "extension"
-        : queueDisplay?.resourceInvocation?.source ?? "plain";
-      const invocationName = isExactExtensionCommand
+        : queueDisplay?.resourceInvocation?.source ?? "plain");
+      const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
         ? extensionCommandName
-        : queueDisplay?.resourceInvocation?.name;
-      const invocation: LiveInvocation = {
+        : queueDisplay?.resourceInvocation?.name);
+      const invocation: LiveInvocation = existingInvocation ?? {
         version: 1,
         invocationId,
         operationId,
@@ -7503,7 +7768,7 @@ export class RuntimeSlot {
         updatedAt: new Date().toISOString(),
       };
       if (session.isStreaming && !behavior && !isExactExtensionCommand) {
-        this.invocations.delete(invocationId);
+        if (!redelivery) this.invocations.delete(invocationId);
         throw new GatewayError("busy", "Session is running; choose steer or follow-up");
       }
       const queueAdmissionDisplay = queueDisplay ?? {
@@ -7522,7 +7787,7 @@ export class RuntimeSlot {
             true,
           );
         }
-        RuntimeSlot.validateQueue([...this.queuedMessages, {
+        RuntimeSlot.validateQueue([...this.queuedMessages.filter((item) => item.id !== redelivery?.id), {
           text: queueAdmissionDisplay.text,
           attachmentCount: queueAdmissionDisplay.attachmentCount,
           ...(queueAdmissionDisplay.resourceInvocation === undefined
@@ -7532,7 +7797,7 @@ export class RuntimeSlot {
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
 
-      if (ownership) this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
+      if (ownership && ownership.kind !== "subagentWake") this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -7556,6 +7821,7 @@ export class RuntimeSlot {
         this.invocations.set(invocationId, invocation);
         while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
         operationWork = this.beginOperationWork(operationId);
+        if (redelivery) this.lifecycle.cancelPreflight(operationId);
         // Exact preflight ownership begins synchronously before marker I/O, so a
         // drain that starts while the marker is pending snapshots this owner.
         this.lifecycle.beginPreflight(operationId);
@@ -7584,7 +7850,7 @@ export class RuntimeSlot {
         });
         // Durable staging precedes the Pi call so an extension handler can
         // never emit output before Gateway has recorded its invocation owner.
-        await this.persistInvocationReceipt(startReceipt, operationWork);
+        if (!redelivery) await this.persistInvocationReceipt(startReceipt, operationWork);
         startPersisted = true;
         this.assertHomePromptAdmission();
 
@@ -7625,8 +7891,11 @@ export class RuntimeSlot {
             ...(queueAdmissionDisplay.attachments === undefined
               ? {}
               : { attachments: queueAdmissionDisplay.attachments }),
+            inputSource: queueAdmissionDisplay.inputSource ?? "interactive",
+            ...(queueAdmissionDisplay.commandId === undefined ? {} : { commandId: queueAdmissionDisplay.commandId }),
             attachmentEnvelope: queueAdmissionDisplay.attachmentEnvelope,
             images,
+            ...(redelivery === undefined ? {} : { redelivery: true }),
             resolveDisposition: (disposition) => resolveQueueDisposition?.(disposition),
           };
         }
@@ -7684,7 +7953,8 @@ export class RuntimeSlot {
         sdkRun = withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
-          source: "rpc",
+          source: ownership?.kind === "subagentWake" ? "extension" : queueDisplay?.inputSource ?? "rpc",
+          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates } : {}),
           preflightResult: (disposition) => {
             // Pi calls back only after it has handled, queued, or started the
             // prompt. Rejections do not call this hook; the SDK promise's
@@ -7874,6 +8144,14 @@ export class RuntimeSlot {
         this.reconcileQueuedMessages();
         const disposition = await queueDisposition!;
         queuesIntoActiveRun = disposition === "queued";
+        if (disposition === "queued" && held) this.removeHeldPrompt(held.id);
+        if (disposition === "queued" && preflightStarted) {
+          // Queued input has an accepted queue owner, not an active preflight.
+          // Releasing this exact owner lets a later Stop-redelivery reuse the
+          // same operation identity through ordinary admission.
+          this.lifecycle.cancelPreflight(operationId);
+          preflightStarted = false;
+        }
         handledWithoutAgent = disposition === "handled";
         if (disposition === "failed") {
           this.lifecycle.resolvePreflight(operationId, true);
@@ -7897,7 +8175,7 @@ export class RuntimeSlot {
       if ((!queuesIntoActiveRun || !admitted) && this.pendingQueueAdmission?.id === operationId) {
         this.pendingQueueAdmission = undefined;
       }
-      this.lifecycle.resolvePreflight(operationId, admitted);
+      this.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && !handledWithoutAgent);
       admissionAccepted = admitted;
       if (!admitted) {
         // A preflight callback is a disposition, not SDK settlement. Join the
@@ -8070,7 +8348,9 @@ export class RuntimeSlot {
         await settleWithoutAgent(terminalLifecycle);
       }
       return { operationId };
-    }));
+      };
+      return laneOwned ? run() : this.lane.run(run);
+    });
   }
 
   private promptDisplay(
@@ -8079,8 +8359,10 @@ export class RuntimeSlot {
     images: ImageContent[],
     queueDisplay: PromptQueueDisplay | undefined,
   ): PendingPromptState {
+    const semantic = this.internalWakeSemantic(operationId);
     return {
       id: operationId,
+      ...(semantic ? { semantic } : {}),
       createdAt: new Date().toISOString(),
       // Requested queue behavior is advisory until Pi actually enqueues.
       // A prompt admitted after the run settles remains ordinary.
@@ -8110,6 +8392,42 @@ export class RuntimeSlot {
     expectedOperationId?: string,
     terminalErrorCode = "user-abort",
   ): Promise<void> {
+    let queuedAtStop: RuntimeQueuedMessage[] | undefined;
+    // Finite task cancellation belongs to its report/controller, not the
+    // ordinary Stop continuation. A sealed task can never admit another turn.
+    if (!this.taskWorker && (this.queuedMessages.some((item) => item.behavior === "steer")
+      || this.pendingQueueAdmission?.behavior === "steer")
+      && this.stopSteeringContinuation === undefined) {
+      queuedAtStop = await this.lane.run(() => {
+        this.assertAvailable();
+        if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
+          throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
+        }
+        const accepted = this.queuedMessages.slice();
+        if (!accepted.some((item) => item.behavior === "steer")) return undefined;
+        // Close before clearing: any steer admitted while Stop waits stays in the
+        // Gateway owner and joins the continuation, never Pi's queue.
+        this.stopRecoveryQueueClosed = true;
+        for (const item of accepted) this.stopSteeringRecoveryIDs.add(item.id);
+        this.suppressQueueEvents = true;
+        try { this.runtime.session.clearQueue(); }
+        finally { this.suppressQueueEvents = false; }
+        this.sdkQueuedSteeringIDs.clear();
+        return accepted;
+      });
+    }
+    const recovered = await this.abortSerialized(kind, expectedOperationId, terminalErrorCode, queuedAtStop);
+    if (recovered.length > 0) {
+      await this.lane.run(() => this.redeliverStoppedSteering(recovered, true));
+    }
+  }
+
+  private async abortSerialized(
+    kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash",
+    expectedOperationId: string | undefined,
+    terminalErrorCode: string,
+    queuedAtStop?: RuntimeQueuedMessage[],
+  ): Promise<RuntimeQueuedMessage[]> {
     // A persistence blocker must not disable the owner's Stop route. Stop still
     // proves exact operation identity and reports any unresolved receipt after
     // cancellation instead of clearing the persistence fence.
@@ -8121,7 +8439,7 @@ export class RuntimeSlot {
       || (taskOwnsForeground && expectedOperationId === this.operation?.id);
     if (this.taskWorker?.controlsActive && terminalErrorCode === "user-abort" && targetsTask) {
       await this.taskWorker.stop();
-      return;
+      return [];
     }
     if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId
       && !(taskOwnsForeground && expectedOperationId === taskOperationId)) {
@@ -8149,6 +8467,20 @@ export class RuntimeSlot {
     }
     if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
+    // Retire accepted queue ownership before abort emits queue_update: those
+    // entries were not consumed. Keep their exact owners on this cancellation
+    // frame until their not-delivered receipts are persisted below.
+    const stoppedTaskQueue = this.taskWorker ? this.queuedMessages : [];
+    if (this.taskWorker) {
+      this.suppressQueueEvents = true;
+      try { this.runtime.session.clearQueue(); }
+      finally { this.suppressQueueEvents = false; }
+      this.sdkQueuedSteeringIDs.clear();
+      this.queuedMessages = [];
+      this.queueRevision += 1;
+    }
+    const queuedSteerCount = queuedAtStop?.filter((item) => item.behavior === "steer").length ?? 0;
+    const redeliver = queuedAtStop !== undefined && queuedSteerCount > 0;
     const session = this.runtime.session;
     for (const cancel of [
       () => session.abortCompaction(),
@@ -8158,29 +8490,94 @@ export class RuntimeSlot {
     ]) {
       try { cancel(); } catch { /* Continue through every independent escape hatch. */ }
     }
-    await Promise.allSettled([
+    const abortResults = await Promise.allSettled([
       session.abort(),
       this.directBashProcesses?.abortAll() ?? Promise.resolve(),
     ]);
+    for (const item of stoppedTaskQueue) {
+      await this.terminalizeInvocation(item.id, "interrupted", "task-stopped-before-delivery");
+      this.settleOperationWork(item.id);
+    }
+    const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
+    if (!settled || this.directBashProcesses?.hasActiveProcesses
+      || abortResults.some((result) => result.status === "rejected")) {
+      throw new GatewayError("conflict", "Foreground work did not stop", true);
+    }
 
     let interruptionPersisted = false;
-    try {
-      const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
-      if (!settled || this.directBashProcesses?.hasActiveProcesses) {
-        throw new GatewayError("conflict", "Foreground work did not stop", true);
-      }
-      if (invocationOperationId) {
-        await this.terminalizeInvocation(invocationOperationId, "interrupted", terminalErrorCode);
-        interruptionPersisted = true;
-      }
-    } finally {
-      if (invocationOperationId && interruptionPersisted) {
-        this.abortedOperations.delete(invocationOperationId);
+    if (invocationOperationId && !redeliver) {
+      await this.terminalizeInvocation(invocationOperationId, "interrupted", terminalErrorCode);
+      interruptionPersisted = true;
+    }
+    if (invocationOperationId && interruptionPersisted) this.abortedOperations.delete(invocationOperationId);
+
+    let recovered: RuntimeQueuedMessage[] = [];
+    if (redeliver) {
+      recovered = queuedAtStop.filter((item) => this.stopSteeringRecoveryIDs.has(item.id));
+      this.stopSteeringContinuation = {
+        ...(invocationOperationId === undefined ? {} : { operationId: invocationOperationId }),
+        queuedSteerCount,
+      };
+      this.dependencies.stopSteeringDiagnostic?.({ sessionId: this.id, queuedSteerCount, outcome: "started" });
+      if (recovered.length === 0) {
+        this.dependencies.stopSteeringDiagnostic?.({ sessionId: this.id, queuedSteerCount, outcome: "completed" });
+        this.stopSteeringContinuation = undefined;
       }
     }
 
     this.revision += 1;
     this.publishSnapshot();
+    return recovered;
+  }
+
+  private async redeliverStoppedSteering(items: RuntimeQueuedMessage[], laneOwned: boolean): Promise<void> {
+    const processed = new Set<string>();
+    while (true) {
+      const held = this.heldPrompts.filter((item) => this.stopRecoveryHoldIDs.has(item.id));
+      const pending = [...items, ...held]
+        .filter((item) => !processed.has(item.id)
+          && (this.stopSteeringRecoveryIDs.has(item.id) || this.stopRecoveryHoldIDs.has(item.id)))
+        .sort((left, right) => left.ordinal - right.ordinal);
+      if (pending.length === 0) break;
+      for (const item of pending) {
+        const heldEntry = this.stopRecoveryHoldIDs.has(item.id)
+          ? this.heldPrompts.find((entry) => entry.id === item.id)
+          : undefined;
+        const hasAcceptedInvocation = this.invocationForOperation(item.id) !== undefined;
+        try {
+          await this.admitPrompt(item.text, item.images, item.behavior, {
+            text: item.text,
+            attachmentEnvelope: item.attachmentEnvelope,
+            attachmentCount: item.attachmentCount,
+            ...(item.photoCount === undefined ? {} : { photoCount: item.photoCount }),
+            ...(item.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: item.fileAttachmentCount }),
+            ...(item.attachments === undefined ? {} : { attachments: item.attachments }),
+            ...(item.resourceInvocation === undefined ? {} : { resourceInvocation: item.resourceInvocation }),
+            inputSource: item.inputSource,
+            ...(item.commandId === undefined ? {} : { commandId: item.commandId }),
+          }, undefined, undefined, item.id, heldEntry, hasAcceptedInvocation ? item : undefined, laneOwned);
+          processed.add(item.id);
+          this.stopRecoveryHoldIDs.delete(item.id);
+          // A handled input has no Agent message_start; its terminal receipt
+          // from normal admission is the exact queue-row removal boundary.
+          const lifecycle = this.invocationForOperation(item.id)?.lifecycle;
+          if (lifecycle === "completed" || lifecycle === "failed" || lifecycle === "interrupted") {
+            this.consumeStopSteeringRecoveryOwner(item.id);
+            this.removeHeldPrompt(item.id);
+          }
+        } catch (error) {
+          this.dependencies.stopSteeringDiagnostic?.({
+            sessionId: this.id,
+            queuedSteerCount: items.filter((queued) => queued.behavior === "steer").length,
+            outcome: "failed",
+          });
+          this.stopSteeringContinuation = undefined;
+          throw error;
+        }
+      }
+    }
+    this.stopRecoveryQueueClosed = false;
+    this.stopRecoveryHoldIDs.clear();
   }
 
   /** Republish this snapshot because the Gateway-owned archive projection
@@ -8222,6 +8619,7 @@ export class RuntimeSlot {
       } finally {
         this.suppressQueueEvents = false;
       }
+      this.sdkQueuedSteeringIDs.clear();
       for (const item of removed) {
         await this.terminalizeInvocation(item.id, "interrupted", "queue-cleared");
         this.settleOperationWork(item.id);
@@ -8483,6 +8881,8 @@ export class RuntimeSlot {
       this.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior
         ? left.ordinal - right.ordinal
         : left.behavior === "steer" ? -1 : 1);
+      this.sdkQueuedSteeringIDs.clear();
+      for (const item of survivors) if (item.behavior === "steer") this.sdkQueuedSteeringIDs.add(item.id);
       this.queueRevision += 1;
       this.revision += 1;
       this.publishSnapshot();
