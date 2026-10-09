@@ -14,7 +14,8 @@ export async function copyPayload(payload: string, ownTestFile: string): Promise
     recursive: true,
     filter: (source) => !source.endsWith(".test.ts") || source.endsWith(ownTestFile),
   });
-  for (const file of ["test-support", "vitest.config.ts", "package.json"]) {
+  // The main config imports the nested list, so a payload that runs either pass needs both.
+  for (const file of ["test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) {
     await cp(join(packageRoot, file), join(payload, file), { recursive: true });
   }
   await symlink(join(packageRoot, "node_modules"), join(payload, "node_modules"));

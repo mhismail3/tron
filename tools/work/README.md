@@ -439,10 +439,15 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   protocol fixtures and the pinned Node version. A lockfile change merged from
   the base branch therefore reruns it. It runs `npm ci`, the Pi SDK cohort check
   and the build, then `vitest related` when every changed Gateway path is
-  existing source or test support. A change that no test imports runs only the
-  build. Any other changed input, or a deleted or renamed Gateway file, runs the
-  full suite instead, because `vitest related` cannot select a test that still
-  imports a deleted module and the build excludes tests.
+  existing source or test support. That related selection runs twice, once per
+  Vitest config: the parallel main pass, then the nested pass
+  (`vitest.nested.config.ts`) that runs the files spawning nested Vitest or pi
+  children one at a time. A nested pass runs only when a changed file is one of
+  those tests or imports a changed module, and a change that no test imports runs
+  only the build. Any other changed input, or a deleted or renamed Gateway file,
+  runs the full suite (`npm test`, which runs both passes) instead, because
+  `vitest related` cannot select a test that still imports a deleted module and
+  the build excludes tests.
 - **Gateway scale** runs the dedicated scale suite when one of its own
   `*.scale.test.ts` files, `vitest.scale.config.ts`, or an explicitly exercised
   Knowledge source/helper changes. It stays separate from the ordinary source

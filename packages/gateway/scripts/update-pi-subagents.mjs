@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const GATEWAY = dirname(dirname(fileURLToPath(import.meta.url)));
 const PIN = "pi-subagents-pin.json";
+const NESTED_CONFIG = ["--config", "vitest.nested.config.ts"];
 const UPSTREAM = "https://github.com/nicobailon/pi-subagents.git";
 const hash = (bytes, algorithm) => createHash(algorithm).update(bytes).digest("hex");
 const commitId = (value) => typeof value === "string" && /^[0-9a-f]{40}$/u.test(value);
@@ -112,22 +113,23 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     invoke(process.execPath, [join(candidateRoot, "scripts/check-pi-subagents.mjs")], candidateRoot, env);
     // Qualify the exact unpublished bytes in their own payload lifetime. The
     // repository pin stays current until both real execution gates have settled.
-    for (const path of ["src", "test-support", "vitest.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
+    for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(candidateRoot, "node_modules"));
-    const gate = (label, file, reportName, reportEnv) => {
+    // Nested gates pass NESTED_CONFIG: their files run one at a time, and the main config excludes them.
+    const gate = (label, file, reportName, reportEnv, config = ["--maxWorkers=2"]) => {
       const reportPath = join(staging, reportName);
       try {
-        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", file, "--maxWorkers=2"], candidateRoot, { ...env, [reportEnv]: reportPath, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
+        invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...config, file], candidateRoot, { ...env, [reportEnv]: reportPath, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
         const report = JSON.parse(readFileSync(reportPath, "utf8"));
         if (report.passed !== true) throw new Error("execution report did not pass");
         return report;
       } catch (error) { throw new Error(`${label} failed: ${error.message}`, { cause: error }); }
     };
     const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT");
-    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT");
+    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG);
     // Refusal of a verified build with an invalid extension entry: each case is its own
     // nested run and reports by exit status. A refusal regression must still block publication.
-    invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", "src/sessions/managed-subagents.invalid-entry.test.ts", "--maxWorkers=2"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
+    invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...NESTED_CONFIG, "src/sessions/managed-subagents.invalid-entry.test.ts"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
     if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));

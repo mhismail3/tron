@@ -21,7 +21,7 @@ function fixture(run, usable = false) {
     for (const path of [target, fork, join(target, "scripts"), join(root, "home"), join(root, "tmp")]) mkdirSync(path, { recursive: true });
     cpSync(join(gateway, "artifacts"), join(target, "artifacts"), { recursive: true });
     copyFileSync(join(gateway, "pi-subagents-pin.json"), join(target, "pi-subagents-pin.json"));
-    for (const path of ["src", "test-support", "vitest.config.ts"]) cpSync(join(gateway, path), join(target, path), { recursive: true });
+    for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts"]) cpSync(join(gateway, path), join(target, path), { recursive: true });
     symlinkSync(join(gateway, "node_modules"), join(target, "node_modules"));
     for (const file of ["check-pi-subagents.mjs", "build-pi-subagents-closure.py"]) copyFileSync(join(gateway, "scripts", file), join(target, "scripts", file));
     const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: usable ? "https://registry.npmjs.org/" : "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1" };

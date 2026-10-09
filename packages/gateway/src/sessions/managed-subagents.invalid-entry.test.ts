@@ -55,7 +55,7 @@ it.skipIf(Boolean(leg)).each([
     pin.closure = { path: "invalid-closure.tgz", sha512: createHash("sha512").update(archive).digest("hex") };
     await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
     for (const directory of ["agent", "workspace", "home", "tmp"]) await mkdir(join(root, directory));
-    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", `src/sessions/${ownTestFile}`, "--maxWorkers=2"], {
+    await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/sessions/${ownTestFile}`], {
       cwd: payload, timeout: 15_000, maxBuffer: 1024 * 1024,
       env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
         TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE: root,

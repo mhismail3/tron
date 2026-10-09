@@ -48,7 +48,7 @@ it("executes previous → candidate → previous with detached resume through th
         parentBefore = await readFile(join(root, candidate!.completion.parentFile));
         childBefore = await readFile(join(root, candidate!.completion.childFile));
       }
-      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "src/sessions/managed-subagents.rollback.test.ts", "--maxWorkers=2"], {
+      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/sessions/managed-subagents.rollback.test.ts"], {
         cwd: payload, timeout: 30_000, maxBuffer: 1024 * 1024,
         env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), PI_SKIP_VERSION_CHECK: "1",
           TRON_SUBAGENTS_ROLLBACK_LEG: name, TRON_SUBAGENTS_ROLLBACK_FIXTURE: root,
