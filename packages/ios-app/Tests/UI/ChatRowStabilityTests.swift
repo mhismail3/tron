@@ -2525,7 +2525,11 @@ private func recordMotionMetrics(
                 "single-frame geometry step of \(maxTransitionStep) pt")
         #expect(maxTail <= ChatMotionConformanceBounds.maximumTailDistance,
                 "pinned tail moved \(maxTail) pt")
-        #expect(identityCount <= 1, "the physical row remounted \(identityCount) times")
+        if scenario == .notificationChangesInPlace {
+            #expect(nativeInstances <= 1, "the physical notification row remounted \(nativeInstances) times")
+        } else {
+            #expect(identityCount <= 1, "the physical row remounted \(identityCount) times")
+        }
         if scenario == .replace || scenario == .resize {
             let heights = samples.compactMap(\.transitioningHeight)
             let changed = zip(heights, heights.dropFirst()).filter { abs($0 - $1) > 0.5 }.count
@@ -2593,6 +2597,7 @@ private func recordReduceMotionScenario(
 
 enum ChatMotionScenario: String, CaseIterable {
     case arrive, replace, resize, depart, move, stopTwoSteers, control
+    case groupGainsCall, runtimeToolHandoff, notificationChangesInPlace
 
     var isKnownUnanimated: Bool { self == .depart || self == .move || self == .stopTwoSteers }
     var isAnimated: Bool { self == .arrive || self == .replace || self == .resize }
@@ -2766,6 +2771,59 @@ private func motionFixture(_ scenario: ChatMotionScenario) throws -> ChatMotionF
         updated.revision += 1
         updated.eventSequence += 1
         return ChatMotionFixture(initial: initial, updated: updated, rowID: RowStabilityFixture.groupedRunRowID)
+    case .groupGainsCall:
+        var initial = try stabilitySnapshot(items: rowStabilityHistoryItems())
+        initial.phase = .running
+        let groupID = "motion-live-group"
+        initial.toolExecutions = [harnessRuntimeTool(
+            id: "motion-live-call-a", status: .running,
+            groupId: groupID, groupIndex: 0, groupCount: 2
+        )]
+        var updated = initial
+        updated.toolExecutions.append(harnessRuntimeTool(
+            id: "motion-live-call-b", order: 1, status: .running,
+            groupId: groupID, groupIndex: 1, groupCount: 2
+        ))
+        updated.revision += 1
+        updated.eventSequence += 1
+        return ChatMotionFixture(initial: initial, updated: updated, rowID: "tool-run-" + groupID)
+    case .runtimeToolHandoff:
+        let callID = "motion-runtime-call"
+        let groupID = "motion-final-group"
+        var initial = try stabilitySnapshot(items: rowStabilityHistoryItems())
+        initial.phase = .running
+        initial.toolExecutions = [harnessRuntimeTool(
+            id: callID, status: .running, groupFinalized: false
+        )]
+        var updated = initial
+        updated.transcript += try stabilitySnapshot(items: toolRunRows(callID: callID)).transcript
+        updated.transcriptTotal = updated.transcript.count
+        updated.toolExecutions = [harnessRuntimeTool(
+            id: callID, status: .completed, groupId: groupID, groupCount: 1
+        )]
+        updated.revision += 1
+        updated.eventSequence += 1
+        return ChatMotionFixture(initial: initial, updated: updated, rowID: "tool-run-" + callID)
+    case .notificationChangesInPlace:
+        func notification(message: String) throws -> TranscriptItem {
+            try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("""
+                {"id":"motion-notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"writer":"gateway","version":1,"receiptId":"notification:motion","sessionId":"session","message":"\(message)","tone":"info","origin":{"kind":"extension","ownerId":"extension:motion","title":"Motion","confidence":"receipt"},"sequence":1,"createdAt":"2026-01-01T00:00:00.000Z"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"extension:motion","title":"Motion","confidence":"receipt"},"sequence":1}}
+                """.utf8)
+            )
+        }
+        var initial = try stabilitySnapshot(items: rowStabilityHistoryItems())
+        initial.phase = .running
+        initial.transcript.append(try notification(message: "Working."))
+        initial.transcriptTotal = initial.transcript.count
+        var updated = initial
+        updated.transcript[updated.transcript.count - 1] = try notification(
+            message: "Still working."
+        )
+        updated.revision += 1
+        updated.eventSequence += 1
+        return ChatMotionFixture(initial: initial, updated: updated, rowID: "notification-motion-notice")
     }
 }
 
