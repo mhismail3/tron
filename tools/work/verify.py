@@ -570,15 +570,27 @@ def scrub(root: Path, command: str, text: str) -> None:
         raise VerifyError(f"the scrub command refused the evidence text; nothing was posted\n{detail}")
 
 
+_UPLOAD_CONFLICTS = 5
+
+
 def _upload(gh: Gh, repository: str, path: str, content: bytes, message: str) -> None:
     api = f"repos/{repository}/contents/{path}"
-    body = {"message": message, "content": base64.b64encode(content).decode()}
-    try:
-        body["sha"] = gh.rest("GET", api)["sha"]
-    except GhError as error:
-        if "HTTP 404" not in str(error):
-            raise
-    gh.rest("PUT", api, body)
+    # Each PUT is a commit on the evidence branch: a compare-and-swap on its head.
+    # Concurrent lands lose it with HTTP 409; that is re-read and re-applied, not
+    # a failure. Every other error, and a bounded run of conflicts, still raises.
+    for attempt in range(_UPLOAD_CONFLICTS):
+        body = {"message": message, "content": base64.b64encode(content).decode()}
+        try:
+            body["sha"] = gh.rest("GET", api)["sha"]
+        except GhError as error:
+            if "HTTP 404" not in str(error):
+                raise
+        try:
+            gh.rest("PUT", api, body)
+            return
+        except GhError as error:
+            if "HTTP 409" not in str(error) or attempt == _UPLOAD_CONFLICTS - 1:
+                raise
 
 
 def open_pull(gh: Gh, branch: str) -> Optional[dict]:
