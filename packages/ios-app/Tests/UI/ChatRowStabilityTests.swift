@@ -1782,12 +1782,16 @@ private func toolDetailSnapshot() throws -> SessionSnapshot {
 
 /// One finalized group of the given calls: the same contract a gateway install
 /// publishes when it names a run.
-private func harnessRuntimeTools(callIDs: [String], groupID: String) -> [ToolExecutionState] {
+private func harnessRuntimeTools(
+    callIDs: [String],
+    groupID: String,
+    status: ToolExecutionState.Status = .completed
+) -> [ToolExecutionState] {
     callIDs.enumerated().map { index, callID in
         harnessRuntimeTool(
             id: callID,
             order: index,
-            status: .completed,
+            status: status,
             groupId: groupID,
             groupIndex: index,
             groupCount: callIDs.count
@@ -2501,9 +2505,14 @@ private func recordMotionMetrics(
 
     if scenario.isKnownUnanimated {
         let unanimatedStep = max(maxTransitionStep, maxBelowStep)
-        withKnownIssue(Comment(rawValue: scenario.knownIssue)) {
+        if scenario == .control {
             #expect(unanimatedStep <= ChatMotionConformanceBounds.maximumGeometryStep,
                     "single-frame geometry step of \(unanimatedStep) pt")
+        } else {
+            withKnownIssue(Comment(rawValue: scenario.knownIssue)) {
+                #expect(unanimatedStep <= ChatMotionConformanceBounds.maximumGeometryStep,
+                        "single-frame geometry step of \(unanimatedStep) pt")
+            }
         }
     } else {
         #expect(maxTransitionStep <= ChatMotionConformanceBounds.maximumGeometryStep,
@@ -2733,13 +2742,19 @@ private func motionFixture(_ scenario: ChatMotionScenario) throws -> ChatMotionF
             : "queued-message-motion-steer-b"
         return ChatMotionFixture(initial: initial, updated: updated, rowID: rowID)
     case .control:
+        // Gateway and ToolExecutionStatePolicy retain finalized group metadata
+        // by call ID; keep this a stable grouped capsule update, not the
+        // synthetic metadata loss that split the physical row in the old fixture.
         var initial = try toolDetailSnapshot()
-        guard let first = initial.toolExecutions.first else { throw HarnessError.missingTranscript }
+        initial.phase = .running
         var updated = initial
-        updated.toolExecutions = [harnessRuntimeTool(id: first.id, order: 0, status: .running)]
+        updated.toolExecutions = harnessRuntimeTools(
+            callIDs: RowStabilityFixture.groupedRunCallIDs,
+            groupID: RowStabilityFixture.groupedRunID,
+            status: .running
+        )
         updated.revision += 1
         updated.eventSequence += 1
-        initial.phase = .running
         return ChatMotionFixture(initial: initial, updated: updated, rowID: RowStabilityFixture.groupedRunRowID)
     }
 }
@@ -2769,7 +2784,7 @@ private func writeMotionMetrics(_ metrics: ChatMotionCaseMetrics) throws {
 @MainActor
 @Suite("Chat motion pixel evidence", .serialized, .enabled(if: UIValidationTier.isActive))
 struct ChatMotionPixelConformanceTests {
-    @Test("pixel evidence is sampled separately for cross-fade-capable transitions", arguments: [ChatMotionScenario.arrive, .replace, .depart])
+    @Test("pixel evidence is sampled separately for cross-fade-capable transitions", arguments: [ChatMotionScenario.arrive, .replace, .depart, .control])
     func pixelFrameChanges(_ scenario: ChatMotionScenario) async throws {
         let fixture = try motionFixture(scenario)
         if scenario == .replace {
