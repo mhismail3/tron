@@ -467,6 +467,11 @@ function compareParity(before: Record<string, unknown>, after: Record<string, un
     if (/\.(transcript|deliveries)\.progress_update\.\d+\.delivery$/.test(path) && a === "triggeredTurn" && b === "stored") return "progress stored with no turn";
     if (a === undefined && Array.isArray(b)) {
       const checkpoint = path.split(".")[1];
+      // Canonical deliveries pin the per-checkpoint count above. The projected
+      // transcript publishes asynchronously, so a capture may observe the
+      // question checkpoint's failed-child note before or after projection;
+      // whenever present, each row must have the approved typed shape.
+      if (path.endsWith(".transcript.subagent-incremental-child-notify") && ["workflow-question", "workflow-completed"].includes(checkpoint!) && b.length > 0 && b.every(row => record(row) && row.category === "subagent-incremental-child-notify" && row.origin === "subagent" && row.title === "Subagents" && row.direction === "inboundContext" && row.delivery === "stored" && row.visibility === "visible")) return "per-child notes stored; independent question/barrier owns turns";
       if (path.endsWith(".deliveries.subagent-incremental-child-notify") && ["workflow-question", "workflow-completed"].includes(checkpoint!) && b.length === (checkpoint === "workflow-question" ? 1 : 3) && b.every(row => record(row) && row.delivery === "stored" && row.source === managedSource && row.title === "Subagents" && typeof row.display === "boolean")) return "per-child notes stored; independent question/barrier owns turns";
     }
     return null;

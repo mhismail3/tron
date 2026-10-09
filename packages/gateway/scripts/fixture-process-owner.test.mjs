@@ -161,8 +161,12 @@ finish(None, None)
         process.kill = nativeKill;
         writeFileSync(${JSON.stringify(signalFile)}, 'complete');
         if (parent.exitCode === null) {
-          nativeKill(parent.pid, 'SIGTERM');
-          await new Promise(resolve => parent.once('exit', resolve));
+          // The parent may already have exited (its reap completes the
+          // transition) before Node records exitCode; ESRCH then proves it.
+          const exited = new Promise(resolve => parent.once('exit', resolve));
+          try { nativeKill(parent.pid, 'SIGTERM'); }
+          catch (error) { if (error.code !== 'ESRCH') throw error; }
+          await exited;
         }
       }
       writeFileSync(${JSON.stringify(proofFile)}, JSON.stringify({pid, parent:parent.pid}));
