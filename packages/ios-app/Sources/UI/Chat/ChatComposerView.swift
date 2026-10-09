@@ -235,9 +235,7 @@ struct ChatComposerView: View {
             attachmentButton
             ZStack(alignment: .leading) {
                 if text.isEmpty && !isFocused {
-                    Text("Type here")
-                        .font(TronTypography.input)
-                        .foregroundStyle(Color.tronEmerald)
+                    ComposerPlaceholder(reduceMotion: reduceMotion)
                         .opacity(isTranscriptReady ? 1 : 0.38)
                         .padding(.leading, 2)
                         .padding(.vertical, 10)
@@ -470,5 +468,56 @@ struct ChatPendingAttachmentStrip: View {
             withAnimation(animation) { presentedAttachments = target }
             reconciliationTask = nil
         }
+    }
+}
+
+/// The empty, unfocused composer's prompt. It exists only while visible, so its
+/// rotation task starts on appearance and is cancelled when the user focuses or
+/// types; each appearance starts from a fresh random line.
+private struct ComposerPlaceholder: View {
+    let reduceMotion: Bool
+    @State private var line = ComposerPlaceholder.lines.randomElement() ?? "Ask anything"
+
+    /// Keep lines short enough for one line beside the composer's buttons.
+    static let lines = [
+        "Ask anything",
+        "Ask me anything",
+        "Go on, ask",
+        "Spill it",
+        "What are we breaking today?",
+        "Say the magic words",
+        "Ask away, I don't bite",
+        "What's the plan, boss?",
+        "Got a wild idea?",
+        "Make me useful",
+        "Hit me",
+        "Let's ship something",
+        "Any bugs to squash?",
+        "No question too weird",
+        "Okay, what now?",
+        "Type something brilliant",
+        "I was promised tasks",
+        "Ready when you are",
+        "Your wish, my command",
+        "Ask before you overthink",
+    ]
+
+    var body: some View {
+        Text(line)
+            .font(TronTypography.input)
+            .foregroundStyle(Color.tronEmerald)
+            .lineLimit(1)
+            .id(line)
+            .transition(.opacity)
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(6))
+                    guard !Task.isCancelled else { return }
+                    let next = Self.lines.filter { $0 != line }.randomElement() ?? line
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
+                        line = next
+                    }
+                }
+            }
     }
 }
