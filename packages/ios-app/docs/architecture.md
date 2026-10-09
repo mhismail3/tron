@@ -2734,7 +2734,7 @@ The Tasks sheet uses the task contract in
 inbox/redelivery and shared control). `home.taskList` is a bounded newest-first
 summary, not a native task catalog; `home.taskStatus` supplies exact detail and
 execution authority. One page replaces another. Dates are store-reported Unix
-milliseconds; spend remains unavailable/unpriced when reported that way. Neither
+milliseconds; spend shows the task's input and output token counts, or is unavailable when the Gateway reports none. Neither
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
@@ -2752,11 +2752,11 @@ installed read; accepted commands remain with `HomeMutationCoordinator` and its
 command ID/receipt invocation after dismissal. Unknown completion allows only
 receipt checks, never automatic mutation replay.
 
-Stop and steer capture task, operation and controller generation from detail;
+Stop and steer capture task and operation from detail; the operation is the control fence;
 there is no transfer/takeover or successor targeting. Permissions list standing
 scopes and one-use grant states/expiry. Revocation does not stop admitted work.
 Grant review displays the exact stored target, intent revision/digest, scope,
-worker profile, policy and restore epoch. Native DatePicker requires the
+restore epoch. Native DatePicker requires the
 maintainer to select a future expiry for both approve and deny; only request ID,
 boolean decision, expiry and command ID are sent, never a substituted binding.
 Approval does not replay refused work. Explicit reconfirmation re-stamps active
