@@ -1001,27 +1001,24 @@ export class RuntimeRegistry {
       });
       let manager: SessionManager;
       if (scan.action === "adopt") {
+        // The scan adopts only the path it was given, so a mismatch means the
+        // durable reservation names a different file.
+        if (chapter.expectedPath !== scan.path) {
+          throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
+        }
         manager = SessionManager.open(scan.path, sessionDirectory, cwd.cwd);
         if (manager.getSessionId() !== sessionId || manager.getSessionFile() !== scan.path) {
           throw new GatewayError("conflict", "Home chapter recovery did not reopen the exact reserved session");
         }
+        // The durable path was recorded by the earlier process; this attempt
+        // rebinds it before any runtime can submit canonical input.
+        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
       } else {
         manager = SessionManager.create(cwd.cwd, sessionDirectory);
         const createdPath = manager.newSession({ id: sessionId });
         if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
         await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
         expectedPath = createdPath;
-      }
-      if (scan.action === "adopt" && chapter.expectedPath !== scan.path) {
-        throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
-      }
-      if (scan.action === "adopt" && !chapter.expectedPath) {
-        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
-      }
-      if (scan.action === "adopt" && chapter.expectedPath) {
-        // The durable path was recorded by the earlier process; this attempt
-        // rebinds it before any runtime can submit canonical input.
-        await this.home.recordReservedChapterPath(sessionId, attemptId, scan.path);
       }
       const chapterState = this.home.chapterStateFor(sessionId);
       if (!chapterState.materializing || !chapterState.homeId || chapterState.ordinal !== chapter.ordinal

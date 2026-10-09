@@ -47,8 +47,8 @@ export interface TronModuleHost {
    * here is what keeps the wiring honest: the only Home runtime is built by a
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
-  homeTask?: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
-  homeDelegate?: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -214,13 +214,8 @@ export const TRON_HOME_MODULE: TronModule = {
   tools: ["zoom", "date", "memory_search", "delegate", "task"],
   commands: [],
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
-    request => {
-      if (!host.homeDelegate) throw new Error("Home dispatch is unavailable");
-      return host.homeDelegate(host.sessionId(), request);
-    }, request => {
-      if (!host.homeTask) throw new Error("Home task control is unavailable");
-      return host.homeTask(host.sessionId(), request);
-    }),
+    request => host.homeDelegate(host.sessionId(), request),
+    request => host.homeTask(host.sessionId(), request)),
 };
 
 /** The executable tool ceiling for a Home runtime, passed to the SDK as its
