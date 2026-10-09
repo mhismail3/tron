@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +33,12 @@ const gate = () => {
 
 it("preserves OLD app-facing subagent projections except approved delivery and identity changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagent-parity-"));
+  // The temp root and its canonical form differ under macOS aliases (/tmp and
+  // /var resolve below /private). Normalize both, canonical first, so reports
+  // never depend on which temporary directory the run used.
+  const canonicalRoot = await realpath(root);
+  const withoutRoot = (text: string, base: string, label: string) =>
+    text.split(canonicalRoot + base.slice(root.length)).join(label).split(base).join(label);
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
@@ -191,7 +197,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         // Canonical session layout and temporary/verified installation roots
         // vary per execution, but file names and provider-authored text do not.
         text = text.split(dirname(sessionFile!)).join("<sessions>");
-        text = text.split(root).join("<fixture>").split(root.replace(/^\/tmp\//, "/private/tmp/")).join("<fixture>");
+        text = withoutRoot(text, root, "<fixture>");
         text = text.replace(/(?:<fixture>\/agent\/npm\/node_modules\/pi-subagents|<fixture>\/tron\/internal\/[^\s"']*?\/root)(?=\/|$)/g, "<provider>");
         for (const [id, label] of identities) text = text.split(id).join(label);
         return text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<uuid>")
@@ -374,14 +380,14 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         subagents: ParityResourceRow[]; subagentDiagnostics?: string;
       };
       const resourceRow = (row: ParityResourceRow) => ({ ...row, ...(row.path ? {
-        path: row.path.split(root.replace(/^\/tmp\//, "/private/tmp/")).join("<fixture>").split(root).join("<fixture>"),
+        path: withoutRoot(row.path, root, "<fixture>"),
       } : {}) });
       return {
         skills: resources.skills.skills.filter((row: ParityResourceRow) => ["pi-subagents", "council-mode"].includes(row.name)).map(resourceRow),
         prompts: resources.prompts.prompts.map(resourceRow),
         skillDiagnostics: resources.skills.diagnostics, promptDiagnostics: resources.prompts.diagnostics,
         subagents: Object.fromEntries(resources.subagents.map((row: ParityResourceRow) => [row.name, row])),
-        subagentDiagnostics: resources.subagentDiagnostics?.split(cwd.replace(/^\/tmp\//, "/private/tmp/")).join("<workspace>").split(cwd).join("<workspace>") ?? null,
+        subagentDiagnostics: resources.subagentDiagnostics === undefined ? null : withoutRoot(resources.subagentDiagnostics, cwd, "<workspace>"),
       };
     };
     const resourceStates = { healthy: await settings(), invalid: undefined as ParitySettings | undefined, repaired: undefined as ParitySettings | undefined };
