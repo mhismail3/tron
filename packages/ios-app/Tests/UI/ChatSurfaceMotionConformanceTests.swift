@@ -18,6 +18,9 @@ struct ChatSurfaceMotionConformanceTests {
         do {
             _ = try await harness.recorder.waitUntil { $0.observation.isReady }
             for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            let previousAnimationScale = ChatMotion.hostedTestAnimationScale
+            ChatMotion.hostedTestAnimationScale = ChatMotionPixelSupport.animationScale
+            defer { ChatMotion.hostedTestAnimationScale = previousAnimationScale }
             let insertion = try await recordComposerInsetChange(harness, accessoryEnabled: true)
             let removal = try await recordComposerInsetChange(harness, accessoryEnabled: false)
             #expect(insertion.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
@@ -44,6 +47,9 @@ struct ChatSurfaceMotionConformanceTests {
         do {
             _ = try await harness.recorder.waitUntil { $0.observation.isReady }
             for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            let previousAnimationScale = ChatMotion.hostedTestAnimationScale
+            ChatMotion.hostedTestAnimationScale = ChatMotionPixelSupport.animationScale
+            defer { ChatMotion.hostedTestAnimationScale = previousAnimationScale }
             let insertion = try await recordAttachmentChipChange(harness, attached: true)
             #expect(insertion.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
             expectSurfaceAnimationFrames(insertion)
@@ -247,6 +253,9 @@ struct ChatSurfaceMotionConformanceTests {
         do {
             _ = try await harness.recorder.waitUntil { $0.observation.isReady }
             for _ in 0..<24 { try await harness.driveFrameBoundary() }
+            let previousAnimationScale = ChatMotion.hostedTestAnimationScale
+            ChatMotion.hostedTestAnimationScale = ChatMotionPixelSupport.animationScale
+            defer { ChatMotion.hostedTestAnimationScale = previousAnimationScale }
             let display = DisplayProjection(
                 displayId: "mo7-floating-motion", title: "Browser", altText: "Live browser viewport",
                 kind: .browserLive,
@@ -328,6 +337,9 @@ struct ChatSurfaceMotionConformanceTests {
         do {
             _ = try await harness.recorder.waitUntil { $0.observation.isReady }
             for _ in 0..<12 { try await harness.driveFrameBoundary() }
+            let previousAnimationScale = ChatMotion.hostedTestAnimationScale
+            ChatMotion.hostedTestAnimationScale = ChatMotionPixelSupport.animationScale
+            defer { ChatMotion.hostedTestAnimationScale = previousAnimationScale }
             let failure = try await recordOpeningOverlayMotion(harness, failed: true)
             #expect(failure.maximumGeometryStep <= ChatMotionConformanceBounds.maximumGeometryStep)
             expectSurfaceAnimationFrames(failure, requiresPixelMotion: true)
@@ -370,23 +382,9 @@ private func expectSurfaceAnimationFrames(
     _ metrics: ChatMotionSurfaceMetrics,
     requiresPixelMotion: Bool = false
 ) {
-    let intervals = metrics.sampleIntervalMilliseconds ?? []
-    let averageInterval = intervals.isEmpty ? 0 : intervals.reduce(0, +) / Double(intervals.count)
-    let displayInterval = 1_000 / Double(max(1, UIScreen.main.maximumFramesPerSecond))
-    let animationPasses = metrics.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames
-    let pixelsPass = !requiresPixelMotion || (metrics.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames
-    print("CHAT-MOTION-SAMPLER \(metrics.name) avg=\(averageInterval)ms display=\(displayInterval)ms samples=\(intervals.count) rawMax=\(metrics.rawMaximumGeometryStep ?? 0) normalizedMax=\(metrics.maximumGeometryStep)")
-    if averageInterval > displayInterval * 1.5 {
-        withKnownIssue(
-            Comment(rawValue: "sampler slower than display (measured \(averageInterval) ms per sample); flips when MO-4's hosted motion scale lands"),
-            isIntermittent: true
-        ) {
-            #expect(animationPasses)
-            #expect(pixelsPass)
-        }
-    } else {
-        #expect(animationPasses)
-        #expect(pixelsPass)
+    #expect(metrics.changedFrames >= ChatMotionConformanceBounds.minimumAnimatedFrames)
+    if requiresPixelMotion {
+        #expect((metrics.pixelChangingFrames ?? 0) >= ChatMotionConformanceBounds.minimumPixelChangingFrames)
     }
 }
 
