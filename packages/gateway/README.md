@@ -3379,10 +3379,14 @@ owners narrow while iterating and use the full configured suite for checkpoints.
 
 `npm test` runs two Vitest passes, in order. The main pass (`vitest.config.ts`) runs
 the parallel suite. The nested pass (`vitest.nested.config.ts`) runs the files that
-spawn nested Vitest or real pi children, one file at a time. That config's list is
-the single owner of which files are nested. Under parallel workers those children
-starve and miss their execFile or detached-process bounds, so they cannot share the
-parallel pass; the bounds are hang bounds only, and a passing run never reaches them.
+spawn nested Vitest or real pi children, or that first-load the managed provider from
+a fresh install root, one file at a time. That config's list is the single owner of
+which files are nested. Under parallel workers those children starve and miss their
+execFile or detached-process bounds, so they cannot share the parallel pass; the
+bounds are hang bounds only, and a passing run never reaches them. A fresh root's
+first managed load transpiles the whole extension graph because jiti's cache is keyed
+by absolute path; production reuses one stable root, so only its first load per
+install pays that cost.
 Run one of them with `npx vitest run --config vitest.nested.config.ts <file>`.
 
 Tests own every remote boundary through injected fetchers, resolvers and HTTP

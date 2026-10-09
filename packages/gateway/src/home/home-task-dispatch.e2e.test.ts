@@ -1,126 +1,32 @@
 import * as fileSystem from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { TrustService } from "../admin/trust-service.js";
-import type { NotificationService } from "../notifications/notification-service.js";
 import { HomeTaskStore } from "./home-task-store.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { SessionCatalog } from "../sessions/session-catalog.js";
-import { ManagedSubagents } from "../sessions/managed-subagents.js";
-import { delegatedArtifactRoot } from "../sessions/delegated-provider.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { runHomeInput } from "../client/terminal-chat.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 
 const evidence: Array<Record<string, unknown>> = [];
-const fixtures: Array<{ registry: RuntimeRegistry; root: string }> = [];
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const fixture of fixtures.splice(0)) {
-    await fixture.registry.dispose();
-    await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
-    await rm(fixture.root, { recursive: true, force: true });
-  }
+  await disposeFixtures();
   vi.unstubAllEnvs();
 });
 afterAll(async () => {
   if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));
 });
 
-async function fixture(providerVersion?: string, codemode = false, contextWindow?: number, managed = false) {
-  const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
-  const agentDir = join(root, "agent");
-  const cwd = join(root, "project");
-  const tronHome = join(root, "tron");
-  await mkdir(agentDir); await mkdir(cwd);
-  // Pacing 0 streams by microtask. A timer per chunk waits at least 1 ms in Node, so a
-  // 64 KB tool call alone took about 5 s here.
-  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 0, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
-  const model = faux.getModel();
-  const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
-  if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
-  if (codemode) {
-    settings.defaultTools = ["+codemode"];
-    const extensionDir = join(cwd, ".pi", "extensions");
-    await mkdir(extensionDir, { recursive: true });
-    await writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))}; export default createCodemodeExtension({ mode: "on" });`);
-  }
-  if (providerVersion) {
-    const packageRoot = join(agentDir, "npm/node_modules/pi-subagents");
-    await mkdir(packageRoot, { recursive: true });
-    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "pi-subagents", version: providerVersion, pi: { extensions: ["index.ts"] } }));
-    await writeFile(join(packageRoot, "index.ts"), `import { writeFileSync } from 'node:fs'; export default function(pi) {
-      pi.registerTool({name:'subagent',label:'Subagent',description:'Test producer boundary',parameters:{type:'object',properties:{}},
-        execute:async (_id,input) => { writeFileSync(${JSON.stringify(join(cwd, "subagent-effect.json"))}, JSON.stringify(input)); return {content:[{type:'text',text:'producer admitted'}]}; }});
-      pi.registerTool({name:'bg_wait',label:'Background Wait',description:'Test versioned wait boundary',parameters:{type:'object',properties:{}},
-        execute:async (_id,input) => {
-          writeFileSync(${JSON.stringify(join(cwd, "wait-effect.json"))}, JSON.stringify(input));
-          return {content:[{type:'text',text:'wait finished'}]}; }});
-    }`);
-    settings.packages = [`npm:pi-subagents@${providerVersion}`];
-  }
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify(settings));
-  const trust = new TrustService(agentDir);
-  await trust.set(cwd, true);
-  const signals: Array<Record<string, unknown>> = [];
-  const notifications: Array<Record<string, unknown>> = [];
-  if (managed) {
-    vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-    vi.stubEnv("PI_SUBAGENTS_TEMP_ROOT", delegatedArtifactRoot(tronHome));
-  }
-  const managedSubagents = managed ? ManagedSubagents.activateForStartup(tronHome) : undefined;
-  const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", managedSubagents,
-    modelRuntimeFactory: async () => {
-      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-      runtime.registerNativeProvider(faux.provider); return runtime;
-    },
-    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    notifications: { enqueue: async (input: Record<string, unknown>) => { notifications.push(input); return "queued"; },
-      suppressAutomatic: async () => "suppressed", markSessionInboxRead: async () => {} } as unknown as NotificationService,
-    homeTaskDiagnostic: (record) => signals.push(record),
-    homeRequestDiagnostic: record => signals.push(record as unknown as Record<string, unknown>),
-    scheduleToolOperations: { execute: async () => {
-      await writeFile(join(cwd, "schedule-effect"), "producer called");
-      return { message: "schedule read", details: { status: "ok" } };
-    } },
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("bounded summary") }),
-  });
-  const registry = createRegistry();
-  const owned = { registry, root };
-  fixtures.push(owned);
-  await bringUpToReadiness(registry);
-  await registry.recoverHomeTasks();
-  const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } });
-  // Readiness only: task recovery runs after listen, as in gateway-main.
-  const restartToReadiness = async () => {
-    await owned.registry.dispose();
-    await owned.registry.administrativeWorkRegistry.waitUntilSettled();
-    owned.registry = createRegistry();
-    await bringUpToReadiness(owned.registry);
-    return owned.registry;
-  };
-  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust, restartToReadiness,
-    restart: async () => {
-      const cold = await restartToReadiness();
-      await cold.recoverHomeTasks();
-      return cold;
-    } };
-}
-
-async function bringUpToReadiness(registry: RuntimeRegistry): Promise<void> {
-  await registry.initialize();
-  await (registry as any).sessionCatalog.whenPublished();
-}
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
   const directory = join(f.tronHome, "gateway/home/tasks");
   return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
@@ -164,10 +70,6 @@ async function observeTaskAcknowledgement<T>(f: Awaited<ReturnType<typeof fixtur
   return accepted;
 }
 
-const reportCall = (id = "report-one", text = "Verified result") => fauxToolCall("report", { resultId: id, outcome: "final", text, evidence: ["focused check passed"] }, { id: `call-${id}` });
-async function dispatch(f: Awaited<ReturnType<typeof fixture>>, taskId = "task-one") {
-  return f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
-}
 
 async function issueGrant(owner: import("./home-task-authorization.js").HomeTaskAuthorization,
   request: import("./home-task-authorization.js").HomeTaskAuthorizationRequest,
@@ -1503,31 +1405,6 @@ describe("Home task production dispatch", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall("after-confirmation")], { stopReason: "toolUse" })]);
     expect((await (await dispatch(f, "after-confirmation")).completion).terminalEvidence?.outcome).toBe("final");
     evidence.push({ case: "explicit-permission-reconfirmation", refusedBefore: true, admittedAfter: true });
-  }, 20_000);
-  it.each(["report", "natural"] as const)("loads the managed provider into ordinary task workers but refuses execution (%s)", async ending => {
-    const f = await fixture(undefined, false, undefined, true);
-    f.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("subagent", { action: "guide" }, { id: "managed-guide" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage([fauxToolCall("subagent", { agent: "missing-task-test-agent", task: "must not execute", async: false }, { id: "managed-execution" })], { stopReason: "toolUse" }),
-      ending === "report" ? fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }) : fauxAssistantMessage("No explicit report"),
-    ]);
-    const run = await dispatch(f);
-    const result = await run.completion;
-    const rows = (await f.registry.readTaskEvidence(run.sessionId)) as any[];
-    const tools = rows.filter(row => row.type === "message" && row.message?.role === "toolResult").map(row => row.message);
-    expect(tools).toContainEqual(expect.objectContaining({ toolCallId: "managed-guide", isError: false }));
-    expect(tools).toContainEqual(expect.objectContaining({ toolCallId: "managed-execution", isError: true,
-      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Home tasks can't launch subagents yet") })]) }));
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "subagent-execution" }));
-    const receipts = rows.filter(row => row.type === "custom" && row.customType === "tron.chat-invocation.v1"
-      && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
-    expect(receipts).toHaveLength(1);
-    expect(receipts[0].data).toMatchObject({ sessionId: run.sessionId, operationId: run.operationId,
-      lifecycle: ending === "report" ? "interrupted" : "completed" });
-    expect(result.terminalEvidence?.outcome).toBe(ending === "report" ? "final" : "unknown");
-    expect(f.notifications).toHaveLength(1);
-    expect(f.notifications[0]).toMatchObject({ kind: "agent_finished", title: "Tron Home task", sessionId: result.homeId });
-    evidence.push({ case: `managed-task-${ending}`, guideLoaded: true, executionRefused: true, terminalReceipt: receipts[0].data, result });
   }, 20_000);
 
   it.each([

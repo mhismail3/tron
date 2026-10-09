@@ -1,10 +1,13 @@
 import { defineConfig } from "vitest/config";
 
-/** Test files that run nested vitest or real pi children. Each child boots its own
- * runtime under execFile or detached-process bounds, and under the parallel pass
- * those children starve and miss their bounds (#655). They run one file at a time
- * in their own pass after the parallel suite; the main config excludes this list. */
+/** Test files that run nested vitest or real pi children, or first-load the managed
+ * provider from a fresh install root (its cold jiti transpile is seconds of CPU).
+ * Each child boots its own runtime under execFile or detached-process bounds, and
+ * under the parallel pass those children starve and miss their bounds (#655). They
+ * run one file at a time in their own pass after the parallel suite; the main
+ * config excludes this list. */
 export const nestedTestFiles = [
+  "src/home/home-task-managed-provider.e2e.test.ts",
   "src/sessions/managed-attribution.integration.test.ts",
   "src/sessions/managed-subagents.invalid-entry.test.ts",
   "src/sessions/managed-subagents.rollback.test.ts",
