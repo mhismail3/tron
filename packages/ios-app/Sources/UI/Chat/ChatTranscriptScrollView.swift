@@ -376,39 +376,78 @@ private struct ChatRowMotionMeasurement: Equatable {
     let height: CGFloat
 }
 
-/// A unified ForEach preserves this host while runtime/local content becomes
-/// canonical. Exact physical row identity owns admitted in-place updates.
-private struct ChatRowMotionHost<Content: View>: View {
+/// The stable ForEach value. Its child motion owner keeps frame-by-frame state
+/// below this projection-scoped content builder.
+private struct ChatPhysicalTranscriptRowHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
     let viewportIsPositioning: Bool
+    let promptEntrance: ChatPhysicalPromptEntrance?
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
     let onPromptEntranceConsumed: (String) -> Void
     let onPromptContentReplacement: (String) -> Void
     let onPromptEntranceSettled: (String) -> Void
     @ViewBuilder let content: (ChatPhysicalTranscriptRow, Bool, Bool) -> Content
+    #if HOSTED_TEST
+    @State private var hostedIdentity = UUID()
+    #endif
 
-    /// The queued card being replaced by its canonical row, and the cross-fade
-    /// progress between them. Nothing mirrors the row input: the row renders
-    /// straight from `row`, so an update costs one body evaluation instead of one
-    /// stale and one fresh, and the outgoing card is the only snapshot this host
-    /// keeps.
-    @State private var outgoingPrompt: ChatPhysicalTranscriptRow?
+    var body: some View {
+        #if HOSTED_TEST
+        let _ = hostedRecorder?.recordReplacementHostEvaluation(id: row.id)
+        #endif
+        ChatRowMotionHost(
+            row: row,
+            reduceMotion: reduceMotion,
+            viewportIsPositioning: viewportIsPositioning,
+            promptEntrance: promptEntrance,
+            incomingContent: content(row, false, false),
+            onPromptEntranceConsumed: onPromptEntranceConsumed,
+            onPromptContentReplacement: onPromptContentReplacement,
+            onPromptEntranceSettled: onPromptEntranceSettled,
+            content: content
+        )
+        #if HOSTED_TEST
+        .background {
+            ChatHostedNativeRowProbe(
+                physicalID: row.id, semanticID: row.semanticID, identity: hostedIdentity
+            )
+        }
+        #endif
+        .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: row.id) }
+        .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: row.id) }
+    }
+}
+
+/// One row-scoped owner selects replacement transitions and owns replacement
+/// and streaming-resize state. Supplied content values are projection-scoped;
+/// only a replacement captures another view, never a copy of the current projection.
+private struct ChatRowMotionHost<Content: View>: View {
+    let row: ChatPhysicalTranscriptRow
+    let reduceMotion: Bool
+    let viewportIsPositioning: Bool
+    let incomingContent: Content
+    let onPromptEntranceConsumed: (String) -> Void
+    let onPromptContentReplacement: (String) -> Void
+    let onPromptEntranceSettled: (String) -> Void
+    @ViewBuilder let content: (ChatPhysicalTranscriptRow, Bool, Bool) -> Content
+
+    @State private var outgoingContent: Content?
+    @State private var replacementIncomingContent: Content?
     @State private var promptReplacementProgress = 1.0
     @State private var replacedPromptSemanticID: String?
     @State private var promptReplacementRevision = 0
     @State private var retainedPromptEntrance: ChatPhysicalPromptEntrance?
+    @State private var presentedHeight: CGFloat?
+    @State private var lastMeasurement: ChatRowMotionMeasurement?
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    #if HOSTED_TEST
-    @State private var hostedIdentity = UUID()
-    #endif
 
     init(
         row: ChatPhysicalTranscriptRow,
         reduceMotion: Bool,
         viewportIsPositioning: Bool,
         promptEntrance: ChatPhysicalPromptEntrance?,
-        hostedRecorder: (any ChatTranscriptHostedRecording)? = nil,
+        incomingContent: Content,
         onPromptEntranceConsumed: @escaping (String) -> Void,
         onPromptContentReplacement: @escaping (String) -> Void,
         onPromptEntranceSettled: @escaping (String) -> Void,
@@ -417,7 +456,7 @@ private struct ChatRowMotionHost<Content: View>: View {
         self.row = row
         self.reduceMotion = reduceMotion
         self.viewportIsPositioning = viewportIsPositioning
-        self.hostedRecorder = hostedRecorder
+        self.incomingContent = incomingContent
         self.onPromptEntranceConsumed = onPromptEntranceConsumed
         self.onPromptContentReplacement = onPromptContentReplacement
         self.onPromptEntranceSettled = onPromptEntranceSettled
@@ -426,34 +465,27 @@ private struct ChatRowMotionHost<Content: View>: View {
     }
 
     var body: some View {
-        // `row.id` owns structural continuity. Descendants animate admitted
-        // lifecycle and payload values within this persistent host.
-        #if HOSTED_TEST
-        let _ = hostedRecorder?.recordReplacementHostEvaluation(id: row.id)
-        #endif
         renderedContent
-            #if HOSTED_TEST
-            .background {
-                ChatHostedNativeRowProbe(
-                    physicalID: row.id, semanticID: row.semanticID, identity: hostedIdentity
-                )
-            }
-            #endif
-            .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: row.id) }
-            .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: row.id) }
             .onChange(of: row) { previous, next in retarget(from: previous, to: next) }
     }
 
     @ViewBuilder
     private var renderedContent: some View {
         if row.isAssistantMessage {
-            ChatRowStreamingContentOwner(
-                row: row,
-                streaming: row.isStreamingMessage,
-                viewportIsPositioning: viewportIsPositioning
-            ) {
-                entranceWrappedContent
-            }
+            entranceWrappedContent
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: ChatRowMotionMeasurement.self) { geometry in
+                    ChatRowMotionMeasurement(row: row, width: geometry.size.width, height: geometry.size.height)
+                } action: { measurement in
+                    install(measurement)
+                }
+                .frame(height: presentedHeight, alignment: .top)
+                .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
+                .clipShape(ChatRowMotionVerticalClip(isActive: row.isStreamingMessage))
+                .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
+                .onChange(of: row.isStreamingMessage) { _, active in
+                    if !active { releaseHeight() }
+                }
         } else {
             entranceWrappedContent
         }
@@ -465,12 +497,8 @@ private struct ChatRowMotionHost<Content: View>: View {
             ChatOutgoingSubmissionEntranceRow(
                 reduceMotion: reduceMotion,
                 animatesEntrance: entrance.animates,
-                onEntranceConsumed: {
-                    onPromptEntranceConsumed(entrance.lifecycleID)
-                },
-                onEntranceSettled: {
-                    onPromptEntranceSettled(entrance.lifecycleID)
-                }
+                onEntranceConsumed: { onPromptEntranceConsumed(entrance.lifecycleID) },
+                onEntranceSettled: { onPromptEntranceSettled(entrance.lifecycleID) }
             ) {
                 replacementContent
             }
@@ -479,26 +507,17 @@ private struct ChatRowMotionHost<Content: View>: View {
         }
     }
 
-
-    /// The canonical row and, only while a queued card is handing off, that card.
-    /// `ChatRowMotionLayout` measures both in the pass that places them, so
-    /// the row's height follows the cross-fade exactly instead of waiting for the
-    /// incoming content's next measurement.
     private var replacementContent: some View {
-        ChatRowMotionLayout(
+        let incoming = replacementIncomingContent ?? incomingContent
+        return ChatRowMotionLayout(
             progress: promptReplacementProgress,
             reduceMotion: reduceMotion,
             surfaceActive: presentationActivity.allowsContinuousAnimation,
             viewportIsPositioning: viewportIsPositioning
         ) {
-            content(row, false, replacedPromptSemanticID == row.semanticID)
-                .opacity(promptReplacementProgress)
-            if let outgoingPrompt {
-                content(outgoingPrompt, true, true)
-                    // The outgoing card keeps its natural layout but is clipped to
-                    // the row's interpolated height (horizontal glass and shadow
-                    // overflow stay visible). Only this transient layer is
-                    // clipped, so ordinary rows carry no clip.
+            incoming.opacity(promptReplacementProgress)
+            if let outgoingContent {
+                outgoingContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
                     .clipShape(Rectangle())
@@ -511,121 +530,47 @@ private struct ChatRowMotionHost<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func retarget(
-        from previous: ChatPhysicalTranscriptRow,
-        to next: ChatPhysicalTranscriptRow
-    ) {
+    private func retarget(from previous: ChatPhysicalTranscriptRow, to next: ChatPhysicalTranscriptRow) {
         switch ChatRowMotionTransitionPolicy.select(from: previous, to: next) {
         case .notification:
-            // A runtime notification that stops showing progress is the one
-            // notification change that animates, and the notification's own view
-            // owns that content transition (`ChatNotificationView`). Its mirrored
-            // row here existed only to carry the animation through the
-            // projection's animation-suppressing transaction, which the row's own
-            // `.animation(value:)` does below that boundary.
-            break
+            if replacedPromptSemanticID == next.semanticID {
+                replacementIncomingContent = content(next, false, true)
+            }
         case .promptContent:
-            // Only a queued-card row looks different from the canonical row, so
-            // only it cross-fades. Keep the physical host, row geometry, and
-            // consumed entrance lease; the two contents fade inside that owner
-            // while the layout interpolates the row's height with the same curve.
             onPromptContentReplacement(next.semanticID)
+            outgoingContent = content(previous, true, true)
+            replacementIncomingContent = content(next, false, true)
             replacedPromptSemanticID = next.semanticID
             promptReplacementRevision &+= 1
             let revision = promptReplacementRevision
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                outgoingPrompt = previous
-                promptReplacementProgress = 0
-            }
-            withAnimation(
-                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion),
-                completionCriteria: .logicallyComplete
-            ) {
+            withTransaction(transaction) { promptReplacementProgress = 0 }
+            withAnimation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), completionCriteria: .logicallyComplete) {
                 promptReplacementProgress = 1
             } completion: {
                 guard promptReplacementRevision == revision else { return }
                 var settle = Transaction()
                 settle.disablesAnimations = true
-                withTransaction(settle) { outgoingPrompt = nil }
+                withTransaction(settle) { outgoingContent = nil }
             }
         case .none:
-            // Every other payload replaces atomically, including an ordinary
-            // prompt lifecycle row whose content matches the canonical row.
-            // Stable physical identity prevents a second entrance and the
-            // scroll owner retains its geometry.
             promptReplacementRevision &+= 1
+            replacementIncomingContent = replacedPromptSemanticID == next.semanticID
+                ? content(next, false, true)
+                : nil
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                outgoingPrompt = nil
+                outgoingContent = nil
                 promptReplacementProgress = 1
             }
         }
     }
-}
-
-private struct ChatRowMotionVerticalClip: Shape {
-    let isActive: Bool
-
-    func path(in bounds: CGRect) -> Path {
-        if isActive { return Path(bounds) }
-        let overflow = ChatEntranceGrowthPolicy.settledOverflow
-        return Path(bounds.insetBy(dx: -overflow, dy: -overflow))
-    }
-}
-
-/// Keeps streaming height state below the physical row identity host so each
-/// animation frame does not re-evaluate the row's content closure.
-private struct ChatRowStreamingContentOwner<Content: View>: View {
-    let row: ChatPhysicalTranscriptRow
-    let streaming: Bool
-    let viewportIsPositioning: Bool
-    @ViewBuilder let content: Content
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var presentedHeight: CGFloat?
-    @State private var lastMeasurement: ChatRowMotionMeasurement?
-    @State private var isAnimatingGrowth = false
-
-    init(
-        row: ChatPhysicalTranscriptRow,
-        streaming: Bool,
-        viewportIsPositioning: Bool,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.row = row
-        self.streaming = streaming
-        self.viewportIsPositioning = viewportIsPositioning
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: ChatRowMotionMeasurement.self) { geometry in
-                ChatRowMotionMeasurement(
-                    row: row,
-                    width: geometry.size.width,
-                    height: geometry.size.height
-                )
-            } action: { measurement in
-                install(measurement)
-            }
-            .frame(height: presentedHeight, alignment: .top)
-            .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
-            .clipShape(ChatRowMotionVerticalClip(isActive: streaming))
-            .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
-            .onChange(of: streaming) { _, active in
-                if !active { releaseHeight() }
-            }
-    }
 
     @MainActor
     private func install(_ measurement: ChatRowMotionMeasurement) {
-        guard streaming,
+        guard row.isStreamingMessage,
               measurement.width.isFinite,
               measurement.height.isFinite,
               measurement.height >= 0 else { return }
@@ -652,14 +597,12 @@ private struct ChatRowStreamingContentOwner<Content: View>: View {
             return
         }
         let animation = ChatMotion.streamingResize
-        isAnimatingGrowth = true
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             var transaction = Transaction(animation: animation)
             transaction.admitsChatIncrementalGrowthAnimation = true
             withTransaction(transaction) { presentedHeight = measurement.height }
         } completion: {
-            isAnimatingGrowth = false
-            if !streaming { releaseHeight() }
+            if !row.isStreamingMessage { releaseHeight() }
         }
     }
 
@@ -672,6 +615,16 @@ private struct ChatRowStreamingContentOwner<Content: View>: View {
             presentedHeight = nil
             lastMeasurement = nil
         }
+    }
+}
+
+private struct ChatRowMotionVerticalClip: Shape {
+    let isActive: Bool
+
+    func path(in bounds: CGRect) -> Path {
+        if isActive { return Path(bounds) }
+        let overflow = ChatEntranceGrowthPolicy.settledOverflow
+        return Path(bounds.insetBy(dx: -overflow, dy: -overflow))
     }
 }
 
@@ -1123,7 +1076,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         installed: InstalledChatTranscript
     ) -> some View {
         let entrance = promptEntrance(for: row, installed: installed)
-        return ChatRowMotionHost(
+        return ChatPhysicalTranscriptRowHost(
             row: row,
             reduceMotion: reduceMotion,
             viewportIsPositioning: scrollCoordinator.isViewportBeingPositioned,

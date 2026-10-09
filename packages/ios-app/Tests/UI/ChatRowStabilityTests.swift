@@ -758,6 +758,74 @@ struct ChatRowStabilityTests {
         }
     }
 
+    @Test("one physical row host survives assistant arrival, streamed resize and canonical completion")
+    func rowMotionOwnerSurvivesArrivalResizeAndCanonicalCompletion() async throws {
+        try await withTestWatchdog(timeout: .seconds(90)) {
+            var baseSnapshot = try stabilitySnapshot(items: rowStabilityHistoryItems())
+            baseSnapshot.phase = .running
+            let initialSnapshot = baseSnapshot
+            try await withStabilityHarness(snapshot: initialSnapshot) { harness in
+                var snapshot = initialSnapshot
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                let rowID = "motion-owner-streaming-reply"
+                let firstFrame = try harnessRichAssistantMessage(
+                    id: rowID,
+                    presentationID: rowID,
+                    thinkingLines: traceMotionLines(1),
+                    text: "This reply arrives and streams before canonical completion."
+                )
+                snapshot.streaming = firstFrame
+                snapshot.revision += 1
+                snapshot.eventSequence += 1
+                let priorInstall = harness.probeObservation.projectionInstallCount
+                harness.replaceAuthoritativeSnapshot(snapshot)
+                _ = try await harness.recorder.waitUntil { observation in
+                    observation.observation.projectionInstallCount > priorInstall
+                        && observation.nativeRows.contains { $0.semanticID == rowID || $0.physicalID == rowID }
+                }
+                try await driveBoundaries(20, harness: harness)
+                let physicalID = try #require(harness.recorder.samples.last?.nativeRows.first {
+                    $0.semanticID == rowID || $0.physicalID == rowID
+                }?.physicalID)
+                let arrivingHeight = try #require(harness.probeObservation.rowFrames[physicalID]?.height)
+                let identityCountAfterArrival = harness.probeObservation.rowIdentityInstanceCounts[physicalID]
+
+                let streamedFrame = try harnessRichAssistantMessage(
+                    id: rowID,
+                    presentationID: rowID,
+                    thinkingLines: traceMotionLines(6),
+                    text: "This reply arrives and streams before canonical completion."
+                )
+                snapshot.streaming = streamedFrame
+                snapshot.revision += 1
+                snapshot.eventSequence += 1
+                let streamInstall = harness.probeObservation.projectionInstallCount
+                harness.replaceAuthoritativeSnapshot(snapshot)
+                _ = try await harness.recorder.waitUntil { $0.observation.projectionInstallCount > streamInstall }
+                try await driveBoundaries(20, harness: harness)
+                let streamedHeight = try #require(harness.probeObservation.rowFrames[physicalID]?.height)
+                #expect(streamedHeight > arrivingHeight + 10, "the same row did not resize while streaming")
+                #expect(harness.probeObservation.rowIdentityInstanceCounts[physicalID] == identityCountAfterArrival)
+
+                snapshot.streaming = nil
+                snapshot.transcript.append(streamedFrame)
+                snapshot.transcriptTotal = snapshot.transcript.count
+                snapshot.revision += 1
+                snapshot.eventSequence += 1
+                let completionInstall = harness.probeObservation.projectionInstallCount
+                harness.replaceAuthoritativeSnapshot(snapshot)
+                _ = try await harness.recorder.waitUntil { observation in
+                    observation.observation.projectionInstallCount > completionInstall
+                        && observation.nativeRows.contains { $0.physicalID == physicalID }
+                }
+                try await driveBoundaries(8, harness: harness)
+                #expect(identityCountAfterArrival == 1)
+                #expect(harness.probeObservation.rowIdentityInstanceCounts[physicalID] == 1)
+                #expect(harness.probeObservation.physicalRowAppearanceCounts[physicalID] == 1)
+            }
+        }
+    }
+
     @Test("a tool detail stays presented while streaming pushes its row out of the window")
     func toolDetailOutlivesItsStreamingRow() async throws {
         try await withTestWatchdog(timeout: .seconds(150)) {
