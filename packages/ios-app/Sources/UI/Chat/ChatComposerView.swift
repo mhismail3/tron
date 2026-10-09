@@ -235,7 +235,7 @@ struct ChatComposerView: View {
             attachmentButton
             ZStack(alignment: .leading) {
                 if text.isEmpty && !isFocused {
-                    ComposerPlaceholder(reduceMotion: reduceMotion)
+                    ComposerPlaceholder()
                         .opacity(isTranscriptReady ? 1 : 0.38)
                         .padding(.leading, 2)
                         .padding(.vertical, 10)
@@ -471,11 +471,10 @@ struct ChatPendingAttachmentStrip: View {
     }
 }
 
-/// The empty, unfocused composer's prompt. It exists only while visible, so its
-/// rotation task starts on appearance and is cancelled when the user focuses or
-/// types; each appearance starts from a fresh random line.
+/// The empty, unfocused composer's prompt. It exists only while visible, so
+/// its state is recreated each time it reappears (after a send or clearing the
+/// draft): each appearance picks one random line and keeps it until hidden.
 private struct ComposerPlaceholder: View {
-    let reduceMotion: Bool
     @State private var line = ComposerPlaceholder.lines.randomElement() ?? "Ask anything"
 
     /// Keep lines short enough for one line beside the composer's buttons.
@@ -505,19 +504,8 @@ private struct ComposerPlaceholder: View {
     var body: some View {
         Text(line)
             .font(TronTypography.input)
-            .foregroundStyle(Color.tronEmerald)
+            // Typed text is full emerald; the prompt reads as a dimmer hint.
+            .foregroundStyle(Color.tronEmerald.opacity(0.55))
             .lineLimit(1)
-            .id(line)
-            .transition(.opacity)
-            .task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(6))
-                    guard !Task.isCancelled else { return }
-                    let next = Self.lines.filter { $0 != line }.randomElement() ?? line
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.45)) {
-                        line = next
-                    }
-                }
-            }
     }
 }
