@@ -1064,7 +1064,7 @@ Tron Home is one opt-in persistent conversation per Gateway installation. It is
 created only by an explicit `home.designate`; until then every session is
 ordinary. `home.status` (a read) returns one bounded projection
 `{ phase, activation, readiness, recovery, taskRecovery?, available, reason?, enabled, homeId?,
-  sessionId?, generation?, model?, live, sessionPresent, memory }`. Phase,
+  sessionId?, openSessionId?, generation?, model?, live, sessionPresent, memory }`. Phase,
 readiness and recovery are derived from the existing designation, memory and
 activation owners rather than stored as separate lifecycle state. `memory` is
 `{ configured, open, model?, spentTokens?, episodic?, blocked?,

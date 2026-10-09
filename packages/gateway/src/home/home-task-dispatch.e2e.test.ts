@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { HomeTaskStore } from "./home-task-store.js";
+import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { SessionCatalog } from "../sessions/session-catalog.js";
@@ -1114,6 +1115,7 @@ describe("Home task production dispatch", () => {
     expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "blocked" } });
     expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
     const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
+      uploads: new UploadStore(join(f.root, "redelivery-uploads"), 1024),
       receipts: new CommandReceiptStore(join(f.root, "redelivery-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "inbox-terminal", identity: "device:inbox-test", isLocal: true } as unknown as ClientContext;
     let command: unknown;
@@ -1142,6 +1144,46 @@ describe("Home task production dispatch", () => {
     expect(await readFile(oldPath)).toEqual(sealed);
     evidence.push({ case: "replacement-redelivery-rollover", pending, accepted, consumed: await owner.taskResult(task.taskId), sealedBytesUnchanged: true });
   }, 20_000);
+
+  it("keeps the sealed predecessor openable while a rollover is pending, and routes attachments through home.prompt", async () => {
+    const f = await fixture();
+    const owner = f.registry.homeOwner(); const model = f.faux.getModel();
+    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    const predecessor = f.home.sessionId;
+    const home = await f.registry.acquire(predecessor);
+    f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
+    await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
+    const port = (owner as any).options.sessions;
+    const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
+    await owner.chapterQuiescent(predecessor); metrics.mockRestore();
+    // A reserved successor has no session yet: the sealed predecessor is the one
+    // openable route, and its successor is named only by the logical route.
+    const pending = await owner.status();
+    expect(pending).toMatchObject({ phase: "rollover-pending", sessionPresent: false, openSessionId: predecessor });
+    expect(pending.sessionId).not.toBe(predecessor);
+    // The openable predecessor is a readable canonical session, not just a name.
+    expect((await f.registry.acquire(predecessor)).id).toBe(predecessor);
+    const uploads = new UploadStore(join(f.root, "uploads"), 1024);
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner, uploads,
+      receipts: new CommandReceiptStore(join(f.root, "attachment-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { id: "attachment-client", identity: "device:attachment-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
+    // The sealed predecessor stays read-only: a physical prompt to it is refused.
+    await expect(service.invoke(client, "session.prompt", { sessionId: predecessor, text: "write to the sealed chapter", commandId: "sealed-chapter-command" }))
+      .rejects.toMatchObject({ code: "conflict", details: { reason: "sealed-chapter" } });
+    const upload = await uploads.save("notes.txt", "text/plain", Buffer.from("attached notes"));
+    // Extension commands never carry attachments, on the logical route as well.
+    await expect(service.invoke(client, "home.prompt", { commandId: "extension-attachment-command", text: "", uploadIds: [upload.id], resourceInvocation: { source: "extension", name: "goal", arguments: "" } }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    f.faux.setResponses([fauxAssistantMessage("attachment received")]);
+    const accepted = await service.invoke(client, "home.prompt", { commandId: "attachment-command-one", text: "Review the attachment", uploadIds: [upload.id] }) as unknown as { sessionId: string; operationId: string; logicalSessionId: string };
+    expect(accepted).toMatchObject({ logicalSessionId: "home", sessionId: pending.sessionId });
+    const successor = await f.registry.acquire(accepted.sessionId);
+    await waitFor(() => successor.snapshot().configurationBlocker === null, "attachment Home terminal");
+    const prompted = successor.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "user");
+    expect(JSON.stringify(prompted)).toContain("notes.txt");
+    expect(await owner.status()).toMatchObject({ sessionPresent: true, sessionId: accepted.sessionId, openSessionId: accepted.sessionId });
+    evidence.push({ case: "rollover-pending-attachment-route", pending: { phase: pending.phase, openSessionId: pending.openSessionId }, accepted: accepted.sessionId });
+  }, 30_000);
 
   it("wires Home's real task tool to exact-operation shared steering", async () => {
     const f = await fixture();

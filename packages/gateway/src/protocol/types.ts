@@ -1121,6 +1121,10 @@ export interface HomeStatus {
   enabled: boolean;
   homeId?: string;
   sessionId?: string;
+  /** The newest chapter a client may open: `sessionId` when it is present, or the
+   * sealed predecessor while `rollover-pending`. Absent when nothing is openable.
+   * Sends from it still go through `home.prompt`, which materializes the successor. */
+  openSessionId?: string;
   bindingRevision?: number;
   generation?: number;
   routeGeneration?: number;

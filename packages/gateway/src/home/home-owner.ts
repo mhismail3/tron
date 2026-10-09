@@ -397,6 +397,14 @@ export class HomeOwner {
     const currentChapter = record.chapters.at(-1)!;
     const live = this.options.sessions.hasLiveRuntime(sessionId);
     const sessionPresent = await this.options.sessions.sessionPresent(sessionId);
+    // The newest chapter a client may open. A reserved or materializing successor
+    // has no session to open yet, so the sealed predecessor is the openable route
+    // until the first logical prompt materializes the successor.
+    const openable = currentChapter.state === "reserved" || currentChapter.state === "materializing"
+      ? record.chapters.at(-2) : currentChapter;
+    const openSessionPresent = openable === undefined ? false
+      : openable === currentChapter ? sessionPresent : await this.options.sessions.sessionPresent(openable.sessionId);
+    const openSessionId = openable !== undefined && openSessionPresent ? openable.sessionId : undefined;
     // Missing-session recovery is a status, never zero-valued admission metrics.
     const activeMetrics = sessionPresent && currentChapter.state === "active" && this.options.sessions.chapterMetrics
       ? await this.options.sessions.chapterMetrics(currentChapter.sessionId)
@@ -424,6 +432,7 @@ export class HomeOwner {
       enabled: record.enabled,
       homeId: record.homeId,
       sessionId,
+      ...(openSessionId === undefined ? {} : { openSessionId }),
       bindingRevision: record.bindingRevision,
       generation: record.generation,
       routeGeneration: record.routeGeneration,

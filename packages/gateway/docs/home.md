@@ -909,7 +909,7 @@ browser endpoints below; `home.v1` alone does not promise a browser contract.
 
 - `home.status` is one bounded read that composes the record, memory status and
   `home.context`: `{ phase, activation, readiness, recovery, available, reason?,
-  enabled, homeId?, sessionId?, generation?, routeGeneration?, model?, live, sessionPresent,
+  enabled, homeId?, sessionId?, openSessionId?, generation?, routeGeneration?, model?, live, sessionPresent,
   chapter?, memory }`. `chapter` contains a bounded ledger count, current canonical
   byte/entry measurements when available, and the current recovery decision. `phase` and the recovery action are derived on each read; they are
   not additional lifecycle state. Readiness gaps identify an unavailable record,
@@ -926,11 +926,22 @@ browser endpoints below; `home.v1` alone does not promise a browser contract.
   all — live, or still a canonical session in the catalog. A Gateway whose first
   catalog cut has not completed reports `sessionPresent: true`, because an
   unread catalog cannot prove absence.
+- `openSessionId` is the newest chapter a client may open. It is `sessionId`
+  when that chapter is present. While a successor is `reserved` or
+  `materializing` (`rollover-pending`), it is the sealed predecessor, because
+  the reserved successor has no session to open yet. It is absent when neither
+  is present, so a client routes by this one field. It never makes a sealed
+  chapter writable: `session.prompt` to the predecessor is still refused with
+  `sealed-chapter`, and only `home.prompt` materializes the successor.
 - `home.open` returns the logical Home route and current binding without
   creating a runtime or materializing a reserved successor. `home.prompt` binds
   one command receipt to that route before effects, materializes a reserved
   chapter only when needed, rechecks the exact binding, and returns the physical
-  session and operation identity.
+  session and operation identity. `home.prompt` takes the composer's whole
+  prompt contract, admitted by the same code as `session.prompt`: `text`,
+  `uploadIds` (at most 10, materialized into the resolved chapter),
+  `behavior` (`steer`/`followUp` while a turn runs), `resourceInvocation` and
+  `commandId`. Extension commands cannot carry attachments on either route.
 - `home.designate` is a mutation with a command-id receipt. With no record it
   creates the working directory and trust decision, creates a **new** session
   whose first runtime is the Home profile, applies the model, writes the record,
@@ -1071,9 +1082,11 @@ callback arriving from a slot lane cannot invert the slot/lifecycle lock order.
 
 `tron-chat` (`packages/gateway/src/client/terminal-chat.ts`) is the terminal
 client. The iOS Home surface designates, configures and pauses Home's memory,
-reads status, and runs the task controls through the same `home.*` RPCs. iOS
-chat sends `session.prompt` to the physical session it shows, and never calls
-`home.prompt` or `home.open`; only the terminal client prompts the logical route.
+reads status, and runs the task controls through the same `home.*` RPCs. An
+ordinary iOS chat sends `session.prompt` to the session it shows. The Home
+chat opens the route `openSessionId` names and sends `home.prompt`, so its next
+send materializes a reserved successor and the chat follows `sessionId`; it
+never sends `session.prompt` to a sealed chapter. The terminal client prompts the logical route the same way.
 With no explicit `--session`, it first asks for the
 logical Home route; while Home is enabled, ordinary input goes through
 `home.prompt` even as physical chapters change. A reserved successor is not
