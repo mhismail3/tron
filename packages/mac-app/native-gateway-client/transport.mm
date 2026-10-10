@@ -2,12 +2,8 @@
 #import <Security/Security.h>
 #include <stdexcept>
 #include <atomic>
-#ifdef TRON_CAPTURE_TEST
-#include <mutex>
-#endif
 
 namespace capture {
-#ifndef TRON_CAPTURE_TEST
 // Neither callers nor mutable runtime settings supply endpoints or expected
 // identities. The actual signed Node's publisher pins the canonical wrapper;
 // that validated installed composition pins the exact native host build.
@@ -91,45 +87,4 @@ public:
     ~XPCTransport() override { invalidate(); }
 };
 std::shared_ptr<Transport> makeTransport() { return std::make_shared<XPCTransport>(); }
-#else
-static std::mutex delayedMutex;
-static std::function<void()> delayedReply; // one bounded, explicitly released test-edge reply
-static std::atomic<unsigned> deliveries{0};
-void deliverDelayedReply() {
-    std::function<void()> reply;
-    { std::lock_guard lock(delayedMutex); reply = std::move(delayedReply); delayedReply = {}; }
-    if (!reply) throw std::runtime_error("no delayed test reply");
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        reply();
-        ++deliveries; // observable AFTER the actual weak callback returned
-    });
-}
-unsigned delayedReplyCount() { return deliveries.load(); }
-// Fixed-size retained callbacks deliberately survive invalidation. A delayed
-// reply must be harmless even after the real owner or Node worker has retired.
-class TestTransport final : public Transport {
-    Reply replies_[5];
-    Lost lost_;
-    bool delayUsed_ = false, terminal_ = false;
-public:
-    void open(Lost lost) override { lost_ = std::move(lost); }
-    void send(size_t slot, NSData *, Reply reply) override {
-        if (terminal_) throw std::runtime_error("native capture connection terminal");
-        replies_[slot] = std::move(reply);
-    }
-    void invalidate() override { terminal_ = true; }
-    void reply(size_t slot, NSData *control, NSData *jpeg, bool delayed) override {
-        if (slot >= 5 || !replies_[slot]) throw std::runtime_error("test slot not admitted");
-        Reply reply = replies_[slot];
-        if (!delayed) { reply(control, jpeg); return; }
-        if (delayUsed_) throw std::runtime_error("one delayed callback per test transport");
-        std::lock_guard lock(delayedMutex);
-        if (delayedReply) throw std::runtime_error("delayed test edge capacity exhausted");
-        delayUsed_ = true;
-        delayedReply = [reply, control, jpeg] { reply(control, jpeg); };
-    }
-    void lose() override { terminal_ = true; lost_(); }
-};
-std::shared_ptr<Transport> makeTransport() { return std::make_shared<TestTransport>(); }
-#endif
 }

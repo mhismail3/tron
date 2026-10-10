@@ -258,16 +258,15 @@ targets:
       - path: Tests/Fixtures/SingleInstanceLockProbe
         createIntermediateGroups: true
 
-  TronMacTests:
+  # Real-boundary tests only (spawned processes, loopback sockets, the built
+  # launcher). Unit tests are not kept; see docs/development.md.
+  TronMacIntegrationTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - path: Sources/NativeHost/CuaProcessOwner.swift
-      - path: Tests
+      - path: Tests/Integration
         createIntermediateGroups: true
-        optional: true
-        excludes:
-          - Fixtures/SingleInstanceLockProbe/**
     dependencies:
       - target: TronMac
       - target: SingleInstanceLockProbe
@@ -280,14 +279,14 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMac.app/Contents/MacOS/TronMac"
         GENERATE_INFOPLIST_FILE: YES
         TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
-        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.integration-tests
 
 schemes:
   TronMac:
     build:
       targets:
         TronMac: all
-        TronMacTests: [test]
+        TronMacIntegrationTests: [test]
     run:
       config: Debug
       environmentVariables:
@@ -298,10 +297,10 @@ schemes:
         TRON_MAC_TEST_HOST: "1"
         # Code under test resolves the Tron home globally (for example the Mac
         # log writer); keep every test run out of the user's real home.
-        TRON_DATA_DIR: "$(BUILT_PRODUCTS_DIR)/TronMacTests-home"
+        TRON_DATA_DIR: "$(BUILT_PRODUCTS_DIR)/TronMacIntegrationTests-home"
         TRON_SINGLE_INSTANCE_LOCK_PROBE: "$(BUILT_PRODUCTS_DIR)/SingleInstanceLockProbe"
       targets:
-        - TronMacTests
+        - TronMacIntegrationTests
     profile:
       config: Release
     analyze:

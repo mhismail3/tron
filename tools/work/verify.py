@@ -134,7 +134,7 @@ def plan(root: Path, changed: List[str], tests: List[str], merge_base: str) -> L
     if _code_paths(changed, _IOS):
         checks.append(Check("ios", "scripts/tron-ios-test build"))
     if _code_paths(changed, _MAC):
-        checks.append(Check("mac", "scripts/tron mac generate && cd packages/mac-app && xcodebuild build "
+        checks.append(Check("mac", "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing "
                                    "-project TronMac.xcodeproj -scheme TronMac -configuration Debug "
                                    "-destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData"))
     syntax: dict = {"python": [], "node": [], "shell": []}
