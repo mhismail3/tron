@@ -221,9 +221,7 @@ explicit user action against fresh validation and ServiceManagement state.
 Entry discovery is asynchronous presentation, not installation authority. It is
 retired on cancellation or when an explicit installation supersedes it. Completed
 installation does not repeat discovery whose result is hidden by the authoritative
-install outcome. `WizardInstallationTests` exercises accepted lifetime, duplicate
-admission, first failure, progress continuity and stale observation rejection with
-owned fixtures and synthetic service callbacks.
+install outcome.
 
 ## Pairing
 
@@ -338,8 +336,7 @@ Refresh/takeover are reasons for real bootout/unregister/register steps, not
 separate execution modes or no-op steps. Live load and its focused tests share
 one sequential executor: await each accepted step, stop at the first reported
 failure, and never retry or re-derive ownership between steps.
-`LiveLaunchAgentManagerTests` exercises the real planner with synthetic inputs
-and the live executor with controlled callbacks, without changing Login Items. Bearer, enrollment, and network-cache credentials
+Bearer, enrollment, and network-cache credentials
 use one bounded owner-only regular-file/no-symlink descriptor reader, followed
 by separate exact-key schema validation. Stable transport never probes loopback
 when Tailscale resolution is unavailable; Debug admits only the exact lifecycle
@@ -408,10 +405,7 @@ survives. Empty credentials and non-sensitive fields remain useful. This is a
 targeted export safeguard, not a general secret detector or a change to the
 private log viewer.
 
-`DiagnosticsRedactorTests` protects the string boundaries; `FeedbackComposerTests`
-checks the decoded issue body and the exact body used by the clipboard branch.
-Neither requires live logs, credentials, a clipboard write or an issue submission.
-`MenuBarLogReaderTransportTests` also exercises the actual reader against owned
+`MenuBarLogReaderTransportTests` exercises the actual reader against owned
 loopback WebSocket peers: stalled hello/response, cancellation and socket close,
 large/oversized responses, hello admission, frame count and sanitized Gateway
 error export. Its watchdog only releases broken clients; deadline assertions must

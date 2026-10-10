@@ -31,16 +31,9 @@ type Connector = typeof CONNECTORS[number];
 
 interface ConnectorHTTPResponse { status: number; headers: Headers; body: string; }
 export type ConnectorHTTP = (input: string, init: { method?: "GET" | "PUT" | "POST" | "DELETE"; headers: Record<string, string>; body?: string; signal: AbortSignal }) => Promise<ConnectorHTTPResponse>;
-export type ConnectorSourceFetch = (url: string, excerpt: string | undefined, signal: AbortSignal) => Promise<Response>;
-export type ConnectorResolveHost = (hostname: string, signal?: AbortSignal) => Promise<string[]>;
 
 interface KnowledgeConnectorOptions {
   credentials: ConnectorCredentialStore;
-  http?: ConnectorHTTP;
-  sourceFetch?: ConnectorSourceFetch;
-  resolveHost?: ConnectorResolveHost;
-  sleep?: (milliseconds: number) => Promise<void>;
-  now?: () => string;
   /** Optional bounded Jev decision adapter; absence fails intake closed. */
   assessment?: SourceAssessmentModel;
   /** Queues owned summary work after a source's save-time and extraction recovery; never awaited by intake. */
@@ -239,14 +232,12 @@ class XAuthorizationError extends GatewayError {
 }
 
 export class KnowledgeConnectorExtension {
-  private readonly http: ConnectorHTTP;
-  private readonly sleep: (milliseconds: number) => Promise<void>;
-  private readonly now: () => string;
+  private readonly http: ConnectorHTTP = defaultHTTP;
+  private readonly sleep = (milliseconds: number): Promise<void> => new Promise(resolve => setTimeout(resolve, milliseconds));
+  private readonly now = (): string => new Date().toISOString();
   private readonly lanes = new Map<string, AsyncMutex>();
   private readonly xOAuthAttempts = new Map<string, { instanceId: string; clientId: string; redirectUri: string; state: string; verifier: string; policy: KnowledgeXOAuthStartRequest["policy"]; createdAt: number }>();
-  constructor(private readonly store: KnowledgeStore, private readonly options: KnowledgeConnectorOptions) {
-    this.http = options.http ?? defaultHTTP; this.sleep = options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))); this.now = options.now ?? (() => new Date().toISOString());
-  }
+  constructor(private readonly store: KnowledgeStore, private readonly options: KnowledgeConnectorOptions) {}
   private lane(connector: Connector, connectionId?: string): AsyncMutex { const key = connectionId ? `${connector}:${connectionId}` : connector; const existing = this.lanes.get(key); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(key, created); return created; }
 
   private assertCredentialNamespace(connector: Connector, credentialRef: string | undefined): void {
@@ -708,7 +699,7 @@ export class KnowledgeConnectorExtension {
       origin: "connector", identity, ...(request.connector === "raindrop" && item.collectionId ? { collectionId: item.collectionId } : {}),
       ...(request.connector === "raindrop" && item.annotation ? { annotations: [{ text: item.annotation }] } : {}),
       ...(request.connector === "x" || isPublicXPost(item.url) ? { publicPostLookup: true } : {}),
-    }, { writer: "connector", signal: activeSignal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? activeSignal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+    }, { writer: "connector", signal: activeSignal });
     let source = captured.record;
     if (source.scope !== request.scope && !sourceAdmissionIsDecided(source)) {
       try {
