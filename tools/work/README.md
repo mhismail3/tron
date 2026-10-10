@@ -42,9 +42,9 @@ by path:
   for `.sh` and for shebang-shell files under `scripts/`;
 - each `--tests` command, run from the repository root.
 
-Checks run two at a time. Each log is kept under `<git common dir>/work/logs/`, and a
+Checks run two at a time. Each log is kept under `<git dir>/work/logs/`, and a
 failing check prints the end of its log. A tree that passed with the same check set is
-recorded under `<git common dir>/work/verified/` and is not run again. `verify` refuses
+recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
 a dirty worktree, because it checks a commit.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
