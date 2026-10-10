@@ -74,8 +74,10 @@ deletes the local branch and the remote branch with a lease on the proven head.
 - **Public text leaks personal data.** Issues, comments, and pull request text pass the
   privacy guard first; a refusal prints no matching line.
 - **A conflict is merged by hand.** `land` aborts a conflicting merge and names the files.
-- **Unverified code is merged.** `land` merges only the commit it verified, with the
-  squash-merge `sha` check, and never after the base moved past it.
+- **Unverified code is merged.** The squash merge names the verified commit, so GitHub
+  refuses it if the branch changed. A base that moved is re-merged and re-verified first.
+  A base that moves in the instant between that check and GitHub's merge call is not
+  caught; the merge still composes the base with the verified branch.
 - **Unmerged work is removed.** `cleanup` needs a merged pull request at the local head,
   or a closed issue whose branch holds only its empty claim commit.
 - **A closed or blocked issue is claimed.** `start` refuses a closed issue, an excluded
