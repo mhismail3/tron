@@ -2,14 +2,14 @@ import SwiftUI
 import TronMobileCore
 
 enum HomeSheetDestination: Identifiable {
-    case manage, settings, model, context, memory, tasks, permissions
+    case manage, settings, model, context, memory, tasks, permissions, chapters
     case task(String), grant(HomeTaskPermissionsDTO.Request)
     case evidence(HomeMemoryEvidenceDTO)
     var id: String {
-        switch self { case .manage: "manage"; case .settings: "settings"; case .model: "model"; case .context: "context"; case .memory: "memory"; case .evidence: "evidence"; case .tasks: "tasks"; case .permissions: "permissions"; case .task: "task"; case .grant: "grant" }
+        switch self { case .manage: "manage"; case .settings: "settings"; case .model: "model"; case .context: "context"; case .memory: "memory"; case .evidence: "evidence"; case .tasks: "tasks"; case .permissions: "permissions"; case .task: "task"; case .grant: "grant"; case .chapters: "chapters" }
     }
     var title: String {
-        switch self { case .manage: "Manage Home"; case .settings: "Memory Settings"; case .model: "Memory Model"; case .context: "Home Context"; case .memory: "Home Memory"; case .evidence: "Exact Evidence"; case .tasks: "Home Tasks"; case .permissions: "Task Permissions"; case .task: "Task"; case .grant: "Grant Request" }
+        switch self { case .manage: "Manage Home"; case .settings: "Memory Settings"; case .model: "Memory Model"; case .context: "Home Context"; case .memory: "Home Memory"; case .evidence: "Exact Evidence"; case .tasks: "Home Tasks"; case .permissions: "Task Permissions"; case .task: "Task"; case .grant: "Grant Request"; case .chapters: "Chapters" }
     }
     var initialQuery: HomeSheetReadQuery {
         switch self {
@@ -17,6 +17,7 @@ enum HomeSheetDestination: Identifiable {
         case .task(let id): .task(id)
         case .permissions, .grant: .permissions
         case .manage, .settings, .model, .context: .status
+        case .chapters: .chapters
         case .memory: .memory(nil)
         case .evidence(let source): .evidence(source, offset: 0)
         }
@@ -37,6 +38,14 @@ struct HomeSheetRoute: Identifiable {
     var id: String { "home.\(profileID).\(destination.id)" }
 }
 
+/// The chat's canonical Stop authority, carried into Manage Home now that the
+/// header bar is gone (#740). Reading `canStop` inside the sheet's body keeps
+/// the control bound to the live operation, never a value captured at present.
+struct HomeSheetStopControl {
+    let canStop: () -> Bool
+    let perform: () -> Void
+}
+
 private struct HomeSheetRequest: Hashable {
     var id = UUID()
     let query: HomeSheetReadQuery
@@ -53,6 +62,11 @@ private struct HomeSheetTaskID: Hashable {
 struct HomeSheet: View {
     let destination: HomeSheetDestination
     let profileID: String
+    /// Present only on the chat's top-level sheet; child sheets inherit what they need.
+    var stop: HomeSheetStopControl?
+    /// Opens one chapter read-only: the chat's route owner stages the navigation
+    /// and dismisses this sheet.
+    var onOpenChapter: ((String) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
@@ -60,14 +74,20 @@ struct HomeSheet: View {
     @Environment(\.tronPresentationActivity) private var activity
     @State private var owner = HomeSheetReadOwner()
     @State private var request: HomeSheetRequest
+    #if HOSTED_TEST
+    @Environment(\.hostedHomeActionProbe) private var hostedActionProbe
+    #endif
     /// Evidence and Manage Home rows present existing Home sheets as managed
     /// children, so each child keeps its own read owner and lifetime.
     @State private var childDestination: HomeSheetDestination?
     @State private var mutationFailure: String?
 
-    init(destination: HomeSheetDestination, profileID: String) {
+    init(destination: HomeSheetDestination, profileID: String,
+         stop: HomeSheetStopControl? = nil, onOpenChapter: ((String) -> Void)? = nil) {
         self.destination = destination
         self.profileID = profileID
+        self.stop = stop
+        self.onOpenChapter = onOpenChapter
         _request = State(initialValue: HomeSheetRequest(query: destination.initialQuery))
     }
 
@@ -131,12 +151,17 @@ struct HomeSheet: View {
             }
         }
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
-            HomeSheet(destination: child, profileID: profileID)
+            HomeSheet(destination: child, profileID: profileID, onOpenChapter: onOpenChapter)
         }
         .alert("Home change", isPresented: Binding(get: { mutationFailure != nil && destination.id == "model" },
                                                    set: { if !$0 { mutationFailure = nil } })) {
             Button("OK", role: .cancel) { mutationFailure = nil }
         } message: { Text(mutationFailure ?? "") }
+        #if HOSTED_TEST
+        // Retains the mounted pause action so hosted journeys can invoke it after
+        // a route replacement; the identity fences inside `perform` must refuse it.
+        .onAppear { if case .manage = destination { hostedActionProbe?.pause = { perform(.pauseMemory) } } }
+        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -155,6 +180,7 @@ struct HomeSheet: View {
                     else if case .model = destination { modelPicker(status) }
                     else { context(status.activation) }
                 case .tasks, .task, .permissions: EmptyView()
+                case .chapters(let list): chapters(list)
                 case .memory(let page): memory(page)
                 case .evidence(let page): evidence(page)
                 }
@@ -175,17 +201,31 @@ struct HomeSheet: View {
         request = HomeSheetRequest(query: destination.initialQuery)
     }
 
-    /// The Manage Home sections (#725): every Home control in one sheet, in the
-    /// issue's order. Next-prompt preview, the chapter list and "About you" need
+    /// The Manage Home sections (#725/#740): every Home control in one sheet, in
+    /// the issue's order, including Stop and the full chapter list. The
+    /// next-prompt preview, delivered-context viewing and "About you" need
     /// Gateway reads that do not exist yet and stay with their follow-ups.
     private func manage(_ status: HomeStatusDTO) -> some View {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
             TronGlassCard(accent: .tronEmerald) {
-                TronSettingsRow(icon: "house", title: "Home · \(HomeStatusLinePresentation.state(status))",
-                    subtitle: HomeStatusLinePresentation.memory(status, unresolvedCommand: unresolved), accent: .tronEmerald)
-                    .accessibilityIdentifier("home-manage-state")
+                VStack(spacing: 0) {
+                    TronSettingsRow(icon: "house", title: "Home · \(HomeStatusLinePresentation.state(status))",
+                        subtitle: HomeStatusLinePresentation.memory(status, unresolvedCommand: unresolved), accent: .tronEmerald)
+                        .accessibilityIdentifier("home-manage-state")
+                    // The header bar's Stop moved here (#740): the same canonical
+                    // operation authority the composer uses, read live from the chat.
+                    if let stop {
+                        TronSettingsDivider(accent: .tronEmerald)
+                        Button { stop.perform() } label: {
+                            TronSettingsRow(icon: "stop.fill", title: "Stop response",
+                                subtitle: "Stops the running activation", accent: .tronEmerald)
+                        }
+                        .disabled(!stop.canStop())
+                        .accessibilityIdentifier("home-manage-stop")
+                    }
+                }
             }
             Text("Model").font(TronTypography.headline)
             TronGlassCard(accent: .tronEmerald) {
@@ -235,24 +275,13 @@ struct HomeSheet: View {
                     }
                 }
             }
-            if let chapter = status.chapter {
+            if let chapter = status.chapter,
+               model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true {
                 Text("Chapters").font(TronTypography.headline)
                 TronGlassCard(accent: .tronEmerald) {
-                    VStack(spacing: 0) {
-                        TronValueRow(icon: "book", title: "Chapters", value: chapter.count.formatted())
-                            .accessibilityIdentifier("home-manage-chapters")
-                        TronSettingsDivider(accent: .tronEmerald)
-                        let size = [chapter.currentEntries.map { "\($0.formatted()) entries" },
-                                    chapter.currentBytes.map { "\($0.formatted()) bytes" }]
-                            .compactMap { $0 }.joined(separator: " · ")
-                        TronValueRow(icon: "book.pages", title: "Current chapter",
-                            value: size.isEmpty ? "Not measured" : size)
-                        if chapter.recoveryDecision != .none {
-                            TronSettingsDivider(accent: .tronEmerald)
-                            TronValueRow(icon: "arrow.triangle.2.circlepath", title: "Rollover",
-                                value: chapter.recoveryDecision == .reserved ? "Successor reserved" : "Materializing")
-                        }
-                    }
+                    navigationRow(icon: "book", title: "Chapters",
+                        subtitle: HomeChapterPresentation.manageSubtitle(chapter),
+                        destination: .chapters, id: "home-manage-chapters")
                 }
             }
             if status.taskRecovery != nil {
@@ -297,7 +326,7 @@ struct HomeSheet: View {
         .accessibilityIdentifier(id)
     }
 
-    /// Accepted domain commands keep the header's authority rules: acquire once
+    /// Accepted domain commands keep the chat's authority rules: acquire once
     /// for the mounted profile, then let the coordinator own receipt resolution.
     private func perform(_ command: HomeMutationCoordinator.Command) {
         guard let identity, let coordinator, active,
@@ -430,6 +459,42 @@ struct HomeSheet: View {
     private func metadataRow(_ title: String, value: String) -> some View {
         TronSettingsRow(icon: "info.circle", title: title, accent: .tronEmerald) {
             Text(value).font(TronTypography.secondaryCodeDescription).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The full chapter ledger (#740), newest first: state, size against the
+    /// shared limits, date range, and a read-only open for present chapters.
+    @ViewBuilder private func chapters(_ list: HomeChapterListDTO) -> some View {
+        Text("Newest first. Sealed chapters stay readable and refuse changes.")
+            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
+        ForEach(list.chapters.reversed()) { chapter in
+            TronGlassCard(accent: .tronEmerald) {
+                VStack(spacing: 0) {
+                    TronSettingsRow(icon: chapter.state == .active ? "book" : "book.closed",
+                        title: "Chapter \(chapter.ordinal) · \(HomeChapterPresentation.stateLabel(chapter.state))",
+                        subtitle: HomeChapterPresentation.dateRange(chapter), accent: .tronEmerald)
+                        .accessibilityIdentifier("home-chapter-\(chapter.ordinal)")
+                    TronSettingsDivider(accent: .tronEmerald)
+                    TronSettingsRow(icon: "book.pages", title: "Size", accent: .tronEmerald) {
+                        Text(HomeChapterPresentation.sizeLine(chapter, limits: list.limits))
+                            .font(TronTypography.secondaryCodeDescription)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let onOpenChapter, chapter.sessionPresent,
+                       chapter.state == .active || chapter.state == .sealed {
+                        TronSettingsDivider(accent: .tronEmerald)
+                        Button { onOpenChapter(chapter.sessionId) } label: {
+                            TronSettingsRow(icon: "book.pages.fill", title: "Open read-only",
+                                subtitle: chapter.state == .sealed ? "Sealed history; changes are refused" : "The writable chapter",
+                                accent: .tronEmerald) {
+                                Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronEmerald)
+                            }
+                        }
+                        .accessibilityIdentifier("home-chapter-open-\(chapter.ordinal)")
+                    }
+                }
+            }
         }
     }
 

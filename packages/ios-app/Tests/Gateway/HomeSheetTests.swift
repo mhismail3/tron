@@ -109,6 +109,61 @@ final class HomeSheetTests: XCTestCase {
         XCTAssertThrowsError(try HomeStatusDTO.decode(.object(status)))
     }
 
+    private func chapterList(chapters: [JSONValue]) -> JSONValue {
+        .object(["homeId": .string("home"), "generation": .number(2), "enabled": .bool(true),
+                 "limits": .object(["softBytes": .number(25_165_824), "softEntries": .number(50_000),
+                                    "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
+                 "chapters": .array(chapters)])
+    }
+
+    private func chapter(_ ordinal: Int, state: String, bytes: Int? = nil, entries: Int? = nil, sealedAt: String? = nil) -> JSONValue {
+        var value: [String: JSONValue] = ["sessionId": .string("chapter-\(ordinal)"), "ordinal": .number(Double(ordinal)),
+            "state": .string(state), "createdAt": .string("2026-01-0\(ordinal)T00:00:00Z"),
+            "activationStarted": .bool(true), "sessionPresent": .bool(true)]
+        if let bytes { value["bytes"] = .number(Double(bytes)) }
+        if let entries { value["entries"] = .number(Double(entries)) }
+        if let sealedAt { value["sealedAt"] = .string(sealedAt) }
+        return .object(value)
+    }
+
+    // Failure modes (#740): protocol drift admitted into the Chapters sheet, an
+    // unmeasured chapter read as zero, or an out-of-order/empty ledger accepted.
+    func testChapterListAdmitsLedgerAndRejectsDrift() throws {
+        let list = try HomeChapterListDTO.decode(chapterList(chapters: [
+            chapter(1, state: "sealed", bytes: 25_165_824, entries: 50_001, sealedAt: "2026-01-02T00:00:00Z"),
+            chapter(2, state: "reserved"),
+        ]))
+        XCTAssertEqual(list.chapters.count, 2)
+        XCTAssertEqual(list.chapters[0].bytes, 25_165_824)
+        XCTAssertNil(list.chapters[1].bytes, "an unmeasured chapter must stay unmeasured, never zero")
+        XCTAssertThrowsError(try HomeChapterListDTO.decode(chapterList(chapters: [])))
+        XCTAssertThrowsError(try HomeChapterListDTO.decode(chapterList(chapters: [chapter(2, state: "sealed"), chapter(1, state: "active")])),
+                             "ledger order is the Gateway's; a reordered list is drift")
+        XCTAssertThrowsError(try HomeChapterListDTO.decode(chapterList(chapters: [chapter(1, state: "future-state")])))
+        XCTAssertThrowsError(try HomeChapterListDTO.decode(chapterList(chapters: [chapter(1, state: "active", bytes: -1)])))
+        var inverted = chapterList(chapters: [chapter(1, state: "active")]).objectValue!
+        inverted["limits"] = .object(["softBytes": .number(100), "softEntries": .number(100),
+                                      "hardBytes": .number(50), "hardEntries": .number(50)])
+        XCTAssertThrowsError(try HomeChapterListDTO.decode(.object(inverted)))
+    }
+
+    func testChapterPresentationNamesUnmeasuredSizesAndLimits() throws {
+        let list = try HomeChapterListDTO.decode(chapterList(chapters: [
+            chapter(1, state: "sealed", bytes: 25_165_824, entries: 50_001, sealedAt: "2026-01-02T00:00:00Z"),
+            chapter(2, state: "active", bytes: 480, entries: 12),
+            chapter(3, state: "reserved"),
+        ]))
+        XCTAssertEqual(HomeChapterPresentation.sizeLine(list.chapters[2], limits: list.limits), "Not measured")
+        XCTAssertTrue(HomeChapterPresentation.sizeLine(list.chapters[1], limits: list.limits).hasSuffix("% of soft limit"))
+        XCTAssertTrue(HomeChapterPresentation.sizeLine(list.chapters[0], limits: list.limits).hasSuffix("% of hard limit"),
+                      "a chapter at its soft limit is measured against the hard limit")
+        XCTAssertTrue(HomeChapterPresentation.dateRange(list.chapters[0]).contains("\u{2013}"))
+        XCTAssertTrue(HomeChapterPresentation.dateRange(list.chapters[1]).hasPrefix("Since "))
+        XCTAssertEqual(HomeChapterPresentation.stateLabel(list.chapters[2].state), "Reserved")
+        XCTAssertEqual(HomeChapterPresentation.manageSubtitle(.init(count: 3, currentBytes: nil, currentEntries: nil, recoveryDecision: .reserved)),
+                       "3 chapters · Successor reserved")
+    }
+
     func testNewerPageOwnsLoadingResultAndError() async throws {
         let coordinator = PresentationActivityCoordinator()
         let token = PresentationSurfaceToken(id: "memory", generation: UUID())
