@@ -506,7 +506,7 @@ private actor HostedHomeShellGateway {
         return .object(record)
     }
     private func taskBinding() -> JSONValue {
-        .object(["intentRevision": .number(1), "intentDigest": .string(String(repeating: "a", count: 64)),
+        .object(["intentDigest": .string(String(repeating: "a", count: 64)),
             "target": .string("/trusted/project"), "authorizationScope": .string("full-work"), "restoreEpoch": .string("fixture-epoch")])
     }
     private func taskPermissions() -> JSONValue {

@@ -92,13 +92,12 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
 
 struct HomeTaskPermissionsDTO: Equatable, Sendable {
     struct Binding: Decodable, Equatable, Sendable {
-        let intentRevision: Int
         let intentDigest: String
         let target: String
         let authorizationScope: String
         let restoreEpoch: String
         var valid: Bool {
-            intentRevision > 0 && homeText(intentDigest, bytes: 128) && homeText(target, bytes: 4096) && target.hasPrefix("/")
+            homeText(intentDigest, bytes: 128) && homeText(target, bytes: 4096) && target.hasPrefix("/")
                 && [authorizationScope, restoreEpoch].allSatisfy(homeID)
         }
     }
@@ -123,7 +122,6 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
         enum State: String, Decodable, Sendable { case available, consumed, revoked }
         let id: String
         let decisionId: String
-        let intentRevision: Int
         let intentDigest: String
         let target: String
         let authorizationScope: String
@@ -131,7 +129,7 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
         let expiresAt: Int
         let state: State
         var binding: Binding {
-            .init(intentRevision: intentRevision, intentDigest: intentDigest, target: target, authorizationScope: authorizationScope,
+            .init(intentDigest: intentDigest, target: target, authorizationScope: authorizationScope,
                   restoreEpoch: restoreEpoch)
         }
     }

@@ -230,7 +230,6 @@ struct HomeTaskSheet: View {
             TronGlassCard(accent: .tronEmerald) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(request.request.target).font(TronTypography.bodySM)
-                    Text("Intent revision \(request.request.intentRevision)").font(TronTypography.secondaryDescription)
                     Text(request.request.intentDigest).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
                     Text("Scope: \(request.request.authorizationScope)").font(TronTypography.secondaryDescription)
                     Text("Restore epoch: \(request.request.restoreEpoch)").font(TronTypography.secondaryCodeDescription).textSelection(.enabled)

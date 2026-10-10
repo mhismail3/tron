@@ -45,7 +45,7 @@ final class HomeTaskSheetTests: XCTestCase {
         XCTAssertEqual(decoded.grants.first?.binding.target, "/trusted/project")
         XCTAssertEqual(decoded.grants.first?.binding.restoreEpoch, "epoch")
 
-        for change in [("intentRevision", JSONValue.number(2)), ("intentDigest", .string("other-digest")),
+        for change in [("intentDigest", JSONValue.string("other-digest")),
                        ("target", .string("/other/project")), ("authorizationScope", .string("other-scope")),
                        ("restoreEpoch", .string("other-epoch")), ("expiresAt", .number(3000))] {
             XCTAssertThrowsError(try HomeTaskPermissionsDTO.decode(permissionDocument(grantOverride: change)), change.0)
@@ -65,9 +65,9 @@ final class HomeTaskSheetTests: XCTestCase {
     /// One request, one approved decision and its grant. The request binding carries exactly the
     /// dimensions the Gateway still sends; `grantOverride` alters the grant's copy of one of them.
     private func permissionDocument(grantOverride: (String, JSONValue)? = nil) throws -> JSONValue {
-        var grant = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"id":"grant-one","decisionId":"decision-one","intentRevision":1,"intentDigest":"digest","target":"/trusted/project","authorizationScope":"full-work","restoreEpoch":"epoch","expiresAt":2000,"state":"available"}"#.utf8)).objectValue!
+        var grant = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"id":"grant-one","decisionId":"decision-one","intentDigest":"digest","target":"/trusted/project","authorizationScope":"full-work","restoreEpoch":"epoch","expiresAt":2000,"state":"available"}"#.utf8)).objectValue!
         if let grantOverride { grant[grantOverride.0] = grantOverride.1 }
-        var document = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"revision":1,"scopes":[],"requests":[{"id":"request-one","request":{"intentRevision":1,"intentDigest":"digest","target":"/trusted/project","authorizationScope":"full-work","restoreEpoch":"epoch"}}],"decisions":[{"id":"decision-one","requestId":"request-one","approved":true,"decidedAt":1000,"expiresAt":2000}],"grants":[]}"#.utf8)).objectValue!
+        var document = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"revision":1,"scopes":[],"requests":[{"id":"request-one","request":{"intentDigest":"digest","target":"/trusted/project","authorizationScope":"full-work","restoreEpoch":"epoch"}}],"decisions":[{"id":"decision-one","requestId":"request-one","approved":true,"decidedAt":1000,"expiresAt":2000}],"grants":[]}"#.utf8)).objectValue!
         document["grants"] = .array([.object(grant)])
         return .object(document)
     }
