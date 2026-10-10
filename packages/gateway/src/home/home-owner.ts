@@ -374,10 +374,11 @@ export class HomeOwner {
     if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
   }
 
-  /** The Home session went idle after a user activation or a wake. Only these two events can ask for
-   * another wake: a refused or failed wake never does. An activation that Stop or abort ended never does either. */
-  noteHomeIdle(sessionId: string, by: "user" | "wake", stopped: boolean): void {
-    if (stopped || !this.wakeRoute(sessionId)?.enabled) return;
+  /** The Home session went idle after a user activation or a delivered wake. Only these two events can
+   * ask for another wake: a refused or failed wake never does. A run that Stop or abort ended never
+   * reaches this idle notice (home-wake.e2e Stop cases), so its pending results wait for the next event. */
+  noteHomeIdle(sessionId: string, by: "user" | "wake"): void {
+    if (!this.wakeRoute(sessionId)?.enabled) return;
     if (by === "user" || this.lastWakeDelivered) this.requestWake();
   }
 

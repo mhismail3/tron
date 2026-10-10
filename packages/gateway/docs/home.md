@@ -1187,9 +1187,9 @@ do not drain the inbox.
   decision and the enqueue may omit a push; the inbox is the guaranteed delivery, and
   recovery never re-decides a decided event.
 - **Stop.** An activation that Stop or abort ended never requests a wake, whether it was a
-  user activation or a wake. The runtime reports the stop with the idle signal, so Stop
-  cannot start a wake (`HomeOwner.noteHomeIdle`). Results still pending after a stopped
-  activation wait for the next user message or the next settled result.
+  user activation or a wake: a stopped run never reaches the idle notice that asks for one
+  (`HomeOwner.noteHomeIdle`; the `home-wake.e2e` Stop cases). Results still pending after a
+  stopped activation wait for the next user message or the next settled result.
 - **Operating context.** Home is told the settled-result wake, the one-push rule and the
   paused/disabled/blocked fallback (`tron-home-extension.ts`). It reads its learned profile
   and system prompt once per activation at the request seam, so a wake carries the same

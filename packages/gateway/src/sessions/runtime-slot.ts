@@ -593,7 +593,7 @@ export interface RuntimeSlotDependencies {
   homeInboxRelease: (taskId: string, operationId: string) => Promise<void>;
   homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
   /** The Home session is idle again after a user activation or a delivered wake. */
-  homeIdle: (sessionId: string, by: "user" | "wake", stopped: boolean) => void;
+  homeIdle: (sessionId: string, by: "user" | "wake") => void;
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
   homeMemory: HomeMemoryPort;
@@ -4006,7 +4006,7 @@ export class RuntimeSlot {
       this.hooks.settled(this.id);
       await this.hooks.homeQuiescent(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
-      this.noteHomeIdle(completion.operationId);
+      this.noteHomeIdle();
       this.operation ??= this.compactionOperation;
       this.revision += 1;
       this.publishSnapshot();
@@ -7806,13 +7806,10 @@ export class RuntimeSlot {
     });
   }
 
-  /** The Home session has no operation left: `operationId`'s user activation or wake ended.
-   * A Stop or abort is the runtime's own intent (`abortedOperations`), so it is passed on
-   * and never asks for another wake. */
-  private noteHomeIdle(operationId: string | undefined): void {
+  /** The Home session has no operation left: a user activation or a wake ended. */
+  private noteHomeIdle(): void {
     if (!this.homeRequestPolicy || this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
-    const stopped = operationId !== undefined && this.abortedOperations.has(operationId);
-    this.dependencies.homeIdle(this.id, this.operationWasHomeWake ? "wake" : "user", stopped);
+    this.dependencies.homeIdle(this.id, this.operationWasHomeWake ? "wake" : "user");
   }
 
   /** The managed provider uses user input to run Pi's normal before-agent-start
@@ -8467,7 +8464,7 @@ export class RuntimeSlot {
         }
         if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
         this.phase = "idle";
-        this.noteHomeIdle(operationId);
+        this.noteHomeIdle();
         if (this.pendingManualCompaction) {
           this.publishSnapshot();
           this.startPendingManualCompaction();

@@ -267,24 +267,6 @@ describe("Home wakes on its own task results (#749)", () => {
     expect((await settledTask(f, "stop-user")).wake?.state).toBe("pending");
   }, 30_000);
 
-  it("never requests a wake for an activation that ended by Stop, through the idle seam", async () => {
-    const f = await fixture();
-    await configure(f);
-    // Home is paused while the result settles, so the result waits without a wake and no push is pending for it.
-    await f.registry.homeOwner().pauseMemory();
-    f.faux.setResponses([fauxAssistantMessage([reportCall("seam-report", "Seam result")], { stopReason: "toolUse" })]);
-    await (await dispatch(f, "seam-stop")).completion;
-    await f.registry.homeOwner().resumeMemory();
-    expect((await settledTask(f, "seam-stop")).wake?.state).toBe("pending");
-    // The runtime reports an activation that a Stop ended: it must not start a wake.
-    f.faux.setResponses([fauxAssistantMessage("Wake that must not run")]);
-    f.registry.homeOwner().noteHomeIdle(f.home.sessionId, "user", true);
-    await new Promise(resolve => setTimeout(resolve, 600));
-    // Only the worker's report has called the provider: no wake ran for the Stop-ended activation.
-    expect(f.faux.state.callCount).toBe(1);
-    expect((await settledTask(f, "seam-stop")).wake?.state).toBe("pending");
-  }, 30_000);
-
   it("never wakes Home again after Stop ends a wake, though another result waits", async () => {
     const f = await fixture();
     await configure(f);
