@@ -57,18 +57,29 @@ struct ChatRoutes: ViewModifier {
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
     @Binding var homeSheet: HomeSheetRoute?
+    /// The chat's canonical Stop authority, shown inside Manage Home (#740).
+    /// Nil only for fixtures that never present a Home sheet.
+    var homeStop: HomeSheetStopControl?
     @Environment(AppModel.self) private var model
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     func body(content: Content) -> some View {
         content
-            .tronManagedSheet(item: $homeSheet, identity: { $0.id }) { route in
-                HomeSheet(destination: route.destination, profileID: route.profileID)
+            .tronManagedSheet(item: $homeSheet, identity: { $0.id }, onDismiss: completeStagedNavigationAfterDismissal) { route in
+                HomeSheet(destination: route.destination, profileID: route.profileID, stop: homeStop,
+                          onOpenChapter: { chapterSessionID in
+                              // Read-only chapter open: stage a profile-fenced ordinary
+                              // route, dismiss the sheet, navigate on its dismissal.
+                              guard let staged = try? model.navigationRouteForHomeChapter(
+                                  profileID: route.profileID, sessionID: chapterSessionID) else { return }
+                              forkNavigation.stage(staged)
+                              homeSheet = nil
+                          })
             }
             .tronManagedSheet(
                 isPresented: $showContext,
                 identity: "chat.\(sessionID).context",
-                onDismiss: completeForkNavigationAfterContextDismissal
+                onDismiss: completeStagedNavigationAfterDismissal
             ) {
                 SessionContextSheet(sessionID: sessionID, initialHistoryEntryID: initialHistoryEntryID) { route in
                     forkNavigation.stage(route)
@@ -187,7 +198,9 @@ struct ChatRoutes: ViewModifier {
             }
     }
 
-    private func completeForkNavigationAfterContextDismissal() {
+    /// Completes a navigation a covering sheet staged (a fork from the context
+    /// sheet, or a read-only chapter open from Manage Home) once that sheet is gone.
+    private func completeStagedNavigationAfterDismissal() {
         guard let route = forkNavigation.consume(),
               model.ownsNavigationRoute(route) else { return }
         onForkCreated(route)

@@ -11,7 +11,7 @@ struct ChatView: View {
     private let initialHistoryEntryID: String?
     private let initialSearchResult: SessionSearchResult?
     /// The Home conversation's logical route: sends go through `home.prompt`,
-    /// and the Home header belongs to this chat whichever chapter it opens.
+    /// and Manage Home belongs to this chat whichever chapter it opens.
     private let isHomeRoute: Bool
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
@@ -154,17 +154,6 @@ struct ChatView: View {
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if let (profileID, status) = manageHomeContext {
-                    HomeChatHeader(
-                        status: status,
-                        profileID: profileID,
-                        canStop: admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil,
-                        onStop: abortCurrentOperation,
-                        onPresent: { homeSheet = HomeSheetRoute(profileID: profileID, destination: $0) }
-                    )
-                }
-            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -234,7 +223,13 @@ struct ChatView: View {
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             },
-            homeSheet: $homeSheet
+            homeSheet: $homeSheet,
+            // Manage Home's Stop reads the chat's canonical operation authority
+            // live, never an ID captured when the sheet was presented (#740).
+            homeStop: HomeSheetStopControl(
+                canStop: { admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil },
+                perform: abortCurrentOperation
+            )
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
@@ -2882,8 +2877,8 @@ struct ChatView: View {
     }
 
     /// The Home status this chat's route claims, with the profile that owns its
-    /// mutations. Decides both the header bar and what the gear button opens;
-    /// nil keeps the ordinary settings sheet.
+    /// mutations. Decides what the gear button opens; nil keeps the ordinary
+    /// settings sheet. Home's state, controls and Stop live in Manage Home (#740).
     private var manageHomeContext: (profileID: String, status: HomeStatusDTO)? {
         guard let profileID = composerScope?.profileID,
               profileID == model.profiles.selected?.id,

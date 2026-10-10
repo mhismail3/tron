@@ -8,7 +8,7 @@ import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryPage, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryPage, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { historyEntry } from "../sessions/history.js";
 import type { EpisodicMemory } from "../episodic/episodic-memory.js";
@@ -28,7 +28,7 @@ import {
   type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
-import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
+import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 
 /** One Gateway installation keeps at most one Home. */
@@ -43,8 +43,6 @@ const MAXIMUM_MODEL_ID_BYTES = 300;
  * re-enable both write the current revision, so an older record advances the next time
  * Home is enabled. */
 const HOME_POLICY_REVISION = 3;
-const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
-const HOME_SOFT_ENTRIES = 50_000;
 
 export interface HomeChapter {
   sessionId: string;
@@ -459,6 +457,48 @@ export class HomeOwner {
         recoveryDecision: currentChapter.state === "reserved" ? "reserved"
           : currentChapter.state === "materializing" ? "materializing" : "none",
       },
+    };
+  }
+
+  /**
+   * `home.chapterList`: the full chapter ledger as one bounded read (#740).
+   * Sealed chapters answer exactly their recorded seal metrics (a chapter sealed
+   * by disable has none); only the active chapter is measured live, and only when
+   * its session is present, so a missing session is absent sizes, never zero. The
+   * limits are the shared rollover constants, not a second copy.
+   */
+  async chapterList(): Promise<HomeChapterList> {
+    this.assertAvailable();
+    const record = this.record;
+    if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
+    const chapters: HomeChapterSummary[] = [];
+    for (const chapter of record.chapters) {
+      const sessionPresent = await this.options.sessions.sessionPresent(chapter.sessionId);
+      let bytes = chapter.sizeAtSeal;
+      let entries = chapter.entriesAtSeal;
+      if (chapter.state === "active" && sessionPresent) {
+        const metrics = await this.options.sessions.chapterMetrics(chapter.sessionId);
+        bytes = metrics.bytes;
+        entries = metrics.entries;
+      }
+      chapters.push({
+        sessionId: chapter.sessionId,
+        ordinal: chapter.ordinal,
+        state: chapter.state,
+        createdAt: chapter.createdAt,
+        activationStarted: chapter.activationStarted,
+        sessionPresent,
+        ...(chapter.sealedAt === undefined ? {} : { sealedAt: chapter.sealedAt }),
+        ...(bytes === undefined ? {} : { bytes }),
+        ...(entries === undefined ? {} : { entries }),
+      });
+    }
+    return {
+      homeId: record.homeId,
+      generation: record.generation,
+      enabled: record.enabled,
+      limits: { softBytes: HOME_SOFT_BYTES, softEntries: HOME_SOFT_ENTRIES, hardBytes: HOME_HARD_BYTES, hardEntries: HOME_HARD_ENTRIES },
+      chapters,
     };
   }
 

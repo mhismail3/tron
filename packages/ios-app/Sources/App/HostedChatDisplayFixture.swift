@@ -88,14 +88,14 @@ struct HostedChatDisplayFixture: View {
     }
 }
 
-/// Retains the actual mounted menu action to exercise a callback after route replacement.
+/// Retains the actual mounted Manage Home action to exercise a callback after route replacement.
 @MainActor
-final class HostedHomeHeaderActionProbe {
+final class HostedHomeActionProbe {
     var pause: (() -> Void)?
 }
 
 extension EnvironmentValues {
-    @Entry var hostedHomeHeaderActionProbe: HostedHomeHeaderActionProbe? = nil
+    @Entry var hostedHomeActionProbe: HostedHomeActionProbe? = nil
 }
 
 @MainActor
@@ -113,7 +113,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var staleActionFinished = false
     @State private var promptRoute = "none"
     @State private var openedSession = "none"
-    private let actionProbe = HostedHomeHeaderActionProbe()
+    private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
     private let gateway: HostedHomeShellGateway
@@ -124,7 +124,7 @@ struct HostedHomeDashboardFixture: View {
         let capabilityEnabled = !arguments.contains("-home-capability-absent")
         let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
         let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
-            headerState: arguments.first(where: { $0.hasPrefix("-home-header-state-") })?.replacingOccurrences(of: "-home-header-state-", with: ""),
+            phase: arguments.first(where: { $0.hasPrefix("-home-phase-") })?.replacingOccurrences(of: "-home-phase-", with: ""),
             unresolved: arguments.contains("-home-control-unresolved"),
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
@@ -146,7 +146,7 @@ struct HostedHomeDashboardFixture: View {
             if ready {
                 SessionShellView()
                     .environment(model)
-                    .environment(\.hostedHomeHeaderActionProbe, actionProbe)
+                    .environment(\.hostedHomeActionProbe, actionProbe)
                     .environment(\.tronPresentationActivityCoordinator, homeActivity)
                     .tronPresentation()
                     .tronSettingsLayout()
@@ -285,7 +285,7 @@ private actor HostedHomeShellGateway {
     private var materialized = false
     private var promptRoutes: [String] = []
     private var openedSessions: [String] = []
-    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, chatBeforeStatus: Bool = false) {
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, chatBeforeStatus: Bool = false) {
         self.chatBeforeStatus = chatBeforeStatus
         self.sheetState = sheetState
         self.browserState = browserState
@@ -293,9 +293,9 @@ private actor HostedHomeShellGateway {
         self.capabilityEnabled = capabilityEnabled
         self.initialState = initialState
         designated = initialState == "ready" || initialState == "rollover"
-        phase = headerState ?? "ready"
-        paused = headerState == "paused"
-        configured = headerState != "unconfigured"
+        self.phase = phase ?? "ready"
+        paused = phase == "paused"
+        configured = phase != "unconfigured"
         self.unresolved = unresolved
         self.delayed = delayed
     }
@@ -305,7 +305,7 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
         switch method {
@@ -373,6 +373,21 @@ private actor HostedHomeShellGateway {
             let result: JSONValue = .object(["decision": decision, "grant": approved ? .object(grant) : .null])
             taskDecisions[id] = result; controlCount += 1
             return (result, nil)
+        case "home.chapterList":
+            return (.object([
+                "homeId": .string("home-fixture"), "generation": .number(1), "enabled": .bool(designated),
+                "limits": .object(["softBytes": .number(25_165_824), "softEntries": .number(50_000),
+                                    "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
+                "chapters": .array([
+                    .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
+                             "createdAt": .string("2025-12-01T00:00:00Z"), "sealedAt": .string("2025-12-31T00:00:00Z"),
+                             "activationStarted": .bool(true), "sessionPresent": .bool(true),
+                             "bytes": .number(25_165_824), "entries": .number(50_001)]),
+                    .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
+                             "createdAt": .string("2026-01-01T00:00:00Z"), "activationStarted": .bool(true),
+                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12)]),
+                ]),
+            ]), nil)
         case "home.memory.page":
             browserReads += 1
             if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }

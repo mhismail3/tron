@@ -123,11 +123,11 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// The chat route that a status claim and the Home header both decide for. A
+/// The chat route that a status claim and the gear's Manage Home routing both decide for. A
 /// Home route always presents Home, even when no chapter is openable, so its
-/// recovery state stays visible. An ordinary chat presents only the chapter it
-/// is (`sessionId`), so an ordinary chat on the sealed predecessor during a
-/// rollover neither claims the status nor shows the header.
+/// recovery state stays reachable from the gear. An ordinary chat presents only
+/// the chapter it is (`sessionId`), so an ordinary chat on the sealed
+/// predecessor during a rollover neither claims the status nor manages Home.
 enum HomeChatRouteKey: Equatable, Sendable {
     case home
     case ordinary(sessionID: String)
@@ -144,8 +144,7 @@ enum HomeChatRouteKey: Equatable, Sendable {
     }
 }
 
-/// The one source of the Home state and memory lines; the header bar and the
-/// Manage Home sheet must describe the same status identically.
+/// The one source of the Home state and memory lines the Manage Home sheet shows.
 enum HomeStatusLinePresentation {
     static func state(_ status: HomeStatusDTO) -> String {
         switch status.phase {
@@ -307,7 +306,7 @@ final class HomeStatusPresentationOwner {
     /// Presentation coordinator changes are re-evaluated at the same owner
     /// boundary as reads, rather than trusting an activity Boolean captured earlier.
     /// A covering discards a claim's in-flight read; the first uncover of that claim
-    /// retries it once, so a sheet cannot leave the chat header unresolved forever.
+    /// retries it once, so a sheet cannot leave the chat's claim unresolved forever.
     func presentationActivityChanged(for token: PresentationSurfaceToken) {
         guard token == surfaceToken else { return }
         guard surfaceIsActive(token) else {
@@ -414,7 +413,7 @@ final class HomeStatusPresentationOwner {
     }
 
     /// A claim's first publication decides it, by the same `HomeChatRouteKey` the
-    /// chat's header uses. A matching route promotes the surface to the mounted
+    /// chat's gear routing uses. A matching route promotes the surface to the mounted
     /// cadence without an extra read. Any other route releases it and stops every
     /// read, while the published status stays for the dashboard.
     private func resolveClaim(with value: HomeStatusDTO) {

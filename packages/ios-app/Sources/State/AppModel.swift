@@ -4819,6 +4819,11 @@ final class AppModel {
         case .permissions:
             let status = try await readTaskStatus()
             return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
+        case .chapters:
+            guard lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the chapter list.", retryable: false, details: nil)
+            }
+            return .chapters(try HomeChapterListDTO.decode(try await read("home.chapterList")))
         case .memory(let continuation):
             try requireMemoryBrowser()
             var values: [String: JSONValue] = ["limit": .number(20)]
@@ -4833,6 +4838,22 @@ final class AppModel {
 
     func unmountHomeStatus(surfaceToken: PresentationSurfaceToken) {
         homeStatus.retireSurface(surfaceToken)
+    }
+
+    /// A profile-fenced ordinary route to one Home chapter, opened read-only from
+    /// the Chapters sheet: sealed chapters refuse mutation at the Gateway, and an
+    /// ordinary chat on a Home chapter neither claims the Home status nor sends
+    /// through `home.prompt`. A stale tap can never switch profiles.
+    func navigationRouteForHomeChapter(profileID: String, sessionID: String) throws -> SessionNavigationRoute {
+        guard lifecycle.selectedProfileID == profileID,
+              connectionState == .connected,
+              !sessionID.isEmpty else { throw CancellationError() }
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: lifecycle.currentLifecycleGeneration
+        )
     }
 
     /// Forms a profile-qualified route only from the current authenticated Home

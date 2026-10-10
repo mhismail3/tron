@@ -9,7 +9,7 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import { HOME_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryPage, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
@@ -210,7 +210,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.page", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.chapterList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.page", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -452,7 +452,7 @@ export class GatewayService {
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
-        ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY] : []),
+        ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
     };
@@ -469,6 +469,10 @@ export class GatewayService {
       case "home.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
         return safeJson(await this.requireHome().status());
+      }
+      case "home.chapterList": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home chapter list accepts no parameters");
+        return safeJson(await this.requireHome().chapterList());
       }
       case "home.taskList": {
         rejectUnknownFields(params, ["limit", "cursor"], method);

@@ -24,6 +24,8 @@ interface Harness {
   replaced: string[];
   present: Set<string>;
   live: Set<string>;
+  /** What `chapterMetrics` answers; tests that measure the active chapter set it. */
+  metrics: { bytes: number; entries: number; quiescent: boolean };
   holdProfileCommit(): { entered: Promise<void>; release(): void };
 }
 
@@ -45,6 +47,8 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
   const replaced: string[] = [];
   const present = new Set<string>();
   const live = new Set<string>();
+  // A small quiescent chapter never reaches a limit, and no conversation is durable yet.
+  const metrics = { bytes: 0, entries: 0, quiescent: true };
   let sequence = 0;
   let replaceGate: Promise<void> | undefined;
   let replaceEntered!: () => void;
@@ -60,8 +64,7 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
     sessionFile: async (sessionId) => (present.has(sessionId) ? join(root, "sessions", `${sessionId}.jsonl`) : undefined),
     sessionPresent: async (sessionId) => present.has(sessionId),
     hasLiveRuntime: (sessionId) => live.has(sessionId),
-    // A small quiescent chapter never reaches a limit, and no conversation is durable yet.
-    chapterMetrics: async () => ({ bytes: 0, entries: 0, quiescent: true }),
+    chapterMetrics: async () => ({ ...metrics }),
     hasConversation: async () => false,
     serializeSessionMutation: async (_id, commit) => commit(),
     replaceRuntimeForProfile: async (sessionId, commit) => {
@@ -99,6 +102,7 @@ async function harness(options: { symlinkHome?: boolean } = {}): Promise<Harness
     replaced,
     present,
     live,
+    metrics,
     holdProfileCommit: () => {
       let release!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
@@ -614,5 +618,86 @@ describe("Tron Home record", () => {
     expect(written.memory).toEqual(memory);
     expect(written.generation).toBe(3);
     await h.owner.dispose();
+  });
+});
+
+describe("Tron Home chapter list", () => {
+  const timestamps = {
+    first: "2026-01-01T00:00:00.000Z",
+    sealed: "2026-01-02T00:00:00.000Z",
+    second: "2026-01-02T00:00:01.000Z",
+  };
+  const ledger = () => [
+    { sessionId: "session-sealed", ordinal: 1, state: "sealed", activationStarted: true,
+      createdAt: timestamps.first, sealedAt: timestamps.sealed, sizeAtSeal: 25_165_824, entriesAtSeal: 50_001 },
+    { sessionId: "session-1", ordinal: 2, state: "active", activationStarted: true, createdAt: timestamps.second },
+  ];
+
+  it("answers the whole ledger in order: sealed metrics exactly as recorded, the active chapter measured live, shared limits", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes({ chapters: ledger() }), { mode: 0o600 });
+    f.present.add("session-sealed");
+    f.present.add("session-1");
+    f.metrics.bytes = 480;
+    f.metrics.entries = 12;
+    await f.owner.initialize();
+
+    const list = await f.owner.chapterList();
+    expect(list).toMatchObject({ homeId: "home-1", generation: 2, enabled: true });
+    // One shared constant set: the read must never carry drifting copies.
+    expect(list.limits).toEqual({ softBytes: 24 * 1_024 * 1_024, softEntries: 50_000, hardBytes: 200 * 1_024 * 1_024, hardEntries: 100_000 });
+    expect(list.chapters).toEqual([
+      { sessionId: "session-sealed", ordinal: 1, state: "sealed", activationStarted: true, sessionPresent: true,
+        createdAt: timestamps.first, sealedAt: timestamps.sealed, bytes: 25_165_824, entries: 50_001 },
+      { sessionId: "session-1", ordinal: 2, state: "active", activationStarted: true, sessionPresent: true,
+        createdAt: timestamps.second, bytes: 480, entries: 12 },
+    ]);
+    await f.owner.dispose();
+  });
+
+  it("reports a missing active session and a reserved successor without sizes, never zero", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes({ chapters: [
+      // Sealed by disable: a sealedAt without seal metrics stays unmeasured.
+      { sessionId: "session-sealed", ordinal: 1, state: "sealed", activationStarted: true,
+        createdAt: timestamps.first, sealedAt: timestamps.sealed },
+      { sessionId: "session-reserved", ordinal: 2, state: "reserved", activationStarted: false, createdAt: timestamps.second },
+    ] }), { mode: 0o600 });
+    await f.owner.initialize();
+
+    const list = await f.owner.chapterList();
+    expect(list.chapters).toEqual([
+      { sessionId: "session-sealed", ordinal: 1, state: "sealed", activationStarted: true, sessionPresent: false,
+        createdAt: timestamps.first, sealedAt: timestamps.sealed },
+      { sessionId: "session-reserved", ordinal: 2, state: "reserved", activationStarted: false, sessionPresent: false,
+        createdAt: timestamps.second },
+    ]);
+    await f.owner.dispose();
+  });
+
+  it("lists a disabled Home's chapters: sealed history stays readable", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, chapterRecordBytes({ enabled: false, chapters: ledger() }), { mode: 0o600 });
+    f.present.add("session-1");
+    await f.owner.initialize();
+    await expect(f.owner.chapterList()).resolves.toMatchObject({ enabled: false });
+    await f.owner.dispose();
+  });
+
+  it("refuses an undesignated Home with not_found, never an empty list", async () => {
+    const f = await harness();
+    await f.owner.initialize();
+    await expect(f.owner.chapterList()).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("refuses an unavailable record with conflict, never a partial list", async () => {
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, legacyRecordBytes(), { mode: 0o600 });
+    await f.owner.initialize();
+    await expect(f.owner.chapterList()).rejects.toMatchObject({ code: "conflict" });
   });
 });
