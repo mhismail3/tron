@@ -19,7 +19,7 @@ baseline and the candidate, and decide only with
 bound. Instructions retired is the primary iOS CPU metric; simulator numbers are
 host-CPU proxies, not device battery. Record both run directories, the host
 warnings and the verdicts in the handoff. Add a scenario (in
-`packages/ios-app/Tests/Profiling/`) rather than an ad hoc timer when no existing
+`packages/ios-app/ProfilingTests/`) rather than an ad hoc timer when no existing
 one exercises the path. Details:
 [iOS scenario profiler](../../../packages/ios-app/docs/development.md#ios-scenario-profiler).
 

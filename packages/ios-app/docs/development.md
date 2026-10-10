@@ -1231,7 +1231,7 @@ closed result code and nonnegative item/byte counts. Never add identifiers, path
 methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway `session.list` materialization, authenticated cursor expiry/scope/client
 binding, per-client/global count and byte limits, disconnect cleanup, one-scan traversal, and summary/catalog
-revision atomicity are owned by `session-list-pagination.test.ts` and
+revision atomicity are owned by
 `runtime-registry.integration.test.ts`.
 frames through visible open, synchronization/resynchronization, uncertain receipt,
 and terminal replay boundaries.

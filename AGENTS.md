@@ -228,9 +228,9 @@ scripts/tron work verify --tests "<integration or E2E command>"
 # Gateway, focused
 cd packages/gateway && npx vitest run <owning-test-file>
 
-# iOS: canonical owned test simulator, bounded process, and focused owner
+# iOS: canonical owned test simulator; UI journeys by name
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>
 
 # Mac
 scripts/tron mac generate
