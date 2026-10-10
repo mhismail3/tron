@@ -42,25 +42,7 @@ struct TronTopBlurOverlay: View {
             // Dark mode uses a dark material plus black tint so it stays soft
             // without the regular UIBlurEffect's gray lift.
             ChatTopVariableBlur(maxBlurRadius: style.radius, darkMode: colorScheme == .dark)
-            LinearGradient(
-                colors: colorScheme == .dark
-                    ? [
-                        Color.black.opacity(0.46),
-                        Color.black.opacity(0.40),
-                        Color.black.opacity(0.24),
-                        Color.black.opacity(0.08),
-                        Color.clear,
-                    ]
-                    : [
-                        Color.tronBackground.opacity(0.98),
-                        Color.tronBackground.opacity(0.94),
-                        Color.tronBackground.opacity(0.72),
-                        Color.tronBackground.opacity(0.28),
-                        Color.clear,
-                    ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            TronEdgeBlurTint(edge: .top)
         }
         .frame(maxWidth: .infinity)
         .frame(height: style.height)
@@ -71,37 +53,62 @@ struct TronTopBlurOverlay: View {
     }
 }
 
-enum ChatBottomActivityBlurLayout {
-    static let bottomHeight: CGFloat = 68
-    static let keyboardHeight: CGFloat = 80
-    static let bottomSafeAreaTranslation: CGFloat = 44
-    static let keyboardTranslation: CGFloat = 24
-    static let radius: CGFloat = 10
+/// The background-colored ramp that integrates an edge blur with the surface.
+/// Top and bottom chat edges share it so both read as one treatment.
+private struct TronEdgeBlurTint: View {
+    let edge: VerticalEdge
+    /// Scales every stop of the ramp; the top edge uses the full ramp.
+    var strength: Double = 1
+    @Environment(\.colorScheme) private var colorScheme
 
-    static func height(keyboardVisible: Bool) -> CGFloat {
-        keyboardVisible ? keyboardHeight : bottomHeight
-    }
-
-    static func translation(keyboardVisible: Bool) -> CGFloat {
-        keyboardVisible ? keyboardTranslation : bottomSafeAreaTranslation
+    var body: some View {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [
+                    Color.black.opacity(0.46 * strength),
+                    Color.black.opacity(0.40 * strength),
+                    Color.black.opacity(0.24 * strength),
+                    Color.black.opacity(0.08 * strength),
+                    Color.clear,
+                ]
+                : [
+                    Color.tronBackground.opacity(0.98 * strength),
+                    Color.tronBackground.opacity(0.94 * strength),
+                    Color.tronBackground.opacity(0.72 * strength),
+                    Color.tronBackground.opacity(0.28 * strength),
+                    Color.clear,
+                ],
+            startPoint: edge == .top ? .top : .bottom,
+            endPoint: edge == .top ? .bottom : .top
+        )
     }
 }
 
-/// A short, nonstructural safe-area blur over the chat background. It uses
-/// the same masked custom blur in both appearances, without a separate tint,
-/// material overlay, or working-state animation.
+enum ChatBottomActivityBlurLayout {
+    /// One geometry with or without the keyboard: the blur rises above the
+    /// input bar and extends below it to the screen edge (home indicator) or
+    /// behind the keyboard.
+    static let height: CGFloat = 124
+    static let translation: CGFloat = 44
+}
+
+/// The chat's bottom edge blur. It mirrors the top chat blur (same variable
+/// backdrop radius and background tint ramp) so both edges match.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
-    let keyboardVisible: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ChatTopVariableBlur(
-            maxBlurRadius: ChatBottomActivityBlurLayout.radius,
-            darkMode: false,
-            fadesFromBottom: true
-        )
+        ZStack {
+            ChatTopVariableBlur(
+                maxBlurRadius: TronTopBlurStyle.chat.radius,
+                darkMode: colorScheme == .dark,
+                fadesFromBottom: true
+            )
+            TronEdgeBlurTint(edge: .bottom, strength: 0.8)
+        }
         .frame(maxWidth: .infinity)
-        .frame(height: ChatBottomActivityBlurLayout.height(keyboardVisible: keyboardVisible))
+        .frame(height: ChatBottomActivityBlurLayout.height)
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tron is working")
