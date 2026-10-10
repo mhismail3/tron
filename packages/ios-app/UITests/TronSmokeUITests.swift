@@ -595,7 +595,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testHomeChatStatusPollingResumesAfterCoveredSettingsSheet() {
+    func testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture"]
@@ -608,20 +608,70 @@ final class TronSmokeUITests: XCTestCase {
         let count = app.staticTexts["fixture.home-status-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
         let statusCount = { Int(count.label.split(separator: ":").last ?? "0") ?? 0 }
-        app.buttons["Settings"].tap()
-        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        // The Home chat's gear opens Manage Home (#725); its one status read must
+        // settle inside the baseline window below, and it never polls.
+        let gear = app.buttons["Manage Home"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
         // Let a read admitted before cover settle, then require a quiet interval
         // longer than the five-second fallback while the managed sheet is open.
         Thread.sleep(forTimeInterval: 1)
         let coveredBaseline = statusCount()
         Thread.sleep(forTimeInterval: 5.5)
-        XCTAssertEqual(statusCount(), coveredBaseline, "Home status reads continued while Settings covered the chat")
-        app.buttons["Done"].tap()
+        XCTAssertEqual(statusCount(), coveredBaseline, "Home status reads continued while Manage Home covered the chat")
+        app.buttons["home-sheet-done-manage"].tap()
         let increased = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             statusCount() > coveredBaseline
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [increased], timeout: 7), .completed)
         app.terminate()
+    }
+
+    // Failure modes (#725): the Home chat's gear opens the ordinary settings sheet
+    // whose controls are refused for Home; an ordinary chat's gear regresses to
+    // Manage Home; a Manage Home child surface cannot open or return.
+    @MainActor
+    func testManageHomeSheetFromGearAndOrdinaryChatKeepsSettings() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.staticTexts["home-header-state"].waitForExistence(timeout: 10), app.debugDescription)
+        let gear = app.buttons["Manage Home"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
+        gear.tap()
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(state.label.contains("Ready"), state.label)
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-chat-model"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
+        for row in ["home-manage-context", "home-manage-memory-settings", "home-manage-memory-browser",
+                    "home-manage-tasks", "home-manage-pause", "home-manage-disable"] {
+            XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
+        }
+        keepScreenshot(named: "manage-home-sheet")
+        // A child surface keeps its own sheet lifetime above Manage Home and returns to it.
+        app.descendants(matching: .any)["home-manage-memory-settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-model-row"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["home-sheet-done-settings"].tap()
+        XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.buttons["home-controls"].waitForExistence(timeout: 5))
+        // The ordinary chat keeps the ordinary settings sheet from its gear.
+        app.buttons["Back"].tap()
+        let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
+        ordinary.tap()
+        XCTAssertTrue(app.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Manage Home"].exists)
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        keepScreenshot(named: "ordinary-chat-settings-sheet")
     }
 
     // Failure mode: a Home chat opened before any status is known never shows its

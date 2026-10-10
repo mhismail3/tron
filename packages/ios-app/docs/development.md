@@ -87,7 +87,8 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeHeaderKeepsOrdinaryChatAndControls \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredSettingsSheet \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSheetFromGearAndOrdinaryChatKeepsSettings \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatOpenedBeforeStatusShowsHeaderAfterClaim \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowNamesRunningDesignationAsUpdate
 ```
