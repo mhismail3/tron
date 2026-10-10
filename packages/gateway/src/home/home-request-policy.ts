@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Agent, AgentMessage, PrepareRequest, StreamFn } from "@earendil-works/pi-agent-core";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import {
   estimateTokens,
   type AgentSession,
@@ -15,12 +16,14 @@ import { markAnthropicBlocks } from "../episodic/cache-layout.js";
  * loop, the SDK's retries and continuations, and any steering or follow-up that
  * joins the same run. Every provider request of an activation carries only:
  *
- *   1. the system messages that precede the activation's start entry,
+ *   1. Home's system prompt, frozen for that activation at its first request,
  *   2. ONE request-local memory view frozen for that activation, and
  *   3. the activation's native messages, from its exact start entry onward.
  *
  * Prior activations are never re-sent, and the memory view is never persisted:
- * Home's continuity is the memory, not the transcript.
+ * Home's continuity is the memory, not the transcript. Every activation, user or
+ * wake, reaches the provider through this seam, so Home needs no SDK hook for its
+ * system prompt.
  *
  * The seam is three wrappers, outermost first:
  *
@@ -29,11 +32,11 @@ import { markAnthropicBlocks } from "../episodic/cache-layout.js";
  *    SDK's own canonical projection.
  *  - `wrapTransformContext` is installed outermost on `Agent.transformContext`,
  *    i.e. after every SDK context stage, and records the single-use expectation
- *    for the provider request. A digest taken at `prepareRequest` time can never
- *    match: the SDK's extension `context` handlers, hidden-declaration
- *    projection and forced-prompt projection all run after the outermost
- *    `prepareRequest`, and the last of them rewrites the leading system message
- *    (#412 qualification).
+ *    for the provider request. It frames the request's system messages as one
+ *    head holding the frozen system prompt, the shape the SDK's forced-prompt
+ *    projection gave it. A digest taken at `prepareRequest` time can never
+ *    match: the SDK's extension `context` handlers and hidden-declaration
+ *    projection run after the outermost `prepareRequest` (#412 qualification).
  *  - `wrapStreamFunction` is installed INNERMOST on the provider stream, so it
  *    validates the exact request the provider-facing base stream receives, after
  *    `abortAwareStream` and the compaction policy's rewrite. An outermost guard
@@ -54,6 +57,7 @@ const HOME_RESERVE_TOKENS = 1_024;
 /** Why a Home request was refused. Bounded and reported; observable. */
 export type HomeRefusalReason =
   | "no-activation"
+  | "system-unavailable"
   | "memory-not-configured"
   | "memory-paused"
   | "memory-blocked"
@@ -79,6 +83,7 @@ export type HomeRefusalReason =
  */
 const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
   "no-activation": "no Home activation is open for this provider request.",
+  "system-unavailable": "Home's system prompt could not be prepared for this activation.",
   "memory-not-configured": "Home memory is not configured for this conversation.",
   "memory-paused": "Home memory is paused.",
   "memory-blocked": "Home memory is blocked until its source is repaired.",
@@ -191,6 +196,10 @@ export interface HomeRequestPolicyOptions {
    * cover the activation start is abortable through the request's signal.
    */
   prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => Promise<HomeActivationView>;
+  /** Home's full system prompt for one activation, from the SDK's base prompt
+   * captured at admission. Called at most once per activation, at its first
+   * `prepareRequest` step; a rejection fails that activation closed. */
+  prepareSystemPrompt: (base: string) => Promise<string>;
   /** Where the seam reports its bounded per-activation and refusal records. */
   onRecord?: (record: HomeRequestRecord) => void;
 }
@@ -218,6 +227,9 @@ export class HomeRequestPolicyError extends Error {
 
 interface ActivationState extends HomeActivationIdentity {
   cancellation: AbortController;
+  /** The SDK's base system prompt at admission, before any run changed it. */
+  systemBase: string;
+  system: Promise<string> | undefined;
   view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
   /** True while this activation's first request has not been recorded yet. */
@@ -282,7 +294,7 @@ export class HomeRequestPolicy {
    * activation start: the input's own entry is appended inside `session.prompt`
    * afterwards, and steering later inserts entries after it, never before it.
    */
-  admit(operationId: string, boundaryEntryId: string | null): void {
+  admit(operationId: string, boundaryEntryId: string | null, systemBase: string): void {
     // A displaced activation means the previous operation settled without a
     // matching `settle`, or a new run began first. Replacing it is the only safe
     // choice: the old boundary can no longer be trusted.
@@ -292,6 +304,8 @@ export class HomeRequestPolicy {
       nonce: randomUUID(),
       cancellation: new AbortController(),
       boundaryEntryId,
+      systemBase,
+      system: undefined,
       view: undefined,
       viewRefusal: undefined,
       unrecorded: true,
@@ -373,6 +387,7 @@ export class HomeRequestPolicy {
       this.assertProjectionFidelity(context.messages, projectionBefore, activation);
       const boundaryBefore = this.boundaryIndex(projectionBefore, activation);
       const excludedBefore = excludedMessages(projectionBefore, boundaryBefore);
+      await this.systemPromptFor(activation);
       const memoryView = await this.memoryView(activation, signal);
       // The wait can last seconds, so the projection the cut is computed from is
       // read again afterwards. What must not have moved is the part this request
@@ -450,11 +465,12 @@ export class HomeRequestPolicy {
           activation,
         );
       }
-      this.assertContextNotMutated(transformed, activation);
+      const framed = homeSystemFrame(transformed, await this.systemPromptFor(activation));
+      this.assertContextNotMutated(framed, activation);
       // Use the same settings-aware converter as this agent's loop; bare
       // conversion would reject Pi's supported image-blocking replacement.
-      this.expectedDigest = digestLlmMessages(await convertMessages(transformed));
-      return transformed;
+      this.expectedDigest = digestLlmMessages(await convertMessages(framed));
+      return framed;
     };
   }
 
@@ -515,6 +531,17 @@ export class HomeRequestPolicy {
       }
     })();
     return activation.view;
+  }
+
+  /** Home's system prompt for this activation. It is composed once from the base
+   * captured at admission and frozen, so every request of the activation carries
+   * the same bytes. A failure refuses the activation, and the refusal is cached
+   * with the prompt, as the memory view's is. */
+  private systemPromptFor(activation: ActivationState): Promise<string> {
+    activation.system ??= this.options.prepareSystemPrompt(activation.systemBase).catch(error => {
+      throw this.refuse("system-unavailable", error instanceof Error ? error.message : String(error), activation);
+    });
+    return activation.system;
   }
 
   /** A memory refusal keeps its own reason; anything else is a view failure. */
@@ -679,6 +706,16 @@ export class HomeRequestPolicy {
     this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
     return new HomeRequestPolicyError(reason, homeRefusalMessage(reason));
   }
+}
+
+/** Frames a request's system messages as one head holding Home's system prompt,
+ * shaped as the SDK's forced-prompt projection shapes its head: the tools the
+ * request declares stay on it, and every other system message is dropped. */
+function homeSystemFrame(messages: readonly AgentMessage[], system: string): AgentMessage[] {
+  const current = getCurrentSystemMessage(messages as never);
+  const head = { role: "system", content: system, ...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+    timestamp: current?.timestamp ?? Date.now() } as AgentMessage;
+  return [head, ...messages.filter(message => message.role !== "system")];
 }
 
 /** The messages a request starting after `boundaryIndex` would NOT send: the

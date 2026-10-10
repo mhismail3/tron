@@ -532,9 +532,8 @@ escapes, which is why the key set and every value shape are checked before
 decoding; a decoder would silently keep the last of a repeated key. Payload
 admission also requires the immutable tree, the alias targets, the required
 files and the recomputed fingerprint described above. Each rule has a refused
-fixture: one per rule in `packages/mac-app/scripts/test-tron-gateway-launcher.sh`,
-the same table in `GatewayPayloadStoreTests`, and the identity and key cases in
-`scripts/gateway-payload-deploy.test.mjs`. The LaunchAgent exports the selected payload's validated
+fixture in `packages/mac-app/scripts/test-tron-gateway-launcher.sh`, which compiles
+the launcher and runs it against temporary payloads. The LaunchAgent exports the selected payload's validated
 `app/scripts/gateway-payload-deploy.mjs` as the only update helper; verified
 artifact promotion is wired, and source builds read only the validated
 `gateway/update-config.json` projection. Source mode compiles with the repository's

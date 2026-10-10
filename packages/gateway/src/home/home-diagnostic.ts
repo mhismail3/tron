@@ -13,6 +13,7 @@ export type HomeDiagnosticRecord =
   | { outcome: "chapter-recovery"; reason: Exclude<ReservedHomeSessionScan["action"], "blocked"> | "conversation-published" }
   | { outcome: "chapter-refused"; chapterOrdinal?: number; reason: HomeHardBoundary | "sealed-write" | "uncertain-session-evidence" | "materialization-failed" | "ownership-changed" | "missing-conversation-evidence" | "published-evidence-missing" | "publication-failed" | "conversation-not-durable" }
   | { outcome: "chapter-limit-stop"; chapterOrdinal: number; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number; settledBytes: number; settledEntries: number }
+  | { outcome: "wake"; decision: "admitted" | "deferred" | "refused"; reason: "delivered" | "busy" | "disabled" | "paused" | "blocked" | "unavailable" | "ceiling" | "nothing-deliverable" | "failed" }
   | { outcome: "route-bound"; category: "open" | CommandReceiptRouteCategory };
 
 export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;
@@ -21,13 +22,15 @@ export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;
  * shared logger: canonical identities and evidence belong to their owners. */
 export function logHomeDiagnostic(logger: Pick<GatewayLogger, "log">, diagnostic: HomeDiagnosticRecord): void {
   const level = (diagnostic.outcome === "client-control" && diagnostic.reason !== "completed") || diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused"
-    || diagnostic.outcome === "chapter-refused" || diagnostic.outcome === "chapter-limit-stop" ? "warning" : "info";
+    || diagnostic.outcome === "chapter-refused" || diagnostic.outcome === "chapter-limit-stop"
+    || (diagnostic.outcome === "wake" && diagnostic.decision === "refused") ? "warning" : "info";
   logger.log(level, `Tron Home ${diagnostic.outcome}`, {
     event: `home.${diagnostic.outcome}`, source: "home",
     ...("reason" in diagnostic ? { reason: diagnostic.reason } : {}),
     ...("chapterOrdinal" in diagnostic ? { chapterOrdinal: diagnostic.chapterOrdinal } : {}),
     ...(diagnostic.outcome === "client-control" ? { operation: diagnostic.operation } : {}),
     ...(diagnostic.outcome === "route-bound" ? { category: diagnostic.category } : {}),
+    ...(diagnostic.outcome === "wake" ? { decision: diagnostic.decision } : {}),
     ...(diagnostic.outcome === "chapter-limit-stop" ? {
       boundary: diagnostic.boundary, crossingBytes: diagnostic.crossingBytes,
       crossingEntries: diagnostic.crossingEntries, settledBytes: diagnostic.settledBytes,

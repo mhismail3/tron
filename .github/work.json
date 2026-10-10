@@ -13,37 +13,37 @@
     {
       "name": "kind:bug",
       "color": "d1242f",
-      "description": "Kind (one per issue): behavior is wrong, including a failing or flaky test"
+      "description": "Kind (at most one per issue): behavior is wrong, including a failing or flaky test"
     },
     {
       "name": "kind:improvement",
       "color": "1f883d",
-      "description": "Kind (one per issue): a committed feature, enhancement or UX change"
+      "description": "Kind (at most one per issue): a committed feature, enhancement or UX change"
     },
     {
       "name": "kind:maintenance",
       "color": "8c959f",
-      "description": "Kind (one per issue): no behavior change; cleanup, refactor, tests, tooling, docs, deps"
+      "description": "Kind (at most one per issue): no behavior change; cleanup, refactor, tests, tooling, docs, deps"
     },
     {
       "name": "kind:idea",
       "color": "f9c513",
-      "description": "Kind (one per issue): a forward-looking proposal, not yet committed or scoped"
+      "description": "Kind (at most one per issue): a forward-looking proposal, not yet committed or scoped"
     },
     {
       "name": "kind:exploration",
       "color": "1b7c83",
-      "description": "Kind (one per issue): an open question to investigate; delivers findings or new issues"
+      "description": "Kind (at most one per issue): an open question to investigate; delivers findings or new issues"
     },
     {
       "name": "visibility:user-facing",
       "color": "fb8f44",
-      "description": "Visibility (one per issue): the maintainer would notice it while using Tron"
+      "description": "Visibility (at most one per issue): the maintainer would notice it while using Tron"
     },
     {
       "name": "visibility:internal",
       "color": "d0d7de",
-      "description": "Visibility (one per issue): behind the scenes; code, tests, tooling, CI"
+      "description": "Visibility (at most one per issue): behind the scenes; code, tests, tooling, CI"
     },
     {
       "name": "area:gateway",
@@ -76,21 +76,6 @@
       "description": "Documentation only"
     },
     {
-      "name": "needs-triage",
-      "color": "fbca04",
-      "description": "Filed but not yet prioritized or placed under an epic"
-    },
-    {
-      "name": "needs-decision",
-      "color": "b60205",
-      "description": "Blocked on a decision from the maintainer"
-    },
-    {
-      "name": "needs-user-validation",
-      "color": "d93f0b",
-      "description": "Merged; waiting for a maintainer-only action and check"
-    },
-    {
       "name": "regression",
       "color": "b60205",
       "description": "Source: filed by a scheduled or non-blocking check on main (always with kind:bug)"
@@ -113,27 +98,17 @@
           {
             "name": "Proposed",
             "color": "GRAY",
-            "description": "Awaiting maintainer approval; cannot be claimed"
+            "description": "Not yet approved for work"
           },
           {
             "name": "Ready",
             "color": "BLUE",
-            "description": "Approved; claimable once blockers are closed"
+            "description": "Approved for work; the dashboard lists it as next to claim"
           },
           {
             "name": "In progress",
             "color": "YELLOW",
             "description": "Claimed; has a branch and worktree"
-          },
-          {
-            "name": "In review",
-            "color": "PURPLE",
-            "description": "PR open; landing"
-          },
-          {
-            "name": "Needs you",
-            "color": "ORANGE",
-            "description": "Waiting for a maintainer decision or maintainer-only validation"
           },
           {
             "name": "Blocked",
@@ -143,7 +118,7 @@
           {
             "name": "Done",
             "color": "GREEN",
-            "description": "Closed with evidence"
+            "description": "Landed and closed"
           }
         ]
       },
@@ -189,13 +164,10 @@
     "readyStatus": "Ready",
     "claimedStatus": "In progress",
     "claimedStatuses": [
-      "In progress",
-      "In review",
-      "Needs you"
+      "In progress"
     ],
     "activeStatuses": [
-      "In progress",
-      "In review"
+      "In progress"
     ],
     "statusField": "Status",
     "excludeLabels": [
@@ -227,474 +199,11 @@
     "defaultBranchType": "feat"
   },
   "verify": {
-    "statusContext": "tron/verify",
     "prelude": "export PATH=\"$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH\" PYTHONDONTWRITEBYTECODE=1",
-    "scrubCommand": "scripts/personal-info-guard.sh --stdin",
-    "evidenceRepositorySuffix": "-evidence",
-    "excerptLines": 30,
-    "checks": [
-      {
-        "name": "privacy",
-        "always": true,
-        "paths": [
-          ".gitignore",
-          "**/.gitignore"
-        ],
-        "command": "scripts/personal-info-guard.sh"
-      },
-      {
-        "name": "agent-policy",
-        "always": true,
-        "paths": [
-          "AGENTS.md",
-          ".agents/**",
-          ".pi/**",
-          ".codex/**",
-          "scripts/check-agent-policy.sh"
-        ],
-        "command": "scripts/check-agent-policy.sh"
-      },
-      {
-        "name": "documentation-policy",
-        "always": true,
-        "paths": [
-          "**/*.md",
-          "docs/**",
-          "packages/*/docs/**",
-          "scripts/check-documentation-policy.py"
-        ],
-        "command": "python3 scripts/check-documentation-policy.py"
-      },
-      {
-        "name": "whitespace",
-        "always": true,
-        "paths": [],
-        "command": "git diff --check {merge_base} HEAD"
-      },
-      {
-        "name": "work-tooling",
-        "paths": [
-          "tools/work/**",
-          ".github/work.json",
-          ".github/workflows/ci.yml",
-          "scripts/ci_macos_scope.py",
-          "packages/mac-app/.gitignore",
-          "packages/gateway/src/tron-home-environment-policy.mjs",
-          "packages/gateway/test-support/tron-home-environment-preflight.mjs"
-        ],
-        "command": "python3 tools/work/run_tests.py"
-      },
-      {
-        "name": "work-related-issues",
-        "paths": [
-          ".agents/skills/tron-work/related-issues.js",
-          ".agents/skills/tron-work/related-issues.test.mjs"
-        ],
-        "command": "node --test .agents/skills/tron-work/related-issues.test.mjs"
-      },
-      {
-        "name": "github-metadata",
-        "paths": [
-          ".github/workflows/**",
-          ".github/ISSUE_TEMPLATE/**",
-          ".github/rulesets/**",
-          ".github/dependabot.yml"
-        ],
-        "command": "for f in {paths}; do case \"$f\" in *.json) python3 -m json.tool \"$f\" > /dev/null ;; *.yml|*.yaml) ruby -ryaml -e 'YAML.load_file(ARGV[0])' \"$f\" ;; *) echo \"no syntax check for $f\" >&2; exit 1 ;; esac; done"
-      },
-      {
-        "name": "gateway",
-        "heavy": true,
-        "paths": [
-          "packages/gateway/src/**/*.ts",
-          "packages/gateway/test-support/**",
-          "packages/gateway/package.json",
-          "packages/gateway/package-lock.json",
-          "packages/gateway/tsconfig.json",
-          "packages/gateway/tsconfig.test-support.json",
-          "packages/gateway/vitest.config.ts",
-          "packages/gateway/vitest.nested.config.ts",
-          "packages/gateway/vitest.scale.config.ts",
-          "packages/gateway/vitest.corpus.config.ts",
-          "packages/gateway/pi-sdk-baseline.json",
-          "packages/gateway/pi-subagents-pin.json",
-          "packages/gateway/artifacts/**",
-          "packages/gateway/scripts/**",
-          "packages/gateway/test-fixtures/**",
-          "packages/gateway/src/**/*.json",
-          "packages/gateway/src/**/*.mjs",
-          "packages/gateway/src/**/*.mts",
-          "packages/protocol-fixtures/**",
-          "config/GatewayProtocol.json",
-          ".node-version",
-          "scripts/tron-ios-device-bind.mjs",
-          "scripts/tron-ios-device-bind.test.mjs",
-          "config/PushService.xcconfig"
-        ],
-        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run --passWithNoTests \"$@\" && npx vitest related --config vitest.nested.config.ts --run --passWithNoTests \"$@\"; else npm test; fi",
-        "exclusiveGroup": "gateway-source-tree"
-      },
-      {
-        "name": "pi-subagents",
-        "heavy": true,
-        "paths": [
-          "packages/gateway/package.json",
-          "packages/gateway/package-lock.json",
-          "packages/gateway/pi-subagents-pin.json",
-          "packages/gateway/artifacts/pi-subagents-*",
-          "packages/gateway/scripts/*pi-subagents*",
-          ".node-version"
-        ],
-        "command": "cd packages/gateway && npm run check:pi-subagents && npm run test:pi-subagents-scripts",
-        "exclusiveGroup": "gateway-source-tree"
-      },
-      {
-        "name": "gateway-scale",
-        "heavy": true,
-        "paths": [
-          "packages/gateway/src/knowledge/*.scale.test.ts",
-          "packages/gateway/src/knowledge/knowledge-catalog.ts",
-          "packages/gateway/src/knowledge/knowledge-contract.ts",
-          "packages/gateway/src/knowledge/knowledge-curation.ts",
-          "packages/gateway/src/knowledge/knowledge-observation.ts",
-          "packages/gateway/src/knowledge/paid-budget-ledger.ts",
-          "packages/gateway/src/knowledge/knowledge-service.ts",
-          "packages/gateway/src/knowledge/knowledge-store.ts",
-          "packages/gateway/src/knowledge/knowledge-tagger.ts",
-          "packages/gateway/src/knowledge/connectors.ts",
-          "packages/gateway/src/knowledge/jev-assessment.ts",
-          "packages/gateway/src/knowledge/source-capture.ts",
-          "packages/gateway/src/workspace/tron-workspace.ts",
-          "packages/gateway/src/protocol/json-budget.ts",
-          "packages/gateway/test-support/connector-credentials.ts",
-          "packages/gateway/vitest.scale.config.ts"
-        ],
-        "command": "cd packages/gateway && npx vitest run --config vitest.scale.config.ts --maxWorkers=2",
-        "exclusiveGroup": "gateway-source-tree"
-      },
-      {
-        "name": "push-relay",
-        "paths": [
-          "packages/push-relay/**",
-          "packages/protocol-fixtures/**",
-          ".node-version"
-        ],
-        "command": "cd packages/push-relay && npm ci --no-audit --no-fund && npm run check && npm test && npm run build"
-      },
-      {
-        "name": "ios",
-        "heavy": true,
-        "paths": [
-          "packages/ios-app/Configuration/**",
-          "packages/ios-app/Core/**",
-          "packages/ios-app/ShareExtension/**",
-          "packages/ios-app/Sources/**",
-          "packages/ios-app/TestPlans/**",
-          "packages/ios-app/Tests/**",
-          "packages/ios-app/UITests/**",
-          "packages/ios-app/scripts/**",
-          "packages/ios-app/*.entitlements",
-          "packages/ios-app/project.yml",
-          "packages/protocol-fixtures/**",
-          "config/GatewayProtocol.json",
-          "config/PushService.xcconfig",
-          "config/ci-toolchain.env",
-          "scripts/generate-xcode-project",
-          "scripts/tron-ios-test",
-          "scripts/ios-gateway-fault-proxy.mjs",
-          "scripts/ios_verify_test_selection.py",
-          "scripts/test-ios-verify-test-selection.py",
-          "scripts/ios-test-*.py",
-          "scripts/verify-ci-toolchain.sh",
-          "scripts/install-ci-tools.sh"
-        ],
-        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && python3 scripts/ios_verify_test_selection.py --merge-base {merge_base} {paths}",
-        "exclusiveGroup": "gateway-source-tree",
-        "exclusivePaths": [
-          "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift",
-          "packages/ios-app/UITests/RealGateway/RealGatewayPairAndChatUITests.swift",
-          "scripts/ios-gateway-fault-proxy.mjs"
-        ]
-      },
-      {
-        "name": "work-selector-tests",
-        "paths": [
-          "scripts/ios_verify_test_selection.py",
-          "scripts/test-ios-verify-test-selection.py",
-          "scripts/ci_ios_infra_scope.py",
-          "scripts/test-ci-ios-infra-scope.py",
-          "scripts/ci_verify_scope.py",
-          "scripts/test-ci-verify-scope.py",
-          "tools/work/verify.py",
-          ".github/work.json"
-        ],
-        "command": "python3 scripts/test-ios-verify-test-selection.py && python3 scripts/test-ci-ios-infra-scope.py && python3 scripts/test-ci-verify-scope.py"
-      },
-      {
-        "name": "mac",
-        "heavy": true,
-        "paths": [
-          "packages/mac-app/Configuration/**",
-          "packages/mac-app/Sources/**",
-          "packages/mac-app/Tests/**",
-          "packages/mac-app/scripts/**",
-          "packages/mac-app/*.entitlements",
-          "packages/mac-app/project.yml",
-          "packages/mac-app/cua-driver-release.json",
-          "config/PushService.xcconfig",
-          "config/ci-toolchain.env",
-          "scripts/generate-xcode-project",
-          "scripts/verify-ci-toolchain.sh",
-          "scripts/install-ci-tools.sh"
-        ],
-        "command": "scripts/generate-xcode-project mac && cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData && xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData -only-testing:TronMacTests",
-        "exclusiveGroup": "gateway-source-tree"
-      },
-      {
-        "name": "mac-scripts",
-        "paths": [
-          "packages/mac-app/scripts/**",
-          "scripts/install-ci-tools.sh",
-          "scripts/test-install-ci-tools-node.sh",
-          "scripts/validate-push-service-config.sh",
-          "config/PushService.xcconfig",
-          "scripts/gateway-payload-deploy.mjs",
-          "scripts/gateway-install-inputs.mjs",
-          "scripts/gateway-install-inputs.test.mjs",
-          "scripts/gateway-payload-deploy.test.mjs",
-          "scripts/tron",
-          "scripts/tron-dev",
-          "scripts/test-tron-npm-bytecode.sh",
-          "scripts/hash-npm-runtime.py",
-          "config/ci-toolchain.env",
-          ".node-version"
-        ],
-        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && scripts/test-tron-npm-bytecode.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
-      },
-      {
-        "name": "mac-bundle-rebuild",
-        "heavy": true,
-        "paths": [
-          "packages/mac-app/scripts/bundle-gateway.sh",
-          "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",
-          "packages/mac-app/scripts/stage-gateway-app.sh",
-          "packages/mac-app/scripts/ensure-gateway-bundle.sh",
-          "packages/mac-app/scripts/verify-gateway-payload.sh",
-          "packages/mac-app/scripts/tron-gateway-launcher.c",
-          "packages/mac-app/scripts/verify-macho-architectures.sh",
-          "packages/mac-app/Sources/Resources/Library/LoginItems/**",
-          "packages/gateway/package.json",
-          "packages/gateway/package-lock.json",
-          "packages/gateway/pi-sdk-baseline.json",
-          "packages/gateway/pi-subagents-pin.json",
-          "packages/gateway/artifacts/pi-subagents-*",
-          "packages/gateway/scripts/check-pi-sdk.mjs",
-          "packages/gateway/scripts/check-pi-subagents.mjs",
-          "packages/gateway/scripts/install-pi-subagents.mjs",
-          "packages/gateway/scripts/ensure-node-pty-helper.mjs",
-          "scripts/hash-npm-runtime.py",
-          "scripts/gateway-install-inputs.mjs",
-          "scripts/gateway-payload-deploy.mjs",
-          "scripts/install-ci-tools.sh",
-          "scripts/validate-push-service-config.sh",
-          "scripts/verify-gateway-protocol-contract.py",
-          "scripts/gateway_protocol_contract.py",
-          "config/GatewayProtocol.json",
-          "config/PushService.xcconfig",
-          "config/ci-toolchain.env",
-          ".node-version"
-        ],
-        "command": "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",
-        "exclusiveGroup": "gateway-source-tree"
-      },
-      {
-        "name": "mac-native-computer-control",
-        "paths": [
-          "packages/mac-app/native-computer-control/**"
-        ],
-        "command": "python3 -m unittest discover -s packages/mac-app/native-computer-control/qualification -p 'test_*.py' && swift test --package-path packages/mac-app/native-computer-control"
-      },
-      {
-        "name": "mac-native-gateway-client",
-        "paths": [
-          "packages/mac-app/native-gateway-client/**"
-        ],
-        "command": "out=\"$(mktemp -d)\" && trap 'rm -rf \"$out\"' EXIT && python3 -m unittest discover -s packages/mac-app/native-gateway-client -p 'test_*.py' && python3 packages/mac-app/native-gateway-client/build.py --test --output \"$out/tron-native-capture-test.node\" && TRON_CAPTURE_TEST_ADDON=\"$out/tron-native-capture-test.node\" node --expose-gc --test packages/mac-app/native-gateway-client/addon.test.mjs"
-      },
-      {
-        "name": "cua-assets",
-        "paths": [
-          "scripts/test-cua-assets.sh",
-          "packages/mac-app/cua-driver-release.json",
-          "packages/mac-app/scripts/ensure-cua-driver.sh",
-          "packages/mac-app/scripts/verify-macho-architectures.sh"
-        ],
-        "command": "scripts/test-cua-assets.sh"
-      },
-      {
-        "name": "privacy-guard-tests",
-        "paths": [
-          "scripts/personal-info-guard.sh",
-          "scripts/test-personal-info-guard.py"
-        ],
-        "command": "python3 scripts/test-personal-info-guard.py"
-      },
-      {
-        "name": "protocol-contract",
-        "paths": [
-          "scripts/gateway_protocol_contract.py",
-          "scripts/verify-gateway-protocol-contract.py",
-          "scripts/test-gateway-protocol-contract.py",
-          "config/GatewayProtocol.json",
-          "packages/protocol-fixtures/**"
-        ],
-        "command": "python3 scripts/test-gateway-protocol-contract.py"
-      },
-      {
-        "name": "ios-test-infrastructure",
-        "paths": [
-          "scripts/ios-test-*.py",
-          "scripts/tron-ios-test",
-          "scripts/tron-ios-simulator",
-          "scripts/patch-ios-gateway-e2e-xctestrun.py",
-          "scripts/ios-gateway-e2e-test",
-          "scripts/test-ios-test-infrastructure.py",
-          "scripts/tron-profile-ios"
-        ],
-        "command": "python3 scripts/test-ios-test-infrastructure.py"
-      },
-      {
-        "name": "ios-artifact-validator",
-        "paths": [
-          "scripts/validate-ios-artifact.py",
-          "scripts/test-ios-artifact-validator.sh"
-        ],
-        "command": "scripts/test-ios-artifact-validator.sh"
-      },
-      {
-        "name": "ios-device",
-        "paths": [
-          "scripts/tron-ios-device",
-          "scripts/tron-ios-device-test",
-          "scripts/tron-ios-device-bind.mjs"
-        ],
-        "command": "scripts/tron-ios-device-test && node --test scripts/tron-ios-device-bind.test.mjs"
-      },
-      {
-        "name": "ios-release-doctor",
-        "paths": [
-          "scripts/ios-release-toolchain-doctor.sh",
-          "config/ci-toolchain.env"
-        ],
-        "command": "scripts/ios-release-toolchain-doctor.sh --self-test"
-      },
-      {
-        "name": "mac-reinstall",
-        "paths": [
-          "scripts/tron_mac_reinstall.py",
-          "scripts/test-mac-reinstall.py",
-          "scripts/verify-mac-install.sh"
-        ],
-        "command": "python3 scripts/test-mac-reinstall.py"
-      },
-      {
-        "name": "native-host",
-        "paths": [
-          "scripts/validate-native-host.py",
-          "scripts/test-native-host.py"
-        ],
-        "command": "python3 scripts/test-native-host.py"
-      },
-      {
-        "name": "profiler",
-        "paths": [
-          "scripts/tron-profile*",
-          "scripts/tron_profile_*.py",
-          "scripts/test-tron-profile*.py"
-        ],
-        "command": "python3 scripts/test-tron-profile.py && python3 scripts/test-tron-profile-ios.py && python3 scripts/test-tron-profile-attribution.py"
-      },
-      {
-        "name": "triage",
-        "paths": [
-          "scripts/tron_triage.py",
-          "scripts/tron-triage",
-          "scripts/test-tron-triage.py"
-        ],
-        "command": "python3 scripts/test-tron-triage.py"
-      },
-      {
-        "name": "dev-lifecycle-state",
-        "paths": [
-          "scripts/tron-dev",
-          "scripts/tron-dev-state.mjs",
-          "scripts/tron-dev-state.test.mjs"
-        ],
-        "command": "node --test scripts/tron-dev-state.test.mjs"
-      },
-      {
-        "name": "gateway-payload-deploy",
-        "paths": [
-          "scripts/gateway-payload-deploy.mjs",
-          "scripts/gateway-payload-deploy.test.mjs"
-        ],
-        "command": "node --test scripts/gateway-payload-deploy.test.mjs"
-      },
-      {
-        "name": "version",
-        "paths": [
-          "VERSION.env",
-          "scripts/tron-version"
-        ],
-        "command": "scripts/tron-version check && scripts/tron-version test"
-      },
-      {
-        "name": "toolchain",
-        "paths": [
-          ".node-version",
-          "config/ci-toolchain.env",
-          "scripts/verify-ci-toolchain.sh",
-          "scripts/install-ci-tools.sh"
-        ],
-        "command": "scripts/verify-ci-toolchain.sh node"
-      },
-      {
-        "name": "script-syntax",
-        "paths": [
-          "scripts/*"
-        ],
-        "command": "for f in {paths}; do case \"$f\" in *.py) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *.mjs|*.js) node --check \"$f\" ;; *.ts) node --experimental-strip-types --check \"$f\" ;; *) case \"$(head -n 1 \"$f\")\" in *bash*|*/sh) bash -n \"$f\" ;; *python*) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *) echo \"no syntax check for $f\" >&2; exit 1 ;; esac ;; esac; done"
-      }
-    ]
-  },
-  "acceptance": {
-    "evidenceEnv": "TRON_IOS_E2E_STATE_DIR",
-    "journeys": {
-      "real-gateway-pair-and-chat": {
-        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
-        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
-        "report": "results/latest-ui/report.json",
-        "timeoutSeconds": 1800
-      },
-      "real-gateway-wrong-pairing-code": {
-        "journey": "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
-        "command": "scripts/ios-gateway-e2e-test run-ui --only-testing {journey}",
-        "report": "results/latest-ui/report.json",
-        "timeoutSeconds": 1800
-      }
-    }
+    "scrubCommand": "scripts/personal-info-guard.sh --stdin"
   },
   "land": {
-    "requiredChecks": [
-      "policy",
-      "gateway"
-    ],
-    "reviewStatus": "In review",
-    "doneStatus": "Done",
-    "userValidationLabel": "needs-user-validation",
-    "waitSeconds": 1800,
-    "pollSeconds": 20,
-    "maxRounds": 3
+    "doneStatus": "Done"
   },
   "cleanup": {
     "regenerableIgnored": [
@@ -730,28 +239,21 @@
     ]
   },
   "dashboard": {
-    "needsYouStatus": "Needs you",
     "blockedStatus": "Blocked",
     "epicLabel": "epic",
-    "needsYouLabels": [
-      "needs-decision",
-      "needs-user-validation"
-    ],
     "regressionLabel": "regression",
     "priorityField": "Priority",
     "rankField": "Epic rank",
-    "verifyContext": "tron/verify",
     "kindPrefix": "kind:",
     "visibilityPrefix": "visibility:",
     "areaPrefix": "area:",
     "ideaLabel": "kind:idea",
     "recentDays": 14,
     "ciWorkflow": "ci.yml",
-    "advisoryJobs": [
+    "ciJobs": [
       "gateway",
-      "gateway-tooling",
+      "push-relay",
       "ios",
-      "pi-sdk-e2e",
       "mac"
     ]
   }

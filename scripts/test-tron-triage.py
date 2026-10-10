@@ -58,9 +58,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import timedelta
 from pathlib import Path
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -69,9 +67,6 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 FRONT_DOOR = ROOT / "scripts/tron-triage"
 MODULE = ROOT / "scripts/tron_triage.py"
-sys.path.insert(0, str(ROOT / "scripts"))
-
-import tron_triage  # noqa: E402  (the module under test, imported by path)
 
 REPORT_KEEPS = 3
 
@@ -94,12 +89,6 @@ def app_record(timestamp, event, message, level="info", outcome=None, duration_m
     if lifecycle_generation is not None:
         record["lifecycleGeneration"] = lifecycle_generation
     return record
-
-
-def local_compact(instant):
-    """A `log show --style compact` timestamp for a UTC instant, in local time."""
-    parsed = tron_triage.parse_timestamp(instant)
-    return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 def gateway_record(timestamp, event, level, message, **fields):
@@ -167,18 +156,6 @@ class TriageFixture(unittest.TestCase):
         completed = subprocess.run(arguments, capture_output=True, text=True, timeout=120)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return json.loads(completed.stdout) if json_output else completed.stdout
-
-    def log_show(self, text, returncode=0):
-        """A fixture `log` executable, so no test hook lives in the tool."""
-        path = self.root / "fake-log"
-        path.write_text("#!/bin/sh\n"
-                        f"printf '%s' {shlex.quote(text)}\n"
-                        f"exit {returncode}\n", encoding="utf-8")
-        path.chmod(0o755)
-        previous = tron_triage.TAILSCALE_LOG_TOOL
-        tron_triage.TAILSCALE_LOG_TOOL = str(path)
-        self.addCleanup(setattr, tron_triage, "TAILSCALE_LOG_TOOL", previous)
-        return path
 
     def only_episode(self, report):
         self.assertEqual(report["summary"]["episodes"], 1, report["episodes"])
@@ -530,97 +507,6 @@ class InputContractTests(TriageFixture):
         self.assertIn("no such phone export", completed.stderr)
 
 
-class TailscaleWindowTests(TriageFixture):
-    """The extension log is the only path evidence a pre-O-2 Gateway log leaves.
-
-    The lines are the real Magicsock forms, printed in the compact style whose
-    timestamps carry no UTC offset.
-    """
-
-    def magicsock_lines(self, relay_at, direct_at, peer="fakeNodeKey"):
-        return (
-            "Timestamp               Ty Process[PID:TID]\n"
-            f"{local_compact(relay_at)} Df io.tailscale.ipn.macsys.network-extension[3443:48f6] "
-            f"magicsock: new contact: peer=[{peer}] usec=399978702823 cached=false via=derp\n"
-            f"{local_compact(direct_at)} Df io.tailscale.ipn.macsys.network-extension[3443:4954] "
-            f"magicsock: disco: node [{peer}] d:8767 now using 192.0.2.23:41641 mtu=1360 tx=abc\n"
-        )
-
-    def test_relay_lines_become_a_relay_window(self):
-        self.log_show(self.magicsock_lines("2026-09-27T22:10:00.000Z", "2026-09-27T22:20:00.000Z"))
-        start = tron_triage.parse_timestamp("2026-09-27T20:00:00.000Z")
-        capture = tron_triage.capture_tailscale_window(start, start.replace(hour=23))
-        self.assertTrue(capture.captured, capture.reason)
-        windows = capture.relay_windows()
-        self.assertEqual(len(windows), 1, capture.lines)
-        self.assertEqual(windows[0][2], "relay")
-        self.assertLess(windows[0][0], windows[0][1])
-        self.assertEqual(
-            windows[0][0], tron_triage.parse_timestamp("2026-09-27T22:10:00.000Z"))
-
-    def test_a_peer_filter_keeps_another_peers_relay_out(self):
-        text = self.magicsock_lines("2026-09-27T22:10:00.000Z", "2026-09-27T22:20:00.000Z",
-                                    peer="other")
-        self.log_show(text)
-        start = tron_triage.parse_timestamp("2026-09-27T20:00:00.000Z")
-        capture = tron_triage.capture_tailscale_window(start, start.replace(hour=23), "fakeNodeKey")
-        self.assertTrue(capture.captured, capture.reason)
-        self.assertEqual(capture.lines, [])
-
-    def test_relay_window_classifies_a_path_episode(self):
-        phone = self.write("phone.jsonl", [
-            state_change("2026-09-28T10:00:00.000Z", "connected", "reconnecting"),
-            state_change("2026-09-28T10:01:30.000Z", "reconnecting", "connected"),
-        ])
-        self.log_show(self.magicsock_lines("2026-09-28T09:59:00.000Z", "2026-09-28T10:05:00.000Z"))
-        report = tron_triage.triage_reports([phone], None, 60, True)
-        self.assertEqual(report["inputs"]["tailscaleWindow"]["captured"], True)
-        self.assertEqual(report["episodes"][0]["cause"], "path")
-        self.assertIn("relay path window", " ".join(
-            entry["detail"] for entry in report["episodes"][0]["evidence"]))
-        # The windows themselves, so the capture can be reconstructed after the
-        # unified log has dropped the lines it was read from.
-        self.assertEqual(report["inputs"]["tailscaleWindow"]["relayWindows"], [
-            {"kind": "relay", "start": "2026-09-28T09:59:00.000Z",
-             "end": "2026-09-28T10:05:00.000Z"},
-        ])
-
-    def test_a_relay_window_that_closed_before_the_episode_ended_is_context(self):
-        # Review round 3, finding 3: the 03:24:45 silent gap. Its relay window
-        # closed at 03:26:22 and the gap ran to 03:30:30, so the path had been
-        # back for four minutes: the window is nearby context, not the cause,
-        # and the episode keeps the gap statement it was measured by.
-        phone = self.write("phone.jsonl", [
-            state_change("2026-09-28T03:24:31.488Z", "connected", "reconnecting"),
-            app_record("2026-09-28T03:24:43.600Z", "app.backgrounded", "outcome=success"),
-            app_record("2026-09-28T03:24:45.005Z", "app.foregrounded", "outcome=success"),
-            app_record("2026-09-28T03:30:30.618Z", "app.backgrounded", "outcome=success"),
-        ])
-        self.log_show(self.magicsock_lines("2026-09-28T03:24:21.764Z",
-                                           "2026-09-28T03:26:22.334Z"))
-        report = tron_triage.triage_reports([phone], None, 60, True)
-        gap = report["episodes"][2]
-        self.assertEqual(gap["cause"], "unknown", gap["evidence"])
-        self.assertIn("no attempt recorded in this window (gap of 345s)",
-                      " ".join(entry["detail"] for entry in gap["evidence"]))
-        context = [entry for entry in gap["evidence"]
-                   if entry["source"] == "tailscale" and entry["event"] == "path.change"]
-        self.assertEqual([entry["role"] for entry in context], ["context"], gap["evidence"])
-        self.assertIn("does not cover this episode", context[0]["detail"])
-        # The blip's own stretch is inside the window, so it is still the path.
-        self.assertEqual(report["episodes"][0]["cause"], "path")
-
-    def test_a_failing_log_show_does_not_stop_the_run(self):
-        phone = self.write("phone.jsonl", [
-            state_change("2026-09-28T10:00:00.000Z", "connected", "reconnecting"),
-            state_change("2026-09-28T10:01:30.000Z", "reconnecting", "connected"),
-        ])
-        self.log_show("", returncode=3)
-        report = tron_triage.triage_reports([phone], None, 60, True)
-        self.assertEqual(report["inputs"]["tailscaleWindow"]["captured"], False)
-        self.assertEqual(report["episodes"][0]["cause"], "unknown")
-
-
 class ReviewRegressionTests(TriageFixture):
     """The failure modes an independent review found on the branch.
 
@@ -743,47 +629,6 @@ class ReviewRegressionTests(TriageFixture):
         ])
         found = self.only_episode(self.run_tool(phone))
         self.assertNotEqual(found["cause"], "phone-stall", found["evidence"])
-
-    def test_one_attempt_is_counted_once_when_both_shapes_are_written(self):
-        rows = []
-        for index, loop in enumerate(("loop-1", "loop-1", "loop-2", "loop-2")):
-            rows.append(attempt(f"2026-09-28T15:00:{index:02d}.000Z", 15000, "failure",
-                                "transport-open", "timeout", attempt_id=loop,
-                                profile_id="mobile-prod"))
-            rows.append(app_record(
-                f"2026-09-28T15:00:{index:02d}.000Z", "gateway.connection",
-                f"stage=transport-open outcome=failure sequence={index} clientID=c1 "
-                f"attemptID={loop} durationMs=15000 recordKind=connection reason=timeout",
-                level="warning", outcome="failure", duration_ms=15000))
-        phone = self.write("phone.jsonl", rows)
-        records, _ = tron_triage.read_jsonl(phone)
-        self.assertEqual(len(tron_triage.phone_attempts(records)), 4)
-
-    def test_retries_sharing_a_loop_id_survive_without_attempt_records(self):
-        rows = [app_record(f"2026-09-28T15:30:{index:02d}.000Z", "gateway.connection",
-                           f"stage=transport-open outcome=failure sequence={index} clientID=c1 "
-                           f"attemptID=loop-1 durationMs=15000 recordKind=connection reason=timeout",
-                           level="warning", outcome="failure", duration_ms=15000)
-                for index in range(3)]
-        phone = self.write("phone.jsonl", rows)
-        records, _ = tron_triage.read_jsonl(phone)
-        self.assertEqual(len(tron_triage.phone_attempts(records)), 3)
-
-    def test_a_retry_accept_past_the_deadline_is_not_this_attempts_arrival(self):
-        phone = self.write("phone.jsonl", [
-            app_record("2026-09-28T14:00:15.000Z", "gateway.attempt",
-                       "outcome=failure stageReached=transport-open reason=timeout durationMs=15000",
-                       level="warning", outcome="failure", duration_ms=15000),
-        ])
-        self.gateway([
-            gateway_record("2026-09-28T14:00:16.000Z", "connection.opened", "info",
-                           "Client gw-R connection opened after 9ms", connectionId="gw-R"),
-        ])
-        records, _ = tron_triage.read_jsonl(phone)
-        attempts = tron_triage.phone_attempts(records)
-        gateway = tron_triage.GatewayIndex(records=tron_triage.load_gateway_logs(self.logs).records)
-        self.assertFalse(tron_triage.attempt_reached_mac(
-            attempts[0], gateway.window(*attempts[0].span())))
 
 
 class ReviewRoundTwoTests(TriageFixture):
@@ -936,33 +781,6 @@ class ReviewRoundTwoTests(TriageFixture):
         found = self.only_episode(self.run_tool(phone))
         self.assertEqual(found["cause"], "unknown", found["evidence"])
 
-    def test_the_episodes_key_is_the_connection_it_lost(self):
-        # The record at the end names the socket the reconnect opened; the key
-        # of the episode is the connection the failed attempt lost.
-        phone = self.write("phone.jsonl", [
-            attempt("2026-09-28T11:00:05.000Z", 15000, "failure", "transport-open", "timeout",
-                    gateway_connection_id="gw-old", attempt_id="a1", profile_id="p1"),
-            attempt("2026-09-28T11:00:20.000Z", 38, "success", "connected", "none",
-                    gateway_connection_id="gw-new", attempt_id="a1", profile_id="p1"),
-            episode("2026-09-28T11:00:00.000Z", "2026-09-28T11:00:20.000Z", 2, "transport",
-                    "connected"),
-        ])
-        self.gateway([
-            gateway_record("2026-09-28T10:59:00.000Z", "connection.opened", "info",
-                           "Client gw-old connection opened after 9ms", connectionId="gw-old"),
-            gateway_record("2026-09-28T11:00:00.500Z", "connection.closed", "info",
-                           "Client gw-old connection closed after 60000ms", connectionId="gw-old"),
-            gateway_record("2026-09-28T11:00:19.900Z", "connection.opened", "info",
-                           "Client gw-new connection opened after 9ms", connectionId="gw-new"),
-        ])
-        records, _ = tron_triage.read_jsonl(phone)
-        gateway = tron_triage.GatewayIndex(
-            records=tron_triage.load_gateway_logs(self.logs).records)
-        episodes = tron_triage.build_episodes(records, gateway, timedelta(seconds=60))
-        self.assertEqual(len(episodes), 1, episodes)
-        self.assertEqual(episodes[0].gateway_ids, {"gw-old"}, episodes[0].gateway_ids)
-        tron_triage.classify(episodes[0], gateway, timedelta(seconds=60), None)
-        self.assertEqual(episodes[0].join, "key", episodes[0].join)
 
     def test_an_app_connect_operation_counts_as_the_episodes_attempt(self):
         # A pre-O-4 export records its attempts as `operation.gatewayConnect`

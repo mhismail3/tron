@@ -149,20 +149,6 @@ func writePayloadDocument<T: Encodable>(_ value: T, to url: URL) throws {
     try encoder.encode(value).write(to: url)
 }
 
-struct TemporaryPayloadDirectory {
-    let root: URL
-
-    init() throws {
-        root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tron-payload-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    }
-
-    func cleanup() {
-        try? FileManager.default.removeItem(at: root)
-    }
-}
-
 private func bundledNpmRoot() throws -> URL {
     let fm = FileManager.default
     guard let resources = Bundle.main.resourceURL else {
