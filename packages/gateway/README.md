@@ -1089,7 +1089,9 @@ record, RPC shapes, chapters, runtime profile, memory, task delegation and termi
   Sealed chapters stay readable and refuse mutation.
 - **Tasks.** Home is delegate-only for project work. `delegate` admits finite work once, in a trusted project,
   through the neutral owned-session boundary. Workers keep normal project capabilities plus the explicit `report`
-  tool. v1 refuses subagent execution and revival, scheduled work and durable `bg_wait` wake subscriptions.
+  tool. Workers may launch subagents; the task stops and joins every async run it started before it settles, so
+  the 24-hour deadline covers subagent work. v1 refuses revival, mutating management of runs the task did not
+  start, mission launches, scheduled work and durable `bg_wait` wake subscriptions.
   Reports seal exact canonical evidence, never the latest assistant reply; a missing report is `limited` or
   `unknown`. A fixed internal 24-hour deadline cancels and joins operation-owned work. Usage is reported as tokens only,
   and unknown tracked detached work yields `unknown`, never a clean-stop claim.

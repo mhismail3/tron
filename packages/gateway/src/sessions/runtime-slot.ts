@@ -52,6 +52,7 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -768,6 +769,9 @@ export class RuntimeSlot {
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
+  /** Task-end joins waiting for a detached run's state to change. Each join owns its
+   * entry and removes it when it stops waiting. */
+  private readonly detachedWorkWaiters = new Set<() => void>();
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
    * facts; producer timestamps are display evidence only. */
   private readonly extensionActivitySequences = new Map<string, number>();
@@ -1877,6 +1881,7 @@ export class RuntimeSlot {
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
                 taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
               reportSealed: () => this.taskWorker!.reportSealed,
+              ownsSubagentRun: runId => this.ownsSubagentRun(runId),
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
@@ -2898,6 +2903,7 @@ export class RuntimeSlot {
       this.liveActivityRevision += 1;
       this.extensionActivityAsOf = new Date().toISOString();
       this.syncSubagentProcesses(activity);
+      this.notifyDetachedWork();
     }
     return visibility;
   }
@@ -6500,6 +6506,7 @@ export class RuntimeSlot {
       extensionActivityAsOf: this.extensionActivityAsOf,
     }));
     this.publishProcessesForToolCall(activity.toolCallId);
+    this.notifyDetachedWork();
     // Detached lifecycle updates do not rebuild the full transcript snapshot,
     // but they are authoritative live catalog activity and must reorder rows.
     this.publishSummary();
@@ -7443,23 +7450,83 @@ export class RuntimeSlot {
     }
 
     if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
-    const toolCallId = `tron-stop-${randomUUID()}`;
+    await this.controlSubagentRun(tool, { action: "stop", id: route.runId, childId: route.childId });
+  }
+
+  /** The provider's own control for one run, through the exact installed controller.
+   * A rejection is an error: the caller must not assume the run was stopped. */
+  private async controlSubagentRun(tool: ToolDefinition, input: Record<string, unknown>): Promise<void> {
+    const toolCallId = `tron-control-${randomUUID()}`;
     const signal = new AbortController().signal;
-    const result = await tool.execute(
-      toolCallId,
-      { action: "stop", id: route.runId, childId: route.childId },
-      signal,
-      undefined,
-      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal),
-    );
+    const result = await tool.execute(toolCallId, input, signal, undefined,
+      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal));
     if ((result as typeof result & { isError?: boolean }).isError === true) {
       const message = result.content.find(content => content.type === "text")?.text;
-      throw new GatewayError(
-        "conflict",
-        message?.slice(0, 512) || "The subagent controller rejected the stop request",
-        true,
-      );
+      throw new GatewayError("conflict", message?.slice(0, 512) || "The subagent controller rejected the request", true);
     }
+  }
+
+  /** Whether this session's canonical history launched the run. Task controls use it
+   * to refuse a stop or interrupt of any run the task did not start. */
+  ownsSubagentRun(runId: string): boolean {
+    return this.canonicalExtensionRunFacts().has(runId);
+  }
+
+  /** Task-end settlement of this worker's async subagent runs. Every live async run is
+   * stopped through the provider's own stop control, then the join waits until no run
+   * is live, bounded by the operation deadline and one disposal grace after it. The
+   * fact is appended only when the task launched async runs, so an absent fact proves
+   * zero Gateway stops. `stoppedAtEnd` is null unless every stop was accepted and the
+   * join completed. */
+  async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null }> {
+    if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
+    const launched = homeTaskSubagentLaunches(this.canonicalSessionEntries());
+    const live = [...this.extensionActivities.values()].filter(activity => activity.runId !== undefined
+      && this.extensionActivityOwnsLiveWork(activity) && this.extensionRunOwnership.get(activity.runId)?.asyncDir !== undefined);
+    if (live.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0 };
+    const tool = this.trustedSubagentController();
+    const stops = await Promise.allSettled(live.map(async activity => {
+      if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
+      await this.controlSubagentRun(tool, { action: "stop", id: activity.runId });
+    }));
+    const joined = await this.joinDetachedWork(deadline);
+    const stoppedAtEnd = joined && stops.every(stop => stop.status === "fulfilled") ? stops.length : null;
+    await this.persistCanonicalCustomEntry(HOME_TASK_SUBAGENTS,
+      { receiptId: subagentsReceiptId(operationId), operationId, stoppedAtEnd }, subagentsReceiptId(operationId), this.operationWork.get(operationId));
+    return { stoppedAtEnd };
+  }
+
+  /** Waits until no detached run is live. The wait is bounded by the operation's
+   * deadline, then by one disposal grace after it fires. A run still live then is
+   * not joined, and the caller keeps the detached outcome. */
+  private async joinDetachedWork(deadline: AbortSignal): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let resolveBound!: (value: "bound") => void;
+    const bound = new Promise<"bound">(resolve => { resolveBound = resolve; });
+    const start = (): void => { timer = setTimeout(() => resolveBound("bound"), DEFAULT_RUNTIME_DISPOSAL_GRACE_MS); };
+    if (deadline.aborted) start();
+    else deadline.addEventListener("abort", start, { once: true });
+    try {
+      while (this.hasDetachedDashboardWork()) {
+        let wake!: () => void;
+        const changed = new Promise<"changed">(resolve => { wake = () => resolve("changed"); });
+        this.detachedWorkWaiters.add(wake);
+        const outcome = await Promise.race([changed, bound]);
+        this.detachedWorkWaiters.delete(wake);
+        if (outcome === "bound") break;
+      }
+    } finally {
+      deadline.removeEventListener("abort", start);
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    return !this.hasDetachedDashboardWork();
+  }
+
+  /** Every extension-activity publication may end a join's wait. */
+  private notifyDetachedWork(): void {
+    const waiters = [...this.detachedWorkWaiters];
+    this.detachedWorkWaiters.clear();
+    for (const wake of waiters) wake();
   }
 
   publishSnapshot(): void {

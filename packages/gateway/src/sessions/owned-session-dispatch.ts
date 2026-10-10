@@ -11,6 +11,8 @@ type OperationHandle<T> = {
   completion: Promise<T>;
   cancel: (reason?: string) => Promise<void>;
 };
+/** One armed deadline. Its signal aborts at the fixed ceiling; `disarm` releases the timer. */
+export interface OwnedOperationDeadline { readonly signal: AbortSignal; readonly armedAt: number; disarm: () => void }
 
 /** The shared owned-session boundary: session lease, exact operation evidence,
  * and settlement acknowledgement remain with RuntimeRegistry / RuntimeSlot. */
@@ -43,35 +45,44 @@ export class OwnedSessionDispatch {
     return this.sessions.clearOwnedOperationMarker(sessionId, operationId);
   }
 
-  /** Apply only to the opted-in task operation. The deadline is intentionally
-   * not configurable in production; tests advance the timer by the fixed value.
-   * `elapsedMs` is the wall time from arming to the stop's join or failure, so the
-   * caller reports the stop with the outcome it already holds. */
-  async enforceDeadline<T>(handle: OperationHandle<T>): Promise<
+  /** Arms the fixed deadline of one opted-in operation. The caller disarms it only
+   * after settlement, so every bounded step of that operation (including the
+   * subagent join) shares the same 24-hour ceiling. The deadline is intentionally
+   * not configurable in production; tests advance the timer by the fixed value. */
+  armDeadline(): OwnedOperationDeadline {
+    const controller = new AbortController();
+    const armedAt = Date.now();
+    const timer = setTimeout(() => controller.abort(), OWNED_OPERATION_DEADLINE_MS);
+    return {
+      signal: controller.signal,
+      armedAt,
+      disarm: () => clearTimeout(timer),
+    };
+  }
+
+  /** Applies the armed deadline to the opted-in task operation. `elapsedMs` is the
+   * wall time from arming to the stop's join or failure, so the caller reports the
+   * stop with the outcome it already holds. */
+  async enforceDeadline<T>(handle: OperationHandle<T>, deadline: OwnedOperationDeadline): Promise<
     | { state: "terminal"; terminal: T }
     | { state: "deadline-stopped"; terminal: T; elapsedMs: number }
     | { state: "deadline-stop-failed"; elapsedMs: number }
   > {
-    const startedAt = Date.now();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<"deadline">((resolve) => {
-      timer = setTimeout(() => resolve("deadline"), OWNED_OPERATION_DEADLINE_MS);
+    const expired = new Promise<"deadline">((resolve) => {
+      if (deadline.signal.aborted) resolve("deadline");
+      else deadline.signal.addEventListener("abort", () => resolve("deadline"), { once: true });
     });
+    const first = await Promise.race([
+      handle.completion.then((terminal) => ({ kind: "terminal" as const, terminal })),
+      expired,
+    ]);
+    if (first !== "deadline") return { state: "terminal", terminal: first.terminal };
     try {
-      const first = await Promise.race([
-        handle.completion.then((terminal) => ({ kind: "terminal" as const, terminal })),
-        deadline,
-      ]);
-      if (first !== "deadline") return { state: "terminal", terminal: first.terminal };
-      try {
-        await handle.cancel("deadline");
-        const terminal = await handle.completion;
-        return { state: "deadline-stopped", terminal, elapsedMs: Math.max(0, Date.now() - startedAt) };
-      } catch {
-        return { state: "deadline-stop-failed", elapsedMs: Math.max(0, Date.now() - startedAt) };
-      }
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      await handle.cancel("deadline");
+      const terminal = await handle.completion;
+      return { state: "deadline-stopped", terminal, elapsedMs: Math.max(0, Date.now() - deadline.armedAt) };
+    } catch {
+      return { state: "deadline-stop-failed", elapsedMs: Math.max(0, Date.now() - deadline.armedAt) };
     }
   }
 }

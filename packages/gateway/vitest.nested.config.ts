@@ -8,6 +8,7 @@ import { defineConfig } from "vitest/config";
  * pass after the parallel suite; the main config excludes this list. */
 export const nestedTestFiles = [
   "src/home/home-task-managed-provider.e2e.test.ts",
+  "src/home/home-task-subagents.e2e.test.ts",
   "src/sessions/home-managed-provider.integration.test.ts",
   "src/sessions/managed-attribution.integration.test.ts",
   "src/sessions/managed-subagents.integration.test.ts",

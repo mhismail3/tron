@@ -6,6 +6,7 @@ import { GatewayError } from "../errors.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
+import type { HomeTaskSubagents } from "./home-task-subagents.js";
 
 export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
 export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
@@ -40,7 +41,7 @@ interface Options {
    * notification's route must be the session it is about. */
   pushSession: (homeId: string) => string | undefined;
   machineId?: string;
-  result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; text: string }>;
+  result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; text: string; subagents: HomeTaskSubagents }>;
   /** Reads the canonical entries one delivery's proof can use; it must keep no others. */
   evidence: (scope: HomeWakeEvidenceScope) => Promise<HomeWakeEvidence[]>;
   diagnostic?: (record: HomeWakeDiagnostic) => void;
@@ -135,13 +136,15 @@ export class WakeInboxOwner {
         if (!result.task || JSON.stringify(result.task.reportRef) !== JSON.stringify(task.reportRef)
           || JSON.stringify(result.task.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) throw new GatewayError("conflict", "Immutable inbox result is unavailable");
         envelope.signal.throwIfAborted();
-        let content = `Home task ${task.taskId} (${task.terminalEvidence!.outcome})\n${result.text}`;
+        // Every result states its subagent counts; the facts are settled with the task, so this header is stable.
+        const header = `Home task ${task.taskId} (${task.terminalEvidence!.outcome}; subagents started ${result.subagents.started}, stopped at end ${result.subagents.stoppedAtEnd ?? "unknown"})`;
+        let content = `${header}\n${result.text}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
           details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.
-        if (cost(message()) > envelope.freshTokens - cost(count)) content = `Home task ${task.taskId} (${task.terminalEvidence!.outcome}): immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with offset/limit pages.`;
+        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with offset/limit pages.`;
         const selected = message(); const selectedTokens = cost(selected);
         const selectedBytes = canonicalMessageBytes(selected);
         if (selectedTokens > tokens || selectedBytes > bytes) break;

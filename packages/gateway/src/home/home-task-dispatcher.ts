@@ -3,7 +3,7 @@ import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
-import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
+import { OwnedSessionDispatch, type OwnedOperationDeadline } from "../sessions/owned-session-dispatch.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -13,6 +13,7 @@ import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
+import { homeTaskSubagentLaunches, homeTaskSubagentsProjection, type HomeTaskSubagents } from "./home-task-subagents.js";
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
@@ -20,6 +21,7 @@ export type HomeTaskDiagnostic =
   | HomeWakeDiagnostic
   | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
+  | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
@@ -28,7 +30,7 @@ export type HomeTaskRecoveryStatus = { available: true } | { available: false; r
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
-export type HomeTaskStatus = HomeTaskRecord & { workerModel: { provider: string; id: string } | null };
+export type HomeTaskStatus = HomeTaskRecord & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -74,6 +76,9 @@ export class HomeTaskDispatcher {
         let spend = task.spend;
         let entryIds: string[] = [];
         let reason = "cold-no-report";
+        // No runtime exists here to stop an async run, so a run whose status cannot be
+        // proven terminal makes the task unknown, even with a valid report.
+        let detached = false;
         if (task.lifecycle === "active" && task.sessionId && task.operationId) {
           try {
             const entries = await this.sessions.readTaskEvidence(task.sessionId);
@@ -87,6 +92,11 @@ export class HomeTaskDispatcher {
             const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
             entryIds = entryId ? [entryId] : last ? [last.id] : [];
             if (report) reason = "cold-explicit-report";
+            const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
+            // A malformed settlement fact refuses this evidence rather than being guessed.
+            homeTaskSubagentsProjection(entries, task.operationId);
+            detached = !await this.sessions.taskSubagentRunsSettled(asyncDirs);
+            if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
           } catch (error) {
             // Namespace refusal is not missing report evidence: retire this
             // process's capability instead of attempting a terminal write.
@@ -99,7 +109,8 @@ export class HomeTaskDispatcher {
         const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
           wake: this.inbox.event(current),
           reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
-          terminalEvidence: { outcome: report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds, reason } }));
+          terminalEvidence: { outcome: detached ? "unknown" : report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds,
+            reason: detached ? "detached-work-outlived-task" : reason } }));
         this.transition(final, reason);
       }
       // Includes a crash after terminal/outbox co-commit but before advisory
@@ -158,6 +169,7 @@ export class HomeTaskDispatcher {
     }, null);
     this.transition(task, "created");
     let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
+    let deadline: OwnedOperationDeadline | undefined;
     try {
       const authority = await this.authorization.authorize({ intentDigest: task.intentDigest,
         target: task.target, authorizationScope: "full-work", restoreEpoch: epoch });
@@ -191,8 +203,10 @@ export class HomeTaskDispatcher {
         await slot.cancelHomeTaskOperation(operationId, reason);
       };
       // Arm before the first asynchronous prompt preflight; cancellation never
-      // queues behind the lane whose blocked admission it must interrupt.
-      const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation });
+      // queues behind the lane whose blocked admission it must interrupt. The same
+      // deadline bounds the subagent join below, so it is disarmed only at settlement.
+      deadline = dispatch.armDeadline();
+      const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation");
       const admitted = dispatch.admit(slot, `${task.intent.text}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
@@ -209,6 +223,9 @@ export class HomeTaskDispatcher {
         if (!deadlineStopFailed) await admitted.catch(() => {});
         let reportStopFailed = false;
         try { await reports.joinStop(); } catch { reportStopFailed = true; }
+        // Async runs the task started are stopped and joined before the evidence cut,
+        // so the cut records every stop and the outcome reads the join's result.
+        await slot.settleTaskSubagents(operationId, deadline!.signal);
         // Share cold recovery's durable file cut before publishing any terminal
         // references/outbox or acknowledging the operation. SDK append visibility
         // alone cannot guarantee the worker evidence survives a power loss.
@@ -247,6 +264,8 @@ export class HomeTaskDispatcher {
             reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
+        const subagents = cut.state === "present" ? homeTaskSubagentsProjection(entries, operationId) : { started: 0, stoppedAtEnd: 0 };
+        this.diagnostic?.({ event: "home.task.subagents", taskHash: hash(final.taskId), operationHash: hash(operationId), started: subagents.started, stoppedAtEnd: subagents.stoppedAtEnd });
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
         this.diagnostic?.({ event: "home.task.spend", taskHash: hash(final.taskId), spendReference,
           inputTokens: spend.inputTokens, outputTokens: spend.outputTokens });
@@ -256,11 +275,12 @@ export class HomeTaskDispatcher {
         await dispatch.acknowledge(slot.id, operationId, ownedLease);
         await this.inbox.publish(final.taskId);
         return (await this.store.read(final.taskId))!;
-      })().finally(() => { reports.retire(); ownedLease.release(); });
+      })().finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); });
       // Tool callers return admission immediately, but failures remain observed.
       void completion.catch(() => {});
       return { taskId: task.taskId, sessionId: slot.id, operationId, completion };
     } catch (error) {
+      deadline?.disarm();
       lease?.release();
       // Accepted identity remains durable and cannot be used for prompt replay.
       const final: HomeTaskRecord = { ...task, revision: task.revision + 1, lifecycle: "terminal", wake: this.inbox.event(task),
@@ -334,7 +354,15 @@ export class HomeTaskDispatcher {
   async status(taskId: string): Promise<HomeTaskStatus> {
     const task = await this.result(taskId);
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
-    return { ...task, workerModel };
+    return { ...task, workerModel, subagents: await this.subagents(task) };
+  }
+
+  /** The operation's subagent counts, read from the worker's canonical evidence and
+   * never persisted with the task. A task without a worker or operation launched none. */
+  async subagents(task: HomeTaskRecord): Promise<HomeTaskSubagents> {
+    return task.sessionId && task.operationId
+      ? this.sessions.taskWorkerSubagents(task.sessionId, task.operationId)
+      : { started: 0, stoppedAtEnd: 0 };
   }
 
   async result(taskId: string): Promise<HomeTaskRecord> {
