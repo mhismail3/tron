@@ -188,10 +188,12 @@ changed revisions still force fresh canonical occurrence reads. The dashboard ha
 `automation.changed`. No second mutation-reconciliation algorithm or Automation event journal exists.
 `HomeStatusPresentationOwner` is an observable owner of only the focused Gateway's in-memory Home status projection. The surface's mount owns the status read, so a dashboard mounted before pairing reads Home once pairing configures a profile; a profile transition forgets the advertised capability, while a dropped connection keeps it so the row does not flicker. A read that the Gateway answers with a status this client cannot admit publishes a typed `isStatusUnavailable` state, which the row shows instead of loading. `SessionShellView` registers its exact `PresentationSurfaceToken` with the shared `PresentationActivityCoordinator`; every status read and post-await publication checks that token's current managed activity, profile, authenticated connection and latest read generation. Retirement must name the exact token, so a delayed callback from an older dashboard cannot clear a replacement. The owner does not persist status, session identity, or memory data. Its typed DTO decodes exactly the fields the app reads: it requires the phase, activation, readiness gaps, recovery reason and memory sections, rejects an unknown phase rather than guessing, and ignores every other Gateway field. `AppModel` retires status with lifecycle connection ownership, clears it on loss, then admits a fresh status read from the authenticated reconnect callback only if the current profile advertises `home.v1`. Backgrounding suspends the read and clears status; foreground reconciliation re-admits it. Matching Home-session summaries and session-list invalidations trigger an immediate refresh, while the active Home dashboard or its mounted chat route runs one sequential fallback no more frequently than every five seconds. A chat opened before status is known takes a `connectionOnly(HomeChatRouteKey)` probe: it reads on each connection admission and retries once after a covering discards its read, but it never polls and is not refreshed by invalidations or mutations. The key is one predicate (`HomeChatRouteKey.matches`): a Home route always claims the Home status, even with no openable chapter, so its recovery state stays reachable from the gear; an ordinary chat matches only the chapter it is (`sessionId`), so an ordinary chat on the sealed predecessor during a rollover (or an open read-only chapter) never claims the status or manages Home. The first published status decides the claim. A matching route promotes the surface to the mounted cadence; any other route releases it, which keeps the published status for the dashboard and makes no further reads. A known status decides the chat by the same key alone. Cover/uncover activity is observed on the exact mounted surface so covering sheets retire disposable reads and dismissal resumes convergence.
 
-A chat that claims the Home status manages Home from its gear button: the
-`manage` destination (the **Manage Home** sheet, #725) replaces the ordinary
+A chat that claims the Home status manages Home from its gear button and from
+the composer's context ring (#748), through one `ChatView.presentManageHome` rule:
+the `manage` destination (the **Manage Home** sheet, #725) replaces the ordinary
 Manage Session sheet, whose compaction/tool/fork/resource controls are refused
-for Home. The sheet presents one `home.status` read as sections — state, chat
+for Home. Every other chat keeps Settings on the gear and Manage Session on the
+ring, and the ring's accessibility label names the sheet it opens. The sheet presents one `home.status` read as sections — state, chat
 model and context window, Home context, memory (settings, browser, pause/resume),
 bounded chapter metadata, tasks and permissions, and disable/check-completion —
 and opens each existing Home destination as a managed child sheet with its own
@@ -1512,8 +1514,8 @@ immediate revocation; revoking this iPhone also removes its local profile.
 ## Presentation parity
 
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners;
-there is no Home header bar (#740). The gear of a chat that claims the Home
-status opens Manage Home, where the state line, memory line, Stop and every Home
+there is no Home header bar (#740). The gear and the composer context ring of a
+chat that claims the Home status open Manage Home, where the state line, memory line, Stop and every Home
 control live. The mounted composer scope supplies the sheet's immutable profile
 identity. Both rendered admission and delayed callbacks use that owner identity,
 never the profile selected later; the mutation coordinator then captures and

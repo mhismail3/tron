@@ -2741,6 +2741,7 @@ struct ChatView: View {
             isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
             keyboardAppearance: colorScheme == .dark ? .dark : .light,
             contextProgress: contextProgressPresentation,
+            contextOpensManageHome: manageHomeContext != nil,
             trailingMode: composerTrailingMode,
             isSending: sending,
             submissionPending: submissionPending,
@@ -2766,7 +2767,10 @@ struct ChatView: View {
             },
             onSelectResource: selectComposerResource,
             onDismissResourcePicker: dismissComposerResourcePicker,
-            onShowContext: { sessionPresentation.showContext = true },
+            onShowContext: {
+                // Manage Home replaces Manage Session for Home, whose controls it refuses (#748).
+                if !presentManageHome() { sessionPresentation.showContext = true }
+            },
             onSend: { behavior in send(behavior: behavior) },
             onAbort: abortCurrentOperation,
             onSelectAttachmentDestination: requestAttachmentPresentation,
@@ -2862,11 +2866,7 @@ struct ChatView: View {
             // ordinary Manage Session sheet's controls are refused for Home (#725).
             let managesHome = manageHomeContext != nil
             Button {
-                if let (profileID, _) = manageHomeContext {
-                    homeSheet = HomeSheetRoute(profileID: profileID, destination: .manage)
-                } else {
-                    sessionPresentation.showSettings = true
-                }
+                if !presentManageHome() { sessionPresentation.showSettings = true }
             } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
@@ -2874,6 +2874,15 @@ struct ChatView: View {
             }
             .accessibilityLabel(managesHome ? "Manage Home" : "Settings")
         }
+    }
+
+    /// Opens Manage Home when this chat claims the Home status. The gear and the
+    /// composer's context ring share this one rule; false leaves each control's
+    /// ordinary sheet to its caller.
+    private func presentManageHome() -> Bool {
+        guard let (profileID, _) = manageHomeContext else { return false }
+        homeSheet = HomeSheetRoute(profileID: profileID, destination: .manage)
+        return true
     }
 
     /// The Home status this chat's route claims, with the profile that owns its
