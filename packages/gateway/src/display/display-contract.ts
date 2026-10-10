@@ -15,7 +15,7 @@ export { BROWSER_LIVE_VIEW_CAPABILITY as DISPLAY_LIVE_VIEW_CAPABILITY } from "./
 export const DISPLAY_SCHEMA = "tron.display.v1";
 export const DISPLAY_CAPABILITY = "display-artifacts.v1";
 export { DISPLAY_MAXIMUM_ARTIFACT_BYTES };
-export const DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES = 50 * 1_024 * 1_024;
+const DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES = 50 * 1_024 * 1_024;
 
 export type DisplaySurface = "sheet" | "inline" | "floating";
 export type DisplayInlineTapAction = "sheet" | "none";
@@ -143,7 +143,7 @@ export function admitToolDisplayProjection(
 /** Strictly promotes the reserved display tool's canonical details into the
  * typed mobile contract. Unknown or malformed details remain ordinary tool
  * output and cannot select an active renderer. */
-export function admitDisplayProjection(toolName: string | undefined, value: unknown): DisplayProjection | undefined {
+function admitDisplayProjection(toolName: string | undefined, value: unknown): DisplayProjection | undefined {
   if (toolName !== "display" || !value || typeof value !== "object") return undefined;
   const root = value as Record<string, unknown>;
   if (!hasOnlyKeys(root, ["display"])) return undefined;

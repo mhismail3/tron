@@ -229,29 +229,29 @@ describe("Home task bounded backlogs", () => {
     const model = f.faux.getModel();
     await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
     const tasks = [];
+    // A paused Home takes no wake, so the settled results accumulate as a backlog.
+    await f.registry.homeOwner().pauseMemory();
     for (let i = 0; i < 3; i++) {
       f.faux.setResponses([fauxAssistantMessage([reportCall(`backlog-${i}`, String(i).repeat(65536))], { stopReason: "toolUse" })]);
       tasks.push(await (await dispatch(f, `backlog-${i}`)).completion);
     }
+    await f.registry.homeOwner().resumeMemory();
     const home = await f.registry.acquire(f.home.sessionId);
     const batches: string[][] = [];
+    // The user's oversized input starves the inbox. When that activation settles, Home is idle and
+    // the backlog is delivered by wakes: each bounded activation takes what fits, in order.
+    const collect = (context: unknown) => {
+      batches.push([...JSON.stringify(context).matchAll(/Home task (backlog-\d)/g)].map(match => match[1]!));
+      expect(JSON.stringify(context)).not.toContain("u".repeat(1000));
+      return fauxAssistantMessage("Reviewed results");
+    };
     f.faux.setResponses([(context) => {
       expect(JSON.stringify(context)).toContain("3 more task results pending");
       expect(JSON.stringify(context)).not.toContain("Home task backlog-");
       return fauxAssistantMessage("Results wait for a shorter activation");
-    }]);
-    await home.prompt("u".repeat(60000)); await waitFor(() => home.snapshot().configurationBlocker === null, "temporarily starved inbox");
-    expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
-    for (const task of tasks) expect(await f.registry.homeOwner().taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
-    for (let i = 0; i < 6; i++) {
-      f.faux.setResponses([(context) => {
-        batches.push([...JSON.stringify(context).matchAll(/Home task (backlog-\d)/g)].map(match => match[1]!));
-        expect(JSON.stringify(context)).toMatch(/more task results pending/);
-        return fauxAssistantMessage("Reviewed results");
-      }]);
-      await home.prompt("Review pending results"); await waitFor(() => home.snapshot().configurationBlocker === null, "bounded inbox activation");
-      if (batches.flat().length === tasks.length) break;
-    }
+    }, collect, collect, collect, collect, collect, collect]);
+    await home.prompt("u".repeat(60000));
+    await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations");
     expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
     expect(batches.length).toBeGreaterThan(1);
     expect(batches.flat()).toEqual(tasks.map(t => t.taskId));
@@ -550,7 +550,7 @@ describe("Home task cold reconciliation", () => {
       result.push(name);
     }
     // Inbox delivery is a no-op while recovery is refused: nothing is appended and nothing settles.
-    await expect(owner.admitTaskResults(f.home.sessionId, "activation", async () => { throw new Error("delivery while fenced"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }))).resolves.toBeUndefined();
+    await expect(owner.admitTaskResults(f.home.sessionId, "activation", "user", async () => { throw new Error("delivery while fenced"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }))).resolves.toBeUndefined();
     await expect(owner.settleTaskResults(f.home.sessionId, "activation")).resolves.toBeUndefined();
     result.push("inbox-admit", "inbox-ack");
     expect(f.signals.filter(signal => signal.event === "home.task.store-refused" && signal.reason === "unsafe-state")).toHaveLength(1);
@@ -916,52 +916,50 @@ describe("Home task production dispatch", () => {
     expect(rows.some(row => row.type === "message" && row.message?.role === "assistant" && row.message.stopReason === "aborted")).toBe(false);
   });
 
-  it("commits one push plus pending wake and consumes the immutable report only on the next Home message", async () => {
+  it("wakes Home on a settled result: the wake consumes the immutable report and sends one push for itself", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
     await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
-    let calls = 0;
-    f.faux.setResponses([() => { calls++; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
-    const run = await dispatch(f);
-    const task = await run.completion;
-    expect(task).toMatchObject({ wake: { state: "pending", push: "decided" } });
-    expect(calls).toBe(1);
-    expect(f.notifications).toHaveLength(1);
-    expect(f.notifications[0]).toMatchObject({ sourceId: (task as any).wake.eventId, sessionId: f.home.sessionId,
-      route: { sessionId: f.home.sessionId, machineId: "machine-task-test" } });
-    const home = await f.registry.acquire(f.home.sessionId);
-    expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
-    const eventsBeforeDelivery = f.events.length;
+    const eventsBeforeWake = f.events.length;
     let request = "";
     let instructions = "";
-    f.faux.setResponses([(context) => { request = JSON.stringify(context); instructions = JSON.stringify(context.messages.filter(message => message.role === "system")); return fauxAssistantMessage("Result consumed"); }]);
-    await home.prompt("What happened?");
-    await waitFor(() => home.snapshot().configurationBlocker === null, "Home inbox terminal");
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }), (context) => {
+      request = JSON.stringify(context);
+      instructions = JSON.stringify(context.messages.filter(message => message.role === "system"));
+      return fauxAssistantMessage("Result consumed by the wake");
+    }]);
+    const run = await dispatch(f);
+    await run.completion;
+    const home = await f.registry.acquire(f.home.sessionId);
     await waitForTaskAcknowledgement(f, run.taskId);
-    const consumed = await f.registry.homeOwner().taskResult(run.taskId);
-    expect(consumed).toMatchObject({ wake: { state: "acknowledged" } });
-    // The inbox owns its messages' context receipts; delivery raises no client error.
+    // The wake's one push is its turn's own terminal push: the inbox sends no notice for the reply.
+    await waitFor(() => f.notifications.some(input => input.sessionId === f.home.sessionId), "wake reply push");
+    const eventId = (await f.registry.homeOwner().taskResult(run.taskId)).wake!.eventId;
+    // The inbox delivery raises no client error (#730): its context receipt is the inbox's own.
     await new Promise(resolve => setTimeout(resolve, 50));
-    expect(f.events.slice(eventsBeforeDelivery).filter(event => event.topic === "session.extensionError")).toEqual([]);
+    expect(f.events.slice(eventsBeforeWake).filter(event => event.topic === "session.extensionError")).toEqual([]);
+    // The wake delivered the result, and no per-task push went out for it.
     expect(request).toContain("Verified result");
-    // The actual provider instructions must explain the delivery happening in
-    // this activation, rather than telling Home the result is unavailable.
-    expect(instructions).toMatch(/attributed work messages on the next maintainer message/);
-    expect(instructions).toMatch(/advisory push.*does not wake Home/);
+    expect(instructions).toMatch(/settled result wakes Home/);
+    expect(instructions).toMatch(/advisory push|task-finished push/);
     expect(instructions).toContain("do not assume task success from admission");
     expect(instructions).not.toContain("not yet delivered into Home");
+    expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
+    expect(f.notifications.filter(input => input.sourceId.startsWith("home-wake:"))).toHaveLength(0);
+    expect(f.notifications.filter(input => input.sessionId === f.home.sessionId)).toHaveLength(1);
     const attributed = home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1");
     expect(attributed).toHaveLength(1);
     expect(home.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.context-delivery.v4",
-      data: expect.objectContaining({ targetEntryId: attributed[0]!.id, origin: { source: "gateway:home-task", owner: { id: task.taskId, title: "Home task", source: "gateway:home-task" } } }) }));
+      data: expect.objectContaining({ targetEntryId: attributed[0]!.id, origin: { source: "gateway:home-task", owner: { id: run.taskId, title: "Home task", source: "gateway:home-task" } } }) }));
     expect(f.signals.filter(record => record.event === "home.task.inbox")).toEqual(expect.arrayContaining([
       expect.objectContaining({ state: "admitted", reason: "canonical-admission" }), expect.objectContaining({ state: "acknowledged", reason: "canonical-consumed" })]));
     expect(JSON.stringify(f.signals.filter(record => record.event === "home.task.inbox"))).not.toMatch(/Verified result|task-one|Finite work/);
+    // Nothing is delivered twice: the next user message finds no pending result.
     f.faux.setResponses([fauxAssistantMessage("No duplicate")]);
     await home.prompt("Again"); await waitFor(() => home.snapshot().configurationBlocker === null, "second Home terminal");
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
-    expect(f.notifications.filter(input => input.sourceId === (task as any).wake.eventId)).toHaveLength(1);
-    evidence.push({ case: "input-task-report-push-pending-consumption", task, consumed, attributed, request });
+    expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
+    evidence.push({ case: "settled-result-wakes-home", request: request.length, homePushes: f.notifications.filter(input => input.sessionId === f.home.sessionId).length });
   }, 20_000);
 
   it("refuses inbox acknowledgement until canonical message and terminal receipt are durably synced", async () => {
@@ -1526,7 +1524,9 @@ describe("Home task production dispatch", () => {
     }, "delegate task terminal");
     expect((await f.registry.homeOwner().taskResult("task-via-tool")).terminalEvidence?.outcome).toBe("final");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home tool activation terminal");
-    evidence.push({ case: "production-delegate", taskOutcome: "final", noAutomaticWake: homeCalls === 2 });
+    // The settled result wakes Home: the third Home request is that wake.
+    await waitFor(() => homeCalls === 3, "wake request for the settled result");
+    evidence.push({ case: "production-delegate", taskOutcome: "final", homeRequests: homeCalls });
   }, 20_000);
   it("admits once, seals exact canonical report evidence and refuses replay or conflicting reports", async () => {
     const f = await fixture();

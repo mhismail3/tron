@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Patch one Tron test target in a generated xctestrun plist with the fixture environment.
 
-The unit target's runner is a hosted process; the UI target's runner is the
+The E2E target's runner is a hosted process; the UI target's runner is the
 XCUITest runner that drives the app through its real interface. Both read the
 real-Gateway fixture from their own environment, so the same values are written
 to whichever target the command selected.
@@ -18,10 +18,10 @@ from pathlib import Path
 
 MAX_XCTESTRUN_BYTES = 16 * 1024 * 1024
 # Blueprint name to whether that target is the XCUITest bundle. Xcode writes
-# `IsUITestBundle = true` on a UI-test target and omits the key on a unit target
-# (#497), so a unit target is one whose key is anything but true.
+# `IsUITestBundle = true` on a UI-test target and omits the key on a hosted
+# XCTest target (#497), so a hosted target is one whose key is anything but true.
 TARGETS = {
-    "TronMobileTests": False,
+    "TronMobileE2ETests": False,
     "TronMobileUITests": True,
 }
 ENVIRONMENT_KEYS = (

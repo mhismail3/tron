@@ -24,11 +24,11 @@ export interface RemotePiExtensionHostOptions {
   /** Production RPC has no truthful native path for blocking component UI. */
   enableBlockingCustom?: boolean;
 }
-export const MAX_HOST_COMPONENTS = 24;
+const MAX_HOST_COMPONENTS = 24;
 export const MAX_HOST_DIAGNOSTICS = 16;
 const MAX_HOST_KEY_BYTES = 256;
 
-export function widgetSurfaceId(key: string): string {
+function widgetSurfaceId(key: string): string {
   return `widget:${Buffer.from(key, "utf8").toString("base64url")}`;
 }
 

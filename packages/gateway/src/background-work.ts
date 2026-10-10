@@ -3,17 +3,17 @@ import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 /** The event-loop delay p99 at or above which the scheduler starts no new
  * slice: the loop is already behind the interactive work the pause exists to
  * protect, and one more slice would extend the delay it would add to. */
-export const BACKGROUND_PAUSE_P99_MS = 50;
+const BACKGROUND_PAUSE_P99_MS = 50;
 
 /** How long a paused scheduler waits before it re-checks whether it may start a
  * slice. Re-checking with no delay would spin the loop the pause protects. */
-export const BACKGROUND_PAUSE_RECHECK_MS = 100;
+const BACKGROUND_PAUSE_RECHECK_MS = 100;
 
 /** How late a due slice may be before the scheduler records
  * `background.backlog`. A slice this far past its due time is starved, not
  * merely scheduled behind another slice; one record per starved spell keeps a
  * long pause from filling the log one tick at a time. */
-export const BACKGROUND_BACKLOG_WARNING_MS = 5 * 60_000;
+const BACKGROUND_BACKLOG_WARNING_MS = 5 * 60_000;
 
 /** The delay histogram's sampling period. The scheduler's own soundings only
  * have to tell a slow slice from a loop with headroom, and a finer period would
@@ -46,7 +46,7 @@ export interface BackgroundWorkRegistration {
 export type BackgroundPauseReason = "requests-in-flight" | "event-loop-p99";
 
 /** One started slice, for `background.slice`. */
-export interface BackgroundSliceRecord {
+interface BackgroundSliceRecord {
   job: string;
   /** `failed` is a slice that rejected; the scheduler keeps running, so the
    * owner's next slice is what recovers it. */
@@ -59,7 +59,7 @@ export interface BackgroundSliceRecord {
 
 /** One job starved past `BACKGROUND_BACKLOG_WARNING_MS`, for
  * `background.backlog`. */
-export interface BackgroundBacklogRecord {
+interface BackgroundBacklogRecord {
   job: string;
   /** How long the job's slice has been due without starting. */
   waitedMs: number;

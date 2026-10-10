@@ -1,0 +1,27 @@
+{
+  "configurations": [
+    {
+      "id": "9D4A6B2C-8E1F-4A30-B5C7-3F2E1D0C9B8A",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "diagnosticCollectionPolicy": "Never",
+    "targetForVariableExpansion": {
+      "containerPath": "container:TronMobile.xcodeproj",
+      "identifier": "5CE10CFB51EA2F88B755A197",
+      "name": "TronMobile"
+    }
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:TronMobile.xcodeproj",
+        "identifier": "12DD91C329AC43F161B0EB22",
+        "name": "TronMobileProfiling"
+      }
+    }
+  ],
+  "version": 1
+}

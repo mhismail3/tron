@@ -129,11 +129,6 @@ Use the canonical owned simulator runner for iOS; it builds once, then reuses
 products for focused tests with bounded process and result evidence. See the
 [iOS development guide](packages/ios-app/docs/development.md).
 
-```bash
-scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
-```
-
 The TronMac build and test commands are in the
 [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
 

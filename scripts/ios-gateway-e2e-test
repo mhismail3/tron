@@ -191,17 +191,17 @@ proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
 # the boundary test drives; `run-lan` turns it on, because the two-lane cases
 # dial the lane itself.
 e2e_test_filters=(
-  "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
-  "TronMobileTests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
+  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
+  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
 )
 e2e_lan_endpoint="off"
-# One build input per lane: the hosted unit target, whose runner pairs and drives
+# One build input per lane: the hosted E2E target, whose runner pairs and drives
 # the client API, and the UI target, whose runner drives the real app interface.
 # Both products stay in this worktree's one E2E DerivedData and run on its lane.
-unit_scheme="Tron Development"
-unit_test_plan="UnitTests"
-unit_test_target="TronMobileTests"
-unit_xctestrun_glob="Tron Development_UnitTests_*.xctestrun"
+e2e_scheme="Tron Development"
+e2e_test_plan="GatewayE2E"
+e2e_test_target="TronMobileE2ETests"
+e2e_xctestrun_glob="Tron Development_GatewayE2E_*.xctestrun"
 ui_scheme="Tron UI Validation"
 ui_test_plan="UIValidation"
 ui_test_target="TronMobileUITests"
@@ -215,7 +215,7 @@ ui_app_state_owner=0
 ui_app_state_reset=0
 # Whether this command's fixture must be stopped when it ends. A real-UI command
 # renews a fixture per journey and has nothing to iterate against, so it never
-# leaves one running; the unit lane keeps its fixture for iteration.
+# leaves one running; the E2E lane keeps its fixture for iteration.
 stop_fixture_on_exit=0
 simulator_args=(
   --marker "$simulator_marker"
@@ -243,7 +243,7 @@ Usage: scripts/ios-gateway-e2e-test COMMAND [--lane NAME] [--only-testing OWNER]
 
 Commands:
   prepare   Install/build gateway if needed and start one persistent fixture.
-  build     Incrementally build the unit-test products and patch their fixture env.
+  build     Incrementally build the E2E test products and patch their fixture env.
   run       Renew the Gateway fixture and run only the boundary test, without building.
   run-lan   Renew the fixture with the pinned LAN lane on and run only the E-3c
             two-lane cases.
@@ -749,7 +749,7 @@ run_one_test_case() {
   # lane stays leased while Gateway state is renewed between cases.
   start_fresh_fixture
   load_state
-  patch_xctestrun "$xctestrun" "$unit_test_target"
+  patch_xctestrun "$xctestrun" "$e2e_test_target"
   attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-run.XXXXXX")"
   attempt_id="$(basename "$attempt_dir")"
   result_bundle="$attempt_dir/FocusedE2E.xcresult"
@@ -1071,7 +1071,7 @@ run_ui_journey() {
 
 run_ui() {
   # Journey code and the fixture that drives it are one source state, exactly as
-  # the unit lane: prove the products before renewing any Gateway state.
+  # the E2E lane: prove the products before renewing any Gateway state.
   local started=$SECONDS xctestrun journey
   local -a journeys
   xctestrun="$(find_xctestrun "$ui_xctestrun_glob")"
@@ -1089,7 +1089,7 @@ run_ui() {
   fi
   # The trap stays installed on success too: it is what stops the fixture this
   # command renewed and returns the lane's hosted app to the unpaired state the
-  # unit lane expects.
+  # E2E lane expects.
   trap finish_e2e_run EXIT
   for journey in "${journeys[@]}"; do
     run_ui_journey "$journey" "$xctestrun"
@@ -1103,7 +1103,7 @@ run_test() {
   # Prove the products before renewing anything: only products this worktree
   # built from its current source state may run against its Gateway.
   local started=$SECONDS simulator_id xctestrun destination test_filter
-  xctestrun="$(find_xctestrun "$unit_xctestrun_glob")"
+  xctestrun="$(find_xctestrun "$e2e_xctestrun_glob")"
   [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
   python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" \
     || die "run '$0 build' in this worktree before running the E2E"
@@ -1137,7 +1137,7 @@ PY
 }
 
 # The hosted test app persists whatever a real-UI journey pairs or configures, and
-# the hosted unit lane launches that same app in this worktree's lane. Only the
+# the hosted E2E lane launches that same app in this worktree's lane. Only the
 # command can guarantee it is left unpaired: a deadline, a signal or a crash ends
 # the journey before its own teardown runs.
 #
@@ -1152,7 +1152,7 @@ PY
 # It runs once per command: a signal and the EXIT trap both ask for it, and the
 # second ask must not try to uninstall an app that is already gone. It returns
 # non-zero when it could not reset, because an otherwise passing run must not
-# leave the unit lane poisoned.
+# leave the E2E lane poisoned.
 reset_hosted_app_state() {
   ((ui_app_state_owner)) || return 0
   ((ui_app_state_reset)) && return 0
@@ -1172,7 +1172,7 @@ finish_e2e_run() {
   local status=$?
   trap - EXIT
   # A passing run whose reset failed is not a passing run: the lane would keep the
-  # pairing the unit lane shares.
+  # pairing the E2E lane shares.
   if ! reset_hosted_app_state && ((status == 0)); then
     status=1
   fi
@@ -1188,7 +1188,7 @@ show_status() {
   if gateway_running; then echo "Gateway: running (pid $(<"$pid_file"))"; else echo "Gateway: stopped"; fi
   if proxy_running; then echo "Fault proxy: running (pid $(<"$proxy_pid_file"))"; else echo "Fault proxy: stopped"; fi
   [[ -s "$state_file" ]] && { source "$state_file"; echo "Endpoint: 127.0.0.1:$TRON_E2E_PORT"; echo "Workspace: $TRON_E2E_WORKSPACE"; }
-  local xctestrun="$(find_xctestrun "$unit_xctestrun_glob")"
+  local xctestrun="$(find_xctestrun "$e2e_xctestrun_glob")"
   if [[ -z "$xctestrun" ]]; then
     echo "Test products: not built"
   elif python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" >/dev/null 2>&1; then
@@ -1212,7 +1212,7 @@ show_status() {
 
 case "$command" in
   run-lan)
-    e2e_test_filters=("TronMobileTests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes")
+    e2e_test_filters=("TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes")
     e2e_lan_endpoint="on"
     ;;
 esac
@@ -1262,7 +1262,7 @@ handle_signal() {
   local signal_number="$1"
   trap - INT TERM HUP
   # A signal ends a real-UI command before its tests finish: the hosted app is
-  # still paired, and the unit lane shares it. The signal's own exit stands even
+  # still paired, and the E2E lane shares it. The signal's own exit stands even
   # when the reset cannot run.
   reset_hosted_app_state || true
   stop_gateway
@@ -1274,12 +1274,12 @@ trap 'handle_signal 1' HUP
 
 case "$command" in
   prepare) prepare_fixture ;;
-  build) build_tests "$unit_scheme" "$unit_test_plan" "$unit_xctestrun_glob" "Focused test" ;;
+  build) build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test" ;;
   run) run_test ;;
   run-lan) run_test ;;
   run-ui) install_gateway_if_needed; build_tests "$ui_scheme" "$ui_test_plan" "$ui_xctestrun_glob" "UI test"; run_ui ;;
-  iterate) build_tests "$unit_scheme" "$unit_test_plan" "$unit_xctestrun_glob" "Focused test"; run_test ;;
-  all) install_gateway_if_needed; build_tests "$unit_scheme" "$unit_test_plan" "$unit_xctestrun_glob" "Focused test"; run_test ;;
+  iterate) build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test"; run_test ;;
+  all) install_gateway_if_needed; build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test"; run_test ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
   stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$state_file" ;;

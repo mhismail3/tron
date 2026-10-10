@@ -31,7 +31,7 @@ function assistantMessage(snapshot: SessionSnapshot): Extract<TranscriptItem, { 
     );
 }
 
-export function assistantText(snapshot: SessionSnapshot): string {
+function assistantText(snapshot: SessionSnapshot): string {
   const assistant = assistantMessage(snapshot);
   if (!assistant) return "";
   const content = text(assistant.content);
@@ -62,7 +62,7 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function connectResilient(client: GatewayProtocolClient): Promise<void> {
+async function connectResilient(client: GatewayProtocolClient): Promise<void> {
   let delay = 250;
   while (true) {
     try {
@@ -98,7 +98,7 @@ async function acknowledgeTerminalAttention(
 }
 
 /** Install and render the synchronized cut before best-effort attention I/O. */
-export async function synchronizeTerminalSession(
+async function synchronizeTerminalSession(
   client: Pick<GatewayProtocolClient, "request">,
   sessionId: string,
   install: (baseline: SnapshotEnvelope) => void,
@@ -118,7 +118,7 @@ export async function synchronizeTerminalSession(
   return baseline;
 }
 
-export async function listSessions(
+async function listSessions(
   client: Pick<GatewayProtocolClient, "request">,
   limits: {
     pageSize?: number;
@@ -221,7 +221,7 @@ export type HomeCommand =
 /** Returns undefined for any line that is not a `/home` command, so it continues
  * to the model. An unknown subcommand prints usage instead of reaching the
  * model, and a malformed model argument throws for the caller to report. */
-export function parseHomeCommand(input: string): HomeCommand | undefined {
+function parseHomeCommand(input: string): HomeCommand | undefined {
   if (input !== "/home" && !input.startsWith("/home ")) return undefined;
   if (input === "/home" || input === "/home status") return { kind: "status" };
   if (input === "/home disable") return { kind: "disable" };
@@ -254,7 +254,7 @@ export function parseHomeCommand(input: string): HomeCommand | undefined {
   return { kind: "usage" };
 }
 
-export function describeHomeStatus(status: HomeStatus): string {
+function describeHomeStatus(status: HomeStatus): string {
   const designation = !status.available
     ? `Home unavailable: ${status.reason ?? "the stored record could not be used"}`
     : !status.enabled ? "Home is not designated."
@@ -264,12 +264,12 @@ export function describeHomeStatus(status: HomeStatus): string {
   return `${designation} Phase: ${status.phase}. Readiness: ${status.readiness.ready ? "ready" : `not ready; ${gaps}`}. ${describeHomeMemory(status.memory)} ${describeHomeContext(status.activation)} Recovery: ${recovery}.`;
 }
 
-export async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatus);
 }
 
 /** `provider/id`, the same spelling the model picker uses. */
-export function parseHomeModelArgument(argument: string): { provider: string; id: string } {
+function parseHomeModelArgument(argument: string): { provider: string; id: string } {
   const separator = argument.indexOf("/");
   const provider = separator > 0 ? argument.slice(0, separator) : "";
   const id = separator > 0 ? argument.slice(separator + 1) : "";
@@ -358,7 +358,7 @@ export async function runHomeInput(client: Pick<GatewayProtocolClient, "request"
 }
 
 /** Run one parsed `/home` command, reporting its outcome on stdout and failures on stderr. */
-export async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
+async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
   if (command.kind === "usage") {
     process.stderr.write(HOME_USAGE);
     return;

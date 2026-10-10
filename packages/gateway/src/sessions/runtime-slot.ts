@@ -132,6 +132,7 @@ import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
+import type { HomeWakeTrigger } from "../home/home-wake-inbox.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
@@ -408,7 +409,7 @@ type CanonicalCompletionEntry = {
   message?: { role?: string; stopReason?: string };
 };
 
-export function successfulAssistantCompletion(
+function successfulAssistantCompletion(
   entry: CanonicalCompletionEntry | undefined,
 ): CanonicalAssistantCompletion | undefined {
   if (entry?.type !== "message" || entry.message?.role !== "assistant") return undefined;
@@ -480,7 +481,20 @@ interface AutomationPromptOwnership {
   onTerminal: (terminal: OwnedOperationTerminal) => Promise<void> | void;
 }
 
-type PromptOwnership = AutomationPromptOwnership | {
+/** A Home wake: Gateway-authored, with no user input. The inbox's trigger result starts the run. */
+interface HomeWakeOwnership {
+  kind: "homeWake";
+  operationId: string;
+  origin: ChatOrigin;
+  onDelivered: (delivered: boolean) => void;
+  taskFence?: never;
+  expandPromptTemplates?: never;
+  signal?: never;
+  onAdmitted?: never;
+  onTerminal?: never;
+}
+
+type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
   kind: "subagentWake";
   taskFence?: never;
   expandPromptTemplates: boolean;
@@ -572,8 +586,14 @@ export interface RuntimeSlotDependencies {
   /** Tron Home's request seam for one session id. Asked once per runtime
    * creation, never for a fork or an ordinary session. */
   homeRequestPolicy: (sessionId: string) => HomeRequestPolicy | undefined;
-  homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<void>;
+  /** Admits pending Home results for one activation. A `wake` returns the trigger
+   * result the run starts with, not yet appended; otherwise the results are appended. */
+  homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<import("../home/home-wake-inbox.js").HomeWakeTrigger | undefined>;
+  /** Returns a wake trigger that never reached the canonical session to pending. */
+  homeInboxRelease: (taskId: string, operationId: string) => Promise<void>;
   homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
+  /** The Home session is idle again after a user activation or a delivered wake. */
+  homeIdle: (sessionId: string, by: "user" | "wake") => void;
   /** Tron Home's memory. The slot only reports that canonical entries changed;
    * the memory owns what it reads, how long it waits and how much it spends. */
   homeMemory: HomeMemoryPort;
@@ -950,6 +970,10 @@ export class RuntimeSlot {
   private explicitHomeSessionId: string | undefined;
   private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
   private homeLimitStop?: { operationId: string; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number };
+  /** The Home wake whose trigger is being sent: its canonical binding and receipt follow its message_end. */
+  private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
+  /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
+  private operationWasHomeWake = false;
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -3982,6 +4006,7 @@ export class RuntimeSlot {
       this.hooks.settled(this.id);
       await this.hooks.homeQuiescent(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
+      this.noteHomeIdle();
       this.operation ??= this.compactionOperation;
       this.revision += 1;
       this.publishSnapshot();
@@ -4910,7 +4935,11 @@ export class RuntimeSlot {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
         } else if (event.message.role === "custom" && this.isInboxAttributed(event.message)) {
-          // The Home inbox persists this message's receipt after the send returns.
+          // Ordinary inbox messages are persisted by the inbox after their send
+          // returns. A wake's trigger is persisted by its run, so its receipts must
+          // exist before the run's reply can complete the operation.
+          const trigger = this.homeWakeTrigger;
+          if (trigger && (event.message.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId) this.bindHomeWakeTrigger(trigger);
         } else if (event.message.role === "custom") {
           // Custom callbacks are serial. Stored sends already exposed their
           // exact canonical ID at message_start; triggered sends append as soon
@@ -7687,6 +7716,102 @@ export class RuntimeSlot {
     await this.abort("agent", operationId, reason);
   }
 
+  /** Starts one Home wake: the inbox's pending results start the run. */
+  async admitHomeWake(): Promise<{ delivered: boolean }> {
+    let delivered = false;
+    await this.prompt("", [], undefined, undefined, undefined, {
+      kind: "homeWake", operationId: randomUUID(), origin: { kind: "gateway", ownerId: "home", title: "Home", confidence: "boundary" },
+      onDelivered: (value) => { delivered = value; },
+    });
+    return { delivered };
+  }
+
+  /** A wake starts only when nothing else owns this runtime. Pi's prompt() queues or
+   * holds an input; a wake has no input, so it refuses and its results stay pending. */
+  private async assertHomeWakeAdmissible(session: AgentSession): Promise<void> {
+    if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined
+      || this.heldPrompts.length > 0 || this.pendingManualCompaction !== undefined || this.compactionOperation !== undefined
+      || this.isAgentAdmissionSettling || session.isStreaming) {
+      throw new GatewayError("busy", "Tron Home is busy; finished results wait for its next idle moment", true);
+    }
+    // The model and credential checks prompt() runs before a provider call. Its idle-admission block
+    // (settings flush, compaction budgets, context window) runs for a wake too, since admitPrompt owns it.
+    const model = session.model;
+    if (!model) throw new GatewayError("conflict", "Tron Home has no model to wake with", false, { reason: "model-unavailable" });
+    if (!this.modelRuntime.hasConfiguredAuth(model.provider) && (await this.modelRuntime.checkAuth(model.provider)) === undefined) {
+      throw new GatewayError("conflict", "Tron Home has no usable credential to wake with", false, { reason: "auth-unavailable" });
+    }
+  }
+
+  /** Starts a wake's run with its trigger, or completes an operation with nothing to deliver. */
+  private startHomeWake(session: AgentSession, operationId: string, trigger: HomeWakeTrigger | undefined,
+    accept: (accepted: boolean) => void): Promise<void> {
+    accept(true);
+    return trigger ? this.sendHomeWake(session, operationId, trigger) : Promise.resolve();
+  }
+
+  /** Pi appends the trigger and runs the turn. Refuses to leave an inbox result admitted
+   * when the trigger never reached the canonical session: it returns to pending first, so
+   * a terminal receipt cannot settle it as outcome-unknown. */
+  private async sendHomeWake(session: AgentSession, operationId: string, trigger: HomeWakeTrigger): Promise<void> {
+    const eventId = trigger.message.details.eventId;
+    this.inboxAttributedMessages.add(eventId);
+    this.homeWakeTrigger = { eventId, taskId: trigger.taskId, operationId };
+    try {
+      await session.sendCustomMessage(trigger.message, { triggerTurn: true });
+      if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
+    } catch (error) {
+      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.homeInboxRelease(trigger.taskId, operationId);
+      throw error;
+    } finally {
+      this.inboxAttributedMessages.delete(eventId);
+      this.homeWakeTrigger = undefined;
+    }
+  }
+
+  private hasCanonicalCustomMessage(eventId: string): boolean {
+    return this.sessionManager.getBranch().some(entry => entry.type === "custom_message"
+      && (entry.details as { eventId?: unknown } | undefined)?.eventId === eventId);
+  }
+
+  /** Persists the wake's canonical binding (its invocation to the trigger result) and the
+   * trigger's delivery receipt. Both are lane work, so they precede the reply's terminal receipt. */
+  private bindHomeWakeTrigger(trigger: { eventId: string; taskId: string; operationId: string }): void {
+    void this.lane.run(async () => {
+      const candidate = this.sessionManager.getBranch().find(entry => entry.type === "custom_message"
+        && (entry.details as { eventId?: unknown } | undefined)?.eventId === trigger.eventId);
+      if (!candidate) throw new Error("canonical Home wake trigger is unavailable");
+      const invocation = this.invocationForOperation(trigger.operationId);
+      if (!invocation) throw new Error("canonical invocation start receipt is unavailable");
+      await this.persistCanonicalCustomEntry(
+        INVOCATION_RECEIPT_TYPE,
+        receiptJSON(makeInvocationReceipt({
+          version: 1,
+          receiptId: `binding:${invocation.invocationId}`,
+          receiptKind: "binding",
+          invocationId: invocation.invocationId,
+          operationId: trigger.operationId,
+          sessionId: this.id,
+          source: "homeWake",
+          canonicalEntryId: candidate.id,
+          sequence: this.revision + 1,
+          createdAt: new Date().toISOString(),
+        })),
+        `binding:${invocation.invocationId}`,
+        this.operationWork.get(trigger.operationId),
+      );
+      await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
+        safeJson(makeContextDeliveryReceipt(candidate.id, "stored", { source: "gateway:home-task",
+          owner: { id: trigger.taskId, title: "Home task", source: "gateway:home-task" } })), candidate.id);
+    });
+  }
+
+  /** The Home session has no operation left: a user activation or a wake ended. */
+  private noteHomeIdle(): void {
+    if (!this.homeRequestPolicy || this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
+    this.dependencies.homeIdle(this.id, this.operationWasHomeWake ? "wake" : "user");
+  }
+
   /** The managed provider uses user input to run Pi's normal before-agent-start
    * lifecycle. Admit it through the prompt owner, never the SDK's unowned wake
    * path: queued consumption and canonical binding retain this exact invocation. */
@@ -7915,6 +8040,7 @@ export class RuntimeSlot {
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
+      if (ownership?.kind === "homeWake") await this.assertHomeWakeAdmissible(session);
       if (this.taskWorker) {
         const trust = await this.dependencies.trust.requireResolved(this.cwd);
         if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
@@ -7961,7 +8087,7 @@ export class RuntimeSlot {
       // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const parsedCommand = ownership?.kind === "subagentWake" ? undefined : parsePiLiteralCommand(text);
+      const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" ? undefined : parsePiLiteralCommand(text);
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -7985,7 +8111,7 @@ export class RuntimeSlot {
         throw new GatewayError("conflict", "Accepted queued invocation identity is no longer available", true);
       }
       const invocationId = existingInvocation?.invocationId ?? randomUUID();
-      const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : isExactExtensionCommand
+      const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : ownership?.kind === "homeWake" ? "homeWake" : isExactExtensionCommand
         ? "extension"
         : queueDisplay?.resourceInvocation?.source ?? "plain");
       const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
@@ -8036,7 +8162,7 @@ export class RuntimeSlot {
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
 
-      if (ownership && ownership.kind !== "subagentWake") this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
+      if (ownership && ownership.kind !== "subagentWake" && ownership.kind !== "homeWake") this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -8139,6 +8265,7 @@ export class RuntimeSlot {
           };
         }
 
+        let homeWakeTrigger: HomeWakeTrigger | undefined;
         if (isExactExtensionCommand) {
           this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           // Exact commands run before Pi's preflight callback and can wait on UI
@@ -8157,7 +8284,7 @@ export class RuntimeSlot {
           this.phase = "running";
           this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           this.pendingPromptMessage = undefined;
-          this.pendingPrompt = this.promptDisplay(operationId, text, images, queueDisplay);
+          this.pendingPrompt = ownership?.kind === "homeWake" ? undefined : this.promptDisplay(operationId, text, images, queueDisplay);
           // A waiting message becomes this pending prompt in the same
           // publication, so it is never shown twice or not at all.
           if (held) this.removeHeldPrompt(held.id);
@@ -8165,9 +8292,10 @@ export class RuntimeSlot {
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
           this.publishSnapshot();
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt);
+          this.operationWasHomeWake = ownership?.kind === "homeWake";
           if (this.homeRequestPolicy) {
-            await this.dependencies.homeInboxAdmission(this.id, operationId, async message => {
+            homeWakeTrigger = await this.dependencies.homeInboxAdmission(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
               this.inboxAttributedMessages.add(message.details.eventId);
               try { await session.sendCustomMessage(message, { triggerTurn: false }); }
               finally { this.inboxAttributedMessages.delete(message.details.eventId); }
@@ -8190,8 +8318,11 @@ export class RuntimeSlot {
           }
         }
 
+        if (ownership?.kind === "homeWake") ownership.onDelivered(homeWakeTrigger !== undefined);
         ownership?.signal?.throwIfAborted();
-        sdkRun = withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
+        sdkRun = ownership?.kind === "homeWake"
+          ? this.startHomeWake(session, operationId, homeWakeTrigger, acceptedResolve)
+          : withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: ownership?.kind === "subagentWake" ? "extension" : queueDisplay?.inputSource ?? "rpc",
@@ -8333,6 +8464,7 @@ export class RuntimeSlot {
         }
         if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
         this.phase = "idle";
+        this.noteHomeIdle();
         if (this.pendingManualCompaction) {
           this.publishSnapshot();
           this.startPendingManualCompaction();

@@ -78,8 +78,8 @@ Accessibility coverage must protect functional usability rather than label prese
 Destructive-action authorization and cross-runtime safety may remain when the real
 gating behavior is exercised.
 
-Do not classify by directory alone: some files under `packages/ios-app/Tests/UI`
-exercise real state ownership, cancellation, or mutation behavior.
+Unit tests are not kept (maintainer directive, 2026-10-10): the suite is
+integration and E2E tests at real boundaries.
 
 ## Strong retain candidates
 
