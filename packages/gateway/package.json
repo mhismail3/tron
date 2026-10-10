@@ -46,6 +46,6 @@
     "@types/proper-lockfile": "4.1.4",
     "@types/ws": "8.18.1",
     "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "vitest": "5.0.3"
   }
 }
