@@ -613,9 +613,9 @@ The inputs:
    the tool calls it executed, never from the model's own account. Whether a
    tool returns web or browser content is that tool's own declaration (web
    search and fetch, the browser, public-post readers), so a new web tool
-   declares it and nothing here changes. Whether the mark travels with content
-   another turn later reads (a worker's report, a Knowledge record) is
-   [open question A](#102-open-questions).
+   declares it and nothing here changes. The mark belongs to the tool call
+   only: it does not travel with content another turn reads later, such as a
+   worker's report or a Knowledge record ([decision 28](#101-decisions)).
 3. **The risk model.** A decision model may raise the tier, never lower it. If
    it fails or times out, the computed tier stands.
 4. **The maintainer's tap.** A change he makes from a row is approved by that tap. When
@@ -703,7 +703,9 @@ The Project applier, under the project's store lock:
    repository, a gitignored `.pi/`, a locked index), the write stands and is
    not staged ([Q27](#101-decisions)); the entry records why.
 5. If the staged path, or the index, also holds changes Tron did not write,
-   stage anyway and warn in the Changes entry ([Q26](#101-decisions)).
+   stage anyway and warn in the Changes entry. That includes the
+   maintainer's own unstaged edits in the same file
+   ([Q26](#101-decisions), [decision 29](#101-decisions)).
 6. Record the entry: the repo root, the path, staged or not and why, and the
    staged blob id.
 
@@ -1124,21 +1126,15 @@ refines. The sections above already reflect them.
 | 26 | Other work is already staged | Stage anyway, and warn in Changes. | Decision 14, F2 |
 | 27 | Linked worktrees, subdirectories, an ignored `.pi/` | Use the chat's worktree root. An ignored `.pi/` is written, not staged. | F2 (the store is the file on disk) |
 
+**Foundational follow-ups**, asked after Q17 to Q27, answered directly by
+Mohsin on 2026-10-10.
+
+| # | Question | Answer | Follows from |
+|---|---|---|---|
+| 28 | Does the web mark travel with content another turn reads later (a worker's report, a Knowledge record captured from the web, a snippet of a marked chat)? | No. The mark belongs to the turn whose tool call read web or browser content. | F3 |
+| 29 | May staging also stage the maintainer's own unstaged edits in the same `.pi/` file? | Yes: stage anyway, and warn in Changes, as for other staged work. | Decision 14, Q26 |
+
 ### 10.2 Open questions
 
-Only questions about the foundations themselves. Each slice they affect names
-them in its issue.
-
-- **A. Does the web mark travel with content?** F3 marks the turn that read web
-  or browser content. Another turn can later read that content second-hand: a
-  worker's task report reaching Home, a Knowledge record captured from a web
-  page, or a snippet of a marked chat. Either the mark is per tool call only
-  (simple, but a worker can relay web text to Home unmarked), or it travels with
-  content whose origin was marked (each carrier keeps a mark, and reading it
-  marks the reading turn). This design assumes the first until answered.
-- **B. How far may Tron reach into the git index?** Decision 14 and Q26 stage
-  Tron's write even when other work is staged. Staging the path also stages
-  the maintainer's own unstaged edits in that same file. This design applies Q26 to
-  that case too (stage anyway, warn in Changes). The alternative is to write
-  without staging whenever the file already holds unstaged edits, leaving it
-  Uncommitted.
+None. A new question is added here only if it concerns a foundation; anything
+else is answered by applying F1 to F4.
