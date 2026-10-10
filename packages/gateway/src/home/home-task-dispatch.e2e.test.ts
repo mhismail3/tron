@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
+import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -354,7 +355,8 @@ describe("Home task bounded backlogs", () => {
     const barrier = vi.spyOn((policy as any).options, "prepareMemoryView").mockImplementation(async (activation: any, signal: any) => {
       entered = true;
       await new Promise<void>((resolve, reject) => {
-        const abort = () => { signal?.removeEventListener("abort", abort); reject(new Error("cancelled envelope wait")); };
+        // The memory owner's own cancellation refusal, not a generic failure.
+        const abort = () => { signal?.removeEventListener("abort", abort); reject(new HomeMemoryRefusal("memory-wait-cancelled", "the activation's wait for the Home memory was cancelled")); };
         signal?.addEventListener("abort", abort, { once: true });
         void gate.then(() => { signal?.removeEventListener("abort", abort); resolve(); });
       });
@@ -368,7 +370,7 @@ describe("Home task bounded backlogs", () => {
       expect(operation?.kind).toBe("prompt");
       await home.abort("agent", operation!.id);
       await waitFor(() => settled, "Stop cancels envelope wait", { boundMs: 1000 });
-      await expect(prompting).rejects.toThrow(/cancelled envelope wait|cancelled/);
+      await expect(prompting).rejects.toThrow("Home request refused (memory-wait-cancelled)");
       expect(await owner.taskResult(task.taskId)).toMatchObject({ wake: { state: "pending" } });
       expect(home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1")).toHaveLength(0);
       evidence.push({ case: "activation-envelope-wait-stop", pending: task.taskId });
