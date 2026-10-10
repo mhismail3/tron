@@ -474,6 +474,10 @@ final class AppModel {
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
+    /// The save drain that is writing checkpoints now, exposed for callers that
+    /// must await it before delivering the next summary. It exposes the existing
+    /// drain with no new behavior.
+    var inFlightCacheCheckpoint: Task<Void, Never>? { cacheCheckpointTask }
     private var cacheCheckpointTaskGeneration = 0
     /// Present only while a trailing summary checkpoint waits for its window
     /// and no save is draining; `startCacheCheckpointDrain` retires it.
