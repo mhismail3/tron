@@ -1145,6 +1145,12 @@ describe("Home task production dispatch", () => {
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
       await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
       await expect(slot.steerHomeTask({ ...control, operationId: "stale-operation" }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
+      // The removed controller generation is an unknown RPC parameter, refused before any Stop intent is written.
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+        receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
+      const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
+      await expect(service.invoke(client, "home.stopTask",
+        { commandId: "stop-with-removed-fence", taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 })).rejects.toThrow(/unknown fields/);
       release();
       const result = await run.completion;
       expect(result.terminalEvidence?.outcome).toBe("final");

@@ -583,7 +583,7 @@ real directories.
   - `grantRef`, `scopeRef`: nullable, at most one set, each naming an existing
     authorization record, filled once, never swapped.
   - `lifecycle`: `pending`, `active` or `terminal`. `active` requires authority and
-    session, operation and controller identity; `terminal` requires terminal
+    session and operation identity; `terminal` requires terminal
     evidence and a co-committed wake event.
   - `sessionId`, `operationId`: set by dispatch; shared control fences the active
     operation.
@@ -806,8 +806,8 @@ work. One per-process result is shared by every task surface.
   (needs-input or unknown) and `pendingGrant`. Null spend is unavailable, not zero;
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
-- **`home.taskStatus`** returns the record, exact active operation and controller
-  generation, spend and the immutable result. Viewing never changes control. Home's
+- **`home.taskStatus`** returns the record, the exact active operation, spend and the
+  immutable result. Viewing never changes control. Home's
   `task` tool exposes `status`, `steer` and `stop`, only for tasks bound to the
   enabled Home's identity and generation; it can never reconfirm, revoke or decide.
   Status follows Home across disable and re-enable but never transfers control.
@@ -817,7 +817,7 @@ work. One per-process result is shared by every task surface.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.
-- Stop lives outside that lane. The binding persists the exact generation-fenced
+- Stop lives outside that lane. The binding persists the exact operation-fenced
   `stopIntent` before aborting the pre-admission signal and joining the root prompt
   owner. Automatic compaction or retry can carry another primitive ID; cancellation
   follows root ownership, not ID comparison. Settlement updates the latest durable
