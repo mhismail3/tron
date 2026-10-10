@@ -15,11 +15,11 @@ import subprocess
 JOBS = ("gateway", "ios", "pi-sdk-e2e", "mac")
 
 # Helpers select the macOS job whose hosted steps execute or read them: the
-# `scripts/tron` dispatcher (`mac generate`), the reinstall and native-host tests,
-# the personal-info and hook tests, and bundle-gateway.sh's payload inputs.
+# `scripts/tron` dispatcher (`mac generate`), the reinstall and native-host
+# validators, the personal-info and hook tests, and bundle-gateway.sh's payload inputs.
 MAC_HELPERS = frozenset({
-    "scripts/tron", "scripts/tron_mac_reinstall.py", "scripts/test-mac-reinstall.py",
-    "scripts/verify-mac-install.sh", "scripts/test-native-host.py", "scripts/validate-native-host.py",
+    "scripts/tron", "scripts/tron_mac_reinstall.py",
+    "scripts/verify-mac-install.sh", "scripts/validate-native-host.py",
     "scripts/gateway-payload-deploy.mjs", "scripts/gateway-install-inputs.mjs",
     "scripts/personal-info-guard.sh", "scripts/test-personal-info-guard.py", "scripts/install-hooks.sh",
 })
