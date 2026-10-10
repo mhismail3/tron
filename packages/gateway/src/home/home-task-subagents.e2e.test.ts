@@ -371,4 +371,3 @@ describe("Home task subagents", () => {
     await waitFor(async () => (await asyncState(childDir)) === "complete", "orphaned workflow child finishes", bound);
   }, 60_000);
 });
-
