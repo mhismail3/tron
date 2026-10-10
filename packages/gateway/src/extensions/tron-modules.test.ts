@@ -7,7 +7,7 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
-import { HOME_TOOL_NAMES, TRON_HOME_MODULE, TRON_MODULES, tronModuleFactories, type TronModuleHost } from "./tron-modules.js";
+import { HOME_TOOL_NAMES, TRON_HOME_MODULE, TRON_HOME_RESEARCH_MODULE, TRON_MODULES, tronModuleFactories, type TronModuleHost } from "./tron-modules.js";
 
 /** Records what one factory run registers without a session or a live runtime. */
 function registrationSurface() {
@@ -50,6 +50,8 @@ function tronModuleHost(options: { optionalOwners?: boolean } = {}): TronModuleH
     // Registration never executes a Home tool, so the dispatch owners are inert here.
     homeTask: async () => undefined,
     homeDelegate: async () => { throw new Error("Home dispatch is not executed by registration tests"); },
+    sessionSearch: () => undefined,
+    explicitlyTrustedDirectory: async () => false,
   };
 }
 
@@ -79,6 +81,18 @@ describe("Tron module definition", () => {
     expect([...surface.tools].sort()).toEqual([...TRON_HOME_MODULE.tools].sort());
     // Every registered name must be inside the executable allowlist, or the
     // registration is a tool Home can never call.
+    for (const name of surface.tools) expect(HOME_TOOL_NAMES).toContain(name);
+  });
+
+  it("declares exactly the tools the Home-only research module registers", () => {
+    // Like tron-home, tron-home-research is loaded only by a Home runtime. All
+    // five research tools are always registered — the tool list heads every
+    // cached prefix — and each resolves its owner per call.
+    const factory = TRON_HOME_RESEARCH_MODULE.factory(tronModuleHost());
+    expect(factory).toBeTypeOf("function");
+    const surface = registrationSurface();
+    factory!(surface.pi as never);
+    expect([...surface.tools].sort()).toEqual([...TRON_HOME_RESEARCH_MODULE.tools].sort());
     for (const name of surface.tools) expect(HOME_TOOL_NAMES).toContain(name);
   });
 

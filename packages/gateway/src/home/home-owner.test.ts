@@ -370,7 +370,7 @@ describe("Tron Home record", () => {
     expect((await stat(f.workspacePath)).mode & 0o777).toBe(0o700);
     const stored = JSON.parse(await readFile(f.recordPath, "utf8")) as HomeRecord;
     expect(stored).toMatchObject({
-      version: 2, bindingRevision: 1, policyRevision: 1, enabled: true, generation: 1, model: MODEL,
+      version: 2, bindingRevision: 1, policyRevision: 2, enabled: true, generation: 1, model: MODEL,
       chapters: [{ sessionId: designation.sessionId, ordinal: 1, state: "active" }],
     });
     expect(stored.createdAt).toBe(stored.updatedAt);
@@ -407,6 +407,22 @@ describe("Tron Home record", () => {
     expect(f.created).toEqual([first.sessionId]);
     // Every profile change on a live session replaces its runtime in place.
     expect(f.replaced).toEqual([first.sessionId, first.sessionId]);
+  });
+
+  it("writes the current policy revision when re-enabling an older record", async () => {
+    // #724 advanced the curated profile to revision 2. A disabled Home that an
+    // older build designated re-enables onto the current revision: the record
+    // is the only durable evidence of which profile the running Home carries.
+    const f = await harness();
+    await mkdir(f.directory, { recursive: true });
+    await writeFile(f.recordPath, recordBytes({ enabled: false, policyRevision: 1 }), { mode: 0o600 });
+    f.present.add("session-1");
+    await f.owner.initialize();
+
+    await f.owner.designate({ model: MODEL }, defaultModel);
+    const stored = JSON.parse(await readFile(f.recordPath, "utf8")) as HomeRecord;
+    expect(stored.enabled).toBe(true);
+    expect(stored.policyRevision).toBe(2);
   });
 
   it("designates a fresh session when the recorded session is gone", async () => {

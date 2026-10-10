@@ -10,6 +10,8 @@ import { createTronComputerExtension } from "../display/tron-computer-extension.
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
+import { homeResearchTools, type HomeResearchTransport } from "../home/home-research-tools.js";
+import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
@@ -49,6 +51,16 @@ export interface TronModuleHost {
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
   homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  /** Session search for Home's research tools, late-bound: the service is
+   * installed after the registry exists, and may be absent on this Gateway. */
+  sessionSearch: () => ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
+  /** True only for a directory covered by an explicit recorded trust decision
+   * (`savedDecision === true`); the "always" default never counts. Home's
+   * `read_file` is limited to what the maintainer deliberately trusted. */
+  explicitlyTrustedDirectory: (path: string) => Promise<boolean>;
+  /** Transport injection for Home's web tools, the same seam capture's fetch
+   * exposes (`SourceCaptureOptions`); production omits it. */
+  homeWebTransport?: HomeResearchTransport;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -218,11 +230,35 @@ export const TRON_HOME_MODULE: TronModule = {
     request => host.homeTask(host.sessionId(), request)),
 };
 
+/** The one research module only a Home runtime loads (#724): read-only web
+ * search and fetch, session search, Knowledge lookup, and trusted-project file
+ * reading. Like `TRON_HOME_MODULE` it is not part of `TRON_MODULES`, because an
+ * ordinary session never loads it. All five tools are always registered — the
+ * tool list heads every cached prefix — and each resolves its owner per call. */
+export const TRON_HOME_RESEARCH_MODULE: TronModule = {
+  name: "tron-home-research",
+  purpose: "Adds Home's read-only research tools: web search and fetch, session search, Knowledge lookup and trusted-project file reading.",
+  tools: ["web_search", "web_fetch", "session_search", "knowledge", "read_file"],
+  commands: [],
+  factory: (host) => (pi) => {
+    const tools = homeResearchTools({
+      knowledge: () => host.knowledge,
+      sessionSearch: () => host.sessionSearch(),
+      explicitlyTrustedDirectory: (path) => host.explicitlyTrustedDirectory(path),
+      ...(host.homeWebTransport ? { transport: host.homeWebTransport } : {}),
+    });
+    for (const tool of tools) pi.registerTool(tool);
+  },
+};
+
 /** The executable tool ceiling for a Home runtime, passed to the SDK as its
  * registration allowlist. MCP is excluded structurally: no MCP extension is
  * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
  * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task"];
+export const HOME_TOOL_NAMES: readonly string[] = [
+  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task",
+  "web_search", "web_fetch", "session_search", "knowledge", "read_file",
+];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */
@@ -233,8 +269,10 @@ export function homeModuleFactories(host: TronModuleHost): TronModuleRegistratio
     const factory = tronModule.factory(host);
     if (factory) registrations.push({ name: tronModule.name, factory });
   }
-  const factory = TRON_HOME_MODULE.factory(host);
-  if (factory) registrations.push({ name: TRON_HOME_MODULE.name, factory });
+  for (const homeModule of [TRON_HOME_MODULE, TRON_HOME_RESEARCH_MODULE]) {
+    const factory = homeModule.factory(host);
+    if (factory) registrations.push({ name: homeModule.name, factory });
+  }
   return registrations;
 }
 

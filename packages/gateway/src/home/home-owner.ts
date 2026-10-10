@@ -38,8 +38,10 @@ const MAXIMUM_PROVIDER_BYTES = 120;
 const MAXIMUM_MODEL_ID_BYTES = 300;
 /** The curated Home profile this build writes. A record written against a newer
  * revision is still this build's record to read: only `version` gates admission,
- * because a profile change is not a format change. */
-const HOME_POLICY_REVISION = 1;
+ * because a profile change is not a format change. Revision 2 added the read-only
+ * research tools (#724); designation and re-enable both write the current
+ * revision, so an older record advances the next time Home is enabled. */
+const HOME_POLICY_REVISION = 2;
 const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
 const HOME_SOFT_ENTRIES = 50_000;
 

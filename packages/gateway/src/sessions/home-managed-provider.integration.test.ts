@@ -59,11 +59,14 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
       const resources = await slot.resources() as unknown as { subagents: Array<{ name: string }>; subagentDiagnostics?: string };
       const names = context.availableTools.map(tool => tool.name);
       if (profile === "home") {
-        expect(names.sort()).toEqual(["ask_user", "date", "delegate", "display", "memory_search", "task", "zoom"]);
+        expect(names.sort()).toEqual([
+          "ask_user", "date", "delegate", "display", "knowledge", "memory_search",
+          "read_file", "session_search", "task", "web_fetch", "web_search", "zoom",
+        ]);
         // The executable allowlist alone can hide tools from a loaded provider;
         // Home must exclude the extension itself, not merely hide its tools.
         expect(context.extensions.map(extension => extension.name.replace(/^<inline:/, "").replace(/>$/, "")).sort())
-          .toEqual(["tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home"]);
+          .toEqual(["tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research"]);
         expect(resources.subagents).toEqual([]);
       } else {
         expect(names).toContain("subagent");

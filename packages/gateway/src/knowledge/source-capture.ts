@@ -515,11 +515,49 @@ export function extractReadableText(bytes: Uint8Array, mediaType: string | undef
   return { text, truncated };
 }
 
-function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | undefined {
+export function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | undefined {
   const normalized = (mediaType ?? "").toLowerCase();
   if (!normalized.includes("html")) return undefined;
   const text = new TextDecoder().decode(bytes.slice(0, 100_000));
   return text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, " ").trim().slice(0, 512) || undefined;
+}
+
+/** What one bounded public-URL fetch produced, for callers that format their own
+ * answer (Home's research tools). `disposition` is set instead of `bytes` when the
+ * destination answered but refused or failed. */
+export interface PublicUrlFetch {
+  status?: number;
+  bytes?: Uint8Array;
+  mediaType?: string;
+  truncated: boolean;
+  finalUrl: string;
+  disposition?: "inaccessible" | "failed";
+}
+
+/**
+ * One bounded fetch of a public http(s) URL through capture's own transport:
+ * credential-bearing URLs refused, every redirect hop DNS-resolved and refused
+ * when private (SSRF), the response read to `limits.maxBytes` at most. It never
+ * persists anything; the caller owns what becomes of the bytes.
+ */
+export async function fetchPublicUrl(
+  url: string,
+  options: Pick<SourceCaptureOptions, "fetcher" | "resolveHost" | "signal"> & { limits?: Partial<SourceCaptureLimits> } = {},
+): Promise<PublicUrlFetch> {
+  const fetched = await fetchSafe(url, {
+    ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+    resolveHost: options.resolveHost ?? defaultResolveHost,
+    ...(options.signal ? { signal: options.signal } : {}),
+    limits: { ...SOURCE_CAPTURE_LIMITS, ...(options.limits ?? {}) },
+  });
+  return {
+    ...(fetched.response ? { status: fetched.response.status } : {}),
+    ...(fetched.bytes ? { bytes: fetched.bytes } : {}),
+    ...(fetched.mediaType ? { mediaType: fetched.mediaType } : {}),
+    truncated: fetched.truncated,
+    finalUrl: fetched.finalUrl,
+    ...(fetched.disposition === "inaccessible" || fetched.disposition === "failed" ? { disposition: fetched.disposition } : {}),
+  };
 }
 
 async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal?: AbortSignal; limits: SourceCaptureLimits }): Promise<{ response?: Response; bytes?: Uint8Array; truncated: boolean; finalUrl: string; disposition?: SourceContent["captureDisposition"]; mediaType?: string; quality?: "partial" }> {
