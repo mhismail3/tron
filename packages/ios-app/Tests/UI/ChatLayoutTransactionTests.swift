@@ -42,7 +42,7 @@ struct ChatLayoutTransactionTests {
         _ = transaction.join(.submission)
         _ = transaction.animation
         #expect(transaction.generation?.clock == ChatLayoutClock(
-            duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
+            duration: ChatMotion.transcriptRevealDuration,
             curve: .smooth
         ))
         transaction.configure(
@@ -56,7 +56,7 @@ struct ChatLayoutTransactionTests {
         _ = transaction.join(.keyboard)
         _ = transaction.animation
         #expect(transaction.generation?.clock == ChatLayoutClock(
-            duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
+            duration: ChatMotion.transcriptRevealDuration,
             curve: .smooth
         ))
     }

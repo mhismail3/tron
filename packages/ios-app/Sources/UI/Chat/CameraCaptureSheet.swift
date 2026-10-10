@@ -456,5 +456,5 @@ private enum CameraControlMetrics {
     static let iconHitTargetSize: CGFloat = 60
     static let iconFontSize: CGFloat = TronTypography.sizeTitle
     static let confirmationIconFontSize: CGFloat = TronTypography.sizeLargeTitle
-    static let controlAnimation = Animation.smooth(duration: 0.28)
+    static let controlAnimation = ChatMotion.cameraControl
 }

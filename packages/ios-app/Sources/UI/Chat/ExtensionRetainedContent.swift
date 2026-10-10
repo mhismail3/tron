@@ -170,6 +170,32 @@ enum UnifiedActivityButtonKind: Equatable {
     }
 }
 
+#if HOSTED_TEST
+final class ChatComposerProcessOrbMotionMarker: UIView {
+    var mode: ProcessActivityOrbMode?
+}
+
+struct ChatComposerProcessOrbMotionProbe: UIViewRepresentable {
+    let mode: ProcessActivityOrbMode
+
+    func makeUIView(context: Context) -> ChatComposerProcessOrbMotionMarker {
+        let view = ChatComposerProcessOrbMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.mode = mode
+        return view
+    }
+
+    func updateUIView(_ view: ChatComposerProcessOrbMotionMarker, context: Context) {
+        view.mode = mode
+    }
+
+    static func dismantleUIView(_ view: ChatComposerProcessOrbMotionMarker, coordinator: ()) {
+        view.mode = nil
+    }
+}
+#endif
+
 struct UnifiedActivityButton: View {
     let kind: UnifiedActivityButtonKind
     let contentCount: Int
@@ -195,6 +221,9 @@ struct UnifiedActivityButton: View {
                         isVisible: true,
                         accent: .tronSubagent
                     )
+                    #if HOSTED_TEST
+                    .background(ChatComposerProcessOrbMotionProbe(mode: kind == .activeSubagents ? .solving : .thinking))
+                    #endif
                     .transition(.opacity)
                 }
             }

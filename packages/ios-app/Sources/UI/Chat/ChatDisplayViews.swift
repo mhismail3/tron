@@ -268,11 +268,11 @@ struct DisplayToolView: View {
     }
 
     private var disclosureFadeAnimation: Animation? {
-        reduceMotion ? nil : .easeOut(duration: 0.10)
+        ChatMotion.disclosureFade(reduceMotion: reduceMotion)
     }
 
     private var disclosureLayoutAnimation: Animation? {
-        reduceMotion ? nil : .smooth(duration: 0.22)
+        reduceMotion ? nil : ChatMotion.notificationArrive(reduceMotion: false)
     }
 
     private var displayPill: some View {

@@ -23,7 +23,6 @@ struct ChatComposerAccessoryLayoutIdentity: Equatable {
 
 enum ChatComposerStructuralTransitionPolicy {
     static let heightEpsilon: CGFloat = 0.5
-    static let accessoryDuration: TimeInterval = 0.24
 
     static func admitsHeightChange(current: CGFloat?, measured: CGFloat) -> Bool {
         measured.isFinite
@@ -117,7 +116,6 @@ struct ChatComposerStructuralHost<Content: View>: View {
             submissionTransitionActive: submissionActive,
             reduceMotion: reduceMotion
         )
-        installedAccessoryIdentity = measurement.accessoryIdentity
         heightTransitionRevision &+= 1
         let revision = heightTransitionRevision
 
@@ -125,9 +123,12 @@ struct ChatComposerStructuralHost<Content: View>: View {
             if submissionActive { onHeightSettled?(measurement.height) }
             return
         }
+        // The identity belongs to the last installed height, not to a geometry
+        // read that can arrive before SwiftUI reports the new natural size.
+        installedAccessoryIdentity = measurement.accessoryIdentity
         if animates {
             let animation = submissionAnimation
-                ?? Animation.smooth(duration: ChatComposerStructuralTransitionPolicy.accessoryDuration)
+                ?? ChatMotion.composerAccessoryResize
             var transaction = Transaction()
             transaction.admitsChatIncrementalGrowthAnimation = true
             withTransaction(transaction) {
@@ -212,14 +213,6 @@ struct ChatContentEntranceTransform: Equatable, Sendable {
 }
 
 enum ChatContentTransitionPolicy {
-    /// Height-coupled transcript entrances share one short, non-overshooting
-    /// clock. Spring overshoot is inappropriate here because growth progress is
-    /// clamped to layout bounds and can otherwise settle through visible stalls.
-    static let transcriptEntranceDuration: TimeInterval = 0.18
-    /// The outgoing prompt is transform-only, so it can use a slightly longer
-    /// readable entrance without prolonging composer or viewport settlement.
-    static let promptEntranceDuration: TimeInterval = 0.28
-    static let notificationReplacementDuration: TimeInterval = 0.16
     static let attachmentHiddenScale: CGFloat = 0.5
     static let attachmentStaggerInterval: TimeInterval = 0.04
 
@@ -270,33 +263,6 @@ enum ChatContentTransitionPolicy {
                 anchor: .leading
             )
         }
-    }
-
-    static func revealAnimation(
-        for _: ChatContentEntranceKind,
-        reduceMotion: Bool
-    ) -> Animation {
-        if reduceMotion { return .easeOut(duration: 0.12) }
-        // Layout height and the visual transform must advance on the same
-        // monotonic curve. This keeps native bottom anchoring continuous while
-        // avoiding a spring's clamped overshoot for tool/status insertions.
-        return .smooth(duration: transcriptEntranceDuration)
-    }
-
-    static func attachmentAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion
-            ? .easeOut(duration: 0.12)
-            : .smooth(duration: 0.22)
-    }
-
-    static func inPlaceContentReplacementAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? .linear(duration: 0.10) : .smooth(duration: notificationReplacementDuration)
-    }
-
-    static func composerSurfaceAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion
-            ? .easeOut(duration: 0.12)
-            : .spring(response: 0.36, dampingFraction: 0.86, blendDuration: 0.06)
     }
 
     static let composerSurfaceRemovalEdge: Edge = .bottom

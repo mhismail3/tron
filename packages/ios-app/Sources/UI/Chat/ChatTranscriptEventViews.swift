@@ -75,9 +75,7 @@ struct ChatNotificationView: View {
             // row-host animation would be suppressed by the projection's own
             // transaction below it.
             .animation(
-                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
-                    reduceMotion: reduceMotion
-                ),
+                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion),
                 value: presentation.showsProgress
             )
             .accessibilityLabel(accessibilityLabel)
@@ -292,7 +290,7 @@ struct TranscriptNotice: View {
             guard animatesEntrance, !revealed else { return }
             if reduceMotion { revealed = true }
             else {
-                withAnimation(.smooth(duration: 0.24)) { revealed = true }
+                withAnimation(ChatMotion.eventArrive(reduceMotion: false)) { revealed = true }
             }
         }
     }
