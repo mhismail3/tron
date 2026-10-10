@@ -227,7 +227,7 @@ iteration proceeds on `9848`.
 
 ```bash
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<OwningSuite>
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
 python3 scripts/test-ios-test-infrastructure.py
 ```
 

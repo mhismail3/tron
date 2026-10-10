@@ -117,39 +117,13 @@ schemes = Path(sys.argv[1])
 source_root = Path(sys.argv[2])
 pbxproj = Path(sys.argv[3]).read_text()
 
-# A plan's skippedTests is honored only for XCTest methods: a Swift Testing ID
-# there still runs in every unit run, and a stale name skips nothing (#172).
-# Swift Testing cases leave the unit tier through `UIValidationTier` instead.
-superclass, test_methods = {}, set()
-for test_file in (source_root / "Tests").rglob("*.swift"):
-    owner = None
-    for line in test_file.read_text().splitlines():
-        declaration = re.match(r"(?:(?:final|private|fileprivate|internal|public) )*(class|struct|enum|actor|extension) (\w+)(?:: (\w+))?", line)
-        if declaration:
-            owner = declaration.group(2)
-            if declaration.group(1) == "class" and declaration.group(3):
-                superclass[owner] = declaration.group(3)
-        method = re.match(r"\s+(?:@\w+ )*func (test\w+)\(\)", line)
-        if method and owner:
-            test_methods.add(f"{owner}/{method.group(1)}()")
-def is_xctest_case(name):
-    seen = set()
-    while name in superclass and name not in seen:
-        seen.add(name)
-        name = superclass[name]
-        if name == "XCTestCase":
-            return True
-    return False
-
-for relative in ("TestPlans/UnitTests.xctestplan", "TestPlans/UIValidation.xctestplan"):
+for relative in ("TestPlans/GatewayE2E.xctestplan", "TestPlans/Profiling.xctestplan", "TestPlans/UIValidation.xctestplan"):
     plan = json.loads((source_root / relative).read_text())
     references = [plan["defaultOptions"]["targetForVariableExpansion"], *[entry["target"] for entry in plan["testTargets"]]]
     for reference in references:
         assert f'{reference["identifier"]} /* {reference["name"]} */' in pbxproj, (relative, reference)
-    for entry in plan["testTargets"]:
-        for skipped in entry.get("skippedTests", []):
-            assert skipped in test_methods and is_xctest_case(skipped.split("/")[0]), (
-                relative, f"skippedTests entry is not an existing XCTest method: {skipped}")
+    assert not any("skippedTests" in entry for entry in plan["testTargets"]), (
+        relative, "a plan may not skip tests: every hosted case runs or is removed")
 
 expected_actions = {
     "Tron Development": ("Development", "Test", False),
@@ -183,10 +157,18 @@ for name, path in paths.items():
             assert run.get("selectedDebuggerIdentifier") == "", path
             assert run.get("selectedLauncherIdentifier") == "Xcode.IDEFoundation.Launcher.PosixSpawn", path
         plan_references = test.findall("./TestPlans/TestPlanReference")
-        assert len(plan_references) == 1, path
-        expected_plan = "UIValidation.xctestplan" if name == "Tron UI Validation" else "UnitTests.xctestplan"
-        assert plan_references[0].get("reference", "").endswith(expected_plan), path
-        assert plan_references[0].get("default") == "YES", path
+        expected_plan = {
+            "Tron Development": "GatewayE2E.xctestplan",
+            "Tron UI Validation": "UIValidation.xctestplan",
+            "Tron Device Performance": "Profiling.xctestplan",
+        }.get(name)
+        if expected_plan is None:
+            # The device scheme runs no tests of its own; it only installs the app.
+            assert plan_references == [], path
+        else:
+            assert len(plan_references) == 1, path
+            assert plan_references[0].get("reference", "").endswith(expected_plan), path
+            assert plan_references[0].get("default") == "YES", path
 print("generated iOS scheme/test-plan action policy passed")
 PY
 

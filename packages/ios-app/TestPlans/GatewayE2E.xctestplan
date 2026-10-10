@@ -1,7 +1,7 @@
 {
   "configurations": [
     {
-      "id": "A49FF3B9-7BDA-45CA-8C72-77CBE6766FAF",
+      "id": "7C2E1F0A-3B5D-4E61-9A7C-2D1B0E4F6A18",
       "name": "Default",
       "options": {}
     }
@@ -18,8 +18,8 @@
     {
       "target": {
         "containerPath": "container:TronMobile.xcodeproj",
-        "identifier": "6C84D08D5E56B9C22DF122FB",
-        "name": "TronMobileUITests"
+        "identifier": "7A4CBB5754048C2AD5F5412C",
+        "name": "TronMobileE2ETests"
       }
     }
   ],
