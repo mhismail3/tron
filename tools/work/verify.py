@@ -75,9 +75,9 @@ def branch_changes(repo: Path, base_ref: str) -> tuple[str, List[str]]:
 
 
 def _install(package: str, lock_changed: bool, root: Path) -> str:
-    """`npm ci` only when the lockfile changed or the package has no installed tree."""
+    """`npm ci` only when the lockfile changed or the package has no installed tree; run inside the package."""
     if lock_changed or not (root / package / "node_modules").is_dir():
-        return f"(cd {package} && npm ci --no-audit --no-fund)"
+        return "npm ci --no-audit --no-fund"
     return "true"
 
 
@@ -124,8 +124,8 @@ def plan(root: Path, changed: List[str], tests: List[str], merge_base: str) -> L
         checks.append(Check("gateway", f"cd {_GATEWAY} && " + " && ".join(commands)))
     if any(p.startswith(f"{_RELAY}/") for p in changed):
         lock_changed = f"{_RELAY}/package-lock.json" in changed
-        checks.append(Check("push-relay", f"{_install(_RELAY, lock_changed, root)} && "
-                                          f"(cd {_RELAY} && npm run check && npm run build)"))
+        checks.append(Check("push-relay", f"cd {_RELAY} && {_install(_RELAY, lock_changed, root)} && "
+                                          "npm run check && npm run build"))
     if any(p.startswith(_IOS) for p in changed):
         checks.append(Check("ios", "scripts/tron-ios-test build"))
     if any(p.startswith(_MAC) for p in changed):

@@ -515,7 +515,7 @@ def _work(issues: Dict[int, dict], vocabulary: dict, config: dict, ready: List[d
 
 
 def _classification(open_issues: List[dict], vocabulary: dict, config: dict) -> List[dict]:
-    """Missing, repeated or undeclared kind/visibility labels, and committed ideas (failure mode 44)."""
+    """Repeated or undeclared kind/visibility labels, and committed ideas. Labels are optional, so absence is not a problem."""
     board, rules = config["dashboard"], config["claim"]
     committed = {rules["readyStatus"], *rules["claimedStatuses"]}
     problems = []
@@ -530,9 +530,7 @@ def _classification(open_issues: List[dict], vocabulary: dict, config: dict) -> 
             undeclared = [label for label in present if label not in declared]
             if undeclared:
                 found.append("undeclared " + ", ".join(undeclared))
-            if not present:
-                found.append(f"no {noun} label")
-            elif len(present) > 1:
+            if len(present) > 1:
                 found.append(f"{len(present)} {noun} labels: " + ", ".join(present))
         if board["ideaLabel"] in issue["labels"] and issue["status"] in committed:
             found.append(f"{board['ideaLabel']} while {issue['status']}")
