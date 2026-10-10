@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Two checks at a time: a shared Mac runs other agents and the live Gateway too.
 CONCURRENCY = 2
@@ -158,7 +158,26 @@ def _cache_key(tree: str, checks: List[Check]) -> str:
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
 
-def _run(root: Path, prelude: str, check: Check, log: Path, live: list) -> Result:
+_TRON_HOME_POLICY = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
+
+
+def _check_environment() -> Dict[str, str]:
+    """The inherited environment every check runs with: variables that point at a live Tron home are dropped.
+
+    A Stable agent shell can carry such pointers; a check must never reach the Stable home. The
+    policy script names the variables to drop and refuses selectors that choose the data root.
+    """
+    try:
+        result = subprocess.run(["node", str(_TRON_HOME_POLICY)], capture_output=True, text=True)
+    except OSError as error:
+        raise VerifyError(f"cannot run the Tron-home environment preflight: {error}") from error
+    if result.returncode != 0:
+        raise VerifyError(result.stderr.strip() or "inherited environment resolves into a live Tron home")
+    dropped = set(result.stdout.split())
+    return {name: value for name, value in os.environ.items() if name not in dropped}
+
+
+def _run(root: Path, prelude: str, check: Check, log: Path, live: list, environment: Dict[str, str]) -> Result:
     log.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with log.open("w") as stream:
@@ -166,7 +185,7 @@ def _run(root: Path, prelude: str, check: Check, log: Path, live: list) -> Resul
         stream.flush()
         process = subprocess.Popen(
             ["bash", "-c", f"set -eo pipefail\n{prelude}\n{check.command}"],
-            cwd=root, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+            cwd=root, env=environment, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
         live.append(process)
@@ -191,6 +210,7 @@ def _excerpt(log: Path) -> str:
 
 def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     """Run the checks the branch needs on HEAD; True when all pass. Prints one line per check."""
+    environment = _check_environment()
     dirty = dirty_paths(root)
     if dirty:
         raise VerifyError("commit or remove local changes first; verify checks a commit:\n  "
@@ -214,7 +234,7 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     live: list = []
     results: List[Result] = []
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-        futures = [pool.submit(_run, root, prelude, check, logs / f"{check.name}.log", live)
+        futures = [pool.submit(_run, root, prelude, check, logs / f"{check.name}.log", live, environment)
                    for check in checks]
         try:
             for future in as_completed(futures):
