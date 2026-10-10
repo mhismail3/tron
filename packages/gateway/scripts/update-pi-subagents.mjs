@@ -125,11 +125,11 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
         return report;
       } catch (error) { throw new Error(`${label} failed: ${error.message}`, { cause: error }); }
     };
-    const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT");
-    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG);
+    const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT", NESTED_CONFIG);
+    const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.integration.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG);
     // Refusal of a verified build with an invalid extension entry: each case is its own
     // nested run and reports by exit status. A refusal regression must still block publication.
-    invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...NESTED_CONFIG, "src/sessions/managed-subagents.invalid-entry.test.ts"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
+    invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...NESTED_CONFIG, "src/sessions/managed-subagents.invalid-entry.integration.test.ts"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
     if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));

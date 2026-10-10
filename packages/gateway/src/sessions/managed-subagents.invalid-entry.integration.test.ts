@@ -14,7 +14,7 @@ import { ManagedSubagents } from "./managed-subagents.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
-const ownTestFile = "managed-subagents.invalid-entry.test.ts";
+const ownTestFile = "managed-subagents.invalid-entry.integration.test.ts";
 const leg = process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE;
 
 // Valid closure bytes with an invalid manifest entry exercise the installer and

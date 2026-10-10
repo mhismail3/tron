@@ -718,7 +718,7 @@ and checker into the existing fingerprinted `app` tree. It checks those staged
 inputs before dependency installation; the payload verifier independently uses
 the trusted source checker against that app root, rejecting missing or invalid
 current/retained provider inputs. This step never installs into a Gateway home.
-The owning regression is `managed-subagents.payload.test.ts` (build the Gateway
+The owning regression is `managed-subagents.payload.integration.test.ts` (build the Gateway
 first): it runs this real staging step, imports its compiled startup boundary
 with TCP denied, and verifies activation plus retained-closure refusal.
 

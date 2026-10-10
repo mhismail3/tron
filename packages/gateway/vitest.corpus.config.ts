@@ -9,7 +9,7 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   test: {
-    include: ["test-fixtures/pi-sdk/record-corpus.test.ts"],
+    include: ["test-fixtures/pi-sdk/record-corpus.integration.test.ts"],
     environment: "node",
     // The recorder is a generator, not a timed test: it drives MCP servers, an
     // OAuth sign-in and two Gateway sessions, then reopens the corpus. Its

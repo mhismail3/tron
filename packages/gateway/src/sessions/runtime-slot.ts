@@ -409,7 +409,7 @@ type CanonicalCompletionEntry = {
   message?: { role?: string; stopReason?: string };
 };
 
-export function successfulAssistantCompletion(
+function successfulAssistantCompletion(
   entry: CanonicalCompletionEntry | undefined,
 ): CanonicalAssistantCompletion | undefined {
   if (entry?.type !== "message" || entry.message?.role !== "assistant") return undefined;

@@ -34,7 +34,7 @@ it("executes previous → candidate → previous with detached resume through th
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
     for (const name of ["previous", "candidate", "rollback"]) {
       const payload = join(payloads, name);
-      await copyPayload(payload, "managed-subagents.rollback.test.ts");
+      await copyPayload(payload, "managed-subagents.rollback.integration.test.ts");
       const selection = name === "candidate" ? pin : pin.previous.fork ? pin.previous
         : { ...pin, version: pin.previous.version, closure: pin.previous.closure, fork: { commit: null } };
       await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(selection));
@@ -48,7 +48,7 @@ it("executes previous → candidate → previous with detached resume through th
         parentBefore = await readFile(join(root, candidate!.completion.parentFile));
         childBefore = await readFile(join(root, candidate!.completion.childFile));
       }
-      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/sessions/managed-subagents.rollback.test.ts"], {
+      const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/sessions/managed-subagents.rollback.integration.test.ts"], {
         // Hang guard only: legs run alone in the nested pass (vitest.nested.config.ts);
         // a passing leg takes about 9-12 s, so a reached bound means a hung leg.
         cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,

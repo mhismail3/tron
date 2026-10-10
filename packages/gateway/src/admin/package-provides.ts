@@ -20,7 +20,7 @@ import type { TrustService } from "./trust-service.js";
 /** Per-kind cap on the names one installed package reports. `provides` is a
  * presentation summary; the flat `resources` inventory stays authoritative for
  * every resolved path. */
-export const MAX_PROVIDES_NAMES_PER_KIND = 256;
+const MAX_PROVIDES_NAMES_PER_KIND = 256;
 const MAX_PROVIDES_DIAGNOSTIC_CHARACTERS = 512;
 const SKILL_FILE_NAME = "SKILL.md";
 
@@ -43,7 +43,7 @@ type ResourceKind = "skills" | "prompts" | "themes";
  * holding its `SKILL.md` (or a root-level `.md` file's own name), a prompt and a
  * theme are their file names without the extension. Pi derives the same names
  * when it loads them. */
-export function providesResourceName(kind: ResourceKind, path: string): string {
+function providesResourceName(kind: ResourceKind, path: string): string {
   const name = basename(path);
   if (kind === "skills") return name === SKILL_FILE_NAME ? basename(dirname(path)) : name.replace(/\.md$/, "");
   return kind === "prompts" ? name.replace(/\.md$/, "") : name.replace(/\.json$/, "");
@@ -101,7 +101,7 @@ export interface PackageProvidesInput {
 
 /** The `provides` object for one installed package: names only, every kind
  * capped, and empty when the package contributes nothing of that kind. */
-export function packageProvides(input: PackageProvidesInput): PackageProvides {
+function packageProvides(input: PackageProvidesInput): PackageProvides {
   const { pkg, resources, extensions, subagents } = input;
   const registered = extensionNames(extensions, pkg);
   return {

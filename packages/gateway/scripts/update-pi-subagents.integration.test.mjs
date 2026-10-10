@@ -82,8 +82,8 @@ test("packs committed objects, builds a closure and retains current as previous"
     const originalPin = readFileSync(join(target, "pi-subagents-pin.json"));
     const executed = [];
     const beforePublication = (bin, args, options) => {
-      if (args.includes("src/sessions/managed-subagents.integration.test.ts") || args.includes("src/sessions/managed-subagents.rollback.test.ts")
-        || args.includes("src/sessions/managed-subagents.invalid-entry.test.ts")) {
+      if (args.includes("src/sessions/managed-subagents.integration.test.ts") || args.includes("src/sessions/managed-subagents.rollback.integration.test.ts")
+        || args.includes("src/sessions/managed-subagents.invalid-entry.integration.test.ts")) {
         assert.deepEqual(readFileSync(join(target, "pi-subagents-pin.json")), originalPin);
         assert.deepEqual(snapshot(target), original);
         executed.push(args.find((arg) => arg.endsWith(".test.ts")));
@@ -91,7 +91,7 @@ test("packs committed objects, builds a closure and retains current as previous"
       return spawn(bin, args, options);
     };
     const result = runUpdate({ gatewayDir: target, forkRepo: fork, commit, spawn: beforePublication });
-    assert.deepEqual(executed, ["src/sessions/managed-subagents.integration.test.ts", "src/sessions/managed-subagents.rollback.test.ts", "src/sessions/managed-subagents.invalid-entry.test.ts"]);
+    assert.deepEqual(executed, ["src/sessions/managed-subagents.integration.test.ts", "src/sessions/managed-subagents.rollback.integration.test.ts", "src/sessions/managed-subagents.invalid-entry.integration.test.ts"]);
     const candidate = JSON.parse(readFileSync(join(target, "pi-subagents-pin.json"), "utf8"));
     assert.equal(candidate.version, "0.76.1-tron.99");
     assert.deepEqual(candidate.fork, { repository: null, commit });
@@ -160,7 +160,7 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
       if (failure === "dirty") writeFileSync(join(target, "pi-subagents-pin.json"), readFileSync(join(target, "pi-subagents-pin.json"), "utf8") + " ");
       const originalPin = readFileSync(join(target, "pi-subagents-pin.json")); const originalArtifacts = snapshot(target);
       if (failure === "rollback") {
-        const probe = join(target, "src/sessions/managed-subagents.rollback.test.ts");
+        const probe = join(target, "src/sessions/managed-subagents.rollback.integration.test.ts");
         // A real producer refusal on return, after candidate execution. No gate
         // result or provider implementation is mocked.
         const source = readFileSync(probe, "utf8");
@@ -171,7 +171,7 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
       let writerPid;
       let preserved;
       const injected = (bin, args, options) => {
-        if (failure === "join" && args.includes("src/sessions/managed-subagents.rollback.test.ts")) {
+        if (failure === "join" && args.includes("src/sessions/managed-subagents.rollback.integration.test.ts")) {
           const pidFile = join(root, "writer.pid");
           const writer = `const fs=require('node:fs'); process.removeAllListeners('SIGTERM'); process.on('SIGTERM',()=>{});
             fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid)); setInterval(()=>fs.writeFileSync(${JSON.stringify(join(root, "live"))},'writing'),1);`;

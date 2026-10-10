@@ -499,9 +499,7 @@ integration suites protect ordering and accepted-command ownership. iOS recovery
 and dashboard owner tests cover attempt exhaustion, explicit retry and entry
 replacement without silently resetting the budget.
 
-`projection.test.ts` covers dense browser detail and tiny-content-part aggregates,
-including normalized response envelopes. `server-frame.test.ts` and capacity
-integration tests cover exact node limits, read-local fallback, both client roles,
+Capacity integration tests (`server-capacity.integration.test.ts`) cover exact node limits, read-local fallback, both client roles,
 and rejected-open subscription cleanup. The shared JSON-limit fixture is checked
 against both producer and native constants; the native transport regression drives
 an actual over-node-budget frame through decoding, diagnostic capture and strict
