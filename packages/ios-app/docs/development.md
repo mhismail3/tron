@@ -91,7 +91,7 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSheetFromGearAndOrdinaryChatKeepsSettings \
   --only-testing TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatOpenedBeforeStatusRoutesGearAfterClaim \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeIsNotAnOrdinarySessionRowWhileWorking \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowNamesRunningDesignationAsUpdate
 ```
 
