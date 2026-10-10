@@ -234,7 +234,7 @@ scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
 
 # Mac
 scripts/tron mac generate
-cd packages/mac-app && xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
+cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData
 ```
 

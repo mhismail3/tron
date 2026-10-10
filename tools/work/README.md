@@ -38,7 +38,7 @@ start a build:
   `vitest run` for the changed test files, under the default and nested configs;
 - `packages/push-relay`: `npm run check` and `npm run build`;
 - `packages/ios-app`: `scripts/tron-ios-test build`;
-- `packages/mac-app`: `scripts/tron mac generate`, then a Debug `xcodebuild build`;
+- `packages/mac-app`: `scripts/tron mac generate`, then a Debug `xcodebuild build-for-testing` (it also compiles the integration target);
 - changed scripts: `ast` parse for `.py`, `node --check` for `.mjs`/`.js`, `bash -n`
   for `.sh` and for shebang-shell files under `scripts/`;
 - each `--tests` command, run from the repository root.
