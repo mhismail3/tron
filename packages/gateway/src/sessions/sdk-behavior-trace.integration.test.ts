@@ -124,8 +124,8 @@ afterEach(async () => {
  * Bounded in-process CPU load: two chains of 4 ms bursts. Both run on this
  * worker's event loop, so this is one thread kept busy, not several cores — and
  * deliberately modest, because the Gateway suite runs four workers on a Mac
- * shared with other agents and an event-loop-stall owner
- * (`session-search-stall.test.ts`) measures that same host.
+ * shared with other agents and an event-loop-stall sampler measures that same
+ * host.
  */
 function startInProcessLoad(): () => void {
   let running = true;
