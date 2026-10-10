@@ -171,13 +171,4 @@ final class CustomModelConfigurationCoordinator {
         ) else { throw CancellationError() }
     }
 
-    #if HOSTED_TEST
-    func installHostedModels(_ value: JSONValue?, for target: CustomModelTarget) {
-        modelsByTarget[target] = value
-    }
-
-    func setHostedInvalidationGeneration(_ generation: Int) {
-        invalidationGeneration = generation
-    }
-    #endif
 }

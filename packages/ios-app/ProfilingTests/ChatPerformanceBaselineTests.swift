@@ -49,7 +49,7 @@ final class ChatPerformanceBaselineTests: XCTestCase {
 
             let deadline = Date().addingTimeInterval(15)
             while Date() < deadline {
-                if let observation = harness.recorder.samples.last?.observation,
+                if let observation = harness.recorder.samples.last,
                    observation.isReady,
                    observation.scrollSettledDistance != nil,
                    observation.visibleRowIDs.contains(harness.lastTranscriptID) {
@@ -59,7 +59,7 @@ final class ChatPerformanceBaselineTests: XCTestCase {
             }
             stopMeasuring()
 
-            let observation = harness.recorder.samples.last?.observation
+            let observation = harness.recorder.samples.last
             XCTAssertEqual(observation?.isReady, true)
             XCTAssertNotNil(observation?.scrollSettledDistance)
             XCTAssertTrue(observation?.visibleRowIDs.contains(harness.lastTranscriptID) == true)

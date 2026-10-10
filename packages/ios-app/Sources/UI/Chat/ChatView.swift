@@ -434,10 +434,6 @@ struct ChatView: View {
         let commands = ownsCatalog
             ? identity.commands.filter { identity.supportsSkillPrompt || $0.source != .skill }
             : []
-        #if HOSTED_TEST
-        hostedProbe?.recordComposerCatalogBuild()
-        defer { hostedProbe?.composerCatalogDidFinish?(commands) }
-        #endif
         let build = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let catalog = ComposerResourceCatalog(commands: commands)
@@ -454,15 +450,9 @@ struct ChatView: View {
         } catch {
             return
         }
-        #if HOSTED_TEST
-        await hostedProbe?.composerCatalogWillInstall?(catalog)
-        #endif
         guard !Task.isCancelled, activity == composerCatalogActivity, scenePhase == .active,
               identity == composerResourceCatalogIdentity else { return }
         installedComposerResourceCatalog = (identity, catalog)
-        #if HOSTED_TEST
-        hostedProbe?.recordComposerCatalogInstall(catalog)
-        #endif
         if ownsCatalog, let composerScope {
             model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
         }
@@ -1829,12 +1819,7 @@ struct ChatView: View {
     }
 
     private var admitsNativeScrollCallbacks: Bool {
-        guard presentationActivity.allowsViewportObservation else { return false }
-        #if HOSTED_TEST
-        return hostedProbe?.admitsNativeScrollCallbacks != false
-        #else
-        return true
-        #endif
+        presentationActivity.allowsViewportObservation
     }
 
     @ViewBuilder private var openingSurface: some View {
@@ -1859,9 +1844,6 @@ struct ChatView: View {
             .transition(.opacity.animation(
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
-            #if HOSTED_TEST
-            .background(ChatOpeningOverlayMotionProbe())
-            #endif
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -1882,9 +1864,6 @@ struct ChatView: View {
             .transition(.opacity.animation(
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
-            #if HOSTED_TEST
-            .background(ChatOpeningOverlayMotionProbe())
-            #endif
         case .presented, .ready:
             EmptyView()
         }
@@ -2012,7 +1991,6 @@ struct ChatView: View {
             )
         }
         #if HOSTED_TEST
-        if let hostedProbe { installHostedControls(probe: hostedProbe) }
         defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
         performanceTracker.discardScroll()
@@ -2286,110 +2264,6 @@ struct ChatView: View {
         sessionPresentation.modelPresentationGeneration = nil
         if !retainsReaderCut { transcriptPresentation.reset() }
     }
-
-    #if HOSTED_TEST
-    @MainActor
-    private func installHostedControls(probe: ChatHostedProbe) {
-        probe.openingOverlayControl = { failed in
-            var state = sessionPresentation.open
-            if failed {
-                _ = state.fail(sessionID: sessionID, epoch: state.epoch, message: "Hosted opener failure")
-            } else {
-                _ = state.begin()
-            }
-            withAnimation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)) {
-                sessionPresentation.open = state
-            }
-        }
-        probe.composerPickerEntries = {
-            presentedComposerResourcePicker == nil ? [] : composerResourceResults
-        }
-        probe.composerResourceSelection = { selectComposerResource($0) }
-        probe.composerResourcePickerPresentation = { destination in
-            if let destination { requestAttachmentPresentation(destination) }
-            else { dismissComposerResourcePicker() }
-        }
-        probe.installScrollControls(
-            geometry: { previous, current, viewport in
-                if viewport {
-                    scrollCoordinator.viewportChanged(previous: previous, current: current)
-                } else {
-                    scrollCoordinator.geometryChanged(previous: previous, current: current)
-                }
-            },
-            phase: { old, new, geometry in
-                scrollCoordinator.scrollPhaseChanged(from: old, to: new, finalGeometry: geometry)
-            },
-            native: { owned in
-                scrollCoordinator.scrollPositionChanged(isPositionedByUser: owned)
-            },
-            catchUp: { reduceMotion in
-                scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
-            },
-            semanticResponse: {
-                scrollCoordinator.semanticResponseArrived()
-            },
-            submitPrompt: {
-                send()
-            },
-            presentDisplay: { sessionPresentation.presentDisplay($0) },
-            frame: {
-                try await displayFrameScheduler.nextFrame()
-            },
-            state: {
-                ChatHostedScrollState(
-                    isDetached: scrollCoordinator.userScrolledAway,
-                    hasUnread: scrollCoordinator.hasUnreadContent
-                )
-            },
-            prepend: {
-                guard !isLoadingEarlierMessages,
-                      scrollCoordinator.canRequestHistoryPage,
-                      let generation = sessionPresentation.modelPresentationGeneration,
-                      let operationToken = sessionPresentation.earlierMessagesOperation.begin() else { return false }
-                let anchor = transcriptPresentation.installed
-                    .flatMap { installed in
-                        installed.tag == transcriptProjectionSource
-                            ? scrollCoordinator.semanticAnchor(in: installed.timeline)
-                            : nil
-                    }
-                return scrollCoordinator.beginHistoryPageLoad(
-                    anchor: anchor,
-                    load: { admittedAnchor in
-                        do { try await probe.waitForPrependPageRelease() }
-                        catch { return .failed }
-                        // The hosted boundary owns no Gateway transport. Model
-                        // exact canonical installation; semantic restoration is
-                        // emitted only when the coordinator admitted its anchor.
-                        guard sessionPresentation.modelPresentationGeneration == generation else {
-                            return .failed
-                        }
-                        guard let admittedAnchor,
-                              let current = transcriptPresentation.installed,
-                              current.tag == transcriptProjectionSource,
-                              let renderedID = current.timeline
-                                .renderedIDBySemanticID[admittedAnchor.semanticID] else {
-                            return .installed(nil)
-                        }
-                        let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
-                        return .installed(ChatPrependPage(
-                            renderedAnchorID: renderedID,
-                            installedLayout: installedLayout
-                        ))
-                    },
-                    completion: { result in
-                        probe.recordPrependCompletion(result)
-                        self.settleEarlierMessagesOperation(operationToken)
-                        self.intakeLatestTranscriptProjectionIfNeeded()
-                    }
-                )
-            },
-            cancelPresentation: {
-                scrollCoordinator.cancel()
-            }
-        )
-    }
-    #endif
 
     @MainActor
     private func beginOpeningReveal(epoch: Int) -> Bool {

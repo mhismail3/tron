@@ -895,9 +895,6 @@ final class AppModel {
     var selectedSessionID: String? { sessionPresentation.selectedSessionID }
     var selectedSnapshot: SessionSnapshot? { sessionPresentation.snapshot }
 
-    func selectHostedCompatibilitySession(_ sessionID: String?) {
-        sessionPresentation.installCompatibilitySelection(sessionID)
-    }
 
     func installHostedSecondaryProjection(
         context: JSONValue?,
@@ -917,9 +914,6 @@ final class AppModel {
         sessionPresentation.installHostedSnapshotWithoutPresentation(snapshot)
     }
 
-    func replaceHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
-        sessionPresentation.replaceHostedSnapshot(snapshot)
-    }
 
     func invalidateHostedPendingPresentation() {
         sessionPresentation.invalidateHostedPendingPresentation()
@@ -962,23 +956,12 @@ final class AppModel {
         try await lifecycle.connectHosted(profile: profile, token: token)
     }
 
-    func beginHostedReconciliationAggregate() {
-        guard let admission = lifecycle.admission else { return }
-        lifecycleBeginReconciliationAggregate(admission: admission)
-    }
 
-    func completeHostedReconciliationAggregate(succeeded: Bool) {
-        guard let admission = reconciliationAggregateAdmission else { return }
-        lifecycleCompleteReconciliationAggregate(admission: admission, succeeded: succeeded)
-    }
 
     func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
         settingsTrust.installHostedSettings(value, for: target)
     }
 
-    func setHostedSettingsInvalidationGeneration(_ generation: Int) {
-        settingsTrust.setHostedInvalidationGenerations(settings: generation)
-    }
 
     func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
         providerAuth.installHostedCatalog(catalog, for: target)
@@ -988,35 +971,11 @@ final class AppModel {
         providerAuth.installHostedRecentModels(models)
     }
 
-    func setHostedProviderInvalidationGeneration(_ generation: Int) {
-        providerAuth.setHostedInvalidationGeneration(generation)
-    }
 
-    func installHostedPackageInventory(
-        _ inventory: PackageInventory?,
-        for target: PackageConfigurationTarget
-    ) {
-        packageConfiguration.installHostedInventory(inventory, for: target)
-    }
 
-    func setHostedPackageInvalidationGeneration(_ generation: Int) {
-        packageConfiguration.setHostedInvalidationGeneration(generation)
-    }
 
-    func installHostedCustomModels(_ value: JSONValue?, for target: CustomModelTarget) {
-        customModelConfiguration.installHostedModels(value, for: target)
-    }
 
-    func setHostedCustomModelInvalidationGeneration(_ generation: Int) {
-        customModelConfiguration.setHostedInvalidationGeneration(generation)
-    }
 
-    func installHostedProviderAuthOperation(
-        _ operationID: String,
-        target: ProviderCatalogTarget = .global
-    ) {
-        providerAuth.installHostedAuthOperation(operationID, target: target)
-    }
     #endif
 
     func presentationGeneration(for sessionID: String) -> Int? {

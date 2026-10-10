@@ -43,7 +43,6 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     private let deliversCallbacksAfterClose: Bool
     private let deliversSendsAfterCancellation: Bool
     private let metadataValue: GatewaySocketMetadata
-    private let metadataGate: TestReadGate?
     private var closeBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
 
     init(
@@ -52,8 +51,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         suspendsClose: Bool = false,
         deliversCallbacksAfterClose: Bool = false,
         deliversSendsAfterCancellation: Bool = false,
-        metadata: GatewaySocketMetadata = .init(closeCode: nil, httpStatusCode: nil),
-        metadataGate: TestReadGate? = nil
+        metadata: GatewaySocketMetadata = .init(closeCode: nil, httpStatusCode: nil)
     ) {
         self.suspendsSend = suspendsSend
         self.suspendsPing = suspendsPing
@@ -61,12 +59,10 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         self.deliversCallbacksAfterClose = deliversCallbacksAfterClose
         self.deliversSendsAfterCancellation = deliversSendsAfterCancellation
         self.metadataValue = metadata
-        self.metadataGate = metadataGate
     }
 
     func metadata() async -> GatewaySocketMetadata {
-        await metadataGate?.wait()
-        return metadataValue
+        metadataValue
     }
 
     func send(_ data: Data) async throws {
@@ -341,11 +337,6 @@ final class ScriptedGatewaySocketFactory: Sendable {
 
     init(socket: ScriptedGatewaySocket) {
         state = Mutex(State(sockets: [socket]))
-    }
-
-    init(sockets: [ScriptedGatewaySocket]) {
-        precondition(!sockets.isEmpty)
-        state = Mutex(State(sockets: sockets))
     }
 
     var factory: GatewaySocketFactory {
