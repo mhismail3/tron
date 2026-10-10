@@ -498,6 +498,11 @@ export interface RuntimeSlotDependencies {
   /** Optional bounded observational memory owner. */
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
+  /** Session search for Home's research tools, late-bound: the service is
+   * installed on the registry after construction and may be absent. */
+  sessionSearch: () => import("./session-search-service.js").SessionSearchService | undefined;
+  /** Transport injection for Home's web tools (tests); production omits it. */
+  homeWebTransport?: import("../home/home-research-tools.js").HomeResearchTransport;
   connections?: ConnectionOwner;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
@@ -1823,6 +1828,21 @@ export class RuntimeSlot {
         homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools(sessionId),
         homeDelegate: this.dependencies.homeDelegate,
         homeTask: this.dependencies.homeTask,
+        sessionSearch: () => {
+          const search = this.dependencies.sessionSearch();
+          return search ? (request, signal) => search.search(request, signal) : undefined;
+        },
+        // Explicit recorded trust only: Home's read_file never follows the
+        // "always" default-trust setting, so an untrusted Mac path cannot be
+        // readable merely because the default is permissive.
+        explicitlyTrustedDirectory: async (path: string) => {
+          try {
+            return (await this.dependencies.trust.inspect(path)).savedDecision === true;
+          } catch {
+            return false;
+          }
+        },
+        ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept

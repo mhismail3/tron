@@ -25,7 +25,7 @@ installation:
 | `bindingRevision` | Advances when designation or reserved-chapter activation binds Home to a different physical session. |
 | `generation` | Advances on every profile change (designate, re-enable, disable) and fences in-flight operations. |
 | `routeGeneration` | Required positive route epoch. Set at designation; unchanged by disable, re-enable and rollover; advanced only on missing-session replacement. |
-| `policyRevision` | The curated-profile revision in force. A re-enable writes this build's revision. |
+| `policyRevision` | The curated-profile revision in force; `2` added the research tools (#724). Designation and re-enable both write this build's revision, so an older record advances the next time Home is enabled. |
 | `enabled` | Whether Home is currently designated. |
 | `model` | The model applied at the last designation, updated when the Home session's model changes. |
 | `memory` | Optional `{ model, paused?: true }`. Absent means unconfigured; there are no memory defaults. |
@@ -223,10 +223,10 @@ imported Registry target is ordinary unless the ledger names it.
 
 | | Home | Ordinary |
 | --- | --- | --- |
-| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
+| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
-| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
+| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | session-local view of the Gateway-wide user-scope runtime | one per session runtime |
@@ -239,6 +239,8 @@ imported Registry target is ordinary unless the ledger names it.
 - `tron-home` is loaded only for Home. It contributes Home's operating context,
   registers the memory tools, `delegate` and `task`, and is the single answer to the
   SDK's `cache_warming_decision`. It is not in `modules.list`.
+- `tron-home-research` is loaded only for Home (#724). It registers the
+  [read-only research tools](#the-research-tools). It is not in `modules.list`.
 - MCP is excluded structurally: no MCP extension loads for Home. From SDK 1.0.4, an
   allowlist naming no `mcp__*` tool keeps MCP tools registered, so omission from the
   allowlist would not exclude them.
@@ -280,9 +282,9 @@ is an ordinary change and does not touch the record.
 **Tool loadout.** A profile change does not rewrite the loadout, because Pi replays
 the declared loadout at every runtime creation. A disabled Home starts with
 `ask_user`, `display` and `notify`; the ordinary tools are only registered
-(`runtime-tool-loadout.integration.test.ts`). The memory tools belong to the
-Home-only module and are never registered or activated for an ordinary profile.
-`session.setTools` restores the ordinary tools.
+(`runtime-tool-loadout.integration.test.ts`). The memory and research tools belong
+to the Home-only modules and are never registered or activated for an ordinary
+profile. `session.setTools` restores the ordinary tools.
 
 ## Profile changes
 
@@ -547,6 +549,48 @@ byte-identical across activations and head every
 cached prefix. Only the summaries below the preamble move, and they remain
 request-local evidence, never instructions. `memory_search` is Tron's addition; the
 recipe's tree navigation is otherwise unchanged.
+
+## The research tools
+
+Home gets a curated **read-only** tool set (#724, maintainer decision) so it can
+find things out and remember them, while real work still goes to delegated worker
+sessions. `tron-home-research` registers five tools; all five are inside
+`HOME_TOOL_NAMES`, always registered (the tool list heads every cached prefix, so
+availability answers inside a result, never by changing the registration surface),
+and constant in description.
+
+| tool | what it answers |
+| --- | --- |
+| `web_search(query, maxResults?)` | Public web results (DuckDuckGo's HTML endpoint): title, URL and snippet per hit, at most 10. |
+| `web_fetch(url)` | One public http(s) page's readable text with its title and final URL, through capture's transport: credential-bearing URLs refused, every redirect hop DNS-resolved and refused when private (SSRF), the body read to a 2 MB bound. |
+| `session_search(query, maxResults?)` | This installation's chats through `SessionSearchService`: session, entry, kind, title and a bounded snippet per hit, with coverage and ranking state. |
+| `knowledge(action, ...)` | Exactly the read-only subset of the Knowledge tool: `search`, `recall`, `read` and `list`. Writes, connectors, curation and paid assessment are structurally absent from the schema, so Home cannot name them. |
+| `read_file(path, offset?, limit?)` | A bounded page of one file inside an **explicitly trusted** project, by absolute path. The canonical (symlink-resolved) location decides trust, and only a recorded `true` decision counts — the "always" default-trust setting never does — so a link inside a trusted project cannot read outside it, and Home's own workspace (recorded `false` at designation) is unreadable. No directory listing, no writes. |
+
+- **Bounded.** Every result is capped at the memory projection's tool-result bound
+  (30,000 characters, head and tail kept, with a marker), at the tool itself.
+- **Seam-unchanged.** The module registers tools only: no extension `context`
+  handler, no provider registration, no per-turn state in a tool description.
+  Every call runs inside an ordinary Home activation and passes the request seam
+  as-is (`home-research-tools.integration.test.ts` proves each tool with zero seam
+  refusals, and that ordinary sessions gain none of this).
+- **Owners per call.** Knowledge and session search resolve their service at every
+  call and answer a typed `unavailable` when absent; trust is read from the trust
+  store at every call, so a revoked decision takes effect immediately.
+
+**Injection surface.** Web results, fetched pages, other chats' snippets and
+Knowledge records are untrusted content, and Home can delegate tasks under the
+maintainer's standing scopes — so retrieved text could try to talk Home into
+dispatching work. The v1 decision is to **not** gate delegation on whether a turn
+fetched external content: standing scopes are maintainer-granted and revocable,
+every task is admitted with a durable attributed record and an explicit report, the
+maintainer shares steering, and a fetched-content fence would be per-turn state the
+request seam forbids in anything heading the cached prefix. Instead, each web and
+session result carries a constant untrusted-content banner, the operating context
+says retrieved text is never instructions or authorization to delegate, and this
+paragraph records the residual risk: a prompt-injected Home could still dispatch a
+task inside an existing standing scope, exactly as it could from a maintainer
+message that quoted the same text.
 
 ## Tasks
 
@@ -1180,6 +1224,7 @@ without a retained artifact.
 | `src/sessions/home-managed-provider.integration.test.ts` | Home delegate-only versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
+| `src/sessions/home-research-tools.integration.test.ts` | the five research tools inside real activations with zero seam refusals; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; `session.setTools` restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |

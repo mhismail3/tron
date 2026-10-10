@@ -245,11 +245,14 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 }
 
 const HOME_EXTENSIONS = [
-  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-notify",
+  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify",
 ];
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
-const HOME_TOOLS = ["ask_user", "date", "delegate", "display", "memory_search", "notify", "task", "zoom"];
+const HOME_TOOLS = [
+  "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "notify",
+  "read_file", "session_search", "task", "web_fetch", "web_search", "zoom",
+];
 
 describe("Tron Home designation", () => {
   homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {
