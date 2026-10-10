@@ -19,8 +19,12 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     maxWorkers: 1,
-    // Same as vitest.config.ts; the two configs must not drift on the test environment.
-    testTimeout: 15_000,
+    // Every file here waits on real pi/SDK/vitest children, which start in seconds and
+    // run one file at a time; their waits are hang bounds (test-support/wait-for.ts),
+    // so this pass declares its own: 45 s waits under a 60 s test timeout, which most
+    // of these files already set per test. The main pass keeps 12 s under 15 s.
+    testTimeout: 60_000,
+    env: { TRON_TEST_WAIT_HANG_BOUND_MS: "45000" },
     setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },
 });
