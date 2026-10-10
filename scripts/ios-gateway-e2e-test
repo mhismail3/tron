@@ -748,6 +748,13 @@ run_one_test_case() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest"
+  # Evidence is kept whatever the case's status: a possibly_sent or pong_timeout
+  # is exactly the case whose Gateway-side and phone-side records must be read
+  # together. Missing evidence is reported, never turned into a case status.
+  capture_journey_evidence "$attempt_dir" \
+    || echo "warning: $test_filter's Gateway or proxy evidence is incomplete (see above)" >&2
+  export_phone_liveness_records "$result_bundle" "$attempt_dir" \
+    || echo "warning: $test_filter attached no phone liveness records to its result bundle" >&2
   if ((status == 0)); then
     # A missing fixture must not turn XCTest's conditional skip into a green
     # cross-layer qualification receipt.
@@ -819,6 +826,39 @@ capture_journey_evidence() {
     failure=1
   fi
   return "$failure"
+}
+
+# The phone's liveness and transport records that the boundary case attaches as
+# `phone-liveness-records` (one JSON line per record, tagged with its client).
+# They are exported from the result bundle and joined into one file: with the
+# fault proxy's per-ping timeline, a reader separates a stalled Gateway (no pong
+# recorded, or a late one) from a stalled phone (the pong was forwarded to the
+# phone but the phone's deadline still fired).
+export_phone_liveness_records() {
+  local result_bundle="$1" attempt_dir="$2" export_dir status=0
+  [[ -d "$result_bundle" ]] || return 1
+  export_dir="$(mktemp -d "$attempt_dir/.attachments.XXXXXX")"
+  if xcrun xcresulttool export attachments --path "$result_bundle" --output-path "$export_dir" >/dev/null 2>&1; then
+    python3 - "$export_dir" "$attempt_dir/phone-liveness-records.jsonl" <<'PY' || status=1
+import json, sys
+from pathlib import Path
+
+export_dir, output = Path(sys.argv[1]), Path(sys.argv[2])
+manifest = json.loads((export_dir / "manifest.json").read_text())
+lines = []
+for test in manifest:
+    for attachment in test.get("attachments", []):
+        if attachment.get("suggestedHumanReadableName", "").startswith("phone-liveness-records"):
+            lines.append((export_dir / attachment["exportedFileName"]).read_text().rstrip("\n"))
+if not lines:
+    raise SystemExit("no phone-liveness-records attachment in the result bundle")
+output.write_text("\n".join(line for line in lines if line) + "\n")
+PY
+  else
+    status=1
+  fi
+  rm -rf "$export_dir"
+  return "$status"
 }
 
 write_journey_report() {

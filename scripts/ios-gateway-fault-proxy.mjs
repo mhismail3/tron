@@ -58,8 +58,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     logsExportRequestBytes: null, logsExportResponseBytes: null,
   };
   const logsExportRequestIDs = new Set();
+  // Ping timelines keep the last 128 client pings across every bridge of this
+  // fixture, so a failing case's final pings are never the ones evicted.
   const outstandingClientPings = [];
   let clientPingSequence = 0;
+  let bridgeSequence = 0;
   let heldHTTP = false;
   let releaseHTTP;
   let httpHoldTimer;
@@ -311,6 +314,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         headers: request.headers.authorization ? { authorization: request.headers.authorization } : {},
         maxPayload: maximumBytes, perMessageDeflate: compressed ? { clientMaxWindowBits: false } : false, autoPong: false,
       });
+      const connectionOrdinal = ++bridgeSequence;
       const pending = [];
       const heldFrames = [];
       let pendingBytes = 0, heldBytes = 0;
@@ -407,20 +411,28 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
       for (const [source, destination, direction] of [[front, back, "client"], [back, front, "gateway"]]) {
         source.on("ping", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
+          // Wall-clock stamps (`*At`) join these records to the phone's own
+          // liveness records on the one host clock; the `*Ms` offsets are
+          // proxy-relative and only order the proxy's events.
           const heartbeat = direction === "client" ? {
             payload: data.toString("hex"),
             timeline: {
               sequence: ++clientPingSequence,
+              connection: connectionOrdinal,
+              enqueuedAt: new Date().toISOString(),
               enqueuedMs: elapsedMilliseconds(),
               forwardedMs: null,
+              gatewayPongAt: null,
               gatewayPongMs: null,
+              roundTripMs: null,
+              appPongForwardedAt: null,
               appPongForwardedMs: null,
             },
           } : undefined;
           if (heartbeat) {
             outstandingClientPings.push(heartbeat);
             linkStats.clientHeartbeatTimeline.push(heartbeat.timeline);
-            if (linkStats.clientHeartbeatTimeline.length > 16) linkStats.clientHeartbeatTimeline.shift();
+            if (linkStats.clientHeartbeatTimeline.length > 128) linkStats.clientHeartbeatTimeline.shift();
             if (outstandingClientPings.length > 16) outstandingClientPings.shift();
           }
           void schedule("websocket-ping", data.length + (direction === "client" ? 6 : 2), () => {
@@ -437,14 +449,19 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
             ? outstandingClientPings.find(ping => ping.payload === data.toString("hex") && ping.timeline.gatewayPongMs === null)
             : undefined;
           if (heartbeat) {
+            heartbeat.timeline.gatewayPongAt = new Date().toISOString();
             heartbeat.timeline.gatewayPongMs = elapsedMilliseconds();
+            heartbeat.timeline.roundTripMs = heartbeat.timeline.gatewayPongMs - heartbeat.timeline.enqueuedMs;
             linkStats.heartbeatRoundTripMilliseconds.push(heartbeat.timeline.gatewayPongMs - heartbeat.timeline.enqueuedMs);
             if (linkStats.heartbeatRoundTripMilliseconds.length > 32) linkStats.heartbeatRoundTripMilliseconds.shift();
           }
           void schedule("websocket-pong", data.length + (direction === "gateway" ? 6 : 2), () => {
             if (destination.readyState === WebSocket.OPEN) {
               destination.pong(data);
-              if (heartbeat) heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
+              if (heartbeat) {
+                heartbeat.timeline.appPongForwardedAt = new Date().toISOString();
+                heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
+              }
               if (direction === "gateway") linkStats.forwardedWebSocketPongs++;
               if (heartbeat) {
                 const index = outstandingClientPings.indexOf(heartbeat);

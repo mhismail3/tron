@@ -2190,6 +2190,14 @@ scripts/ios-gateway-e2e-test run
 scripts/ios-gateway-e2e-test iterate
 ```
 
+Each focused case leaves one directory, `results/<utc>-run.XXXXXX`, whatever its
+status: the case's result bundle, the fixture Gateway's runtime log, the fault
+proxy's link statistics (`proxy-link-stats.json`, whose `clientHeartbeatTimeline`
+is the per-ping record of the Gateway's answers), and `phone-liveness-records.jsonl`,
+the phone's own liveness and transport records exported from the bundle. The
+[observability row](../../../packages/gateway/docs/observability.md#test-and-verification-environment-preflight)
+says how to read the two together.
+
 `run-lan` renews that same fixture with the Gateway's pinned LAN lane on
 (`TRON_GATEWAY_LAN_ENDPOINT=on`, kept across the proxy's private restart) and
 then runs `testRacesLanAndTailscaleLanes` — the E-3c two-lane case — instead of

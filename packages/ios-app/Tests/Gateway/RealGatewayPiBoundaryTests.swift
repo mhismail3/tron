@@ -345,26 +345,26 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         await reconnectedClient.close()
         await firstClient.close()
 
-        try await Self.exerciseForegroundReconnect(
+        try await exerciseForegroundReconnect(
             profile: profile,
             token: token,
             port: port,
             proxyToken: proxyToken,
             sessionID: created.sessionId
         )
-        let blackholeRecords = try await Self.exerciseBlackholedReconnect(
+        let blackholeRecords = try await exerciseBlackholedReconnect(
             profile: profile,
             token: token,
             port: port,
             proxyToken: proxyToken
         )
-        let foregroundRecords = try await Self.exerciseForegroundBlackholedReconnect(
+        let foregroundRecords = try await exerciseForegroundBlackholedReconnect(
             profile: profile,
             token: token,
             port: port,
             proxyToken: proxyToken
         )
-        let longOutageRecords = try await Self.exerciseLongBlackholedReconnect(
+        let longOutageRecords = try await exerciseLongBlackholedReconnect(
             profile: profile,
             token: token,
             port: port,
@@ -385,7 +385,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// measure. The app stays foregrounded throughout: no scene transition opens
     /// or ends anything.
     @MainActor
-    private static func exerciseForegroundBlackholedReconnect(
+    private func exerciseForegroundBlackholedReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -401,7 +401,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        let client = GatewayClient()
+        let client = makeClient()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -917,7 +917,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// that ends the outage, so the leg also proves the second outage is answered
     /// by a new attempt instead of a loop parked in projection work.
     @MainActor
-    private static func exerciseLongBlackholedReconnect(
+    private func exerciseLongBlackholedReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -933,7 +933,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        let client = GatewayClient()
+        let client = makeClient()
         let projection = StallingRestoreProjection()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
@@ -1151,7 +1151,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// attempts. Returns the outage's own records so the caller can attach them
     /// for inspection.
     @MainActor
-    private static func exerciseBlackholedReconnect(
+    private func exerciseBlackholedReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -1167,7 +1167,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        let client = GatewayClient()
+        let client = makeClient()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -1294,7 +1294,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     }
 
     @MainActor
-    private static func exerciseForegroundReconnect(
+    private func exerciseForegroundReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -1306,7 +1306,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let memoryTokens = MemoryGatewayTokenStore()
         let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
         try profiles.save(profile, token: token)
-        let client = GatewayClient()
+        let client = makeClient()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -1395,8 +1395,57 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
 
     private func makeClient(networkPath: (@Sendable () -> String?)? = nil) -> GatewayClient {
         let client = networkPath.map { path in GatewayClient(networkPath: path) } ?? GatewayClient()
-        addTeardownBlock { await client.close() }
+        addTeardownBlock {
+            await self.attachLivenessRecords(of: client)
+            await client.close()
+        }
         return client
+    }
+
+    /// The phone's liveness and transport records for one client, one JSON line
+    /// per record, so a failed case shows what the phone saw. A retired epoch's
+    /// liveness record gives the probe's send time (`timestamp` less
+    /// `durationMilliseconds`) and when its deadline fired (`timestamp`); its
+    /// transport record gives the last inbound frame (`timestamp` less
+    /// `lastInboundAgeMilliseconds`). `scripts/ios-gateway-e2e-test` exports this
+    /// attachment beside the fault proxy's per-ping timeline on the same clock.
+    private func attachLivenessRecords(of client: GatewayClient) async {
+        let records = await client.diagnostics()
+            .filter { $0.stage == .liveness || $0.stage == .transport }
+            .sorted { $0.sequence < $1.sequence }
+        guard !records.isEmpty else { return }
+        let lines: [String] = records.map { record in
+            let value = JSONValue.object([
+                "clientId": .string(client.diagnosticOwnerID),
+                "sequence": .number(Double(record.sequence)),
+                "stage": .string(record.stage.rawValue),
+                "outcome": .string(record.outcome.rawValue),
+                "timestamp": .string(record.timestamp),
+                "durationMilliseconds": .number(Double(record.durationMilliseconds)),
+                "reason": Self.optionalString(record.reason?.rawValue),
+                "connectionID": Self.optionalNumber(record.connectionID),
+                "gatewayConnectionID": Self.optionalString(record.gatewayConnectionID),
+                "attemptID": Self.optionalString(record.attemptID),
+                "lastInboundAgeMilliseconds": Self.optionalNumber(record.lastInboundAgeMilliseconds),
+                "lastWriteProgressAgeMilliseconds": Self.optionalNumber(record.lastWriteProgressAgeMilliseconds),
+                "platformCode": Self.optionalNumber(record.platformCode),
+                "closeCode": Self.optionalNumber(record.closeCode),
+                "httpStatusCode": Self.optionalNumber(record.httpStatusCode),
+            ])
+            return String(decoding: (try? JSONEncoder.gateway.encode(value)) ?? Data(), as: UTF8.self)
+        }
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n") + "\n")
+        attachment.name = "phone-liveness-records"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private static func optionalNumber(_ value: Int?) -> JSONValue {
+        value.map { JSONValue.number(Double($0)) } ?? .null
+    }
+
+    private static func optionalString(_ value: String?) -> JSONValue {
+        value.map { JSONValue.string($0) } ?? .null
     }
 
     private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false, rateBytesPerSecond: Int? = nil, latencyMilliseconds: Int? = nil, maximumQueuedBytes: Int? = nil) async throws {
