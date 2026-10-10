@@ -2,6 +2,9 @@ import Foundation
 
 /// Owns one user Quit across Gateway drain, exact process disappearance and
 /// native-host retirement. Uncertain stages fail closed; the caller leaves UI open.
+/// A Quit retried after the Gateway has stopped (for example, native-host
+/// retirement failed) resumes at retirement only while the Login Item is enabled
+/// and launchd reports no running Gateway process.
 @MainActor
 final class MacQuitCoordinator {
     enum Failure: Error, LocalizedError, Equatable {
@@ -31,6 +34,7 @@ final class MacQuitCoordinator {
     private let readRuntime: @Sendable () async throws -> LaunchAgentRuntimeInfo?
     private let processStartIdentity: @Sendable (Int) async -> String?
     private let runtimeOwnershipHealthy: @Sendable () async -> Bool
+    private let serviceEnabled: @Sendable () -> Bool
     private let stopGateway: @Sendable (String) async throws -> GatewayStopClient.Response
     private let retireNativeHost: @Sendable () async throws -> Void
     private let wait: @Sendable () async throws -> Void
@@ -41,6 +45,7 @@ final class MacQuitCoordinator {
         readRuntime: @escaping @Sendable () async throws -> LaunchAgentRuntimeInfo?,
         processStartIdentity: @escaping @Sendable (Int) async -> String?,
         runtimeOwnershipHealthy: @escaping @Sendable () async -> Bool,
+        serviceEnabled: @escaping @Sendable () -> Bool,
         stopGateway: @escaping @Sendable (String) async throws -> GatewayStopClient.Response,
         retireNativeHost: @escaping @Sendable () async throws -> Void,
         wait: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) }
@@ -48,6 +53,7 @@ final class MacQuitCoordinator {
         self.readRuntime = readRuntime
         self.processStartIdentity = processStartIdentity
         self.runtimeOwnershipHealthy = runtimeOwnershipHealthy
+        self.serviceEnabled = serviceEnabled
         self.stopGateway = stopGateway
         self.retireNativeHost = retireNativeHost
         self.wait = wait
@@ -62,7 +68,18 @@ final class MacQuitCoordinator {
     }
 
     private func perform() async throws {
-        guard await runtimeOwnershipHealthy() else { throw Failure.unmanaged }
+        if await runtimeOwnershipHealthy() {
+            try await stopOwnedRuntime()
+        } else {
+            // Unowned means either stopped (resume) or running but foreign. Only an
+            // enabled service with no running process resumes; a foreign runtime or
+            // a disabled service is refused without a stop request.
+            guard serviceEnabled(), try await readRuntime()?.pid == nil else { throw Failure.unmanaged }
+        }
+        try await retireNativeHost()
+    }
+
+    private func stopOwnedRuntime() async throws {
         guard let before = try await readRuntime(), let pid = before.pid,
               let command = before.processCommand,
               let start = await processStartIdentity(pid), !start.isEmpty else {
@@ -92,7 +109,6 @@ final class MacQuitCoordinator {
             }
             try await wait()
         }
-        try await retireNativeHost()
     }
 
     static func shouldCoordinate(mode: MacStartupMode, ownsLock: Bool, canManage: Bool) -> Bool {
