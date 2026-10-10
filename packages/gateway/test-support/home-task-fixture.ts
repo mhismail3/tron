@@ -87,6 +87,8 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   }
   const managedSubagents = managed ? ManagedSubagents.activateForStartup(tronHome) : undefined;
   // Fixture runtimes never idle-evict; an omitted idle lifetime would make the cutoff NaN.
+  // Every slot event, so a test can assert that a path emits no error event.
+  const events: Array<{ topic: string; payload: unknown }> = [];
   const pushStore = new NotificationGrantStore(join(root, "notifications"));
   await pushStore.initialize();
   // No relay: admission validates and records nothing is sent off the Mac.
@@ -96,7 +98,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
     },
-    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    broadcast: (_sessionId: string, topic: string, payload: unknown) => { events.push({ topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     notifications: { enqueue: async (input: Parameters<NotificationService["enqueue"]>[0]) => {
       // The real admission (identity, route and bounds) runs before a push is
       // recorded: a fake that accepts anything hid a route every real push refused.
@@ -127,7 +129,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
-  return { root, registry, faux, cwd, tronHome, home, signals, notifications, agentDir, trust, restartToReadiness,
+  return { root, registry, faux, cwd, tronHome, home, signals, notifications, events, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
       await cold.recoverHomeTasks();

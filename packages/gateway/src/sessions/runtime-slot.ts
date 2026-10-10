@@ -890,6 +890,10 @@ export class RuntimeSlot {
   private extensionCanonicalEffectFlushScheduled = false;
   private readonly pendingExtensionCanonicalEffects: PendingExtensionCanonicalEffect[] = [];
   private readonly pendingContextMessages: PendingContextMessage[] = [];
+  /** Event IDs of the Home inbox messages being appended right now. The inbox
+   * writes their exact context receipt itself, so generic custom-message
+   * attribution must not claim them with a second, conflicting receipt. */
+  private readonly inboxAttributedMessages = new Set<string>();
   private pendingManualCompaction: PendingManualCompaction | undefined;
   private compactionBaselineEntryId: string | undefined;
   /** Exact operation installed at compaction_start. A hook may launch a
@@ -3481,6 +3485,11 @@ export class RuntimeSlot {
   /** Pi stages before appending. If a failed append left an entry in memory,
    * the enclosing durable-write owner fences the runtime; neither replay nor
    * memory-only presence can replace the missing canonical persistence proof. */
+  private isInboxAttributed(message: AgentMessage): boolean {
+    const eventId = (message as { details?: { eventId?: unknown } }).details?.eventId;
+    return typeof eventId === "string" && this.inboxAttributedMessages.has(eventId);
+  }
+
   private persistVerifiedCustomEntry(options: {
     describe: string;
     existing: () => "absent" | "matching" | "contradictory";
@@ -4521,6 +4530,8 @@ export class RuntimeSlot {
             // arrive; the canonical user append follows on the scheduled frame.
             this.publishSnapshot();
           }
+        } else if (event.message.role === "custom" && this.isInboxAttributed(event.message)) {
+          this.flushPendingProgress();
         } else if (event.message.role === "custom") {
           this.flushPendingProgress();
           // Pi emits stored messages after their exact canonical append and
@@ -4814,6 +4825,8 @@ export class RuntimeSlot {
         } else if (event.message.role === "assistant") {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
+        } else if (event.message.role === "custom" && this.isInboxAttributed(event.message)) {
+          // The Home inbox persists this message's receipt after the send returns.
         } else if (event.message.role === "custom") {
           // Custom callbacks are serial. Stored sends already exposed their
           // exact canonical ID at message_start; triggered sends append as soon
@@ -7969,7 +7982,9 @@ export class RuntimeSlot {
           this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
           if (this.homeRequestPolicy) {
             await this.dependencies.homeInboxAdmission(this.id, operationId, async message => {
-              await session.sendCustomMessage(message, { triggerTurn: false });
+              this.inboxAttributedMessages.add(message.details.eventId);
+              try { await session.sendCustomMessage(message, { triggerTurn: false }); }
+              finally { this.inboxAttributedMessages.delete(message.details.eventId); }
               const entry = session.sessionManager.getLeafEntry();
               if (entry?.type !== "custom_message" || entry.customType !== message.customType
                 || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
