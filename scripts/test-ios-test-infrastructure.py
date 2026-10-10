@@ -1633,8 +1633,11 @@ class BuildIdentityFixture(ContainedFixture, unittest.TestCase):
         self.temporary.cleanup()
 
     def git(self, *arguments: str) -> str:
+        return self.git_in(self.worktree, *arguments)
+
+    def git_in(self, repository: Path, *arguments: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(self.worktree), *arguments],
+            ["git", "-C", str(repository), *arguments],
             env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
@@ -1701,6 +1704,40 @@ class BuildIdentityFixture(ContainedFixture, unittest.TestCase):
         with_untracked = self.identity()
         self.assertTrue(with_untracked["dirty"])
         added.write_text("let added = 2\n")
+        self.assertNotEqual(self.identity()["source_fingerprint"], with_untracked["source_fingerprint"])
+
+    def test_a_nested_checkout_under_the_worktree_is_identified_by_its_own_state(self) -> None:
+        """Failure modes this case targets, written before the code:
+
+        1. Git lists an untracked nested repository as one `dir/` entry, so the
+           identity read crashes on it, as it did under the ignored build root.
+        2. The identity omits the nested checkout's commit, so a dependency moved
+           to another revision keeps products that were built from the old one.
+        3. The identity omits the nested checkout's own uncommitted or untracked
+           content, so an edited dependency keeps stale products.
+        """
+        nested = self.worktree / "build/SourcePackages/checkouts/Dependency"
+        nested.mkdir(parents=True)
+        self.git_in(nested, "init", "-q")
+        self.git_in(nested, "config", "user.email", "tests@tron.invalid")
+        self.git_in(nested, "config", "user.name", "Tron Tests")
+        (nested / "Dependency.swift").write_text("let dependency = 1\n")
+        self.git_in(nested, "add", "Dependency.swift")
+        self.git_in(nested, "commit", "-q", "-m", "initial")
+
+        first = self.identity()
+        self.assertTrue(first["dirty"])
+        self.assertEqual(first, self.identity())
+
+        (nested / "Dependency.swift").write_text("let dependency = 2\n")
+        self.git_in(nested, "commit", "-q", "-am", "second")
+        moved = self.identity()
+        self.assertNotEqual(moved["source_fingerprint"], first["source_fingerprint"])
+
+        (nested / "Scratch.swift").write_text("let scratch = 1\n")
+        with_untracked = self.identity()
+        self.assertNotEqual(with_untracked["source_fingerprint"], moved["source_fingerprint"])
+        (nested / "Scratch.swift").write_text("let scratch = 2\n")
         self.assertNotEqual(self.identity()["source_fingerprint"], with_untracked["source_fingerprint"])
 
     def test_verify_refuses_missing_or_foreign_identity(self) -> None:
