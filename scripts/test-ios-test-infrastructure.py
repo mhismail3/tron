@@ -900,6 +900,7 @@ class RunnerFixture(SyntheticReaders, unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.install_readers(self.root)
+        self.checkout = self.create_fixture_checkout()
         self.xcrun = self.bin / "xcrun"
         self.synthetic_stub(self.xcrun, """import json, os, sys
 from pathlib import Path
@@ -1000,9 +1001,41 @@ shutil.copytree(source, clone)
         finally:
             self.temporary.cleanup()
 
-    def source_identity(self, worktree: Path = ROOT) -> dict[str, object]:
+    def create_fixture_checkout(self) -> Path:
+        """A git repository holding copies of the runner's tool sources, and nothing else.
+
+        The runner stamps and verifies the identity of the checkout it runs from. The
+        real checkout's identity depends on what its developer left untracked or
+        ignored, and under this fixture's isolated HOME the developer's global
+        ignores no longer apply, so a fixture that reads the real checkout depends on
+        the machine it runs on. The fixture runs the tools from its own repository.
+        """
+        # Resolved: the identity owner records the real path, which macOS spells under /private.
+        checkout = self.root.resolve() / "checkout"
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=ignore)
+        shutil.copytree(ROOT / "config", checkout / "config", ignore=ignore)
+        shutil.copy2(ROOT / ".node-version", checkout / ".node-version")
+        shutil.copytree(ROOT / ".github/workflows", checkout / ".github/workflows", ignore=ignore)
+        # The project generator runs in this directory; a file keeps it in the commit (Git
+        # does not track empty directories).
+        (checkout / "packages/ios-app").mkdir(parents=True)
+        (checkout / "packages/ios-app/project.yml").write_text("name: TronMobile\n")
+        environment = self.contained_environment(self.root)
+        for arguments in (
+            ("init", "-q"),
+            ("config", "user.email", "tests@tron.invalid"),
+            ("config", "user.name", "Tron Tests"),
+            ("add", "--all"),
+            ("commit", "-q", "-m", "fixture checkout"),
+        ):
+            subprocess.run(["git", "-C", str(checkout), *arguments], env=environment, check=True,
+                           text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return checkout
+
+    def source_identity(self, worktree: Path | None = None) -> dict[str, object]:
         completed = subprocess.run(
-            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree)],
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree or self.checkout)],
             env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         )
@@ -1010,7 +1043,7 @@ shutil.copytree(source, clone)
 
     def write_products_identity(self, value: dict[str, object] | None = None) -> None:
         subprocess.run(
-            [sys.executable, str(IDENTITY), "write", "--worktree", str(ROOT), "--derived-data", str(self.derived)],
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(self.checkout), "--derived-data", str(self.derived)],
             env=self.contained_environment(self.root),
             check=True, text=True, input=json.dumps(value if value is not None else self.source_identity()),
             stdout=subprocess.DEVNULL,
@@ -1023,7 +1056,7 @@ shutil.copytree(source, clone)
         extra_args: list[str] | None = None,
         lane: str | None = None, discovery_root: Path | None = None,
         override: dict[str, str] | None = None,
-        runner_root: Path = ROOT,
+        runner_root: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
@@ -1061,7 +1094,7 @@ shutil.copytree(source, clone)
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str(runner_root / "scripts/tron-ios-test"), command, *(extra_args or [])],
+            [str((runner_root or self.checkout) / "scripts/tron-ios-test"), command, *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -1153,7 +1186,7 @@ shutil.copytree(source, clone)
             "FAKE_SUMMARY": '{"passedTests":3,"failedTests":0,"skippedTests":0,"totalTestCount":3}',
         })
         result = subprocess.run(
-            [str(ROOT / "scripts/ios-ci-test.sh")], env=environment,
+            [str(self.checkout / "scripts/ios-ci-test.sh")], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1203,7 +1236,7 @@ shutil.copytree(source, clone)
         self.assertEqual(result.returncode, 74, result.stderr)
         self.assertIn("refusing to run", result.stderr)
         self.assertIn("/private/tmp/tron-foreign", result.stderr)
-        self.assertIn(str(ROOT), result.stderr)
+        self.assertIn(str(self.checkout), result.stderr)
 
     def test_run_refuses_products_from_a_changed_source_state(self) -> None:
         build = self.source_identity()
@@ -1225,7 +1258,7 @@ shutil.copytree(source, clone)
 
     def primary_products(self) -> Path:
         common_dir = subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            ["git", "-C", str(self.checkout), "rev-parse", "--path-format=absolute", "--git-common-dir"],
             env=self.contained_environment(self.root), check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         primary = Path(common_dir).parent
@@ -1238,7 +1271,7 @@ shutil.copytree(source, clone)
     def add_runner_worktree(self) -> Path:
         runner_root = self.root / "runner-worktree"
         subprocess.run(
-            ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(runner_root), "HEAD"],
+            ["git", "-C", str(self.checkout), "worktree", "add", "--detach", str(runner_root), "HEAD"],
             env=self.contained_environment(self.root), check=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -1253,7 +1286,7 @@ shutil.copytree(source, clone)
 
     def remove_runner_worktree(self, runner_root: Path) -> None:
         subprocess.run(
-            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(runner_root)],
+            ["git", "-C", str(self.checkout), "worktree", "remove", "--force", str(runner_root)],
             env=self.contained_environment(self.root), check=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -1324,12 +1357,12 @@ shutil.copytree(source, clone)
         self.assertEqual(result.returncode, 0, result.stderr)
         stamp = json.loads((self.derived / "build-identity.json").read_text())
         self.assertEqual(stamp["schema"], "tron.ios-test-build-identity.v1")
-        self.assertEqual(stamp["worktree"], str(ROOT))
+        self.assertEqual(stamp["worktree"], str(self.checkout))
         self.assertEqual(stamp, self.source_identity())
         metadata = self.latest_metadata()
         self.assertEqual(metadata["source"], stamp)
         self.assertEqual(metadata["source"]["revision"], subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], env=self.contained_environment(self.root),
+            ["git", "-C", str(self.checkout), "rev-parse", "HEAD"], env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip())
         self.assertIsInstance(metadata["source"]["dirty"], bool)
@@ -1364,13 +1397,13 @@ shutil.copytree(source, clone)
         result = self.invoke(command="status", home=home)
         self.assertEqual(result.returncode, 0, result.stderr)
         key = subprocess.run(
-            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(self.checkout)],
             env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         expected = home / "Library/Developer/Tron/ios/test-derived-data" / key
         self.assertIn(f"Test products directory: {expected}", result.stdout)
-        self.assertIn(f"Worktree: {ROOT}", result.stdout)
+        self.assertIn(f"Worktree: {self.checkout}", result.stdout)
 
     def test_clean_removes_only_this_worktrees_products(self) -> None:
         sibling = self.derived.parent / "sibling-products"
@@ -1488,7 +1521,7 @@ shutil.copytree(source, clone)
         self.assertEqual(result.returncode, 0, result.stderr)
         lane = self.root / "ios-test-alpha"
         marker = json.loads((lane / "simulator.json").read_text())
-        self.assertEqual(marker["worktree"], str(ROOT))
+        self.assertEqual(marker["worktree"], str(self.checkout))
         self.assertGreaterEqual(marker["last_used_epoch_seconds"], int(started))
         self.assertLessEqual(marker["last_used_epoch_seconds"], int(time.time()) + 1)
         self.assertEqual(marker["name"], "Tron iOS Tests (alpha)")
