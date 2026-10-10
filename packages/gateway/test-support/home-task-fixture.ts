@@ -13,12 +13,24 @@ import { delegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
 // Registered runtime roots of the current test file. Each file's afterEach calls
 // disposeFixtures(), so a fixture is retired with the file that created it.
 const fixtures: Array<{ registry: RuntimeRegistry; root: string }> = [];
+/** Retires every fixture and restores the environment the fixtures stubbed (TMPDIR
+ * points into a fixture root). Every fixture is attempted and the environment is
+ * restored even when one disposal fails, so a failed teardown is reported against
+ * its own test instead of pointing the next fixture at a deleted directory. */
 export async function disposeFixtures(): Promise<void> {
-  for (const fixture of fixtures.splice(0)) {
-    await fixture.registry.dispose();
-    await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
-    await rm(fixture.root, { recursive: true, force: true });
+  const failures: unknown[] = [];
+  try {
+    for (const fixture of fixtures.splice(0)) {
+      try {
+        await fixture.registry.dispose();
+        await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
+        await rm(fixture.root, { recursive: true, force: true });
+      } catch (error) { failures.push(error); }
+    }
+  } finally {
+    vi.unstubAllEnvs();
   }
+  if (failures.length) throw failures[0];
 }
 
 // A same-named user package. The producer gate admits a provider only by managed

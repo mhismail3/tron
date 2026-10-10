@@ -22,7 +22,6 @@ const evidence: Array<Record<string, unknown>> = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   await disposeFixtures();
-  vi.unstubAllEnvs();
 });
 afterAll(async () => {
   if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));

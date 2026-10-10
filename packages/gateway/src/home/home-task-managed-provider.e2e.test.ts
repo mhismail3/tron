@@ -9,7 +9,6 @@ import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-suppo
 afterEach(async () => {
   vi.restoreAllMocks();
   await disposeFixtures();
-  vi.unstubAllEnvs();
 });
 
 describe("Home task managed provider", () => {
