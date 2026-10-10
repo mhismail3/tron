@@ -1,15 +1,17 @@
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
+import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
 
-export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
+export { HOME_TASK_RESULT_MESSAGE };
 export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
+/** Consecutive wake activations with no user message between them (#749). */
+export const HOME_WAKE_CEILING = 8;
 export interface HomeWakeEnvelope { signal: AbortSignal; tokens: number; freshTokens: number; bytes: number; entries: number }
 export interface HomeWakeRoute { homeId: string; routeGeneration: number; generation: number; enabled: boolean; sessionId: string }
 export interface HomeWakeEvent {
@@ -17,6 +19,7 @@ export interface HomeWakeEvent {
   routeGeneration: number;
   createdAt: string;
   state: "pending" | "claimed" | "admitted" | "terminal" | "acknowledged" | "blocked" | "outcome-unknown";
+  /** Undecided until one push covers the event: its wake turn's terminal push, a waiting notice, or the task-finished notice. */
   push: "pending" | "decided";
   delivery: { sessionId: string; operationId: string; generation: number; routeGeneration: number; messageDigest: string } | null;
   acknowledgedAt: string | null;
@@ -28,6 +31,10 @@ export interface HomeWakeMessage {
   display: true;
   details: { eventId: string; taskId: string; resultRef: HomeTaskRecord["reportRef"]; terminalEvidence: HomeTaskRecord["terminalEvidence"]; operationId: string; routeGeneration: number };
 }
+/** The result a wake starts with. It is the run's trigger: the SDK appends it and starts the turn. */
+export interface HomeWakeTrigger { taskId: string; message: HomeWakeMessage }
+/** `user`: a user activation drains results as context; `wake`: the last result starts the run. */
+export type HomeWakeDelivery = "user" | "wake";
 export interface HomeWakeEvidence {
   type: string; id: string; sessionId: string; customType?: string; details?: unknown; data?: unknown; content?: unknown;
 }
@@ -44,13 +51,18 @@ interface Options {
   result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; text: string; subagents: HomeTaskSubagents }>;
   /** Reads the canonical entries one delivery's proof can use; it must keep no others. */
   evidence: (scope: HomeWakeEvidenceScope) => Promise<HomeWakeEvidence[]>;
+  /** Whether a settled result may wake Home now. Read when a result settles: only
+   * the wake's own admission can refuse later (ceiling, busy, failure). */
+  wakeAvailable: (homeId: string) => Promise<boolean>;
+  /** Asks the wake owner to look at pending results. Called at most once per settled result. */
+  wake: (homeId: string) => void;
   diagnostic?: (record: HomeWakeDiagnostic) => void;
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** Each terminal task owns its outbox/tombstone. There is no independent event
  * catalog or retention clock that can outlive (or lose) its immutable result.
- * Only a maintainer's next activation admits messages; recovery never prompts. */
+ * A result wakes Home only through the wake owner; recovery never prompts. */
 export class WakeInboxOwner {
   private readonly mutex = new AsyncMutex();
   constructor(private readonly store: HomeTaskStore, private readonly options: Options) {}
@@ -60,47 +72,91 @@ export class WakeInboxOwner {
       createdAt: new Date().toISOString(), state: "pending", push: "pending", delivery: null, acknowledgedAt: null, redeliveries: [] };
   }
 
+  /** A settled result. Home is eligible: the wake owner decides when it runs and
+   * which push covers the result. Otherwise the task-finished push goes now. */
   async publish(taskId: string): Promise<void> {
-    await this.mutex.run(() => this.push(taskId));
+    await this.mutex.run(async () => {
+      const task = await this.store.read(taskId);
+      if (!task?.wake || task.wake.push === "decided") return;
+      if (await this.options.wakeAvailable(task.homeId)) { this.options.wake(task.homeId); return; }
+      await this.pushTask(task);
+    });
   }
-  private async push(taskId: string): Promise<void> {
-    const task = await this.store.read(taskId);
-    if (!task?.wake || task.wake.push === "decided") return;
-    // At-most-once advisory decision precedes enqueue. Losing a push in this
-    // crash window is acceptable; the co-committed inbox is guaranteed delivery.
-    // NotificationService's bounded 24h dedupe cannot own task-lifetime replay.
-    await this.change(taskId, wake => ({ ...wake, push: "decided" }), "push-decided");
-    const sessionId = this.options.pushSession(task.homeId);
-    if (!sessionId) return;
-    try {
-      await this.options.notify({ sessionId, sourceId: task.wake.eventId, kind: "agent_finished",
-        title: "Tron Home task", message: `Task finished: ${task.terminalEvidence!.outcome}. Open Home to review the result.`,
-        ...(this.options.machineId ? { route: { sessionId, machineId: this.options.machineId } } : {}) });
-    } catch { /* canonical result/inbox remains available independently */ }
+
+  /** The task-finished push of today: one advisory notice per result, decided before enqueue. */
+  private async pushTask(task: HomeTaskRecord): Promise<void> {
+    await this.decide([task.taskId], "push-task-finished");
+    await this.notify(task.homeId, task.wake!.eventId, `Tron Home task`,
+      `Task finished: ${task.terminalEvidence!.outcome}. Open Home to review the result.`);
+  }
+
+  /** Results waiting for a wake, in the order a wake would deliver them. */
+  async pendingTasks(homeId: string): Promise<HomeTaskRecord[]> {
+    const pending: HomeTaskRecord[] = [];
+    for await (const task of this.store.records()) {
+      if (task.homeId === homeId && task.wake?.state === "pending") pending.push(task);
+    }
+    return pending.sort(deliveryOrder);
+  }
+
+  /** Pending results whose wake was refused. `task` keeps the per-result notice (disabled,
+   * paused, blocked); `waiting` announces every pending result in one notice. */
+  async pushPending(homeId: string, mode: "task" | "waiting"): Promise<void> {
+    await this.mutex.run(async () => {
+      const pending: HomeTaskRecord[] = [];
+      for await (const task of this.store.records()) {
+        if (task.homeId === homeId && task.wake?.state === "pending" && task.wake.push === "pending") pending.push(task);
+      }
+      if (mode === "task") { for (const task of pending) await this.pushTask(task); return; }
+      if (pending.length === 0) return;
+      await this.decide(pending.map(task => task.taskId), "push-waiting");
+      await this.notify(homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home",
+        "Home is waiting for you: finished task results are waiting in Home.");
+    });
   }
 
   async recover(route: HomeWakeRoute): Promise<void> {
     await this.mutex.run(async () => {
+      const proven = new Map<string, string[]>();
       for await (const task of this.store.records()) {
         if (!task.wake || task.wake.state === "acknowledged") continue;
-        await this.push(task.taskId);
-        const wake = task.wake!;
-        if (wake.state === "claimed") {
+        if (task.wake.state === "claimed") {
           await this.change(task.taskId, current => ({ ...current, state: "pending", delivery: null }), "claim-recovered");
-        } else if (["admitted", "terminal"].includes(wake.state)) {
+        } else if (task.wake.state === "pending" && task.wake.push === "pending") {
+          // A committed terminal whose publication never ran: decide its push as publish would.
+          if (!(await this.options.wakeAvailable(task.homeId))) await this.pushTask(task);
+        } else if (["admitted", "terminal"].includes(task.wake.state)) {
           const proof = await this.prove(task);
           if (proof === "proven") {
-            if (route.enabled && task.homeId === route.homeId && wake.routeGeneration === route.routeGeneration) await this.ack(task, route);
+            // A route this process no longer owns cannot acknowledge; its event stays as it is.
+            if (route.enabled && task.homeId === route.homeId && task.wake.routeGeneration === route.routeGeneration) {
+              await this.change(task.taskId, current => ({ ...current, state: "terminal" }), "canonical-terminal");
+              const operation = task.wake.delivery!.operationId;
+              proven.set(operation, [...proven.get(operation) ?? [], task.taskId]);
+            }
           }
           else if (proof !== "deferred") await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), `admission-proof-${proof}`);
         }
       }
+      const operations = new Set<string>(proven.keys());
+      for await (const task of this.store.records()) if (task.wake?.delivery) operations.add(task.wake.delivery.operationId);
+      for (const operation of operations) await this.finishOperation(route, operation, proven.get(operation) ?? []);
     });
   }
 
-  async admit(route: HomeWakeRoute, operationId: string, append: (message: HomeWakeMessage) => Promise<void>, prepareEnvelope: () => Promise<HomeWakeEnvelope>): Promise<void> {
-    if (!route.enabled) return;
-    await this.mutex.run(async () => {
+  /** Decides a user activation's delivered results. A user message is Home's own
+   * conversation, so these results need no push of their own. */
+  private async decideDrained(taskIds: string[]): Promise<void> {
+    await this.decide(taskIds, "push-drained-by-user-activation");
+  }
+
+  /** Admits pending results for one activation. `user` admits them as context
+   * after the start boundary. `wake` appends all but the last selected result and
+   * returns the last one as the trigger: the SDK appends it, and that starts the run. */
+  async admit(route: HomeWakeRoute, operationId: string, delivery: HomeWakeDelivery,
+    append: (message: HomeWakeMessage) => Promise<void>, prepareEnvelope: () => Promise<HomeWakeEnvelope>): Promise<HomeWakeTrigger | undefined> {
+    if (!route.enabled) return undefined;
+    return this.mutex.run(async () => {
       let pending = 0;
       for await (const task of this.store.records()) {
         if (task.homeId !== route.homeId || task.wake?.state !== "pending") continue;
@@ -108,21 +164,23 @@ export class WakeInboxOwner {
           await this.change(task.taskId, current => ({ ...current, state: "blocked" }), "route-replaced");
         } else pending++;
       }
-      if (!pending) return;
+      if (!pending) return undefined;
       const envelope = await prepareEnvelope();
       const pendingMessage = (count: number): HomeWakeMessage => ({ customType: HOME_TASK_PENDING_MESSAGE, display: true,
-        content: `${count} more task results pending.`, details: { eventId: `pending:${operationId}`, taskId: "inbox", resultRef: null,
-          terminalEvidence: null, operationId, routeGeneration: route.routeGeneration } });
+        content: `${count} more task results pending.`, details: { eventId: `pending:${operationId}`, taskId: "inbox",
+          resultRef: null, terminalEvidence: null, operationId, routeGeneration: route.routeGeneration } });
       const cost = (message: HomeWakeMessage) => estimateTokens({ role: "custom", ...message, timestamp: Date.now() });
       // Reserve the attributed count and canonical attribution entries before
-      // selecting results. A cursor/minimum selection retains only one record,
-      // irrespective of blocked events or total backlog membership.
+      // selecting results. Selection keeps one cursor and one candidate, and it
+      // changes no state, so delivery below owns every transition.
       const count = pendingMessage(pending);
       let tokens = envelope.tokens - cost(count);
       let bytes = envelope.bytes - canonicalMessageBytes(count);
       let entries = envelope.entries - 2;
       let cursor: { createdAt: string; eventId: string } | undefined;
-      while (pending > 0 && tokens > 0 && bytes > 0 && entries >= 2) {
+      const selected: Array<{ task: HomeTaskRecord; message: HomeWakeMessage; tokens: number; bytes: number }> = [];
+      let remaining = pending;
+      while (remaining > 0 && tokens > 0 && bytes > 0 && entries >= 2) {
         let next: HomeTaskRecord | undefined;
         for await (const task of this.store.records()) {
           if (task.homeId !== route.homeId || task.wake?.state !== "pending" || task.wake.routeGeneration !== route.routeGeneration
@@ -145,30 +203,57 @@ export class WakeInboxOwner {
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.
         if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with offset/limit pages.`;
-        const selected = message(); const selectedTokens = cost(selected);
-        const selectedBytes = canonicalMessageBytes(selected);
+        const selectedMessage = message(); const selectedTokens = cost(selectedMessage);
+        const selectedBytes = canonicalMessageBytes(selectedMessage);
         if (selectedTokens > tokens || selectedBytes > bytes) break;
-        const delivery = { sessionId: route.sessionId, operationId, generation: route.generation, routeGeneration: route.routeGeneration, messageDigest: hash(content) };
-        await this.change(task.taskId, current => ({ ...current, state: "claimed", delivery }), "next-user-message");
-        // Nothing reaches the canonical session before `append`, so an abort
-        // before it returns the event to pending under this mutex. Its later
-        // proof would otherwise find no entry and mark a never-delivered event
-        // outcome-unknown.
-        if (envelope.signal.aborted) await this.release(task.taskId);
-        envelope.signal.throwIfAborted();
-        await this.change(task.taskId, current => ({ ...current, state: "admitted" }), "canonical-admission");
-        if (envelope.signal.aborted) await this.release(task.taskId);
-        envelope.signal.throwIfAborted();
-        await append(selected);
-        tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; pending--; cursor = { createdAt: wake.createdAt, eventId: wake.eventId };
+        selected.push({ task, message: selectedMessage, tokens: selectedTokens, bytes: selectedBytes });
+        tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; remaining--; cursor = { createdAt: wake.createdAt, eventId: wake.eventId };
       }
       envelope.signal.throwIfAborted();
-      if (envelope.tokens >= cost(count) && envelope.bytes >= canonicalMessageBytes(count) && envelope.entries >= 2) await append(pendingMessage(pending));
+      const trigger = delivery === "wake" ? selected.pop() : undefined;
+      if (delivery === "wake" && !trigger) return undefined;
+      for (const item of selected) {
+        await this.deliver(route, operationId, item, envelope);
+        await append(item.message);
+        if (delivery === "user") await this.decideDrained([item.task.taskId]);
+      }
+      if (remaining > 0 && envelope.tokens >= cost(count) && envelope.bytes >= canonicalMessageBytes(count) && envelope.entries >= 2) {
+        await append(pendingMessage(remaining));
+      }
+      if (!trigger) return undefined;
+      await this.deliver(route, operationId, trigger, envelope);
+      return { taskId: trigger.task.taskId, message: trigger.message };
+    });
+  }
+
+  /** Claim and admit one selected result. Nothing reaches the canonical session
+   * before `append`, so an abort before it returns the event to pending under this
+   * mutex. Its later proof would otherwise find no entry and mark a never-delivered
+   * event outcome-unknown. */
+  private async deliver(route: HomeWakeRoute, operationId: string, item: { task: HomeTaskRecord; message: HomeWakeMessage }, envelope: HomeWakeEnvelope): Promise<void> {
+    const taskId = item.task.taskId;
+    const delivery = { sessionId: route.sessionId, operationId, generation: route.generation, routeGeneration: route.routeGeneration,
+      messageDigest: hash(item.message.content) };
+    await this.change(taskId, current => ({ ...current, state: "claimed", delivery }), "next-user-message");
+    if (envelope.signal.aborted) await this.release(taskId);
+    envelope.signal.throwIfAborted();
+    await this.change(taskId, current => ({ ...current, state: "admitted" }), "canonical-admission");
+    if (envelope.signal.aborted) await this.release(taskId);
+    envelope.signal.throwIfAborted();
+  }
+
+  /** The trigger reached no canonical session (its run never started), so it returns to
+   * pending before any terminal receipt could settle it as outcome-unknown. */
+  async releaseTrigger(taskId: string, operationId: string): Promise<void> {
+    await this.mutex.run(async () => {
+      const task = await this.store.read(taskId);
+      if (task?.wake?.state === "admitted" && task.wake.delivery?.operationId === operationId) await this.release(taskId);
     });
   }
 
   async settle(route: HomeWakeRoute, operationId: string): Promise<void> {
     await this.mutex.run(async () => {
+      const proven: string[] = [];
       for await (const task of this.store.records()) {
         if (task.wake?.delivery?.operationId !== operationId || task.wake.state !== "admitted") continue;
         this.assertRoute(task, route);
@@ -178,9 +263,40 @@ export class WakeInboxOwner {
           await this.change(task.taskId, wake => ({ ...wake, state: "outcome-unknown" }), `terminal-proof-${proof}`); continue;
         }
         await this.change(task.taskId, wake => ({ ...wake, state: "terminal" }), "canonical-terminal");
-        await this.ack(task, route);
+        proven.push(task.taskId);
       }
+      await this.finishOperation(route, operationId, proven);
     });
+  }
+
+  /** Decides the operation's push, then acknowledges its proven results. The store
+   * refuses a push decision once a result is acknowledged, so the order is fixed.
+   * A replied wake's push is its turn's own terminal push (RuntimeSlot), so only the
+   * decision is recorded here. A wake whose results are all uncertain has no reply
+   * push, so it says Home is waiting. Results a user activation drained were decided
+   * when admitted, so only wake deliveries reach here. A still-admitted result is
+   * left for its own proof. */
+  private async finishOperation(route: HomeWakeRoute, operationId: string, provenIds: string[]): Promise<void> {
+    const pending: HomeTaskRecord[] = [];
+    let replied = false;
+    let open = false;
+    for await (const task of this.store.records()) {
+      if (task.wake?.delivery?.operationId !== operationId) continue;
+      if (task.wake.state === "admitted") open = true;
+      if (["terminal", "acknowledged"].includes(task.wake.state)) replied = true;
+      if (task.wake.push === "pending" && task.wake.state !== "acknowledged") pending.push(task);
+    }
+    if (!open && pending.length > 0) {
+      if (replied) await this.decide(pending.map(task => task.taskId), "push-wake-reply");
+      else {
+        await this.decide(pending.map(task => task.taskId), "push-waiting-uncertain");
+        await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home", "Home is waiting for you: finished task results are waiting in Home.");
+      }
+    }
+    for (const taskId of provenIds) {
+      const task = await this.store.read(taskId);
+      if (task?.wake?.state === "terminal") await this.ack(task, route);
+    }
   }
 
   async redeliver(taskId: string, route: HomeWakeRoute): Promise<void> {
@@ -243,6 +359,21 @@ export class WakeInboxOwner {
       && details.routeGeneration === delivery.routeGeneration && JSON.stringify(details.resultRef) === JSON.stringify(task.reportRef)
       && JSON.stringify(details.terminalEvidence) === JSON.stringify(task.terminalEvidence);
   }
+
+  /** Marks the push decided for each task, durably, before any notification. */
+  private async decide(taskIds: string[], reason: string): Promise<void> {
+    for (const taskId of taskIds) await this.change(taskId, wake => ({ ...wake, push: "decided" }), reason);
+  }
+
+  private async notify(homeId: string, sourceId: string, title: string, message: string): Promise<void> {
+    const sessionId = this.options.pushSession(homeId);
+    if (!sessionId) return;
+    try {
+      await this.options.notify({ sessionId, sourceId, kind: "agent_finished", title, message,
+        ...(this.options.machineId ? { route: { sessionId, machineId: this.options.machineId } } : {}) });
+    } catch { /* canonical result/inbox remains available independently */ }
+  }
+
   private async change(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent, reason: string): Promise<HomeTaskRecord> {
     const task = await this.store.updateWake(taskId, change);
     this.options.diagnostic?.({ event: "home.task.inbox", eventHash: hash(task.wake!.eventId).slice(0, 16), state: task.wake!.state, reason });

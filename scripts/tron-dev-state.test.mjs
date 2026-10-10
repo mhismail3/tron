@@ -337,7 +337,7 @@ test("Debug source record is dirty when the tree changed while the candidate bui
 //     candidate (commit, then restart).
 // 17. Admission does not hand `handoff-debug` the exact identity it admitted,
 //     so the copy cannot pin that candidate against a later selection change
-//     (gateway-payload-deploy.test.mjs covers the pinned copy).
+//     (the handoff test below covers the pinned copy).
 const selectDevPayload = (home, epoch) => {
   const version = `debug-${epoch.slice(-12)}`;
   const root = join(home, "gateway", "payloads", "dev");

@@ -675,8 +675,8 @@ projected 1.1 GiB). A traced product scenario needs a shorter window for the
 traced run (`--iterations 1 --window-seconds <n>`, so that two windows plus
 setup stay inside that span), and that choice comes before the run: the check
 needs the trace, so a refused scenario has already spent its simulator time.
-`scripts/test-tron-profile-attribution.py` covers the export parsing failure
-modes and the budget.
+The export-parsing failure modes and the budget have no unit tests; the end-to-end
+proof is `scripts/tron-profile ios --self-test --trace time-profiler`.
 
 A device capture (`scripts/tron-profile device`) is not held to that budget:
 it records one attached process, not `--all-processes`, and its

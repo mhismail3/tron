@@ -45,15 +45,15 @@ const MAX_CONTENT_BYTES = 320_000;
 const MAX_CONTENT_PARTS = 1_000;
 const COMPACT_LIVE_TOOL_JSON_BYTES = 12_000;
 const MAX_LIVE_TOOL_OUTPUT_BYTES = 48_000;
-export const TRANSCRIPT_PAGE_BYTES = 600_000;
-export const TRANSCRIPT_PAGE_ITEMS = 512;
+const TRANSCRIPT_PAGE_BYTES = 600_000;
+const TRANSCRIPT_PAGE_ITEMS = 512;
 // Nested dynamic JSON is admitted by iOS before typed snapshot/page decoding.
 // Reserve structural headroom for live metadata and the response/event wrapper.
-export const TRANSCRIPT_PAGE_NODES = 24_000;
-export const SESSION_SNAPSHOT_NODES = 30_000;
-export const MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES = 24;
+const TRANSCRIPT_PAGE_NODES = 24_000;
+const SESSION_SNAPSHOT_NODES = 30_000;
+const MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES = 24;
 /** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
-export const SESSION_SNAPSHOT_BYTES = 800_000;
+const SESSION_SNAPSHOT_BYTES = 800_000;
 /**
  * Upper bound for one live streaming progress frame. Progress events republish
  * the cumulative streaming message, so an unbounded message amplifies every
@@ -61,7 +61,7 @@ export const SESSION_SNAPSHOT_BYTES = 800_000;
  * quarantine during catch-up. The settled canonical message always pages
  * through transcript projection; only the transient live tail is trimmed here.
  */
-export const STREAMING_PROGRESS_BYTES = 24_000;
+const STREAMING_PROGRESS_BYTES = 24_000;
 
 function boundedText(value: string): string {
   return value.length <= MAX_TEXT ? value : `${value.slice(0, MAX_TEXT)}\n… output truncated by gateway`;
@@ -1635,10 +1635,10 @@ function preview(item: TranscriptItem | undefined, entry: SessionEntry): string 
   }
 }
 
-export const COMMAND_CATALOG_ITEMS = 1_000;
-export const COMMAND_CATALOG_STRING_BYTES = 8_192;
-export const COMMAND_CATALOG_BYTES = 700_000;
-export const COMMAND_DETAIL_CONTENT_BYTES = 96 * 1_024;
+const COMMAND_CATALOG_ITEMS = 1_000;
+const COMMAND_CATALOG_STRING_BYTES = 8_192;
+const COMMAND_CATALOG_BYTES = 700_000;
+const COMMAND_DETAIL_CONTENT_BYTES = 96 * 1_024;
 
 interface BoundedCommandContent {
   content: string;
@@ -1703,7 +1703,7 @@ export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
 // within that generic transport bound so selected nodes are never discarded
 // after projectTree has chosen the newest useful history.
 const MAX_TREE_NODES = 1_000;
-export const TREE_PROJECTION_BYTES = 700_000;
+const TREE_PROJECTION_BYTES = 700_000;
 const TREE_PROJECTION_STRING_BYTES = 8_192;
 
 function validTreeString(value: unknown, optional = false): boolean {
@@ -2216,7 +2216,9 @@ function withInvocationSemantics(
   invocationStates: ReadonlyMap<string, InvocationProjection["lifecycle"]>,
   inheritedCommands: ReadonlyMap<string, InvocationLifecycle>,
 ): TranscriptItem {
-  if (boundInvocation && item.semantic) {
+  // A Home wake's bound target is its delivered result, which already projects as
+  // an attributed context row. Recasting it as a prompt would invent a user row.
+  if (boundInvocation && item.semantic && boundInvocation.source !== "homeWake") {
     return { ...item, semantic: {
       ...item.semantic,
       origin: boundInvocation.origin,

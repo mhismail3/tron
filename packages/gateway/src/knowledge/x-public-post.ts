@@ -76,7 +76,7 @@ export interface XPublicPost {
   readableText?: string;
   article?: XPublicArticle;
 }
-export interface XPostResponse { status: number; body?: string; truncated?: boolean; retryAfter?: string; rateLimitReset?: string }
+interface XPostResponse { status: number; body?: string; truncated?: boolean; retryAfter?: string; rateLimitReset?: string }
 export type XPostGet = (url: string, signal: AbortSignal) => Promise<XPostResponse>;
 export interface XPublicLookupOptions {
   coverage?: XPublicCoverage;
@@ -87,7 +87,7 @@ export interface XPublicLookupOptions {
 }
 
 /** X's public embed token is derived from the post ID, not an account secret. */
-export function xEmbedToken(id: string): string { return (Number(id) / 1e15 * Math.PI).toString(36).replace(/(0+|\.)/g, "") }
+function xEmbedToken(id: string): string { return (Number(id) / 1e15 * Math.PI).toString(36).replace(/(0+|\.)/g, "") }
 export function isPublicXEmbedUrl(url: URL): boolean {
   const id = url.searchParams.get("id") ?? "";
   return url.origin === "https://cdn.syndication.twimg.com" && url.pathname === "/tweet-result" && /^[1-9][0-9]{0,19}$/.test(id) && url.searchParams.getAll("token").length === 1 && url.searchParams.get("token") === xEmbedToken(id);

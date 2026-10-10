@@ -28,7 +28,7 @@ export const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
 
 /** At most one folder batch runs at a time, and a failing visit prevents new
  * assignments while already-admitted filesystem work settles. */
-export async function visitConcurrently<T>(
+async function visitConcurrently<T>(
   values: readonly T[],
   concurrency: number,
   visit: (value: T) => Promise<void>,

@@ -42,7 +42,7 @@ function validateUnique<T>(values: T[], identity: (value: T) => string, label: s
   }
 }
 
-export function validatePackageInventory(packages: InstalledPackage[], resources: ResolvedPaths): void {
+function validatePackageInventory(packages: InstalledPackage[], resources: ResolvedPaths): void {
   if (packages.length > MAXIMUM_PACKAGES) throw new GatewayError("conflict", "Package inventory exceeds its item limit");
   validateUnique(packages, (value) => `${value.scope}:${value.source}`, "Package inventory");
   for (const value of packages) {
@@ -70,7 +70,7 @@ export function validatePackageInventory(packages: InstalledPackage[], resources
   }
 }
 
-export function validatePackageUpdates(updates: PackageUpdateProjection[]): void {
+function validatePackageUpdates(updates: PackageUpdateProjection[]): void {
   if (updates.length > MAXIMUM_PACKAGE_UPDATES) throw new GatewayError("conflict", "Package updates exceed their item limit");
   validateUnique(updates, (value) => `${value.scope}:${value.source}`, "Package updates");
   for (const value of updates) {

@@ -29,12 +29,12 @@ const RUN_DEADLINE_MS = 120_000;
 const CONNECTORS = ["raindrop", "x"] as const;
 type Connector = typeof CONNECTORS[number];
 
-export interface ConnectorHTTPResponse { status: number; headers: Headers; body: string; }
+interface ConnectorHTTPResponse { status: number; headers: Headers; body: string; }
 export type ConnectorHTTP = (input: string, init: { method?: "GET" | "PUT" | "POST" | "DELETE"; headers: Record<string, string>; body?: string; signal: AbortSignal }) => Promise<ConnectorHTTPResponse>;
 export type ConnectorSourceFetch = (url: string, excerpt: string | undefined, signal: AbortSignal) => Promise<Response>;
 export type ConnectorResolveHost = (hostname: string, signal?: AbortSignal) => Promise<string[]>;
 
-export interface KnowledgeConnectorOptions {
+interface KnowledgeConnectorOptions {
   credentials: ConnectorCredentialStore;
   http?: ConnectorHTTP;
   sourceFetch?: ConnectorSourceFetch;

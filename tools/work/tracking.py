@@ -102,18 +102,21 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path,
         raise TrackingError("issue body must not be empty")
 
     declared = {label["name"] for label in config["labels"]}
-    labels: List[str] = [issue_type, "needs-triage"]
+    labels: List[str] = [issue_type]
     if issue_type == "task":
-        prefixes = ((kind, "kind:"), (visibility, "visibility:"))
-        for value, prefix in prefixes:
-            if value is None or not value.startswith(prefix) or value not in declared:
-                raise TrackingError(f"task creation requires a declared {prefix[:-1]} label")
+        # Classification is optional: it helps the dashboard group work, never gates filing.
+        for value, prefix in ((kind, "kind:"), (visibility, "visibility:")):
+            if value is None:
+                continue
+            if not value.startswith(prefix) or value not in declared:
+                raise TrackingError(f"{value!r} is not a declared {prefix[:-1]} label")
             labels.append(value)
-        if not areas or any(not area.startswith("area:") or area not in declared for area in areas):
-            raise TrackingError("task creation requires one or more declared area labels")
-        if len(set(areas)) != len(areas):
+        for area in areas or []:
+            if not area.startswith("area:") or area not in declared:
+                raise TrackingError(f"{area!r} is not a declared area label")
+        if areas and len(set(areas)) != len(areas):
             raise TrackingError("task area labels must be unique")
-        labels.extend(areas)
+        labels.extend(areas or [])
     elif any(value is not None for value in (kind, visibility, areas)):
         raise TrackingError("epics do not take task kind, visibility or area labels")
     _scrub(repo, config, title + "\n\n" + body, "issue title and body")
@@ -121,7 +124,7 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path,
     response = gh.rest("POST", f"repos/{owner}/{name}/issues", {"title": title, "body": body, "labels": labels})
     if not isinstance(response, dict) or not isinstance(response.get("number"), int):
         raise TrackingError("GitHub did not return the created issue number")
-    print(f"created issue #{response['number']} with needs-triage")
+    print(f"created issue #{response['number']}")
     return response["number"]
 
 
@@ -149,12 +152,13 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
         updated = [label for label in current if label not in removals]
         updated.extend(label for label in additions if label not in updated)
         if "epic" not in updated:
+            # Classification is optional, but a kind or visibility, once set, is set once.
             for prefix in taxonomy_prefixes:
                 classified = [label for label in updated if label.startswith(prefix)]
-                valid_count = len(classified) == 1 if prefix != "area:" else bool(classified)
-                if not valid_count or any(label not in declared for label in classified):
-                    count = "one or more" if prefix == "area:" else "exactly one"
-                    raise TrackingError(f"issue labels must retain {count} declared {prefix[:-1]} classification")
+                if any(label not in declared for label in classified):
+                    raise TrackingError(f"issue labels hold an undeclared {prefix[:-1]} label")
+                if prefix != "area:" and len(classified) > 1:
+                    raise TrackingError(f"an issue holds at most one {prefix[:-1]} label")
         additions_needed = [label for label in additions if label not in current]
         removals_needed = [label for label in removals if label in current]
         if not additions_needed and not removals_needed:
@@ -220,9 +224,6 @@ def set_project_fields(gh: Gh, repo: Path, config: dict, number: int,
                        status: Optional[str], priority: Optional[str]) -> None:
     if status is None and priority is None:
         raise TrackingError("provide --status or --priority")
-    allowed = {"Proposed", "Ready", "Needs you", "Blocked"}
-    if status is not None and status not in allowed:
-        raise TrackingError("work project set may assign only Proposed, Ready, Needs you or Blocked; claim and land own other statuses")
     declared_fields = {field["name"]: field for field in config["project"]["fields"]}
     for name, value in (("Status", status), ("Priority", priority)):
         if value is None:
@@ -239,7 +240,11 @@ def set_project_fields(gh: Gh, repo: Path, config: dict, number: int,
              if item["project"]["id"] == project["id"]]
     if not items:
         raise TrackingError(f"issue #{number} is not in the work Project; run work project add first")
+    _write_fields(gh, project, items[0]["id"], number, status, priority)
 
+
+def _write_fields(gh: Gh, project: dict, item_id: str, number: int,
+                  status: Optional[str], priority: Optional[str]) -> None:
     field_map = {field["name"]: field for field in project["fields"]["nodes"] if field}
     resolved: List[Tuple[str, str, str]] = []
     for field_name, value in (("Status", status), ("Priority", priority)):
@@ -255,7 +260,7 @@ def set_project_fields(gh: Gh, repo: Path, config: dict, number: int,
     completed: List[str] = []
     for field_name, field_id, option_id in resolved:
         try:
-            gh.graphql(_UPDATE_FIELD, project=project["id"], item=items[0]["id"],
+            gh.graphql(_UPDATE_FIELD, project=project["id"], item=item_id,
                        field=field_id, option=option_id)
         except GhError as error:
             if completed:
@@ -309,6 +314,21 @@ def add_blocker(gh: Gh, repo: Path, config: dict, issue_number: int, blocker_num
 _CLOSE_REASONS = {"completed": "completed", "not_planned": "not planned"}
 
 
+def complete_issue(gh: Gh, repo: Path, config: dict, number: int) -> str:
+    """Close a landed issue as completed and set its Project Status to the done option; re-running is safe."""
+    owner, name = _repository(gh)
+    issue = _issue(gh, f"{owner}/{name}", number)
+    if issue.get("state") == "open":
+        gh.rest("PATCH", f"repos/{owner}/{name}/issues/{number}", {"state": "closed", "state_reason": "completed"})
+    _, project = _project(gh, repo, config)
+    items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
+    done = config["land"]["doneStatus"]
+    if not items:
+        return f"closed as completed; #{number} is not in the work Project, so its Status is unchanged"
+    _write_fields(gh, project, items[0]["id"], number, done, None)
+    return f"closed as completed with Status {done}"
+
+
 def _close_marker(reason: str, text: str) -> str:
     # One close is identified by its reason and exact public text: a re-run of
     # the same close finds its comment, while a new close after a reopen posts its own.
@@ -339,7 +359,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     session = comments.session_identity()
     text = comments.prepared_body(repo, config, comment_file)
     marker = _close_marker(reason, text)
-    rules, settings = config["claim"], config["land"]
+    rules = config["claim"]
     owner, name = _repository(gh)
     repository = f"{owner}/{name}"
     issue = _issue(gh, repository, number)
@@ -357,7 +377,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
         owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in foreign)
         raise TrackingError(f"#{number} is claimed by another session: {owners}")
 
-    done_status = settings["doneStatus"]
+    done_status = config["land"]["doneStatus"]
     _, project = _project(gh, repo, config)
     items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
     status_item = None
@@ -375,11 +395,6 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     if is_open:
         _finish_step(finished, "issue closed", "close",
                      lambda: gh.run("issue", "close", str(number), "--reason", _CLOSE_REASONS[reason]))
-    validation_label = settings["userValidationLabel"]
-    if validation_label in labels:
-        _finish_step(finished, "validation label removed", "label removal",
-                     lambda: gh.rest("DELETE", f"repos/{repository}/issues/{number}/labels/"
-                                               f"{quote(validation_label, safe='')}"))
     if status_item is not None:
         _finish_step(finished, f"Status set to {done_status}", "Status update",
                      lambda: start.set_status(gh, status_item, done_status))

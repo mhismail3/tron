@@ -27,7 +27,7 @@
  * are reopened through the Gateway.
  *
  * The corpus and its recorded manifest are produced by
- * `test-fixtures/pi-sdk/record-corpus.test.ts` (`npm run record:pi-corpus`) with
+ * `test-fixtures/pi-sdk/record-corpus.integration.test.ts` (`npm run record:pi-corpus`) with
  * the outgoing SDK; see `packages/gateway/README.md`, "Pi SDK maintenance".
  */
 import { spawn } from "node:child_process";

@@ -29,7 +29,8 @@ async function fixture() {
   await store.put(task, null);
   const { WakeInboxOwner } = await import("./home-wake-inbox.js");
   const pushes: unknown[] = []; const entries: any[] = [];
-  const options = { notify: async (input: unknown) => { pushes.push(input); return "queued"; }, pushSession: () => "chapter-one",
+  // Home is not wake-eligible in these fixtures: each settled result keeps its task-finished push.
+  const options = { notify: async (input: unknown) => { pushes.push(input); return "queued"; }, pushSession: () => "chapter-one", wakeAvailable: async () => false, wake: () => {},
     result: async () => ({ task: await store.read("task"), text: "immutable evidence", subagents: { started: 0, stoppedAtEnd: 0 } }),
     evidence: async () => entries };
   const owner = new WakeInboxOwner(store, options);
@@ -76,9 +77,9 @@ describe("Wake inbox frozen-owner crash cuts", () => {
         (result: HomeTaskRecord) => result.wake!.state === (cut === "terminal-state" ? "terminal" : cut)));
       if (cut === "canonical") {
         vi.restoreAllMocks();
-        await f.owner.admit(f.route, "activation", async message => { await f.append(message); throw new Error("frozen owner"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })).catch(() => {});
+        await f.owner.admit(f.route, "activation", "user", async message => { await f.append(message); throw new Error("frozen owner"); }, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })).catch(() => {});
       } else {
-        await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })).catch(() => {});
+        await f.owner.admit(f.route, "activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })).catch(() => {});
       }
       if (["terminal-receipt", "terminal-state", "acknowledged"].includes(cut)) {
         f.receipt(); if (cut !== "terminal-receipt") await f.owner.settle(f.route, "activation").catch(() => {});
@@ -89,7 +90,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     await recovered.recover(f.route);
     const task = (await f.store.read("task"))!;
     const before = f.entries.length;
-    await recovered.admit(f.route, "next-activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await recovered.admit(f.route, "next-activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     if (["admitted", "canonical"].includes(cut)) {
       expect(task.wake?.state).toBe("outcome-unknown");
       expect(f.entries.length).toBe(before);
@@ -105,7 +106,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
 
   it.each(["missing", "malformed", "duplicate", "contradictory", "missing-attribution"])("never acknowledges %s canonical result evidence", async mode => {
     const f = await fixture();
-    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await f.owner.admit(f.route, "activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     f.receipt();
     if (mode === "missing") f.entries.shift();
     if (mode === "missing-attribution") f.entries.splice(1, 1);
@@ -118,7 +119,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
 
   it("settles a delivery whose proof cannot be read as outcome-unknown without failing the activation", async () => {
     const f = await fixture();
-    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await f.owner.admit(f.route, "activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     f.receipt();
     vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", `Canonical session line exceeds ${EPISODIC_DEFAULTS.maxSourceLineBytes} bytes`));
     await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
@@ -131,7 +132,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
 
   it("keeps a delivery whose proof read fails transiently admitted, so the next activation proves and acknowledges it", async () => {
     const f = await fixture();
-    await f.owner.admit(f.route, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await f.owner.admit(f.route, "activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     f.receipt();
     vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new Error("EIO while syncing the chapter"));
     await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
@@ -143,7 +144,7 @@ describe("Wake inbox frozen-owner crash cuts", () => {
 
   it("settles an admitted delivery whose proof is unreadable during recovery as outcome-unknown without refusing the activation", async () => {
     const second = await fixture();
-    await second.owner.admit(second.route, "activation", second.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await second.owner.admit(second.route, "activation", "user", second.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     second.receipt();
     vi.spyOn(second.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
     await expect(second.reopen().recover(second.route)).resolves.toBeUndefined();
@@ -162,24 +163,24 @@ describe("Wake inbox frozen-owner crash cuts", () => {
       if (result.wake?.state === "admitted") controller.abort(new Error("Stop before append"));
       return result;
     });
-    await expect(f.owner.admit(f.route, "activation", f.append, async () => ({ signal: controller.signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })))
+    await expect(f.owner.admit(f.route, "activation", "user", f.append, async () => ({ signal: controller.signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })))
       .rejects.toThrow(/Stop before append/);
     expect(f.entries).toHaveLength(0);
     expect((await f.store.read("task"))?.wake).toMatchObject({ state: "pending", delivery: null });
     vi.restoreAllMocks();
-    await f.owner.admit(f.route, "next-activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await f.owner.admit(f.route, "next-activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     expect(f.entries.filter(entry => entry.type === "custom_message")).toHaveLength(1);
   });
 
   it("waits while disabled, blocks replacement and refuses stale-route acknowledgement", async () => {
     const f = await fixture();
-    await f.owner.admit({ ...f.route, enabled: false }, "disabled", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await f.owner.admit({ ...f.route, enabled: false }, "disabled", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     expect(f.entries).toHaveLength(0);
-    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "replacement", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
+    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "replacement", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 }));
     expect((await f.store.read("task"))?.wake?.state).toBe("blocked");
     expect(f.entries).toHaveLength(0);
     await f.owner.redeliver("task", { ...f.route, routeGeneration: 2 });
-    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "activation", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })); f.receipt();
+    await f.owner.admit({ ...f.route, routeGeneration: 2 }, "activation", "user", f.append, async () => ({ signal: new AbortController().signal, tokens: 128000, freshTokens: 128000, bytes: 1000000, entries: 1000 })); f.receipt();
     await expect(f.owner.settle(f.route, "activation")).rejects.toThrow(/route/i);
     await f.owner.settle({ ...f.route, routeGeneration: 2 }, "activation");
     expect((await f.store.read("task"))?.wake?.state).toBe("acknowledged");

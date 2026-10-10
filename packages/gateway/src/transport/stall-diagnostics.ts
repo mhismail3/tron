@@ -109,7 +109,7 @@ function parseMemoryAvailablePercent(text: string): number | undefined {
  * level and available percentage follow it. Each value is validated against
  * its own domain rather than trusted by its position.
  */
-export function parseHostSysctl(text: string): HostKernelFacts {
+function parseHostSysctl(text: string): HostKernelFacts {
   const lines = text.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
   const swapIndex = lines.findIndex((line) => line.includes("total ="));
   const swap = swapIndex < 0 ? "" : lines[swapIndex]!;
@@ -141,7 +141,7 @@ function sysctl(names: readonly string[]): Promise<string | undefined> {
  * The kernel half of one host probe. The runner is injectable so a test can pin
  * the probe count: one invocation carries every name.
  */
-export async function probeHostKernel(
+async function probeHostKernel(
   run: (names: readonly string[]) => Promise<string | undefined> = sysctl,
 ): Promise<HostKernelFacts> {
   const text = await run(HOST_SYSCTL_NAMES);
@@ -179,7 +179,7 @@ export const HEAP_WARNING_SHARE = 0.7;
  * info or above: a growth step no share of a multi-gigabyte limit would round
  * away, measured from an anchor so a heap that swings tens of megabytes between
  * garbage collections does not write a record every minute. */
-export const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
+const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
 
 /** RSS moved this share away from the last window written at info or above,
  * which is the memory-growth criterion's own resolution. A slower growth has to
@@ -293,7 +293,7 @@ export interface ResourceSamplerDependencies {
 
 /** Convert a Node delay-histogram reading to lateness beyond the configured
  * sampling period. The exit criterion bounds lateness, not the period itself. */
-export function eventLoopDelayLatenessMs(valueNs: number): number {
+function eventLoopDelayLatenessMs(valueNs: number): number {
   return Number.isFinite(valueNs)
     ? Math.max(0, valueNs / 1e6 - EVENT_LOOP_DELAY_RESOLUTION_MS)
     : 0;
@@ -541,7 +541,7 @@ export function resourceSteps(sample: ResourceSample): ResourceSteps {
  * `undefined` `previous` is the first window, which is never a band change, and
  * an undefined anchor has no memory-growth baseline yet, which is never a step.
  */
-export function resourceSampleLevel(
+function resourceSampleLevel(
   sample: ResourceSample,
   previous?: ResourceSteps,
   anchoredRssBytes?: number,

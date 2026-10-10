@@ -18,7 +18,7 @@ export interface LocalAuthDocument {
 }
 
 /** Internal credential-bearing record. Never expose this over RPC or auth context. */
-export interface DeviceRecord {
+interface DeviceRecord {
   id: string;
   /** Pairing-time fallback name; mutable labels and observations are separate. */
   name: string;

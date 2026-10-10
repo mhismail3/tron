@@ -875,6 +875,7 @@ export class RuntimeRegistry {
         serializeSessionMutation: (sessionId, commit) => this.serializeSessionMutation(sessionId, commit),
         beginHomePublicationReconciliation: () => { this.homePublicationUncertain = true; },
         retireHomeRuntimes: (reloaded) => this.retireUncertainHomeRuntimes(reloaded),
+        wakeHome: async (sessionId) => (await this.acquire(sessionId)).admitHomeWake(),
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
@@ -885,6 +886,7 @@ export class RuntimeRegistry {
       ...(options.notifications ? { notifications: options.notifications } : {}),
       ...(options.machineId ? { machineId: options.machineId } : {}),
       ...(options.homeTaskDiagnostic ? { taskDiagnostic: options.homeTaskDiagnostic } : {}),
+      knowledge: () => this.knowledgeService,
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({
@@ -1953,8 +1955,10 @@ export class RuntimeRegistry {
       homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
-      homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, append, envelope),
+      homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, delivery, append, envelope),
+      homeInboxRelease: (taskId: string, operationId: string) => this.home.releaseWakeTrigger(taskId, operationId),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
+      homeIdle: (sessionId: string, by: "user" | "wake") => this.home.noteHomeIdle(sessionId, by),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },

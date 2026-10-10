@@ -51,8 +51,7 @@ without a positive
 
 **Rollback:** a build older than the record format refuses the record (Home
 unavailable) and leaves it
-unchanged. There is no down-conversion. `home-owner.test.ts` proves the refusal and
-the unchanged bytes.
+unchanged. There is no down-conversion. The refusal leaves the record's bytes unchanged.
 
 ### Neutral working directory
 
@@ -236,10 +235,12 @@ imported Registry target is ordinary unless the ledger names it.
   completed-load admission apply only to ordinary runtimes, including task workers.
   Home is delegate-only: `session.resources` returns an empty subagent catalog
   without provider discovery, through reload, replacement and cold acquisition.
-- `tron-home` is loaded only for Home. It contributes Home's operating context and
-  its learned profile section, registers the memory tools, `delegate`, `task` and
-  `profile`, and is the single answer to the SDK's `cache_warming_decision`. It is not
-  in `modules.list`.
+- `tron-home` is loaded only for Home. It registers the memory tools, `delegate`,
+  `task` and `profile`, and is the single answer to the SDK's
+  `cache_warming_decision`. It is not in `modules.list`. It has no `before_agent_start`
+  hook: Home's system prompt (the operating context and the learned profile section,
+  read once per activation) is framed by the request seam for every request, user or
+  wake (`homeSystemPrompt`, #749).
 - `tron-home-research` is loaded only for Home (#724). It registers the
   [read-only research tools](#the-research-tools). It is not in `modules.list`.
 - MCP is excluded structurally: no MCP extension loads for Home. From SDK 1.0.4, an
@@ -371,8 +372,7 @@ restart, or cache expiry.
   classifier matches substrings such as `500`, so a deterministic refusal that embedded
   `effective 4500 tokens` ran its retry budget. The variable detail stays on the refusal
   record, which `home.context` reports as `lastRefusalReason` and `lastRefusalDetail`; the
-  chat error does not carry it. `home-request-policy.test.ts` proves every reason's text is
-  never retryable, and C12 of `home-request-seam.integration.test.ts` proves an overflow
+  chat error does not carry it. Every reason's text is never retryable, and C12 of `home-request-seam.integration.test.ts` proves an overflow
   refusal produces one refusal and no retry.
 - **Cache marks.** OpenAI and DeepSeek reuse the prefix themselves. For
   `anthropic-messages`, the `before_provider_request` handler marks the first block
@@ -1065,22 +1065,53 @@ work. One per-process result is shared by every task surface.
 ## Task wake inbox and terminal push
 
 The terminal task and its wake event share one atomic, fsynced record. There is no
-terminal-to-outbox gap, no orphan
-event catalog and no independent retention sweep. Event identity is
-SHA-256-qualified by task identity. Result IDs, report
-references, terminal evidence and spend remain authoritative.
+terminal-to-outbox gap, no orphan event catalog and no independent retention sweep.
+Event identity is SHA-256-qualified by task identity. Result IDs, report references,
+terminal evidence and spend remain authoritative.
 
 WakeInboxOwner moves an event through `pending → claimed → admitted → terminal →
-acknowledged`, and it also holds
-`blocked` and `outcome-unknown`. Only a new actual user Home activation admits
-pending results, in creation and event-ID
-order. RuntimeSlot inserts each as a context-bearing `tron.home-task-result.v1`
-message after that activation's start
-boundary, with an exact `tron.context-delivery.v4` attribution receipt. The model
-receives the immutable report alongside
-the user's input, never a background prompt. Ordinary chats, steers and
-continuations do not drain the inbox.
+acknowledged`, and it also holds `blocked` and `outcome-unknown`. Two things admit
+pending results. A user activation admits them as context after its start boundary,
+in creation and event-ID order. The **wake owner** (below) admits them as the trigger of
+a Gateway-started activation with no user input. In both cases RuntimeSlot inserts each
+result as a context-bearing `tron.home-task-result.v1` message with an exact
+`tron.context-delivery.v4` attribution receipt. Ordinary chats, steers and continuations
+do not drain the inbox.
 
+- **Wake (#749).** A settled result wakes an idle Home. One owner decides every wake,
+  `HomeOwner`'s wake scheduler, which runs one drain at a time and has no timers or
+  polling. It is asked by exactly these events: a result settles while Home is eligible
+  (enabled, memory configured, not paused or blocked); startup recovery succeeds; and a
+  user activation or a delivered wake goes idle. A wake attempt that finds Home busy
+  stops, and the activation holding Home asks again when it settles. A refused or failed
+  wake asks for nothing more, so a wake cannot retry itself. A wake starts with no user
+  text: the wake's trigger is the **last** result it selects. The inbox returns it
+  without appending, and the run's `sendCustomMessage(…, { triggerTurn: true })` appends
+  and starts it. Earlier results are appended first, and a pending-count line, when one
+  is needed, precedes the trigger. The wake goes through the same admission as a user
+  activation: the same memory prefix, the same request seam, chapter materialization and
+  rollover, and the same idle-admission block, which keeps SDK auto-compaction disabled
+  for Home (`CompactionOperationPolicy`) and applies the context window. The wake's
+  `prompt()` steps that a trigger does not reach are proven irrelevant or handled in
+  `src/sessions/runtime-slot.ts` (`assertHomeWakeAdmissible`): busy, compaction, model and
+  credential checks.
+- **Wake canonical record.** The invocation start receipt has source `homeWake`. The
+  trigger's `message_end` persists two receipts before the reply: a `binding` receipt
+  whose target is that `tron.home-task-result.v1` custom message (the only binding that
+  is not a user message), and its attribution receipt. The wake's turn therefore begins
+  with the delivered-context row of its result, then Home's reply. iOS already renders a
+  `customMessage` row and an assistant row; no user row is ever written.
+- **Ceiling (#749).** At most eight consecutive wake activations run with no user message
+  between them. The count is derived from the canonical result messages: distinct
+  operations that delivered results after the last user message, across chapters, read
+  newest first and continuing into an older chapter only while the newer ones hold no
+  user message. A user activation's drained results precede its own user message, so they
+  never count toward the ceiling (`home-wake.e2e.test.ts`). Nothing is stored, so the Home and task formats do not change. At the
+  ceiling no wake runs, results wait for the maintainer, and a waiting notice is sent.
+- **Rollback (#749).** `homeWake` is an additive invocation-receipt source, following
+  `subagentWake`. A Gateway built before it skips a receipt whose source it does not know
+  (the reader returns no receipt for it), so the session still opens. The rolled-back
+  wake's rows become unattributed, not refused. Pinned by `invocation-receipts.test.ts`.
 - **Envelope.** Each activation has one delivery envelope, derived from the frozen
   memory prefix, the incoming text and
   images, the effective model window and the response reserve, bounded by the
@@ -1140,19 +1171,27 @@ continuations do not drain the inbox.
   both epochs. Idempotent and route-fenced
   under Home's record owner. Model tools cannot invoke it. Admitted, uncertain work
   cannot be re-stamped and replayed.
-- **Push.** The task terminal owner suppresses ordinary `agent_finished` for task
-  operations only. There is at most one push
-  per terminal result. A crash at that exact boundary may omit it, and the Home
-  inbox is the guaranteed delivery. The event
-  durably records `push: decided` before one NotificationService enqueue with its
-  stable identity. There is no retry or
-  re-decision after restart, even past NotificationService's 24-hour dedupe. Push
-  failure or quota refusal cannot reopen a
-  task or delay acknowledgement. The fixed-content hint names Home's openable
-  chapter at push time (the chapter `home.status` reports as `openSessionId`),
-  qualified by machine ID, never the worker. NotificationService admits only a
-  route naming the notification's own session.
-
+- **Push (#749).** Each settled result gets at most one push, decided durably before
+  its one NotificationService enqueue. A result settled while Home is wake-eligible
+  is decided by its wake. The wake's reply sends no inbox notice: its turn's own terminal
+  push (the runtime's ordinary agent-finished notice, opening Home's chat) is the one push
+  for the wake. The inbox records that decision as `push-wake-reply`. A wake that delivered
+  only uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
+  waiting notice that Home is waiting. A paused, disabled or blocked Home keeps the
+  task-finished notice of today, decided when the result settles or when its wake is
+  refused. A result a user activation drains is decided without a notice, since the user
+  is in Home. The store refuses a push decision after acknowledgement, so the operation's
+  push is decided before its results are acknowledged. A crash between the durable
+  decision and the enqueue may omit a push; the inbox is the guaranteed delivery, and
+  recovery never re-decides a decided event.
+- **Stop.** An activation that Stop or abort ended never requests a wake, whether it was a
+  user activation or a wake: a stopped run never reaches the idle notice that asks for one
+  (`HomeOwner.noteHomeIdle`; the `home-wake.e2e` Stop cases). Results still pending after a
+  stopped activation wait for the next user message or the next settled result.
+- **Operating context.** Home is told the settled-result wake, the one-push rule and the
+  paused/disabled/blocked fallback (`tron-home-extension.ts`). It reads its learned profile
+  and system prompt once per activation at the request seam, so a wake carries the same
+  bytes as a user activation (#749).
 `home.task.inbox` reports only a hashed event ID, state and coded reason;
 [observability.md](observability.md) owns its
 vocabulary.
@@ -1399,19 +1438,17 @@ without a retained artifact.
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; `session.setTools` restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
-| `src/episodic/home-source.scale.test.ts` | streamed source bound (`heap.json`); 2,000 messages at production caps (`heap-production.json`); 20 messages of 2 MiB at production caps (`heap-over-cap.json`) | `test-results/home-memory/{heap,heap-production,heap-over-cap}.json` | `npx vitest run --config vitest.scale.config.ts src/episodic/home-source.scale.test.ts` (`-t production` for `heap-production.json`) |
-| `src/home/home-owner.test.ts` | strict admission; unknown-version, malformed-topology, corrupt, empty and permissive records preserved and refused; unavailable workspace, including through a symlink; `home.chapterList` order, exact sealed metrics, live active measurement, absent-not-zero sizes, shared limits, and typed undesignated/unavailable refusals | none | `npx vitest run src/home/home-owner.test.ts` |
-| `src/home/home-session-recovery.test.ts` | reserved-chapter scan: absence proven only after a complete scan; duplicate IDs; path mismatch; uninspectable entries; enumeration errors | none | `npx vitest run src/home/home-session-recovery.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
 | `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows stopped on report and on Stop, and a child that outlives its completed workflow stopped by run id; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
+| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
+| `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |
 | `src/home/home-receipt-crash.e2e.test.ts` | SIGKILL after binding, during SDK effects before completion, and after completion before response: pending fences and exact replay | `test-results/home-receipt-crash/report.json` | `npx vitest run src/home/home-receipt-crash.e2e.test.ts` |
 | `src/sessions/runtime-registry.integration.test.ts` (`-t deadline`) | 24-hour owned-operation deadline: endless no-effect and successful-read turns; a blocked provider request; joined stop | `test-results/owned-session-deadline/report.json` | `npx vitest run src/sessions/runtime-registry.integration.test.ts -t deadline` |
-| `src/home/home-request-policy.test.ts`, `home-memory-tools.test.ts`, `home-memory.test.ts`, `home-task-spend.test.ts` | cache marks on the view's first block and last line; every refusal reason's chat text is never classified as a transient provider error; typed unavailable tool results; serialized opens and coded ingest failure; usage deduplication and contradictory-usage refusal | none | `npx vitest run src/home/home-request-policy.test.ts src/home/home-memory-tools.test.ts src/home/home-memory.test.ts src/home/home-task-spend.test.ts` |
 
 Two limits apply:
 

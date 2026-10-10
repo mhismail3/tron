@@ -39,42 +39,37 @@ Commands:
                                     Plan or converge GitHub labels and the tracking
                                     Project to .github/work.json (tools/work)
   work start <issue> [--session <id>]
-                                    Claim a Ready issue: remote branch, Project
-                                    status, claim comment, and its worktree
-  work verify [--jobs N] [--post] [--evidence-manifest <json>]
-                                    Run diff-scoped checks concurrently (1 = sequential)
-                                    and write a head-bound receipt; attach reviewed UI media.
-                                    --post publishes private evidence and status
+                                    Claim an open, unclaimed issue: remote branch,
+                                    Project status, claim comment, and its worktree
+  work verify [--tests "<command>"]...
+                                    Run the local checks the branch diff requires,
+                                    plus each --tests command, on the current commit
   work dashboard [--html <path>] [--json <path>]
-                                    Read-only live view of all work: needs-you,
-                                    epics, claims, queue, stale, orphans
-  work issues [--closed [--closed-limit <n>]]
-                                    Print every open issue (optionally recent closed
-                                    ones) as a bounded JSON corpus for related-issue
-                                    checks
+                                    Read-only live view of all work: epics, claims,
+                                    queue, stale, orphans
   work comment <issue> --body-file <md>
                                     Privacy-check and audit a public issue comment
-  work issue create --title <t> --body-file <md> --kind <label>
-                     --visibility <label> --area <label> [--type task|epic]
-                                    File a typed task or epic with declared labels
+  work issue create --title <t> --body-file <md> [--kind <label>]
+                     [--visibility <label>] [--area <label>]... [--type task|epic]
+                                    File a task or epic; labels are optional
   work issue labels <issue> [--add <label>] [--remove <label>]
                                     Change only declared work labels
+  work issue close <issue> --reason completed|not_planned --comment-file <md>
+                                    Comment, close, and set Status Done
   work project add <issue>
                                     Add an issue to the configured work Project
-  work project set <issue> [--status Proposed|Ready|Needs you|Blocked]
+  work project set <issue> [--status Proposed|Ready|Blocked]
                      [--priority P0|P1|P2|P3]
-                                    Set unclaimed work classification fields
+                                    Set work classification fields
   work issue parent <issue> --epic <epic>
   work issue block <issue> --blocked-by <issue>
                                     Create native parent or blocker links
-  work land [--title <t>] [--summary-file <md>] [--needs-user-validation <text>]
-                                    From a claim worktree: merge the base in, verify,
-                                    push, open or update the PR, wait for required
-                                    checks, squash-merge, close or hand off the issue.
-                                    Optional --evidence-manifest <json> attaches
-                                    head-bound UI media; base merges need recapture.
-  work steward [--land <issue>]     Report open claim PRs and their gate state;
-                                    --land merges one that is verified and green
+  work land --summary-file <md> [--title <t>] [--tests "<command>"]...
+            [--dry-run]             From a task worktree: merge origin/main in, verify
+                                    the merged tree, push, open or update the pull
+                                    request (body = the summary verbatim), squash-merge
+                                    it at the verified commit, delete the branch, and
+                                    close the issue as completed with Status Done
   work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
                                     PR merged at its head; --all: every one under the
                                     worktree root, naming why each other is kept

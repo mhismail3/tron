@@ -104,7 +104,7 @@ function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefined): G
 /** The helper is trusted only when LaunchAgent exported an absolute, non-link
  * file inside the payload root. The spawn that consumes the result runs
  * detached, so this admission is the only in-process witness of it. */
-export function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): string | undefined {
+function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): string | undefined {
   const value = environment.TRON_GATEWAY_UPDATE_HELPER;
   const payloadRoot = environment.TRON_GATEWAY_PAYLOAD_ROOT;
   if (environment.TRON_GATEWAY_SUPERVISED !== "1" || !value || !payloadRoot
@@ -123,7 +123,7 @@ export function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process
   } catch { return undefined; }
 }
 
-export function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): string[] {
+function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): string[] {
   // The rollback helper runs detached with its stdio ignored, so this exact
   // argument list is the only in-process witness of what is launched.
   if (request.channel !== "stable" && request.channel !== "dev") {
@@ -135,7 +135,7 @@ export function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): stri
   return ["rollback", "--channel", request.channel, "--command-id", request.commandId];
 }
 
-export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[] {
+function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[] {
   // Only an admitted channel/mode/candidate triple and a bounded command ID
   // reach the detached helper, so its argv is the only in-process witness.
   const normalized = validateGatewayUpdateRequest({
@@ -166,7 +166,7 @@ function updaterFailureMessage(error: unknown): string {
 /** The update-progress document a failed helper leaves behind: the persisted
  * shape is the contract, and the detached helper's write path has no in-process
  * seam to observe it through. */
-export function updaterFailureProgress(
+function updaterFailureProgress(
   channel: GatewayUpdateChannel,
   commandId: string,
   error: unknown,

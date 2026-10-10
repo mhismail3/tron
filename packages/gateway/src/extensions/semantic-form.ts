@@ -18,7 +18,7 @@ export const EXTENSION_FORM_MAX_HEADER_BYTES = 256;
 export const EXTENSION_FORM_MAX_QUESTION_BYTES = 4 * 1_024;
 export const EXTENSION_FORM_MAX_CONTEXT_BYTES = 32 * 1_024;
 export const EXTENSION_FORM_MAX_OPTION_BYTES = 2 * 1_024;
-export const EXTENSION_FORM_MAX_OTHER_BYTES = 32 * 1_024;
+const EXTENSION_FORM_MAX_OTHER_BYTES = 32 * 1_024;
 export const EXTENSION_FORM_MAX_ANSWER_BYTES = 192 * 1_024;
 export const EXTENSION_FORM_MAX_INTERACTION_BYTES = 192 * 1_024;
 
@@ -71,7 +71,7 @@ export function normalizeExtensionForm(input: ExtensionFormDescriptor): Extensio
   return form;
 }
 
-export function assertExtensionForm(value: unknown): asserts value is ExtensionFormDescriptor {
+function assertExtensionForm(value: unknown): asserts value is ExtensionFormDescriptor {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new GatewayError("conflict", "Extension form is malformed");
   }

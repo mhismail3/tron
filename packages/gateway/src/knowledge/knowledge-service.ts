@@ -237,7 +237,7 @@ export interface KnowledgeExtensionSeam {
 export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operation"]) => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string } | Promise<{ ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string }>;
 export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; assessment?: SourceAssessmentModel; }
 
-export interface KnowledgeGenerationModel extends SourceAssessmentModel {
+interface KnowledgeGenerationModel extends SourceAssessmentModel {
   reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
   synthesize(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
   summarizeSource(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<{ text: string }>;
