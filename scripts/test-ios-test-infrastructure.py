@@ -1931,6 +1931,22 @@ if arguments[:2] == ['xcresulttool', 'get']:
     # The runner's summary of a focused run: one executed, passing test, unless
     # a case asks for a different one (for example a skipped journey).
     print(os.environ.get('FAKE_SUMMARY') or '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
+if arguments[:2] == ['xcresulttool', 'export']:
+    # The attachments export of a result bundle, in the shape `xcresulttool export
+    # attachments --schema` declares: a manifest of tests, each naming its exported
+    # files. `FAKE_PHONE_LIVENESS_RECORDS` stands for the case's attached records.
+    output = Path(arguments[arguments.index('--output-path') + 1])
+    output.mkdir(parents=True, exist_ok=True)
+    attachments = []
+    records = os.environ.get('FAKE_PHONE_LIVENESS_RECORDS')
+    if records is not None:
+        (output / 'attachment-1.txt').write_text(records)
+        attachments.append({'exportedFileName': 'attachment-1.txt',
+                            'suggestedHumanReadableName': 'phone-liveness-records_0_FAKE.txt',
+                            'isAssociatedWithFailure': False, 'configurationName': 'Test',
+                            'deviceName': 'fake', 'deviceId': 'fake'})
+    (output / 'manifest.json').write_text(json.dumps([{'testIdentifier': 'fake', 'attachments': attachments}]))
+    raise SystemExit(0)
 assert arguments[0] == 'simctl', arguments
 arguments = arguments[1:]
 log = os.environ.get('FAKE_SIMCTL_LOG')
@@ -3517,6 +3533,9 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
     28. A start that fails its owned-command proof, or never becomes ready, leaves
         the Gateway it spawned running: the harness refuses to signal a PID it cannot
         prove, and the start never retires the child it spawned itself.
+    29. A boundary case that fails keeps no Gateway-side ping timeline or phone
+        liveness records, so a possibly_sent cannot be read as a stalled Gateway
+        or a stalled phone from its results directory.
     """
 
     def setUp(self) -> None:
@@ -3604,7 +3623,7 @@ const server = http.createServer((request, response) => {{
       response.writeHead(500); response.end(); return;
     }}
     response.writeHead(200, {{ "content-type": "application/json" }});
-    response.end(JSON.stringify({{ schedule: "unshaped" }}));
+    response.end(JSON.stringify({{ schedule: "unshaped", clientHeartbeatTimeline: [{{ connection: 1, sequence: 1, enqueuedAt: "2026-10-09T00:00:00.000Z", gatewayPongMs: 4 }}] }}));
     return;
   }}
   response.writeHead(404); response.end();
@@ -4273,6 +4292,36 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             latest = self.root / "e2e-state/results/latest"
             self.assertTrue(latest.is_symlink())
             self.assertFalse((latest / "FocusedE2E.xcresult").exists())
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_a_failed_case_keeps_the_proxy_timeline_and_phone_liveness_records(self) -> None:
+        """Failure mode 29: a failed case keeps the fault proxy's ping timeline and
+        the phone's liveness records in its results directory, so a possibly_sent
+        or pong_timeout reads as a stalled Gateway or a stalled phone from one place."""
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        records = json.dumps({
+            "clientId": "phone", "stage": "liveness", "outcome": "failure",
+            "timestamp": "2026-10-09T00:00:08.000Z", "durationMilliseconds": 8000, "reason": "ping_timeout",
+        })
+        environment = self.readiness_node_environment(self.environment)
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(self.root / "failed-case-calls.txt"),
+            "FAKE_XCODEBUILD_FIRST_TEST_EXIT": "37",
+            "FAKE_XCODEBUILD_FIRST_TEST_BUNDLE": "1",
+            "FAKE_PHONE_LIVENESS_RECORDS": records + "\n",
+        })
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            latest = self.root / "e2e-state/results/latest"
+            self.assertTrue((latest / "FocusedE2E.xcresult").is_dir())
+            self.assertTrue((latest / "gateway.jsonl").is_file())
+            link_stats = json.loads((latest / "proxy-link-stats.json").read_text())
+            self.assertEqual(link_stats["clientHeartbeatTimeline"][0]["connection"], 1)
+            self.assertEqual((latest / "phone-liveness-records.jsonl").read_text(), records + "\n")
         finally:
             self.e2e("stop", harness=harness, environment=environment)
 
