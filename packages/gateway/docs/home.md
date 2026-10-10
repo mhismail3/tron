@@ -879,9 +879,16 @@ Per run, the states are:
   live. The task is `unknown` with `detached-work-outlived-task`. A run is never reported
   as stopped unless it was joined.
 
+A workflow can complete while the children it launched in their own runners keep running.
+Such a child is live work of its run, under the same liveness rule as a live run: it keeps
+the session running, blocks drain and eviction, and keeps the task join waiting. Its state
+is read from its own `status.json`. Settlement stops a completed workflow's live child by
+its run id, because the workflow itself can no longer be stopped. A live workflow is stopped
+as itself, and the provider's workflow stop reaches its children.
+
 Settlement runs in this order: operation terminal; report stop joined; the Gateway stops
-and joins the live async runs; the worker's settlement fact is appended; the evidence cut;
-the outcome. The join waits until no run is live. Its bound is the task's 24-hour deadline,
+and joins the live async runs and live workflow children; the worker's settlement fact is
+appended; the evidence cut; the outcome. The join waits until no run is live. Its bound is the task's 24-hour deadline,
 which stays armed through settlement; once the deadline has fired, the join waits one
 disposal grace (5 s) more. The settlement fact is the worker's canonical custom entry
 `tron-home-task-subagents` with `{ receiptId: "subagents:<operationId>", operationId,
@@ -895,8 +902,8 @@ task record:
 - `started` counts the subagent launches the task admitted. A call the gate blocked never
   counts. A provider that rejects an admitted launch before creating a run still counts,
   because its result carries no run identity to tell the two apart.
-- `stoppedAtEnd` counts the async runs the Gateway stopped at settlement. Foreground runs
-  end with the operation abort and are not Gateway stops.
+- `stoppedAtEnd` counts the async runs and workflow children the Gateway stopped at
+  settlement. Foreground runs end with the operation abort and are not Gateway stops.
 
 `home.taskStatus` returns `subagents: { started, stoppedAtEnd }`. `stoppedAtEnd` is
 `null` while async work is unsettled or its stops cannot be proven. Without async runs,
@@ -956,8 +963,9 @@ opens. It does not construct a worker, resume an operation, recreate callbacks o
 replay a prompt or tool. It stops no subagent run, since it has no runtime to stop one
 through. Each async run of the abandoned task is checked against its own `status.json`
 under the admitted artifact root: `complete`, `failed`, `partial`, `stopped` or `rejected`
-has ended; any other state, or an unreadable status, is live. A live run makes the
-outcome `unknown` with `detached-work-outlived-task`, even with a valid report. A
+has ended; any other state, or an unreadable status, is live. Each runner-backed workflow
+child of that run is checked the same way under its own run directory. A live run or child
+makes the outcome `unknown` with `detached-work-outlived-task`, even with a valid report. A
 malformed settlement fact refuses the evidence rather than being guessed. Pending identities, including authorization consumed before
 worker binding, become `unknown`. Scopes and unspent grants stay byte-identical, and
 restart never initializes, enables, renews, revokes or re-stamps authority.
@@ -1392,7 +1400,8 @@ without a retained artifact.
 | `src/home/home-session-recovery.test.ts` | reserved-chapter scan: absence proven only after a complete scan; duplicate IDs; path mismatch; uninspectable entries; enumeration errors | none | `npx vitest run src/home/home-session-recovery.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
-| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task`; foreground abort through the tool signal; kept refusals; cold restart with a live run; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
+| `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
+| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task`; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows stopped on report and on Stop, and a child that outlives its completed workflow stopped by run id; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |

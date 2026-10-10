@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OWNED_OPERATION_DEADLINE_MS } from "../sessions/owned-session-dispatch.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
-import { startChildModelServer, type ChildModelServer } from "../../test-support/home-task-subagent-child.js";
+import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../test-support/home-task-subagent-child.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "./home-task-worker-extension.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -24,16 +24,8 @@ afterEach(async () => {
 });
 
 async function childModel(f: Awaited<ReturnType<typeof fixture>>): Promise<ChildModelServer> {
-  const server = await startChildModelServer();
+  const server = await startScriptedChild(f);
   servers.push(server);
-  await writeFile(join(f.agentDir, "models.json"), JSON.stringify({ providers: { "task-child": {
-    baseUrl: `http://127.0.0.1:${server.port}/v1`, api: "openai-completions", apiKey: "fixture-only",
-    models: [{ id: "child", name: "Task child", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-  } } }));
-  await mkdir(join(f.cwd, ".pi", "agents"), { recursive: true });
-  await writeFile(join(f.cwd, ".pi", "agents", "task-child.md"),
-    "---\nname: task-child\ndescription: Scripted task child\nmodel: task-child/child\ntools: read\n---\nComplete the scripted task.\n");
   return server;
 }
 
@@ -57,6 +49,14 @@ async function launchResults(registry: { readTaskEvidence(sessionId: string): Pr
 
 async function asyncState(asyncDir: string): Promise<string> {
   return JSON.parse(await readFile(join(asyncDir, "status.json"), "utf8")).state;
+}
+
+const holdingWorkflowLaunch = (id: string) =>
+  fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./hold-workflow.js", async: true }, { id })], { stopReason: "toolUse" });
+/** The run id of a workflow's one async child, from the workflow's own status. */
+async function workflowChildRunId(workflowDir: string): Promise<string> {
+  const status = JSON.parse(await readFile(join(workflowDir, "status.json"), "utf8")) as { steps: Array<{ runId?: string }> };
+  return status.steps[0]!.runId!;
 }
 
 const holdingAsyncLaunch = (id: string, task = "HOLD-CHILD background search") =>
@@ -119,6 +119,65 @@ describe("Home task subagents", () => {
     expect(unexpectedTurns).toBe(0);
     expect(slot.canonicalSessionEntries()).toHaveLength(entries);
     expect(slot.isBusy).toBe(false);
+  }, 60_000);
+
+  it("settles an async workflow run and the child it holds before a reported task settles", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
+    f.faux.setResponses([
+      holdingWorkflowLaunch("workflow-launch"),
+      async () => { await waitFor(() => child.heldRequests() === 1, "workflow child live before the report", bound); return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
+    // The workflow run and its child were stopped through the provider before the task settled.
+    expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
+    await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+  }, 60_000);
+
+  it("stops a running async workflow when the task is stopped, and its held child with it", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
+    f.faux.setResponses([
+      holdingWorkflowLaunch("workflow-launch"),
+      (_context, options) => new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => reject(new Error("parent stopped")), { once: true });
+      }),
+    ]);
+    const run = await dispatch(f);
+    await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
+    await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
+    const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
+    expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
+    await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+  }, 60_000);
+
+  it("stops a workflow's async child that outlives its completed workflow, before the task settles", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
+      async () => { await waitFor(() => child.heldRequests() === 1, "detached child live before the report", bound); return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
+    const workflowDir = launch!.details!.asyncDir as string;
+    // The workflow itself had completed; its child was stopped by run id and joined before settlement.
+    expect(await asyncState(workflowDir)).toBe("complete");
+    expect(await asyncState(join(dirname(workflowDir), await workflowChildRunId(workflowDir)))).toBe("stopped");
+    await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
   it("starts no turn when an async run completes while its task reports", async () => {
@@ -275,6 +334,36 @@ describe("Home task subagents", () => {
     const [launch] = (await launchResults(cold, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     child.releaseHeld();
     await waitFor(async () => (await asyncState(launch!.details!.asyncDir as string)) === "complete", "orphaned run finishes", bound);
+  }, 60_000);
+
+  it("reports unknown after a restart finds a workflow child still running under its completed workflow", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
+      async () => { await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+    ]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
+    // The settlement fails before any stop, as after a crash: the task stays active.
+    vi.spyOn(slot, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
+    release();
+    await expect(run.completion).rejects.toThrow("injected settlement interruption");
+    await f.registry.dispose();
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    const cold = await f.restart();
+    // The workflow's own status is complete, but its child's status is not: the task is not clean.
+    expect(await cold.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal",
+      terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task" } });
+    const [launch] = (await launchResults(cold, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
+    const workflowDir = launch!.details!.asyncDir as string;
+    const childDir = join(dirname(workflowDir), await workflowChildRunId(workflowDir));
+    child.releaseHeld();
+    await waitFor(async () => (await asyncState(childDir)) === "complete", "orphaned workflow child finishes", bound);
   }, 60_000);
 });
 

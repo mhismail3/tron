@@ -1,5 +1,5 @@
 import { lstat, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "../sessions/delegated-provider.js";
@@ -86,20 +86,36 @@ export function homeTaskSubagentsProjection(entries: readonly FileEntry[], opera
 }
 
 /** Cold reconciliation has no runtime to stop a run through. It proves a run ended
- * from the provider's own status file under the admitted artifact root. Anything it
- * cannot prove is treated as live, never as ended. */
+ * from the provider's own status file under the admitted artifact root, and from the
+ * status of each async workflow child the run launched: a workflow can complete while
+ * those children run on. Anything it cannot prove is treated as live, never as ended. */
 export async function homeTaskSubagentRunsSettled(asyncDirs: readonly string[], artifactRoot: string): Promise<boolean> {
   for (const asyncDir of asyncDirs) {
     if (!delegatedArtifactPathAllowed(asyncDir, artifactRoot, artifactRoot)) return false;
-    try {
-      const statusPath = join(asyncDir, "status.json");
-      const metadata = await lstat(statusPath);
-      if (!metadata.isFile() || metadata.size > MAXIMUM_STATUS_BYTES) return false;
-      const status = JSON.parse(await readFile(statusPath, "utf8")) as { state?: unknown };
-      if (typeof status.state !== "string" || !SETTLED_RUN_STATES.has(status.state)) return false;
-    } catch {
-      return false;
+    const status = await runStatus(asyncDir);
+    if (!status || !SETTLED_RUN_STATES.has(status.state as string)) return false;
+    for (const step of Array.isArray(status.steps) ? status.steps : []) {
+      const edge = step as Record<string, unknown> | null;
+      if (edge?.async !== true) continue;
+      if (typeof edge.runId !== "string" || !edge.runId || Buffer.byteLength(edge.runId) > 256 || /[\\/\0]/u.test(edge.runId)) return false;
+      const childDir = join(dirname(asyncDir), edge.runId);
+      if (!delegatedArtifactPathAllowed(childDir, artifactRoot, artifactRoot)) return false;
+      const child = await runStatus(childDir);
+      if (!child || !SETTLED_RUN_STATES.has(child.state as string)) return false;
     }
   }
   return true;
+}
+
+/** A run's status file, or undefined when it is missing, oversized or unreadable. */
+async function runStatus(asyncDir: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const statusPath = join(asyncDir, "status.json");
+    const metadata = await lstat(statusPath);
+    if (!metadata.isFile() || metadata.size > MAXIMUM_STATUS_BYTES) return undefined;
+    const status: unknown = JSON.parse(await readFile(statusPath, "utf8"));
+    return status && typeof status === "object" && !Array.isArray(status) ? status as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
 }

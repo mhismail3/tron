@@ -15,6 +15,7 @@ export const nestedTestFiles = [
   "src/sessions/managed-subagents.invalid-entry.test.ts",
   "src/sessions/managed-subagents.rollback.test.ts",
   "src/sessions/managed-subagents.test.ts",
+  "src/sessions/managed-workflow-children.integration.test.ts",
   "src/sessions/runtime-terminal-notifications.integration.test.ts",
   "src/sessions/subagent-parity.integration.test.ts",
 ];

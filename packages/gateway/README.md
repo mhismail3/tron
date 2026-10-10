@@ -3827,6 +3827,10 @@ they observe missing directories' creation and later child-only writes without a
 root event.
 Edges retire only when the root removes them or its observation retires. Child
 watcher errors stay local and never stop the independent root watcher.
+A workflow can complete while its runner-backed children keep running. The root observation
+then stays open, and the live child counts as live work of its run in the one liveness rule
+shared by the dashboard, drain, eviction, and Home task settlement. A terminal root's lifecycle
+never moves; only its child rows update until every child is terminal.
 An explicitly empty recent-tools list with no total represents zero tools before the
 first tool event. The header supplies ownership, not the compact widget's labels,
 ordering or eight-child limit.

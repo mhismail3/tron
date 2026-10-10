@@ -1,5 +1,7 @@
 import { createServer, type Server } from "node:http";
+import { mkdir, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 
 /** A scripted OpenAI-compatible child model for real managed-provider children.
  * A request whose messages contain `HOLD-CHILD` stays open until the test releases
@@ -73,3 +75,26 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
     },
   };
 }
+
+/** Starts the scripted child model and registers it for a managed fixture: a
+ * `task-child` agent whose model answers from this server. The fixture's own
+ * agent and project directories hold the registration. */
+export async function startScriptedChild(fixture: { agentDir: string; cwd: string }): Promise<ChildModelServer> {
+  const server = await startChildModelServer();
+  await writeFile(join(fixture.agentDir, "models.json"), JSON.stringify({ providers: { "task-child": {
+    baseUrl: `http://127.0.0.1:${server.port}/v1`, api: "openai-completions", apiKey: "fixture-only",
+    models: [{ id: "child", name: "Task child", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+  } } }));
+  await mkdir(join(fixture.cwd, ".pi", "agents"), { recursive: true });
+  await writeFile(join(fixture.cwd, ".pi", "agents", "task-child.md"),
+    "---\nname: task-child\ndescription: Scripted task child\nmodel: task-child/child\ntools: read\n---\nComplete the scripted task.\n");
+  return server;
+}
+
+/** Workflow scripts (written under the request cwd) whose one child holds until stopped:
+ * the workflow stays running while the child is live. */
+export const HELD_WORKFLOW_SCRIPT = 'return runs.run("hold", { agent: "task-child", task: "HOLD-CHILD workflow search" });\n';
+/** A child the script launches as async and then returns: the workflow completes while
+ * the child keeps running, as a detached workflow child does. */
+export const DETACHED_WORKFLOW_SCRIPT = 'const receipt = await runs.run("hold", { agent: "task-child", task: "HOLD-CHILD detached search", async: true });\nreturn receipt.runId;\n';
