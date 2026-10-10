@@ -67,9 +67,6 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         }
     }
 
-    // On the main actor, like the @MainActor reconnect legs it drives, so calling
-    // them sends no test instance across isolation.
-    @MainActor
     func testStreamsReconnectsAndSettlesExtensionTools() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let portText = environment["TRON_E2E_PORT"],
@@ -348,26 +345,26 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         await reconnectedClient.close()
         await firstClient.close()
 
-        try await exerciseForegroundReconnect(
+        try await Self.exerciseForegroundReconnect(
             profile: profile,
             token: token,
             port: port,
             proxyToken: proxyToken,
             sessionID: created.sessionId
         )
-        let blackholeRecords = try await exerciseBlackholedReconnect(
+        let blackholeRecords = try await Self.exerciseBlackholedReconnect(
             profile: profile,
             token: token,
             port: port,
             proxyToken: proxyToken
         )
-        let foregroundRecords = try await exerciseForegroundBlackholedReconnect(
+        let foregroundRecords = try await Self.exerciseForegroundBlackholedReconnect(
             profile: profile,
             token: token,
             port: port,
             proxyToken: proxyToken
         )
-        let longOutageRecords = try await exerciseLongBlackholedReconnect(
+        let longOutageRecords = try await Self.exerciseLongBlackholedReconnect(
             profile: profile,
             token: token,
             port: port,
@@ -388,7 +385,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// measure. The app stays foregrounded throughout: no scene transition opens
     /// or ends anything.
     @MainActor
-    private func exerciseForegroundBlackholedReconnect(
+    private static func exerciseForegroundBlackholedReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -404,7 +401,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        let client = makeClient()
+        let client = GatewayClient()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -920,7 +917,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// that ends the outage, so the leg also proves the second outage is answered
     /// by a new attempt instead of a loop parked in projection work.
     @MainActor
-    private func exerciseLongBlackholedReconnect(
+    private static func exerciseLongBlackholedReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -936,7 +933,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        let client = makeClient()
+        let client = GatewayClient()
         let projection = StallingRestoreProjection()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
@@ -1154,7 +1151,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// attempts. Returns the outage's own records so the caller can attach them
     /// for inspection.
     @MainActor
-    private func exerciseBlackholedReconnect(
+    private static func exerciseBlackholedReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -1170,7 +1167,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        let client = makeClient()
+        let client = GatewayClient()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -1297,7 +1294,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     }
 
     @MainActor
-    private func exerciseForegroundReconnect(
+    private static func exerciseForegroundReconnect(
         profile: GatewayProfile,
         token: String,
         port: Int,
@@ -1309,7 +1306,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let memoryTokens = MemoryGatewayTokenStore()
         let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
         try profiles.save(profile, token: token)
-        let client = makeClient()
+        let client = GatewayClient()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
