@@ -1,11 +1,12 @@
 # Settings model
 
-**Status: proposed design.** Nothing here is implemented yet unless a section
-says "today". Epic #758 tracks the work; the slices in
-[Slices](#9-slices) are filed under it as Proposed. As each slice lands, the
-section it implements becomes the current contract and the matching parts of
-[Migration](#8-migration-from-today) and [Slices](#9-slices) are deleted. Those
-two sections go away when the epic closes. See [open question Q1](#10-open-questions).
+**Status: design doc.** Nothing here is implemented yet unless a section says
+"today". Epic #758 tracks the work; the slices in [Slices](#9-slices) are filed
+under it as Proposed. This stays a design doc ([decision 1](#101-decisions)).
+As each slice lands, the matching parts of [Migration](#8-migration-from-today)
+and [Slices](#9-slices) are deleted, and those two sections go away when the
+epic closes. The principles, primitives, layers and registry stay as the
+reference.
 
 This document covers every setting that configures the model or the agent
 harness: how each one is modelled, stored, resolved, changed and shown in Tron.
@@ -24,7 +25,7 @@ gets a home without reorganizing anything.
 7. [Surfaces](#7-surfaces)
 8. [Migration from today](#8-migration-from-today)
 9. [Slices](#9-slices)
-10. [Open questions](#10-open-questions)
+10. [Decisions and open questions](#10-decisions-and-open-questions)
 
 ## 1. Principles
 
@@ -100,12 +101,13 @@ catalog's limits for that model, and for some providers it is a request option.
 Context management (compaction thresholds, reserve and keep-recent tokens) stays
 in Context and reads the window as an input.
 
-**Retry and transport stay in Run.** Moving them under an Accounts provider entry
-was considered and rejected. Accounts supplies credentials and catalogs and
+**Retry and transport stay in Run** ([decision 11](#101-decisions)). Moving them
+under an Accounts provider entry was considered and rejected. Accounts supplies credentials and catalogs and
 should not configure behaviour. Retry and transport are operational policy that
 follows live. When a per-provider value is needed, `provider` becomes a
 qualifier on the Run key (pi's `retry.provider.*` is already provider-level), and
-the Accounts row for that provider links to it.
+the Accounts row for that provider links to it. Like every Run key, a single chat
+may override them ([decision 9](#101-decisions), [3.4](#34-timing-fixed-at-start-or-follows-live)).
 
 ### 2.2 Supply and non-harness sections
 
@@ -121,7 +123,7 @@ They are kept apart so that the five primitives hold only behaviour.
 
 The push notification policy is stored on the Gateway
 (`<tronHome>/gateway/notifications.json`), not on the device, so it belongs to
-Setup rather than This iPhone ([Q10](#10-open-questions)).
+Setup rather than This iPhone ([decision 10](#101-decisions)).
 
 ### 2.3 Today's keys by primitive
 
@@ -138,7 +140,8 @@ plus the Tron stores outside `settings.json`:
 | `compaction.thinkingLevel` → `model.thinking[role=summarizer]` | Model | Project, Mac | Live |
 | `compaction.enabled`, `reserveTokens`, `keepRecentTokens`, `instructions` | Context | Chat, Project, Mac | Live |
 | `branchSummary.reserveTokens` | Context | Project, Mac | Live |
-| `images.autoResize`, `images.blockImages` | Context | Chat, Project, Mac | Fixed |
+| `images.autoResize` | Context | Chat, Project, Mac | Fixed |
+| `images.blockImages` → `context.images.block` | Context | Chat, Project, Mac | Live-tighten ([decision 15](#101-decisions)) |
 | `extensions`, `skills`, `prompts`, `packages` | Sources (contributions shown in Context, Tools and Run) | Project, Mac | Fixed (explicit Reload) |
 | `defaultTools` → `tools.active` | Tools | Chat, Profile, Project, Mac | Fixed |
 | `codemode.mode`, `codemode.inlineBudget` | Tools | Project, Mac | Fixed |
@@ -148,17 +151,30 @@ plus the Tron stores outside `settings.json`:
 | `defaultProjectTrust` | Permissions | Mac only (pi enforces this) | Live |
 | Connection write permission (`connections.policy.update`) | Permissions | Mac | Live |
 | Home task scopes and grants (Home task store) | Permissions | Profile | Live |
+| Floor overrides (new) → `permissions.floor[key]` | Permissions | Mac | Live ([5.4](#54-tiers-floors-and-escalation)) |
 | `steeringMode`, `followUpMode` | Run | Chat, Project, Mac | Live |
-| `retry.*`, `retry.provider.*` | Run | Project, Mac | Live |
-| `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Project, Mac | Live |
+| `retry.*`, `retry.provider.*` | Run | Chat, Project, Mac | Live |
+| `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Chat, Project, Mac | Live |
 | `httpProxy` | Run | Mac only (pi enforces this) | Restart |
 | pi `cacheWarming` (not exposed today) | Run | Mac only (pi enforces this) | Live |
 | Home memory model (`home.json` `memory.model`) → `model.ref[role=memory]` | Model | Profile | Live (next memory pass) |
+| Worker model and thinking (new) → `model.ref[role=worker]`, `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-worker-model-same-as-home)) |
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
 | `enableInstallTelemetry` | Setup | Mac | Live |
 | Push policy (`notifications.json`) | Setup | Mac | Live |
 | Terminal-only pi keys (`theme`, `tuiMode`, ...) | Not shown | | |
+
+The Profile layer applies only to the Home chat ([decision 2](#101-decisions)),
+and the Home chat has no Project layer ([3.3](#33-who-gets-which-layers)). A
+"Profile" entry in this table is therefore a value for Home's own chat, or a
+Home-only key such as the worker role, never a value an ordinary chat reads.
+
+Every chat-applicable Run key allows a Chat layer ([decision 9](#101-decisions)).
+`httpProxy` and `cacheWarming` are the exception: pi reads them only from the
+agent directory, and `httpProxy` takes effect only on restart, so neither has a
+per-chat effect point today. Whether "any Run setting" was meant to include them is
+[Q17](#102-open-questions).
 
 ### 2.4 Features decompose into primitives
 
@@ -178,7 +194,7 @@ cleanly, the model was adjusted, and the adjustment is recorded.
 | 1 | A new reasoning or verbosity parameter (for example a `verbosity` enum) | Model: `model.verbosity[role,model]`. Its row appears only when the catalog declares support, with only the declared values. Fixed at start. | Clean. |
 | 2 | Prompt caching controls | Cache retention or TTL is a request parameter, so Model: `model.cacheRetention`. Keep-alive warming between runs is loop behaviour, so Run: `run.cacheWarming` (Mac only, as pi already enforces). | Splits by the assignment rule. Recorded as the rule's worked example. |
 | 3 | A computer-use tool | Enabling the tool is Tools (`tools.active`). Which apps it may drive, and whether it may use foreground input, are Permissions (floor: wait for tap to widen). The macOS Screen Recording status is Setup. | Clean. The feature spans three primitives by design. |
-| 4 | Sandboxing the shell | Permissions: `permissions.sandbox.mode`. | **Adjusted.** Permissions needs asymmetric timing: tightening applies live, and widening applies at the next chat start or after approval. The registry's `timing` field gained `live-tighten`. |
+| 4 | Sandboxing the shell | Permissions: `permissions.sandbox.mode`. | **Adjusted.** Permissions needs asymmetric timing: tightening applies live, and widening applies at the next chat start or after approval. The registry's `timing` field gained `live-tighten`. Decision 15 reuses it outside Permissions for `context.images.block`, so `live-tighten` is a timing any privacy-tightening key may declare. |
 | 5 | A new memory type (project memory, vector recall) | Context: `context.memory.<kind>`, with its own sources, loaded and delivered chain. Its model is Model `role=memory`. If a package ships it, Sources shows the package. | Clean. |
 | 6 | Per-tool approval ("ask before `bash`") | Permissions: `permissions.toolApproval[tool]`, qualified by tool name. Loosening waits for a tap. Tightening is quiet. | Clean once qualifiers exist. |
 | 7 | Multi-model routing, or a subagent model | Model roles: `model.ref[role=subagent]`, and a router is a model ref (virtual models already exist). | **Adjusted.** Without roles this would need a new group. Roles were added to Model for this case. |
@@ -187,6 +203,8 @@ cleanly, the model was adjusted, and the adjustment is recorded.
 | 10 | An output-token limit or sampling control | Model: `model.maxOutputTokens`, `model.temperature`, shown only when the catalog declares them. | Clean. |
 | 11 | An extension hook that blocks tool calls (a guard) | Hooks are code. Sources lists the extension. Run lists the hook under its event. | **Imperfect.** A hook's effect can belong to any primitive. Hooks stay listed in Run by event, with a badge for effects that matter elsewhere ("can block tools"). Hook behaviour is not a setting key, so this does not move any key. |
 | 12 | A voice or realtime model | Model `role=voice`. Its transport options are Run qualified by provider. | Clean. |
+| 13 | One chat needs more retries for a flaky provider | Run: `run.retry.maxRetries[provider]` at the Chat layer of that chat. Other chats keep following the default live. | Clean after decision 9. Chat-layer Run values are explicit overrides: they do not follow later default edits until the row's "Follow the default" unsets them. |
+| 14 | A worker should run a cheaper model than Home for one task | The `delegate` call names the model: a turn-level input that beats "same as Home" and is recorded in the brief with its reason (decision 5). | Clean. No profile value reaches the worker except through the call. |
 
 ## 3. Layers, precedence and timing
 
@@ -195,15 +213,28 @@ cleanly, the model was adjusted, and the adjustment is recorded.
 Top wins:
 
 1. **Chat**: this chat's own values.
-2. **Profile (Home)**: the Home profile's typed values, for chats in that profile.
+2. **Profile (Home)**: the Home profile's typed values. They apply **only to the
+   Home chat** ([decision 2](#101-decisions)). No other chat reads this layer:
+   not the chats the maintainer starts, and not the workers Home starts.
 3. **Project**: the repo's `.pi/` directory, shared through git.
 4. **Mac**: the Gateway-global layer.
 5. **Built-in**: pi defaults plus Tron's built-in policy.
 
+So a Home chat resolves Chat > Profile > Mac > Built-in (it has no Project
+layer), and every other chat resolves Chat > Project > Mac > Built-in.
+
 Per-message choices (steer or follow-up on a queued message, and the model and
-thinking a `delegate` call names) are **turn-level inputs**. They are not a
+thinking a `delegate` call carries) are **turn-level inputs**. They are not a
 stored layer. A turn-level input either applies to that one message, or writes
 a chat-layer value of a chat being created (a delegated worker).
+
+**How workers get profile values.** A worker Home starts gets the worker model
+and worker thinking because Home resolves them from its own profile and passes
+them explicitly in the `delegate` call ([6.3](#63-worker-model-same-as-home)).
+In the worker they are a turn-level input written into its Chat layer, so they
+sit above the repo's `.pi/` default for that worker
+([decision 3](#101-decisions)). The repo's default still applies to the chats
+the maintainer starts in that repo.
 
 Each key's `layers` field says which layers may set it. A value at a disallowed
 layer is ignored and shown as a diagnostic. For example, pi already ignores
@@ -215,7 +246,7 @@ layer is ignored and shown as a diagnostic. For example, pi already ignores
 |---|---|---|
 | Chat | The session JSONL. pi's `model_change` and `thinking_level_change` entries, Tron's `tron.context-window.v1` custom entry (`packages/gateway/src/providers/context-window-policy.ts:7`), active tools, and a new `tron.settings.v1` entry for the other chat-layer keys and the provenance of fixed values. | The session's runtime slot lane. |
 | Profile (Home) | A typed profile store beside `home.json`: `<tronHome>/gateway/home/profile.json`. Not Knowledge note text ([6](#6-the-home-profile-layer)). | `HomeOwner`. |
-| Project | `<cwd>/.pi/settings.json`, `<cwd>/.pi/mcp.json` and the rest of the repo `.pi/`. | The repo (git). The Gateway is Tron's only writer, but not the file's only writer. |
+| Project | `<cwd>/.pi/settings.json`, `<cwd>/.pi/mcp.json` and the rest of the repo `.pi/`. | The repo (git). The Gateway is Tron's only writer, but not the file's only writer. Tron edits and stages; it never commits ([5.7](#57-project-writes-are-staged-never-committed)). |
 | Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`, plus the Gateway stores (`connections`, `notifications.json`). | The Gateway. pi CLI runs and hand edits are external writers. |
 | Built-in | Code: pi defaults and Tron's built-in policy table in the registry. | The release. |
 
@@ -226,14 +257,15 @@ so the Mac layer is `<tronHome>/agent/settings.json`.
 ### 3.3 Who gets which layers
 
 - An **ordinary chat in a project** resolves Chat > Project > Mac > Built-in. It
-  has no profile layer unless Home started it ([Q2](#10-open-questions)).
+  never has a profile layer ([decision 2](#101-decisions)).
 - **Home's own chat** has no Project layer. Home runs in a neutral workspace with
   no project discovery (`packages/gateway/src/sessions/runtime-slot.ts:1919-1924`).
   It resolves Chat > Profile (Home) > Mac > Built-in.
-- A **Home task worker** is an ordinary chat in its target project. At start, it
-  receives copies of the Home profile values for the worker role in its chat
-  layer ([6.3](#63-worker-model-same-as-home)). After that it resolves like any
-  chat, and its fixed values do not follow later profile edits.
+- A **Home task worker** is an ordinary chat in its target project, with no
+  profile layer. Its model and thinking arrive as `delegate` arguments that Home
+  filled from its profile ([6.3](#63-worker-model-same-as-home)) and are written
+  into its Chat layer at start. Everything else resolves as in any chat, and its
+  fixed values do not follow later profile edits.
 
 ### 3.4 Timing: fixed at start or follows live
 
@@ -241,7 +273,7 @@ Timing is a property of each key, chosen by what the key affects.
 
 - **Fixed at start**: anything that changes what the model is or sees. That
   covers the model, thinking, context window, tools, instructions, skills,
-  resources and image input. When a chat starts, the resolver computes these and
+  resources and image resizing. Image blocking is live-tighten instead (below). When a chat starts, the resolver computes these and
   writes them into the chat layer, each with provenance:
   `{ value, from: "mac" | "project" | "profile" | "builtin", at, ref }`. They
   are then explicit chat values. The row shows **"From default at start: X"**
@@ -252,10 +284,22 @@ Timing is a property of each key, chosen by what the key affects.
 - **Follows live**: operational policy: retry, transport, timeouts, compaction
   thresholds, queue delivery, budgets when tightened. Nothing is copied. The
   chat reads the resolved value at its effect point (next turn, next request, or
-  next compaction). A live key may still allow a chat-layer override, for
-  example the queue delivery mode.
-- **Live-tighten** (Permissions only): narrowing applies live, while widening
-  waits for the next start or an approval ([2.5](#25-stress-tests) case 4).
+  next compaction). A single chat may override **any** chat-applicable Run key
+  (retry, timeouts, transport, queue delivery) and compaction
+  ([decision 9](#101-decisions)). The override is an explicit Chat-layer value
+  that holds until the row's **"Follow the default"** unsets it. Its row shows
+  the Chat badge and the default it overrides. Whether an agent setting its own
+  chat's retry or timeouts needs a floor above `quiet` is
+  [Q18](#102-open-questions).
+- **Live-tighten**: narrowing applies live, while widening waits for the next
+  start or an approval ([2.5](#25-stress-tests) case 4). Permissions keys use
+  it, and so does `context.images.block` ([decision 15](#101-decisions)):
+  turning the block on applies from the next request, and turning it off waits
+  for the next chat start or an approval. pi already re-reads the setting on
+  every request and replaces image content in all messages with a text
+  placeholder (`pi-coding-agent` `dist/core/sdk.js`, `convertToLlmWithBlockImages`),
+  so "on" needs no new pi hook. The maintainer's own tap in a row is the
+  approval, so his "off" applies at once.
 
 Effect points are separate from timing: `next-turn`, `next-request`,
 `new-chat`, `reload` or `restart`. The row shows them when a change does not
@@ -269,7 +313,11 @@ compaction policy follows live: `settings.update` refreshes it for open chats
 builds its own `SettingsManager` when it starts (`runtime-slot.ts:1924`), so,
 as far as the code reads, retry, transport and queue modes reach an open chat
 only when its runtime is rebuilt. That is inferred, and slice 7 verifies and
-fixes it.
+fixes it. pi's `SettingsManager.applyOverrides` is the inspected candidate for
+per-chat Run overrides. For Home, Tron passes no `SettingsManager`
+(`runtime-slot.ts:1924,1952`) and pi's session services create their own
+(`pi-coding-agent` `dist/core/sdk.js:76`), so the override path must reach that
+one too.
 
 **No sticky defaults (verified).** pi 1.0.4's `AgentSession.setModel(model, options)`
 and `setThinkingLevel(level, options)` write `defaultModel` and
@@ -344,7 +392,7 @@ UI reorganization.
 | `builtin` | The built-in value, or `pi-default`. |
 | `timing` | `fixed`, `live` or `live-tighten`. |
 | `effect` | `next-turn`, `next-request`, `new-chat`, `reload` or `restart`. |
-| `risk` | The minimum tier per direction: `{ widen, narrow }` or a single tier. Tiers are `quiet`, `notify` and `approve`. |
+| `risk` | The code floor per direction: `{ widen, narrow }` or a single tier. Tiers are `quiet`, `notify` and `approve`. The maintainer may override it with `permissions.floor[key]` ([5.4](#54-tiers-floors-and-escalation)). |
 | `writers` | Which actors may request a change: `ui`, `home`, `worker` or `agent`. `external` is observed, never admitted. |
 | `sensitivity` | `redact`: show "set" or "changed", never the value (for example `httpProxy`). |
 | `applier` | The owner that performs the write: the pi settings file, a session entry through the slot lane, the profile store, the trust store, the MCP config, or a connections policy. |
@@ -356,22 +404,24 @@ Provenance is not a field. It is part of every resolved value:
 
 | id | primitive | qualifiers | layers → storage | timing / effect | risk (widen / narrow) | writers |
 |---|---|---|---|---|---|---|
-| `model.ref` | model | `role` | chat → `model_change`; profile → `profile.json`; project/mac → `defaultProvider`+`defaultModel` | fixed / next-turn | quiet / quiet (role=worker from Home: notify) | ui, home, agent |
-| `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile; project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
+| `model.ref` | model | `role` | chat → `model_change`; profile → `profile.json` (read by the Home chat only); project/mac → `defaultProvider`+`defaultModel` | fixed / next-turn | quiet / quiet | ui, home, agent |
+| `model.ref[role=worker]` | model | `role` | profile → `profile.json`; built-in `{ sameAs: "home" }` | read when Home delegates | notify (from Home) / quiet (maintainer tap) | ui, home |
+| `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker`, built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
 | `model.ref[role=memory]` | model | `role` | profile → `profile.json` (today `home.json` `memory.model`) | live / next memory pass | notify (spends) | ui, home |
 | `context.compaction.reserveTokens` | context | `model` | chat; project/mac → `compaction.reserveTokens`, pi `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
 | `context.compaction.instructions` | context | | project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
-| `context.images.block` | context | | chat; project/mac → `images.blockImages` | fixed / next-turn | quiet | ui, home, agent |
+| `context.images.block` | context | | chat; project/mac → `images.blockImages` | live-tighten / next-request | quiet (on) / approve (off, from a non-UI actor) | ui, home, agent |
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify (adding) / quiet (removing) | ui, home, agent |
 | `tools.codemode.mode` | tools | | project/mac → `codemode.mode` | fixed / new-chat | quiet | ui, home |
 | `permissions.projectTrust` | permissions | `project` | mac → `trust.json` | live-tighten | approve / notify | ui (Home may request) |
 | `permissions.defaultProjectTrust` | permissions | | mac → `defaultProjectTrust` | live | approve / notify | ui |
 | `permissions.connectionWrite` | permissions | `connection` | mac → connections policy | live-tighten | approve / quiet | ui |
 | `permissions.budget.task` | permissions | | profile | live-tighten | approve / quiet | ui, home |
+| `permissions.floor` | permissions | `key` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve (tap only) / raise: quiet | ui |
 | `run.queue.steeringMode` | run | | chat; project/mac → `steeringMode` | live / next-turn | quiet | ui, home, agent |
-| `run.retry.maxRetries` | run | `provider` | project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
-| `run.transport` | run | `provider` | project/mac → `transport` | live / next-request | quiet | ui, home, agent |
+| `run.retry.maxRetries` | run | `provider` | chat → `tron.settings.v1`; project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
+| `run.transport` | run | `provider` | chat → `tron.settings.v1`; project/mac → `transport` | live / next-request | quiet | ui, home, agent |
 | `run.httpProxy` | run | | mac → `httpProxy` | restart | notify, redact | ui |
 
 ### 4.3 How far today's code is from this
@@ -429,7 +479,10 @@ The steps are:
 2. Compute the tier ([5.4](#54-tiers-floors-and-escalation)).
 3. If the tier is `approve`, create a pending change, notify the maintainer and
    return `pending`.
-4. Apply through the key's applier, under that store's own lock.
+4. Apply through the key's applier, under that store's own lock. A Project-layer
+   applier also stages the file ([5.7](#57-project-writes-are-staged-never-committed)).
+   A failed write or stage leaves the store unchanged and is recorded as
+   `failed`.
 5. Append to the ledger.
 6. Broadcast `settings.changed { changeId, keys, layer, target }`.
 
@@ -438,7 +491,11 @@ in a fixed order and rolls back the stores it already changed, the way
 `TrustService.setAndApply` does today (`trust-service.ts:118-157`).
 
 **The ledger** is `<tronHome>/gateway/settings/changes.jsonl`. It is append-only
-and bounded ([Q12](#10-open-questions)). Each entry holds:
+and **kept forever** ([decision 12](#101-decisions)): no entry is ever pruned.
+So that reads stay cheap as it grows, it is split into closed segments (for
+example one file per month) with an index, and `settings.history` reads it in
+pages. Its growth is reported in observability like other Gateway stores. Each
+entry holds:
 
 - `changeId`, the time, and the actor with its identity;
 - the layer and target;
@@ -448,8 +505,15 @@ and bounded ([Q12](#10-open-questions)). Each entry holds:
 - the tier and why: the floor, untrusted-content escalation, or a risk-model
   raise;
 - the status: `applied`, `pending`, `approved`, `declined`, `expired`, `failed`
-  or `external`;
+  or `external`, with the failure reason when `failed`;
+- for a Project-layer write, the git state: `staged`, `committed: false`, the
+  repo root, the path and the staged blob id
+  ([5.7](#57-project-writes-are-staged-never-committed));
 - `undoOf` when the entry is an undo.
+
+Later facts about an entry (approved, expired, committed by the maintainer,
+unstaged, reverted) are appended as new entries that reference its `changeId`.
+No entry is rewritten.
 
 ### 5.3 Undo
 
@@ -457,7 +521,10 @@ and bounded ([Q12](#10-open-questions)). Each entry holds:
 new change with `undoOf`. It is refused with a conflict if the current value is
 no longer `after`, and the row shows what changed since. Undo is gated like any
 other change. Undoing a narrowing widens, so undoing "remove trust" waits for a
-tap.
+tap. Undo is offered from each key's history and from the full Changes list in
+Settings ([7.4](#74-settings)), for any entry however old, under the same
+conflict check. A redacted key's ledger entry does not hold its old value, so
+whether it can be undone is [Q19](#102-open-questions).
 
 ### 5.4 Tiers, floors and escalation
 
@@ -467,26 +534,48 @@ The three tiers:
 - **notify**: apply, record, and tell the maintainer, with an undo in the
   notification.
 - **approve**: hold until the maintainer taps approve. A pending change expires
-  ([Q8](#10-open-questions)).
+  after 24 hours ([5.5](#55-where-approvals-appear)).
 
 How the tier is computed:
 
-1. **The floor**, fixed per key and direction in the registry policy.
-   Trusting a project, adding credentials and raising budgets are always
-   `approve`. So is widening any Permissions key.
-2. **Untrusted-content escalation.** If the requesting turn read untrusted
-   content, the tier rises ([Q6](#10-open-questions)). Untrusted content means
-   web fetch or search results, X posts, external Knowledge sources, MCP tool
-   output, and untrusted project files or values. The proposal: raise
-   `quiet` to `notify`, and `notify` to `approve`.
-3. **The risk model.** A decision model in front of the action can only raise
+1. **The floor.** Each key's floor per direction is defined in code (the
+   registry). The maintainer may raise **or lower** a key's floor in
+   Settings › Permissions ([decision 7](#101-decisions)). The override is the
+   Mac-layer key `permissions.floor[key]`. Only the UI writes it. Raising a
+   floor applies quietly. Lowering one needs his tap and a confirmation, and
+   like every change it is in the ledger. Without an override the code floor
+   applies. Widening any Permissions key has an `approve` code floor.
+2. **Always-tap changes.** Trusting a project, adding credentials and raising a
+   budget always need the maintainer's tap, whatever the floor and the content
+   ([decision 6](#101-decisions)). This design treats those three as pinned:
+   `permissions.floor` cannot lower them. Whether decision 7's "any key" was
+   meant to reach them is [Q20](#102-open-questions).
+3. **Untrusted-content escalation.** If the requesting turn read untrusted
+   content, the tier rises **one** step: `quiet` to `notify`, and `notify` to
+   `approve` ([decision 6](#101-decisions)). It never jumps straight to
+   `approve`. Untrusted content is:
+   - `web_search` and `web_fetch` results;
+   - other chats' snippets (`session_search`);
+   - Knowledge records;
+   - files read from untrusted projects, and an untrusted project's `.pi/`
+     values read through `settings.resolve` ([3.6](#36-an-untrusted-projects-layer));
+   - task reports that quote any of these.
+
+   The Gateway sets the mark per turn from the tool calls it executed, never
+   from the model's own account. A task report carries its worker's mark: if
+   the worker read untrusted content, the report that reaches Home is
+   untrusted. This list matches what Home's instructions already call untrusted
+   (`tron-home-extension.ts:27`). Which tools in ordinary chats and workers
+   (MCP output, browser, shell network calls, X) also count is
+   [Q21](#102-open-questions).
+4. **The risk model.** A decision model in front of the action can only raise
    the tier, never lower it. If it fails or times out, the computed tier stands.
-4. **The actor.** A change the maintainer makes from a row applies at once, since
+5. **The actor.** A change the maintainer makes from a row applies at once, since
    the tap is the approval. Always-approve keys still show a confirmation in the
    UI. Home and agent changes use the computed tier.
 
-The floors live in code (the registry). Whether the maintainer may raise a floor
-is [Q7](#10-open-questions). Nobody can lower one.
+The floor and any override are recorded in each ledger entry's tier reason, so
+a lowered floor is visible on every change it let through.
 
 ### 5.5 Where approvals appear
 
@@ -496,7 +585,15 @@ Pending changes use the same pattern as Home task grants
 - a push notification with Approve and Decline;
 - a "Waiting for you" row in Manage Home, and in Manage Session when a chat's own
   agent asked;
-- a decision RPC.
+- a decision RPC bound to the exact pending diff.
+
+A pending change **expires after 24 hours** ([decision 8](#101-decisions)). An
+expired or declined change is never applied, and is recorded as `expired` or
+`declined`. **Home is told** on the next maintainer message to Home: that turn's
+context carries one line per change Home asked for that was declined or expired
+since its last turn, the way task results that miss a wake arrive on the next
+maintainer message today. Whether a worker or an ordinary chat's agent that
+asked is told the same way is [Q22](#102-open-questions).
 
 The ledger gives each key's history ("Changed by Home 2h ago: reason · Undo").
 
@@ -515,19 +612,80 @@ When a file changes:
 
 1. Diff it per key against the last snapshot.
 2. If the diff equals the post-image of the latest ledger entry for that store,
-   it was Tron's own write.
+   it was Tron's own write. For a repo file, the watcher also reads the file's
+   git state, so that a staged Tron edit the maintainer later commits, unstages
+   or reverts is appended to that entry's history
+   ([5.7](#57-project-writes-are-staged-never-committed)).
 3. Otherwise record an `external` ledger entry with the file, the per-key diff,
    and the git `HEAD` and branch for repo files. Broadcast it.
 4. Rows show **"Changed outside Tron"** with the diff. The Project card lists
    what the repo changed after a pull.
-5. External changes to Permissions keys, or to anything that adds
-   trust-requiring resources, notify the maintainer. Trust itself still gates
+5. **Only permission-related changes notify** ([decision 13](#101-decisions)).
+   For a repo's `.pi/` after a pull, that means a change to a Permissions key
+   (which the Project layer ignores, but which still signals an attempt), to
+   Tools (`defaultTools`, `.pi/mcp.json`, code mode, shell), to hooks, or to
+   Sources (packages, extension, skill and prompt paths). Those send a push.
+   Every other change is recorded and shown as "Changed outside Tron" with no
+   push. The same rule applies to the Mac files. Trust itself still gates
    loading.
 6. If an agent's tool call wrote that exact path just before, the entry names
    the session ("likely by chat X"). That attribution is a hint, not identity.
 
 Fixed-at-start keys in open chats are unaffected, since they are chat values.
 Live keys take the new value at their next effect point.
+
+### 5.7 Project writes are staged, never committed
+
+When Tron changes a repo's `.pi/` files, it edits them in the project's working
+tree and **stages them with `git add`**. It never commits, never pushes and
+never opens a pull request for them. The maintainer reviews and commits them
+himself ([decision 14](#101-decisions)).
+
+The Project applier, in order, under the project's store lock:
+
+1. Find the git repository that contains `<cwd>/.pi/`. No repository is a
+   failure.
+2. Check the file: its working tree must match its index entry (no unstaged
+   changes), and it must have no unresolved merge conflict. A dirty or
+   conflicting file is a failure, because staging it would also stage someone
+   else's edit.
+3. Check `expected` against the working-tree value.
+4. Write the file, then `git add` exactly that path. If `git add` fails (for
+   example the index is locked, or the path is ignored), restore the previous
+   file content.
+5. Record the ledger entry with `staged: true, committed: false`, the repo
+   root, the path and the staged blob id.
+
+A failure at any step leaves the working tree and the index as they were. It is
+recorded as a `failed` change with its reason (`no-repository`,
+`dirty-file`, `conflicted-file`, `index-locked`, `ignored-path`,
+`stale-expected`), and it appears in the Changes list and in the key's history.
+A non-UI actor's request receives the same reason.
+
+**The live value applies from the working tree.** pi reads the Project layer
+from the working-tree file, so a staged edit takes effect under the key's usual
+timing: a fixed key at the next chat start (or "Use the current default"), a
+live key at its next effect point. Staging is not a pending state: the value is
+applied, and only the commit is outstanding.
+
+**What the UI shows.** The key's source badge reads **"Project · Staged, not
+committed"** while that key's working-tree value differs from its value at
+`HEAD` and the file still matches the blob Tron staged. The Project card lists every such key. The Changes
+list shows the entry as staged and uncommitted.
+
+**What the watcher records afterwards** ([5.6](#56-external-edits)), each as a
+new entry that references the original `changeId`:
+
+- the maintainer commits it: `committed` with the commit id, and the badge
+  drops to "Project";
+- the maintainer edits the file further or reverts it: an `external` change
+  with the diff, and the live value follows the working tree;
+- the maintainer unstages it but keeps the edit: the value still applies, and
+  how that is recorded and shown is [Q24](#102-open-questions).
+
+Tron never re-stages or re-applies a value someone else removed. Several cases
+here need the maintainer's call: [Q24](#102-open-questions) to
+[Q27](#102-open-questions).
 
 ## 6. The Home profile layer
 
@@ -556,42 +714,62 @@ Home's chat layer, carried across chapters, not a profile default.
 
 ### 6.2 Who it applies to
 
-The profile layer applies to Home's own chat and is copied into chats Home
-starts. It does not apply to ordinary chats the maintainer starts
-([Q2](#10-open-questions)). A key's `layers` field decides whether a profile may
-set it. Home-only keys (`model.ref[role=worker]`, `model.ref[role=memory]` and
+The profile layer applies **only to the Home chat** ([decision 2](#101-decisions)).
+It is not resolved for any other chat: not the chats the maintainer starts, and
+not the workers Home starts. Workers get profile-derived values only because
+Home resolves them and passes them explicitly in its `delegate` call
+([6.3](#63-worker-model-same-as-home)). A key's `layers` field decides whether a
+profile may set it. Home-only keys (`model.ref[role=worker]`,
+`model.thinking[role=worker]`, `model.ref[role=memory]` and
 `permissions.budget.task`) have the profile as their highest default layer.
 
 ### 6.3 Worker model: "same as Home"
 
-The new delegation default: workers start with the same model as the active
-Home session. It is modelled as a profile key:
+The delegation default: workers start with the same model **and thinking
+level** as the active Home session ([decision 4](#101-decisions)). Both are
+profile keys, and both are built in as "same as Home":
 
 ```
-model.ref[role=worker]       profile value: { "sameAs": "home" }   (built-in: unset)
-model.thinking[role=worker]  profile value: { "sameAs": "home" }   (Q4)
+model.ref[role=worker]       built-in and default profile value: { "sameAs": "home" }
+model.thinking[role=worker]  built-in and default profile value: { "sameAs": "home" }
 ```
 
-A worker's model resolves once, when the worker starts
-(`packages/gateway/src/home/home-task-dispatcher.ts:190-193`), in this order:
+**Home resolves; the worker receives.** The profile is resolved in Home, at the
+moment Home delegates, not in the worker. The `delegate` handler (Home's side of
+the Gateway, before task admission) fills each of `model` and `thinking` that
+the call left out:
 
-1. **The `delegate` call's `model` and `thinking`**: a turn-level input
-   (`home-task-worker-choice.ts`, `tron-home-extension.ts:29,77`). An explicit
-   choice for this task wins ([Q5](#10-open-questions)).
-2. **The profile value.** `sameAs: home` reads the Home chat's effective model at
-   that moment: its chat layer, which is the current Home session's model. An
-   explicit model ref is used as is.
-3. **Otherwise** the worker's own chat resolution: Project, then Mac, then
-   Built-in.
+1. **The `delegate` call's own `model` or `thinking`** wins, field by field
+   ([decision 5](#101-decisions)). An explicit choice for this task beats "same
+   as Home". The call must then give a short reason, and the brief records the
+   choice and the reason ("Worker model: X, chosen by Home: lookup only").
+2. **Otherwise the profile value.** `sameAs: home` reads the Home chat's
+   effective model or thinking at that moment: its chat layer, which is the
+   current Home session's value. An explicit model ref in the profile is used
+   as is. The brief records it as "Worker model: X, same as Home (Home
+   profile)".
 
-The result is admitted by the existing rules (registered, physical, has
-credentials, supported thinking level). It is then written into the worker's
-chat layer with provenance, for example
-`{ from: "profile", via: "sameAs:home", value: anthropic/<model>, at }`. Manage
-Session for the worker shows **"From Home profile at start: same as Home
-(<model>)"**. If the Home model cannot be used for a worker (for example its
-credentials were removed), resolution falls through to step 3, and the task
-record and the row say why.
+The filled call then goes through the existing admission rules (registered,
+physical, has credentials, supported thinking level;
+`home-task-worker-choice.ts`) and, at worker start
+(`packages/gateway/src/home/home-task-dispatcher.ts:190-193`), is written into
+the worker's Chat layer with provenance, for example
+`{ from: "delegate", via: "home-profile:sameAs:home", value: anthropic/<model>, at }`.
+Because it is a Chat-layer value, it beats the repo's `.pi/` default model for
+this worker ([decision 3](#101-decisions)). Manage Session for the worker shows
+**"From Home at start: same as Home (<model>)"** or **"From Home at start:
+chosen for this task (<model>)"**.
+
+If the profile-derived model cannot be used (for example its credentials were
+removed), Home's handler leaves the field unset, the worker resolves its own
+Chat > Project > Mac > Built-in default, and the task record and the row say
+why. If an explicit model does not support Home's thinking level, the outcome
+is [Q23](#102-open-questions).
+
+Today the `delegate` tool tells Home to "omit both for the Gateway default"
+(`tron-home-extension.ts:29,77`), and an omitted model keeps the worker
+session's default (`home-task-dispatcher.ts:190-191`). Slice 9 replaces that
+guidance and behaviour atomically.
 
 Changing Home's model later does not change running workers: the worker model
 is fixed at start. Changing the profile key from `sameAs: home` to an explicit
@@ -604,8 +782,9 @@ Every surface shows the same five primitive sections in the same order: Model,
 Context, Tools, Permissions, Run. Each row shows:
 
 - the effective value;
-- a **source badge**: Chat, Profile: Home, Project, Mac or Built-in, plus "not
-  applied (untrusted)" or "Changed outside Tron" when they apply;
+- a **source badge**: Chat, Profile: Home (Home chat only), Project, Mac or
+  Built-in, plus "not applied (untrusted)", "Staged, not committed" or
+  "Changed outside Tron" when they apply;
 - a **timing badge** when it helps: "From default at start" or "Follows
   default";
 - an edit at the layer that surface owns. A key the surface cannot edit at its
@@ -620,6 +799,9 @@ This iPhone remain as non-harness sections in Settings.
 
 - **Edits the Chat layer.** The five sections show this chat's values, with
   fixed values showing "From default at start: X · Use the current default".
+  Every Run row (retry, timeouts, transport, queue delivery) and the compaction
+  rows can be overridden for this chat alone, with "Follow the default" to
+  clear the override ([decision 9](#101-decisions)).
 - **The Project card** comes first: the project name, trust state and any
   external changes. It opens the project layer editor ([7.3](#73-project-card)).
 - **Settings** is a row inside it. This is the one door per chat: the
@@ -650,8 +832,10 @@ This iPhone remain as non-harness sections in Settings.
   commit, after a pull.
 - For an untrusted project it shows the repo's values as not applied, with
   Review trust.
-- Writes change the working tree only. Committing is the maintainer's git
-  workflow ([Q14](#10-open-questions)).
+- Writes edit the working tree and stage the file; Tron never commits or
+  pushes ([5.7](#57-project-writes-are-staged-never-committed)). Each staged key
+  carries "Staged, not committed" until the maintainer commits it, and a
+  failed stage shows as a failed change with its reason.
 - **Opened from** Manage Session (the primary route) and from the dashboard
   project list, as the same component. No chat is needed.
 
@@ -671,7 +855,14 @@ is a late, small slice after the Project card.
 - Sections in order: Model, Context, Tools, Permissions, Run, then Accounts,
   Sources, Setup and This iPhone.
 - Data and diagnostics (logs, import) move under Setup.
-- A **Changes** row lists the ledger with filters by actor and layer.
+- A **Changes** row opens the full ledger, kept forever
+  ([decision 12](#101-decisions)): newest first, paged, filterable by actor,
+  layer, key and status, including `failed`, `external` and staged project
+  edits. Each applied entry offers Undo under the conflict check
+  ([5.3](#53-undo)).
+- Permissions holds the **floor overrides** (`permissions.floor`): each key's
+  code floor, any override, and raise or lower actions. Lowering needs a
+  confirmation tap ([5.4](#54-tiers-floors-and-escalation)).
 
 ### 7.5 New Session
 
@@ -710,7 +901,9 @@ Re-verified against `main` at `b76f6ca80`.
 | `transport/gateway-service.ts:1671-1690` `session.setModel` and `setContextWindow`; `runtime-slot.ts:9271-9344` setters | Appliers behind `settings.change` for the Chat layer. The lane guards (`assertConfigurationIdle`, expectations) stay. |
 | `transport/gateway-service.ts:1980-1996` `trust.set`; `admin/trust-service.ts:107-157` | The `permissions.projectTrust` applier. `setAndApply`'s rollback pattern becomes the cross-store rule. |
 | `home/home-owner.ts:77,978` memory model in `home.json`, `home.configureMemory` | `model.ref[role=memory]` in `profile.json`, applied by `HomeOwner`. |
-| `home/home-task-dispatcher.ts:190-193`, `home-task-worker-choice.ts`, `tron-home-extension.ts:29,77` | Worker resolution per [6.3](#63-worker-model-same-as-home): `delegate` arguments, then the profile `sameAs: home`, then the chat default. |
+| `home/home-task-dispatcher.ts:190-193`, `home-task-worker-choice.ts`, `tron-home-extension.ts:29,77` ("omit both for the Gateway default") | Home's `delegate` handler fills omitted `model` and `thinking` from the profile (`sameAs: home` by default) before admission; an explicit choice wins and carries its reason into the brief ([6.3](#63-worker-model-same-as-home)). |
+| `admin/settings-service.ts` project writes: working tree only | The Project applier also stages the file and records the git state; it never commits ([5.7](#57-project-writes-are-staged-never-committed)). |
+| No per-chat Run values; `images.blockImages` read per request by pi but only from settings files | Chat-layer values for every chat-applicable Run key and for `context.images.block` in `tron.settings.v1`, applied to the chat's own settings ([3.4](#34-timing-fixed-at-start-or-follows-live)). |
 | `home/home-profile.ts:21-23` `delegation-default` notes | Kept as the *why*. Values move to typed keys. |
 | `runtime-slot.ts:1924` one `SettingsManager` per runtime build; compaction-only live refresh (`runtime-registry.ts:3656`) | Live keys read the resolver at their effect point, and fixed keys are copied with provenance at chat start. |
 | `context-window-policy.ts:7` `tron.context-window.v1` | Kept as the Chat-layer store for `model.contextWindow`, with provenance added through `tron.settings.v1`. |
@@ -742,21 +935,22 @@ none are planned for it.
 The slices are ordered. The cheap iOS wins come first, then the registry and the
 change path, and the Project card's dashboard route comes last. Size is S, M or
 L. Each slice is a Proposed issue under epic #758. The maintainer moves a slice
-to Ready.
+to Ready. Slices land on `main` one at a time, in their blocked-by order, with
+no integration branch ([decision 16](#101-decisions)).
 
 | # | Slice | Size | Area | Depends on | Issue |
 |---|---|---|---|---|---|
 | 1 | One door per chat: the ordinary-chat gear opens Manage Session, and Settings is a row inside it | S | iOS | | #759 |
 | 2 | Clear names and a shared source badge on today's rows (the three "Thinking" controls, the three "Project Trust" meanings) | S | iOS | | #760 |
 | 3 | The settings registry and `settings.resolve` (layers, provenance, an untrusted project shown as not applied) | L | Gateway | | #761 |
-| 4 | One change path: `settings.change`, the ledger, undo and history; today's setters migrate | L | Gateway, iOS | 3 | #762 |
-| 5 | Risk gate: floors, untrusted-content escalation, approval by tap, and the `settings` tool for Home and agents | L | Gateway, iOS | 4 | #763 |
-| 6 | External edits are detected and shown as "Changed outside Tron" | M | Gateway, iOS | 4 | #764 |
-| 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats | M | Gateway, iOS | 3, 4 | #765 |
+| 4 | One change path: `settings.change`, the ledger (kept forever), undo and history; today's setters migrate; Project writes are staged, never committed | L | Gateway, iOS | 3 | #762 |
+| 5 | Risk gate: code floors with maintainer overrides, one-tier untrusted-content escalation, approval by tap with 24-hour expiry, and the `settings` tool for Home and agents | L | Gateway, iOS | 4 | #763 |
+| 6 | External edits are detected and shown as "Changed outside Tron" (push only for permission-related changes); staged project edits are tracked to commit, unstage or revert | M | Gateway, iOS | 4 | #764 |
+| 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; a chat may override any Run key; image blocking is live-tighten | M | Gateway, iOS | 3, 4 | #765 |
 | 8 | Manage Session and Manage Home show the five primitive sections from the registry (D1, D2, D5, D6, D7) | L | iOS | 2, 3, 4, 7 | #766 |
-| 9 | The Home profile becomes a typed layer: worker model "same as Home", worker thinking, memory model, task budgets | M | Gateway, iOS | 4 | #767 |
-| 10 | The Project card in Manage Session: the project layer, trust, and external changes | M | iOS | 6, 8 | #768 |
-| 11 | Settings becomes the Mac layer by primitive, and the scope pickers are removed (D3, D4) | M | iOS | 8, 10 | #769 |
+| 9 | The Home profile becomes a typed layer for the Home chat: worker model and thinking "same as Home" filled into `delegate` by Home, memory model, task budgets | M | Gateway, iOS | 4 | #767 |
+| 10 | The Project card in Manage Session: the project layer with "Staged, not committed", trust, and external changes | M | iOS | 6, 8 | #768 |
+| 11 | Settings becomes the Mac layer by primitive, and the scope pickers are removed (D3, D4); the full Changes list with undo | M | iOS | 8, 10 | #769 |
 | 12 | The Project card opens from the dashboard project list | S | iOS | 10 | #770 |
 | 13 | A risk model can raise a change's tier | M | Gateway | 5 | #771 |
 
@@ -770,48 +964,90 @@ How #743 and #734 fit:
   "workers use the same model as Home" default as a typed key. #734's
   note-based `delegation-default` stays as the explanation.
 
-## 10. Open questions
+## 10. Decisions and open questions
 
-These need the maintainer's decision. Each slice that depends on an answer says
-so in its issue.
+### 10.1 Decisions
 
-1. **Doc lifetime.** AGENTS.md says there are no plan documents. This doc is
-   written as the target contract in the Gateway docs, and it sheds its
-   Migration and Slices sections as the epic lands. Is that acceptable, or
-   should the design live only in the epic body?
-2. **Profile reach.** Does the Home profile layer apply only to Home's chat and
-   the chats Home starts (proposed), or also to ordinary chats the maintainer
-   starts?
-3. **Profile above Project for workers.** With Chat > Profile > Project, Home's
-   worker model overrides a repo's `.pi/` default model for Home's workers in
-   that repo. Is that intended, or should a repo's own model win for work in
-   that repo?
-4. **Worker thinking.** Should worker thinking also default to "same as Home",
-   or to the worker model's own default?
-5. **Explicit delegate choice.** Does a model named in a `delegate` call (#732)
-   still override "same as Home" (proposed: yes, as a turn-level input)?
-6. **Untrusted-content escalation.** Raise by one tier (proposed), or go
-   straight to "wait for tap"? Which sources count as untrusted: web, fetch, X,
-   external Knowledge sources, MCP output, untrusted repo files?
-7. **Floors.** May the maintainer raise a key's floor in a policy editor
-   (never lower it), or are floors code-only?
-8. **Pending approvals.** How long does a pending change wait before it expires,
-   and does Home get told when one is declined or expires?
-9. **Chat overrides for Run keys.** Which live operational keys may a chat
-   override? Proposed: only queue delivery and compaction; retry and transport
-   are Project or Mac only.
-10. **Push policy placement.** It is stored on the Gateway, so this doc puts it
-    under Setup, not This iPhone. Agree?
-11. **Retry and transport.** Under Run with a provider qualifier (proposed), or
-    under each provider in Accounts?
-12. **Ledger.** Retention bound, and should Settings show a full Changes list or
-    only per-key history?
-13. **External project changes.** Notify on every `.pi/` change after a pull,
-    or only on Permissions-affecting ones (proposed)?
-14. **Project writes.** Tron writes the repo `.pi/` working tree only
-    (proposed). Should it ever stage or commit?
-15. **Image blocking timing.** `images.blockImages` is fixed at start by the
-    "what the model sees" rule. Should a privacy-motivated block apply live
-    instead (a Permissions-style tighten)?
-16. **Landing.** Should the slices land straight to `main` one by one, or be
-    held on an integration branch until the set is verified?
+The maintainer's answers to the sixteen questions this design first asked,
+numbered as they were asked. Each was decided by Mohsin on 2026-10-10. The
+sections above already reflect them.
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Doc lifetime | It stays a design doc. Migration and Slices are removed as slices land. The principles, registry and layers stay as reference. |
+| 2 | Home profile reach | Home only. The profile layer applies only to the Home chat. Workers Home starts get profile-derived values (worker model, worker thinking) because Home resolves them and passes them explicitly in the `delegate` call, not because the profile applies to worker chats. Chats the maintainer starts never see the profile ([3.1](#31-precedence), [6.2](#62-who-it-applies-to)). |
+| 3 | Profile versus a repo's default for workers | Home's worker model beats a repo's `.pi/` default model for workers Home starts in that repo. The repo default still applies to chats the maintainer starts ([6.3](#63-worker-model-same-as-home)). |
+| 4 | Worker thinking | Defaults to "same as Home" ([6.3](#63-worker-model-same-as-home)). |
+| 5 | Explicit `delegate` choice | An explicit model or thinking level in a `delegate` call beats "same as Home". The brief records the choice and the reason ([6.3](#63-worker-model-same-as-home)). |
+| 6 | Untrusted-content escalation | Raises a change one tier, not straight to approval. Untrusted sources: `web_search` and `web_fetch` results, other chats' snippets, Knowledge records, files from untrusted projects, and task reports that quote these. Trust, credential and budget raises still always need a tap ([5.4](#54-tiers-floors-and-escalation)). |
+| 7 | Floors | Floors are defined in code, and the maintainer may raise or lower a key's floor in Settings. Lowering needs his tap and is itself a logged change. The risk model can still only raise ([5.4](#54-tiers-floors-and-escalation)). |
+| 8 | Pending approvals | Expire after 24 hours. Home is told on decline or expiry on the next maintainer message ([5.5](#55-where-approvals-appear)). |
+| 9 | Chat overrides for Run keys | A single chat may override any Run setting (retry, timeouts, transport, queue delivery) and compaction ([3.4](#34-timing-fixed-at-start-or-follows-live)). |
+| 10 | Push policy placement | Under Setup ([2.2](#22-supply-and-non-harness-sections)). |
+| 11 | Retry and transport | Under Run, with a per-provider override ([2.1](#21-harness-primitives)). |
+| 12 | Ledger | Kept forever, with a full Changes list in Settings that supports undo ([5.2](#52-the-request-and-the-record), [7.4](#74-settings)). |
+| 13 | External project changes | After a pull, notify only on permission-related `.pi/` changes (Permissions, Tools, hooks, Sources). Other changes show as "Changed outside Tron" with no push ([5.6](#56-external-edits)). |
+| 14 | Project writes | Tron edits a repo's `.pi/` files and stages them with `git add`. It never commits, pushes or opens a pull request for them; the maintainer reviews and commits. The live value applies from the working tree under the usual timing, the Changes record notes the edit as staged and uncommitted, the source badge says "Staged, not committed", and a failure to stage is a failed change ([5.7](#57-project-writes-are-staged-never-committed)). This replaces an earlier answer that routed project writes through a pull request. |
+| 15 | Image blocking timing | "Block images" is live and tighten-only: turning it on applies at once, turning it off waits for the next chat start or an approval, like Permissions ([3.4](#34-timing-fixed-at-start-or-follows-live)). |
+| 16 | Landing | Slices land on `main` one at a time, in their blocked-by order ([9](#9-slices)). |
+
+### 10.2 Open questions
+
+These follow from the decisions and need the maintainer's call. They are
+numbered after the first sixteen. Each slice they affect names them in its
+issue.
+
+17. **Process-wide Run keys (from decision 9).** pi reads `httpProxy` and
+    `cacheWarming` only from the agent directory, and `httpProxy` takes effect
+    only on restart. This design keeps both Mac only. Was "any Run setting"
+    meant to include them? A per-chat value would need a change in pi or a
+    per-chat transport.
+18. **Agent-set Run overrides (from decision 9).** A chat's own agent can raise
+    its chat's retry count and timeouts, which spends more and can hold a run
+    open longer. Should those overrides from a non-UI actor have a `notify`
+    floor instead of `quiet`?
+19. **Undo of redacted keys (from decision 12).** A redacted key (for example
+    `httpProxy`) records only "changed", so the ledger cannot write the old
+    value back. Should those entries be shown as not undoable, or should the
+    old value be kept in a private store outside the ledger?
+20. **Always-tap changes versus lowering floors (decisions 6 and 7).** This
+    design pins trusting a project, adding credentials and raising budgets at
+    `approve`, so `permissions.floor` cannot lower them. Is that what "any key"
+    meant, or may the maintainer lower those too?
+21. **Untrusted sources outside Home (from decision 6).** The list matches
+    Home's research tools. Ordinary chats and workers also read MCP tool output,
+    browser pages, shell network calls and X posts. Do those mark a turn
+    untrusted too?
+22. **Who else is told on decline or expiry (from decision 8).** Home is told
+    on the next maintainer message. Should a worker or an ordinary chat's agent
+    that asked be told on its next user message the same way, or only through
+    the Changes list?
+23. **Explicit model with "same as Home" thinking (from decisions 4 and 5).** If
+    a `delegate` call names a model but no thinking level, and that model does
+    not support Home's level, should the handler use the model's nearest
+    supported level, the model's own default, or refuse the call? Today a
+    thinking level without a model is refused, and an unsupported level is
+    refused.
+24. **The maintainer unstages but keeps the edit (from decision 14).** The value
+    still applies from the working tree. Should the badge change to
+    "Not staged" with no push, or should the change be treated as an
+    `external` edit?
+25. **The edit is reverted or dropped (from decision 14).** A `git checkout --`,
+    `git restore --staged --worktree`, stash, reset or branch switch can remove
+    the staged edit. The design records it as `external`, the live value
+    follows the working tree, and Tron never re-applies it. Should that send a
+    push even when the key is not permission-related, and should Undo of the
+    original entry then be refused as a conflict or offered as "Apply again"?
+    A branch switch that carries the staged edit along keeps it staged; should
+    the Changes list note the new branch?
+26. **Other staged work in the index (from decision 14).** If the maintainer
+    already has his own staged edit to the same `.pi/` file, staging on top
+    merges Tron's edit into his. Other staged files in the same repo may be
+    committed together with Tron's edit. Should Tron refuse to stage when the
+    file, or the index, already holds staged changes it did not make?
+27. **Which checkout, and ignored `.pi/` (from decision 14).** A project path
+    can be a linked worktree or a subdirectory of a repository, and other
+    checkouts of the same repository do not see a staged edit. A repo may also
+    ignore `.pi/` in `.gitignore`, so `git add` refuses it. Should an ignored
+    path be a failed change (this design), be force-added, or be written
+    without staging?
