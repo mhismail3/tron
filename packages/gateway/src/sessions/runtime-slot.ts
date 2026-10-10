@@ -3376,6 +3376,16 @@ export class RuntimeSlot {
     };
   }
 
+  /** Admits one agent_settled settlement chain to the disposal join for its whole
+   * life. The chain settles its own failures; this only orders disposal after it. */
+  private trackSettlementChain(chain: Promise<void>): void {
+    this.pendingReceiptWrites.add(chain);
+    void chain.finally(() => {
+      this.pendingReceiptWrites.delete(chain);
+      this.releaseSettleWaiters();
+    });
+  }
+
   private trackOwnershipWrite(
     startWrite: () => Promise<void>,
     existingOwner?: GatewayWorkHandle,
@@ -4185,7 +4195,10 @@ export class RuntimeSlot {
             this.phase = "running";
             this.publishSnapshot();
             const completion = this.pendingAssistantCompletion;
-            void (async () => {
+            // The whole chain is one durable owner from its first await: disposal
+            // joins pendingReceiptWrites, so a chain admitted only at its later
+            // attention drain could write its marker clear after dispose (#723).
+            this.trackSettlementChain((async () => {
               // An earlier success can still await attention while a queued
               // follow-up fails. Its receipt cannot stand in for this exact
               // terminal owner (or overwrite its failure when owners coincide).
@@ -4210,7 +4223,7 @@ export class RuntimeSlot {
               }
               if (settledOperationId) this.abortedOperations.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
-            })().catch(() => {});
+            })().catch(() => {}));
             break;
           }
           if (settledOperationId) {
@@ -4238,7 +4251,8 @@ export class RuntimeSlot {
             });
             // The foreground token remains the exact owner; do not create a second
             // receipt token or report drain completion while marker I/O is active.
-            void markerClear.then(
+            // Disposal still joins the chain, so its marker clear cannot land after it.
+            this.trackSettlementChain(markerClear.then(
               () => this.startPendingManualCompaction(),
               (error) => {
                 const pending = this.pendingManualCompaction;
@@ -4257,7 +4271,7 @@ export class RuntimeSlot {
               this.settleOperationWork(settledOperationId);
               this.hooks.settled(this.id);
               this.publishSnapshot();
-            });
+            }));
           } else {
             // A duplicate/late SDK callback has no exact marker authority. Never
             // interpret undefined as permission to clear every session marker.
