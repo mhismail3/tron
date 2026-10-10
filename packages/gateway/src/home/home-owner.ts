@@ -31,6 +31,8 @@ import {
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
+import { homeSystemPrompt } from "./tron-home-extension.js";
+import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 /** One Gateway installation keeps at most one Home. */
 const VERSION = 2;
@@ -154,6 +156,8 @@ export interface HomeOwnerOptions {
   notifications?: NotificationService;
   machineId?: string;
   taskDiagnostic?: (record: HomeTaskDiagnostic) => void;
+  /** Knowledge supplies the learned profile section of Home's system prompt. */
+  knowledge: () => KnowledgeService | undefined;
 }
 
 /**
@@ -707,6 +711,7 @@ export class HomeOwner {
     if (!policy) {
       policy = new HomeRequestPolicy({
         prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => this.memoryView(activation, signal),
+        prepareSystemPrompt: (base: string) => homeSystemPrompt(base, this.options.knowledge),
         ...(this.options.requestDiagnostic ? { onRecord: this.options.requestDiagnostic } : {}),
       });
       this.policies.set(sessionId, policy);

@@ -39,10 +39,21 @@ export type HomeTaskToolRequest = { action: "status"; taskId: string }
   | ({ action: "stop" } & import("./home-task-dispatcher.js").HomeTaskControlRequest);
 
 /**
- * The one first-party module only a Home runtime loads. It contributes Home's
- * operating context, registers the memory tools, places the view's cache
- * breakpoints, and is the single answer to the SDK's per-session cache warming
- * decision.
+ * Home's whole system prompt for one activation: the base prompt the SDK renders,
+ * then the operating context and the learned profile. Home's request seam is the
+ * only caller. It reads this once per activation and freezes the text for every
+ * request of that activation (#749), so no SDK `before_agent_start` hook is
+ * involved: a wake starts a run without one.
+ */
+export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeService | undefined): Promise<string> {
+  return `${base}\n\n${HOME_OPERATING_CONTEXT}\n\n${await homeProfileSection(knowledge)}`;
+}
+
+/**
+ * The one first-party module only a Home runtime loads. It registers the memory
+ * tools, places the view's cache breakpoints, and is the single answer to the
+ * SDK's per-session cache warming decision. Its system prompt is supplied by
+ * `homeSystemPrompt` through the request seam, not by an extension hook.
  *
  * `memoryTools` resolves the memory for the session the tools run in, at every
  * tool call: it answers `undefined` for a session that is not the enabled Home,
@@ -83,11 +94,6 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
         return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },
     });
-    // Read per activation from the Knowledge owner: a profile change reaches the next
-    // activation, and an unchanged profile yields the same text.
-    pi.on("before_agent_start", async (event) => ({
-      systemPrompt: `${event.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}\n\n${await homeProfileSection(knowledge)}`,
-    }));
     pi.on("cache_warming_decision", () => ({ action: "stop" }));
     // The recipe's view breakpoints (gist §8). Anthropic caches only where a
     // request marks it; OpenAI and DeepSeek reuse the view's shared prefix on

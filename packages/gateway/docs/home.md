@@ -236,10 +236,12 @@ imported Registry target is ordinary unless the ledger names it.
   completed-load admission apply only to ordinary runtimes, including task workers.
   Home is delegate-only: `session.resources` returns an empty subagent catalog
   without provider discovery, through reload, replacement and cold acquisition.
-- `tron-home` is loaded only for Home. It contributes Home's operating context and
-  its learned profile section, registers the memory tools, `delegate`, `task` and
-  `profile`, and is the single answer to the SDK's `cache_warming_decision`. It is not
-  in `modules.list`.
+- `tron-home` is loaded only for Home. It registers the memory tools, `delegate`,
+  `task` and `profile`, and is the single answer to the SDK's
+  `cache_warming_decision`. It is not in `modules.list`. It has no `before_agent_start`
+  hook: Home's system prompt (the operating context and the learned profile section,
+  read once per activation) is framed by the request seam for every request, user or
+  wake (`homeSystemPrompt`, #749).
 - `tron-home-research` is loaded only for Home (#724). It registers the
   [read-only research tools](#the-research-tools). It is not in `modules.list`.
 - MCP is excluded structurally: no MCP extension loads for Home. From SDK 1.0.4, an

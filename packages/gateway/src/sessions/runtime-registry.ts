@@ -885,6 +885,7 @@ export class RuntimeRegistry {
       ...(options.notifications ? { notifications: options.notifications } : {}),
       ...(options.machineId ? { machineId: options.machineId } : {}),
       ...(options.homeTaskDiagnostic ? { taskDiagnostic: options.homeTaskDiagnostic } : {}),
+      knowledge: () => this.knowledgeService,
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.readHeapSample = options.heapSample ?? (() => ({

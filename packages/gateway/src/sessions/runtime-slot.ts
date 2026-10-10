@@ -8165,7 +8165,7 @@ export class RuntimeSlot {
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
           this.publishSnapshot();
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt);
           if (this.homeRequestPolicy) {
             await this.dependencies.homeInboxAdmission(this.id, operationId, async message => {
               this.inboxAttributedMessages.add(message.details.eventId);
