@@ -3288,6 +3288,8 @@ spawn nested Vitest or real pi children, one file at a time. That config's list 
 the single owner of which files are nested. Under parallel workers those children
 starve and miss their execFile or detached-process bounds, so they cannot share the
 parallel pass; the bounds are hang bounds only, and a passing run never reaches them.
+For the same reason the nested pass declares its own hang bounds (240 s waits under a
+300 s test timeout, owned by that config) instead of the main pass's 12 s under 15 s.
 Run one of them with `npx vitest run --config vitest.nested.config.ts <file>`.
 
 Tests own every remote boundary through injected fetchers, resolvers and HTTP
