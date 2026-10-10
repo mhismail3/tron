@@ -67,6 +67,9 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         }
     }
 
+    // On the main actor, like the @MainActor reconnect legs it drives, so calling
+    // them sends no test instance across isolation.
+    @MainActor
     func testStreamsReconnectsAndSettlesExtensionTools() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let portText = environment["TRON_E2E_PORT"],
