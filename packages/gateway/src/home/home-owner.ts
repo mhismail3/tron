@@ -191,6 +191,7 @@ export class HomeOwner {
       } });
     this.inbox = new WakeInboxOwner(store, {
       notify: input => options.notifications?.enqueue(input) ?? Promise.resolve("unavailable"),
+      pushSession: homeId => this.openableChapterSession(homeId),
       ...(options.machineId ? { machineId: options.machineId } : {}),
       ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
       result: taskId => this.immutableTaskReport(taskId),
@@ -393,11 +394,7 @@ export class HomeOwner {
     const currentChapter = record.chapters.at(-1)!;
     const live = this.options.sessions.hasLiveRuntime(sessionId);
     const sessionPresent = await this.options.sessions.sessionPresent(sessionId);
-    // The newest chapter a client may open. A reserved or materializing successor
-    // has no session to open yet, so the sealed predecessor is the openable route
-    // until the first logical prompt materializes the successor.
-    const openable = currentChapter.state === "reserved" || currentChapter.state === "materializing"
-      ? record.chapters.at(-2) : currentChapter;
+    const openable = openableChapter(record);
     const openSessionPresent = openable === undefined ? false
       : openable === currentChapter ? sessionPresent : await this.options.sessions.sessionPresent(openable.sessionId);
     const openSessionId = openable !== undefined && openSessionPresent ? openable.sessionId : undefined;
@@ -610,6 +607,13 @@ export class HomeOwner {
 
   /** The canonical cwd used to locate Home's physical session directory. */
   homeWorkspacePath(): string { return this.workspacePath; }
+
+  /** The chapter a task-result push opens for `homeId`: the same openable chapter
+   * `home.status` reports, so a tap lands where the Home row would. */
+  private openableChapterSession(homeId: string): string | undefined {
+    const record = this.record;
+    return record?.homeId === homeId ? openableChapter(record)?.sessionId : undefined;
+  }
 
   /** What the record says about one session id. Runtime creation reads this for
    * every runtime it builds, so a replacement is never built from a stale
@@ -1345,6 +1349,14 @@ export class HomeOwner {
     if (clearAvailability) this.unavailable = undefined;
     return true;
   }
+}
+
+/** The newest chapter a client may open. A reserved or materializing successor
+ * has no session to open yet, so the sealed predecessor is the openable route
+ * until the first logical prompt materializes the successor. */
+function openableChapter(record: HomeRecord): HomeChapter | undefined {
+  const current = record.chapters.at(-1);
+  return current?.state === "reserved" || current?.state === "materializing" ? record.chapters.at(-2) : current;
 }
 
 function homeSessionId(record: HomeRecord): string {

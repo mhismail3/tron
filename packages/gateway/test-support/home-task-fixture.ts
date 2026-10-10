@@ -5,7 +5,9 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { vi } from "vitest";
 import { TrustService } from "../src/admin/trust-service.js";
-import type { NotificationService } from "../src/notifications/notification-service.js";
+import { NotificationService } from "../src/notifications/notification-service.js";
+import { NotificationGrantStore } from "../src/notifications/grant-store.js";
+import type { PushRelayClient } from "../src/notifications/relay-client.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
@@ -85,13 +87,23 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   }
   const managedSubagents = managed ? ManagedSubagents.activateForStartup(tronHome) : undefined;
   // Fixture runtimes never idle-evict; an omitted idle lifetime would make the cutoff NaN.
+  const pushStore = new NotificationGrantStore(join(root, "notifications"));
+  await pushStore.initialize();
+  // No relay: admission validates and records nothing is sent off the Mac.
+  const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
   const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
     },
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    notifications: { enqueue: async (input: Record<string, unknown>) => { notifications.push(input); return "queued"; },
+    notifications: { enqueue: async (input: Parameters<NotificationService["enqueue"]>[0]) => {
+      // The real admission (identity, route and bounds) runs before a push is
+      // recorded: a fake that accepts anything hid a route every real push refused.
+      const status = await pushAdmission.enqueue(input);
+      notifications.push(input as unknown as Record<string, unknown>);
+      return status;
+    },
       suppressAutomatic: async () => "suppressed", markSessionInboxRead: async () => {} } as unknown as NotificationService,
     homeTaskDiagnostic: record => signals.push(record as unknown as Record<string, unknown>),
     homeRequestDiagnostic: record => signals.push(record as unknown as Record<string, unknown>),

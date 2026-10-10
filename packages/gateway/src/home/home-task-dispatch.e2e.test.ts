@@ -464,7 +464,13 @@ describe("Home task cold reconciliation", () => {
     if (mode === "bad-header") rows[0].id = "other-session";
     if (mode === "old-format") rows[0].version = 2;
     if (mode === "bad-graph") report.parentId = report.id;
-    if (mode === "interrupted") expect(rows).toContainEqual(expect.objectContaining({ customType: "tron.chat-invocation.v1", data: expect.objectContaining({ receiptKind: "terminal", lifecycle: "interrupted", operationId: run.operationId }) }));
+    if (mode === "interrupted") {
+      // A sealed report completes its run; interrupted evidence is the terminal
+      // receipt of a run that a Stop ended before any report.
+      const terminal = rows.find(row => row.customType === "tron.chat-invocation.v1" && row.data.receiptKind === "terminal" && row.data.operationId === run.operationId);
+      expect(terminal?.data.lifecycle).toBe("completed");
+      terminal.data = { ...terminal.data, lifecycle: "interrupted", errorCode: "user-abort" };
+    }
     if (mode === "missing-report" || mode === "interrupted") {
       for (const row of rows) if (row.parentId === report.id) row.parentId = report.parentId;
       rows.splice(rows.indexOf(report), 1);
@@ -887,6 +893,27 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "absent-without-stop", frozen, task, providers });
   });
 
+  it("ends a task at its sealed report: no later tool in the batch runs, no further model request, a completed receipt", async () => {
+    const f = await fixture();
+    await writeFile(join(f.cwd, "after-report.txt"), "must not be read\n");
+    let calls = 0;
+    f.faux.setResponses([() => { calls++; return fauxAssistantMessage([reportCall(),
+      fauxToolCall("read", { path: join(f.cwd, "after-report.txt") }, { id: "after-report" })], { stopReason: "toolUse" }); },
+    () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
+    const run = await dispatch(f);
+    const task = await run.completion;
+    expect(task.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(calls).toBe(1);
+    const rows = (await f.registry.readTaskEvidence(run.sessionId)) as any[];
+    const after = rows.find(row => row.type === "message" && row.message?.role === "toolResult" && row.message.toolCallId === "after-report")?.message;
+    expect(after).toMatchObject({ isError: true });
+    expect(JSON.stringify(after.content)).toContain("report is sealed");
+    expect(JSON.stringify(after.content)).not.toContain("must not be read");
+    const receipt = rows.find(row => row.customType === "tron.chat-invocation.v1" && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
+    expect(receipt?.data).toMatchObject({ lifecycle: "completed" });
+    expect(rows.some(row => row.type === "message" && row.message?.role === "assistant" && row.message.stopReason === "aborted")).toBe(false);
+  });
+
   it("commits one push plus pending wake and consumes the immutable report only on the next Home message", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
@@ -898,7 +925,8 @@ describe("Home task production dispatch", () => {
     expect(task).toMatchObject({ wake: { state: "pending", push: "decided" } });
     expect(calls).toBe(1);
     expect(f.notifications).toHaveLength(1);
-    expect(f.notifications[0]).toMatchObject({ sourceId: (task as any).wake.eventId, route: { sessionId: "home" } });
+    expect(f.notifications[0]).toMatchObject({ sourceId: (task as any).wake.eventId, sessionId: f.home.sessionId,
+      route: { sessionId: f.home.sessionId, machineId: "machine-task-test" } });
     const home = await f.registry.acquire(f.home.sessionId);
     expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
     let request = "";

@@ -35,6 +35,10 @@ export interface HomeWakeEvidenceScope { sessionId: string; taskId: string; even
 export interface HomeWakeDiagnostic { event: "home.task.inbox"; eventHash: string; state: HomeWakeEvent["state"]; reason: string }
 interface Options {
   notify: (input: { sessionId: string; sourceId: string; kind: "agent_finished"; title: string; message: string; route?: { sessionId: string; machineId: string } }) => Promise<unknown>;
+  /** The Home chapter a push opens: the newest openable chapter of `homeId`, or
+   * undefined when that Home has none. A push names a real session because a
+   * notification's route must be the session it is about. */
+  pushSession: (homeId: string) => string | undefined;
   machineId?: string;
   result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; text: string }>;
   /** Reads the canonical entries one delivery's proof can use; it must keep no others. */
@@ -65,10 +69,12 @@ export class WakeInboxOwner {
     // crash window is acceptable; the co-committed inbox is guaranteed delivery.
     // NotificationService's bounded 24h dedupe cannot own task-lifetime replay.
     await this.change(taskId, wake => ({ ...wake, push: "decided" }), "push-decided");
+    const sessionId = this.options.pushSession(task.homeId);
+    if (!sessionId) return;
     try {
-      await this.options.notify({ sessionId: task.homeId, sourceId: task.wake.eventId, kind: "agent_finished",
+      await this.options.notify({ sessionId, sourceId: task.wake.eventId, kind: "agent_finished",
         title: "Tron Home task", message: `Task finished: ${task.terminalEvidence!.outcome}. Open Home to review the result.`,
-        ...(this.options.machineId ? { route: { sessionId: "home", machineId: this.options.machineId } } : {}) });
+        ...(this.options.machineId ? { route: { sessionId, machineId: this.options.machineId } } : {}) });
     } catch { /* canonical result/inbox remains available independently */ }
   }
 

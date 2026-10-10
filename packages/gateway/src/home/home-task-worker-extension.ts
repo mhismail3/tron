@@ -14,10 +14,13 @@ const READ_ONLY_ACTIONS = new Set(["guide", "children.list", "status", "list", "
 export function createHomeTaskWorkerExtension(input: {
   providerVersion: (toolName: string) => string | undefined;
   refused: (reason: HomeTaskProducerRefusal) => void;
+  /** True once the task's report is sealed: a later call in the same batch is refused. */
+  reportSealed: () => boolean;
 }): ExtensionFactory {
   return pi => {
     pi.on("before_agent_start", event => ({ systemPrompt: `${event.systemPrompt}\n\nThis is a finite Home task. Work directly with project tools and finish with an explicit report and acceptance evidence. Do not start background, scheduled or subagent work: it can outlive the task. The fixed internal deadline stops this operation; an ordinary final reply is not task success.` }));
     pi.on("tool_call", event => {
+      if (input.reportSealed()) return { block: true, reason: "The task report is sealed, so this task has ended; no further work runs." };
       let reason: HomeTaskProducerRefusal | undefined;
       if (event.toolName === "schedule") reason = "schedule";
       else if (event.toolName === "subagent" || event.toolName === "subagent_supervisor" || event.toolName === "bg_wait") {
