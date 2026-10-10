@@ -2137,6 +2137,70 @@ describe("command-driven session replacement over the real Gateway", () => {
       .toEqual([["start", "staged"], ["terminal", "completed"]]);
   }, 30_000);
 
+  type InvocationSemantic = { kind?: string; operationId?: string; lifecycle?: string; settledInOriginSession?: boolean };
+  it("projects a fork's inherited command rows from their origin settlement, never staged", async () => {
+    // Failure modes: a command that completed before the fork keeps the copied
+    // `staged` lifecycle, which blocks composer commands in the fork; a command
+    // that failed in the origin projects as completed in the fork; the forking
+    // command projects staged or running; the settlement note is missing; the
+    // projection loses either fact after restart.
+    const f = await fixture({ extensions: [{
+      name: "replace.ts",
+      source: () => `
+        export default function (pi) {
+          pi.registerCommand("finished", { handler: async () => {} });
+          pi.registerCommand("broken", { handler: async () => { throw new Error("broken command"); } });
+          pi.registerCommand("replace", { handler: async (args, ctx) => {
+            await ctx.fork(ctx.sessionManager.getLeafId(), { position: "at" });
+          }});
+        }
+      `,
+    }] });
+    let client = await f.connect();
+    const origin = await f.coldSession("inherited-origin");
+    await openSession(client, origin.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    const runCommand = async (name: string) => {
+      const response = await client.request(`command-${name}`, "session.prompt", {
+        commandId: `${name}-command`, sessionId: origin.id, text: `/${name}`,
+      });
+      expect(response.ok, JSON.stringify(response)).toBe(true);
+      await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, `${name} settled`);
+      return response.result.operationId as string;
+    };
+    const finishedOperation = await runCommand("finished");
+    const brokenOperation = await runCommand("broken");
+    const response = await client.request("command-replace", "session.prompt", {
+      commandId: "replace-command", sessionId: origin.id, text: "/replace",
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    const replaceOperation = response.result.operationId as string;
+    await waitFor(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "fork landed");
+    const replacementId = [...registry.slots.keys()][0]!;
+    await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "forking command settled");
+    await waitFor(() => (deliveredAuthorityFrames(client, replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
+      "replacement settled snapshot delivered");
+    // The command rows of one projected snapshot, in transcript order.
+    const commandRows = (payload: unknown) => (payload as { transcript: Array<{ semantic?: InvocationSemantic }> }).transcript
+      .filter((item) => item.semantic?.kind === "command")
+      .map((item) => [item.semantic!.operationId, item.semantic!.lifecycle, item.semantic!.settledInOriginSession]);
+    const expected = [
+      [finishedOperation, "completed", true],
+      [brokenOperation, "failed", true],
+      [replaceOperation, "completed", true],
+    ];
+    expect(commandRows(deliveredAuthorityFrames(client, replacementId).at(-1)!.payload)).toEqual(expected);
+    // The origin keeps every terminal fact; the fork projects them, never rewrites them.
+    expect((await invocationReceiptsIn(origin.file)).filter((receipt) => receipt.receiptKind === "terminal")
+      .map((receipt) => receipt.lifecycle)).toEqual(["completed", "failed", "completed"]);
+
+    await f.restart();
+    client = await f.connect();
+    const reopened = await client.request("replacement-reopened", "session.open", { sessionId: replacementId });
+    expect(reopened.ok, JSON.stringify(reopened)).toBe(true);
+    expect(commandRows(reopened.result.session)).toEqual(expected);
+  }, 30_000);
+
   it("keeps a failure after the switch out of the replacement", async () => {
     const r = await replace("switch", { afterReplace: "throw new Error(\"after the switch\");" });
     await assertSettledInOrigin(r);
