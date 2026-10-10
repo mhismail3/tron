@@ -1396,7 +1396,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     private func makeClient(networkPath: (@Sendable () -> String?)? = nil) -> GatewayClient {
         let client = networkPath.map { path in GatewayClient(networkPath: path) } ?? GatewayClient()
         addTeardownBlock {
-            await self.attachLivenessRecords(of: client)
+            await Self.attachLivenessRecords(of: client)
             await client.close()
         }
         return client
@@ -1409,7 +1409,9 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// transport record gives the last inbound frame (`timestamp` less
     /// `lastInboundAgeMilliseconds`). `scripts/ios-gateway-e2e-test` exports this
     /// attachment beside the fault proxy's per-ping timeline on the same clock.
-    private func attachLivenessRecords(of client: GatewayClient) async {
+    // Static so the @Sendable teardown block captures no test instance; the
+    // attachment is added through the activity API on the main actor.
+    private static func attachLivenessRecords(of client: GatewayClient) async {
         let records = await client.diagnostics()
             .filter { $0.stage == .liveness || $0.stage == .transport }
             .sorted { $0.sequence < $1.sequence }
@@ -1434,10 +1436,15 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             ])
             return String(decoding: (try? JSONEncoder.gateway.encode(value)) ?? Data(), as: UTF8.self)
         }
-        let attachment = XCTAttachment(string: lines.joined(separator: "\n") + "\n")
-        attachment.name = "phone-liveness-records"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        let text = lines.joined(separator: "\n") + "\n"
+        await MainActor.run {
+            XCTContext.runActivity(named: "phone-liveness-records") { activity in
+                let attachment = XCTAttachment(string: text)
+                attachment.name = "phone-liveness-records"
+                attachment.lifetime = .keepAlways
+                activity.add(attachment)
+            }
+        }
     }
 
     private static func optionalNumber(_ value: Int?) -> JSONValue {
