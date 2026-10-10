@@ -2,21 +2,21 @@ import SwiftUI
 import TronMobileCore
 
 enum HomeSheetDestination: Identifiable {
-    case settings, model, context, memory, tasks, permissions
+    case manage, settings, model, context, memory, tasks, permissions
     case task(String), grant(HomeTaskPermissionsDTO.Request)
     case evidence(HomeMemoryEvidenceDTO)
     var id: String {
-        switch self { case .settings: "settings"; case .model: "model"; case .context: "context"; case .memory: "memory"; case .evidence: "evidence"; case .tasks: "tasks"; case .permissions: "permissions"; case .task: "task"; case .grant: "grant" }
+        switch self { case .manage: "manage"; case .settings: "settings"; case .model: "model"; case .context: "context"; case .memory: "memory"; case .evidence: "evidence"; case .tasks: "tasks"; case .permissions: "permissions"; case .task: "task"; case .grant: "grant" }
     }
     var title: String {
-        switch self { case .settings: "Memory Settings"; case .model: "Memory Model"; case .context: "Home Context"; case .memory: "Home Memory"; case .evidence: "Exact Evidence"; case .tasks: "Home Tasks"; case .permissions: "Task Permissions"; case .task: "Task"; case .grant: "Grant Request" }
+        switch self { case .manage: "Manage Home"; case .settings: "Memory Settings"; case .model: "Memory Model"; case .context: "Home Context"; case .memory: "Home Memory"; case .evidence: "Exact Evidence"; case .tasks: "Home Tasks"; case .permissions: "Task Permissions"; case .task: "Task"; case .grant: "Grant Request" }
     }
     var initialQuery: HomeSheetReadQuery {
         switch self {
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .permissions, .grant: .permissions
-        case .settings, .model, .context: .status
+        case .manage, .settings, .model, .context: .status
         case .memory: .memory(nil)
         case .evidence(let source): .evidence(source, offset: 0)
         }
@@ -60,7 +60,9 @@ struct HomeSheet: View {
     @Environment(\.tronPresentationActivity) private var activity
     @State private var owner = HomeSheetReadOwner()
     @State private var request: HomeSheetRequest
-    @State private var evidenceDestination: HomeSheetDestination?
+    /// Evidence and Manage Home rows present existing Home sheets as managed
+    /// children, so each child keeps its own read owner and lifetime.
+    @State private var childDestination: HomeSheetDestination?
     @State private var mutationFailure: String?
 
     init(destination: HomeSheetDestination, profileID: String) {
@@ -128,7 +130,7 @@ struct HomeSheet: View {
                 try await fetch(query: query, identity: identity, requestID: requestID)
             }
         }
-        .tronManagedSheet(item: $evidenceDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
+        .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID)
         }
         .alert("Home change", isPresented: Binding(get: { mutationFailure != nil && destination.id == "model" },
@@ -148,7 +150,8 @@ struct HomeSheet: View {
             if read.identity == identity {
                 switch content {
                 case .status(let status):
-                    if case .settings = destination { settings(status) }
+                    if case .manage = destination { manage(status) }
+                    else if case .settings = destination { settings(status) }
                     else if case .model = destination { modelPicker(status) }
                     else { context(status.activation) }
                 case .tasks, .task, .permissions: EmptyView()
@@ -161,7 +164,7 @@ struct HomeSheet: View {
 
     private func fetch(query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, requestID: UUID) async throws -> HomeSheetContent {
         let content = try await model.readHomeSheet(query, identity: identity, isCurrent: { self.request.id == requestID && self.active })
-        if query == .status, destination.id == "settings" || destination.id == "model",
+        if query == .status, ["manage", "settings", "model"].contains(destination.id),
            model.providerCatalog(for: .global) == nil {
             _ = await model.refreshProviders(target: .global)
         }
@@ -170,6 +173,147 @@ struct HomeSheet: View {
 
     private func reload() {
         request = HomeSheetRequest(query: destination.initialQuery)
+    }
+
+    /// The Manage Home sections (#725): every Home control in one sheet, in the
+    /// issue's order. Next-prompt preview, the chapter list and "About you" need
+    /// Gateway reads that do not exist yet and stay with their follow-ups.
+    private func manage(_ status: HomeStatusDTO) -> some View {
+        let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
+        let mutating = model.homeMutations.isRunning(profileID: profileID)
+        return VStack(alignment: .leading, spacing: 18) {
+            TronGlassCard(accent: .tronEmerald) {
+                TronSettingsRow(icon: "house", title: "Home · \(HomeStatusLinePresentation.state(status))",
+                    subtitle: HomeStatusLinePresentation.memory(status, unresolvedCommand: unresolved), accent: .tronEmerald)
+                    .accessibilityIdentifier("home-manage-state")
+            }
+            Text("Model").font(TronTypography.headline)
+            TronGlassCard(accent: .tronEmerald) {
+                VStack(spacing: 0) {
+                    TronValueRow(icon: "cpu", title: "Chat model",
+                        value: status.model.map { SessionModelSelectionPresentation.modelName($0, catalog: models) } ?? "Unavailable")
+                        .accessibilityIdentifier("home-manage-chat-model")
+                    TronSettingsDivider(accent: .tronEmerald)
+                    TronValueRow(icon: "rectangle.compress.vertical", title: "Context window",
+                        value: status.activation.contextWindow.map { "\($0.formatted()) tokens" } ?? "Unavailable")
+                }
+            }
+            Text("Context").font(TronTypography.headline)
+            TronGlassCard(accent: .tronEmerald) {
+                navigationRow(icon: "doc.text.magnifyingglass", title: "Home context",
+                    subtitle: "What the last activation carried", destination: .context, id: "home-manage-context")
+            }
+            Text("Memory").font(TronTypography.headline)
+            TronGlassCard(accent: .tronPurple) {
+                VStack(spacing: 0) {
+                    navigationRow(icon: "cpu", title: "Memory settings",
+                        subtitle: SessionModelSelectionPresentation.modelName(status.memory.model, catalog: models),
+                        accent: .tronPurple, destination: .settings, id: "home-manage-memory-settings")
+                    if model.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true {
+                        TronSettingsDivider(accent: .tronPurple)
+                        navigationRow(icon: "brain", title: "Browse memory",
+                            subtitle: "Summaries, projections and exact evidence",
+                            accent: .tronPurple, destination: .memory, id: "home-manage-memory-browser")
+                    }
+                    if !unresolved {
+                        TronSettingsDivider(accent: .tronPurple)
+                        if status.memory.paused == true || status.memory.blocked != nil {
+                            Button { perform(.resumeMemory) } label: {
+                                TronSettingsRow(icon: "play.fill", title: "Resume memory", accent: .tronPurple)
+                            }
+                            .disabled(mutating)
+                            .accessibilityIdentifier("home-manage-resume")
+                        }
+                        if status.memory.paused != true {
+                            Button { perform(.pauseMemory) } label: {
+                                TronSettingsRow(icon: "pause.fill", title: "Pause memory",
+                                    subtitle: "New responses are blocked while paused", accent: .tronPurple)
+                            }
+                            .disabled(mutating || !status.memory.configured)
+                            .accessibilityIdentifier("home-manage-pause")
+                        }
+                    }
+                }
+            }
+            if let chapter = status.chapter {
+                Text("Chapters").font(TronTypography.headline)
+                TronGlassCard(accent: .tronEmerald) {
+                    VStack(spacing: 0) {
+                        TronValueRow(icon: "book", title: "Chapters", value: chapter.count.formatted())
+                            .accessibilityIdentifier("home-manage-chapters")
+                        TronSettingsDivider(accent: .tronEmerald)
+                        let size = [chapter.currentEntries.map { "\($0.formatted()) entries" },
+                                    chapter.currentBytes.map { "\($0.formatted()) bytes" }]
+                            .compactMap { $0 }.joined(separator: " · ")
+                        TronValueRow(icon: "book.pages", title: "Current chapter",
+                            value: size.isEmpty ? "Not measured" : size)
+                        if chapter.recoveryDecision != .none {
+                            TronSettingsDivider(accent: .tronEmerald)
+                            TronValueRow(icon: "arrow.triangle.2.circlepath", title: "Rollover",
+                                value: chapter.recoveryDecision == .reserved ? "Successor reserved" : "Materializing")
+                        }
+                    }
+                }
+            }
+            if status.taskRecovery != nil {
+                Text("Tasks").font(TronTypography.headline)
+                TronGlassCard(accent: .tronEmerald) {
+                    navigationRow(icon: "checklist", title: "Tasks and permissions",
+                        subtitle: "Finite work and its grants", destination: .tasks, id: "home-manage-tasks")
+                }
+            }
+            Text("Home").font(TronTypography.headline)
+            TronGlassCard(accent: .tronEmerald) {
+                VStack(spacing: 0) {
+                    if unresolved {
+                        Button { checkCompletion() } label: {
+                            TronSettingsRow(icon: "arrow.clockwise", title: "Check completion",
+                                subtitle: "Resolve the pending Home change first", accent: .tronEmerald)
+                        }
+                        .disabled(mutating)
+                        .accessibilityIdentifier("home-manage-check-completion")
+                    } else {
+                        Button { perform(.disable) } label: {
+                            TronSettingsRow(icon: "house.slash", title: "Disable Home",
+                                subtitle: "Stops activations; history is preserved",
+                                accent: .tronError, titleColor: .tronError)
+                        }
+                        .disabled(mutating)
+                        .accessibilityIdentifier("home-manage-disable")
+                    }
+                }
+            }
+        }
+    }
+
+    /// A Manage Home row that presents an existing Home sheet as a managed child.
+    private func navigationRow(icon: String, title: String, subtitle: String? = nil,
+                               accent: Color = .tronEmerald, destination: HomeSheetDestination, id: String) -> some View {
+        Button { childDestination = destination } label: {
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, accent: accent) {
+                Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(accent)
+            }
+        }
+        .accessibilityIdentifier(id)
+    }
+
+    /// Accepted domain commands keep the header's authority rules: acquire once
+    /// for the mounted profile, then let the coordinator own receipt resolution.
+    private func perform(_ command: HomeMutationCoordinator.Command) {
+        guard let identity, let coordinator, active,
+              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
+        Task { @MainActor in
+            do {
+                try await model.performHomeControl(command, authority: authority)
+                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication else { return }
+                mutationFailure = nil
+                request = HomeSheetRequest(query: destination.initialQuery)
+            } catch {
+                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
+                      !(error is CancellationError) else { return }
+                mutationFailure = error.localizedDescription
+            }
+        }
     }
 
     private func settings(_ status: HomeStatusDTO) -> some View {
@@ -311,7 +455,7 @@ struct HomeSheet: View {
                         }
                         Text("\(item.evidence.sessionId) · \(item.evidence.entryId)")
                             .font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
-                        Button("Exact evidence") { evidenceDestination = .evidence(item.evidence) }
+                        Button("Exact evidence") { childDestination = .evidence(item.evidence) }
                             .buttonStyle(TronActionButtonStyle(expands: false))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

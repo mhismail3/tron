@@ -155,12 +155,7 @@ struct ChatView: View {
                 )
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if let profileID = composerScope?.profileID,
-                   profileID == model.profiles.selected?.id,
-                   model.homeStatus.capabilityEnabled,
-                   let status = model.homeStatus.status,
-                   HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
-                   status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
+                if let (profileID, status) = manageHomeContext {
                     HomeChatHeader(
                         status: status,
                         profileID: profileID,
@@ -2868,13 +2863,35 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            Button { sessionPresentation.showSettings = true } label: {
+            // A chat that claims the Home status manages Home from its gear; the
+            // ordinary Manage Session sheet's controls are refused for Home (#725).
+            let managesHome = manageHomeContext != nil
+            Button {
+                if let (profileID, _) = manageHomeContext {
+                    homeSheet = HomeSheetRoute(profileID: profileID, destination: .manage)
+                } else {
+                    sessionPresentation.showSettings = true
+                }
+            } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(Color.tronEmerald)
             }
-            .accessibilityLabel("Settings")
+            .accessibilityLabel(managesHome ? "Manage Home" : "Settings")
         }
+    }
+
+    /// The Home status this chat's route claims, with the profile that owns its
+    /// mutations. Decides both the header bar and what the gear button opens;
+    /// nil keeps the ordinary settings sheet.
+    private var manageHomeContext: (profileID: String, status: HomeStatusDTO)? {
+        guard let profileID = composerScope?.profileID,
+              profileID == model.profiles.selected?.id,
+              model.homeStatus.capabilityEnabled,
+              let status = model.homeStatus.status,
+              HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
+              status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) else { return nil }
+        return (profileID, status)
     }
 
     private var pendingInteractionScopes: [ExtensionInteractionScope] {

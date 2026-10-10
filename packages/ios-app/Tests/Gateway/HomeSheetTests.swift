@@ -84,6 +84,31 @@ final class HomeSheetTests: XCTestCase {
         XCTAssertThrowsError(try HomeStatusDTO.decode(.object(status)))
     }
 
+    // Failure mode: chat-model and chapter metadata out of protocol bounds is
+    // admitted into the Manage Home sheet, or their absence (an older Gateway)
+    // stops the whole status from decoding.
+    func testStatusAdmitsChapterAndChatModelWithinBoundsOnly() throws {
+        var status = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"phase":"ready","activation":{"available":false},"readiness":{"ready":true,"gaps":[]},"recovery":{"action":"none"},"available":true,"enabled":true,"live":false,"sessionPresent":true,"memory":{"configured":true,"open":true}}"#.utf8)).objectValue!
+        let absent = try HomeStatusDTO.decode(.object(status))
+        XCTAssertNil(absent.model)
+        XCTAssertNil(absent.chapter)
+        status["model"] = .object(["provider": .string("fixture"), "id": .string("chat-model")])
+        status["chapter"] = .object(["count": .number(3), "currentBytes": .number(480),
+                                     "currentEntries": .number(12), "recoveryDecision": .string("reserved")])
+        let value = try HomeStatusDTO.decode(.object(status))
+        XCTAssertEqual(value.model, ModelRef(provider: "fixture", id: "chat-model"))
+        XCTAssertEqual(value.chapter, HomeStatusDTO.Chapter(count: 3, currentBytes: 480, currentEntries: 12, recoveryDecision: .reserved))
+        for invalid in [JSONValue.object(["count": .number(0), "recoveryDecision": .string("none")]),
+                        .object(["count": .number(1), "currentBytes": .number(-1), "recoveryDecision": .string("none")]),
+                        .object(["count": .number(1), "recoveryDecision": .string("future-decision")])] {
+            status["chapter"] = invalid
+            XCTAssertThrowsError(try HomeStatusDTO.decode(.object(status)))
+        }
+        status["chapter"] = .null
+        status["model"] = .object(["provider": .string(""), "id": .string("chat-model")])
+        XCTAssertThrowsError(try HomeStatusDTO.decode(.object(status)))
+    }
+
     func testNewerPageOwnsLoadingResultAndError() async throws {
         let coordinator = PresentationActivityCoordinator()
         let token = PresentationSurfaceToken(id: "memory", generation: UUID())

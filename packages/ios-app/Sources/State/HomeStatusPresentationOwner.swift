@@ -66,6 +66,16 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let available: Bool
         let reason: String?
     }
+
+    /// Bounded chapter metadata of `home.status`; the full chapter list is a
+    /// future Gateway read (#725 follow-up).
+    struct Chapter: Decodable, Equatable, Sendable {
+        enum RecoveryDecision: String, Decodable, Sendable { case none, reserved, materializing }
+        let count: Int
+        let currentBytes: Int?
+        let currentEntries: Int?
+        let recoveryDecision: RecoveryDecision
+    }
     let taskRecovery: TaskRecovery?
     let routeGeneration: Int?
     let phase: Phase
@@ -83,6 +93,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     let generation: Int?
     let sessionPresent: Bool
     let memory: Memory
+    /// The chat model Home's activations use; distinct from `memory.model`.
+    let model: ModelRef?
+    let chapter: Chapter?
 
     /// Task and permission reads are admitted only while the Gateway's task recovery is open.
     var admitsTaskReads: Bool { available && taskRecovery?.available == true }
@@ -95,7 +108,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
               status.memory.spentTokens.map({ $0 >= 0 }) ?? true,
-              status.memory.model.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true,
+              [status.memory.model, status.model].allSatisfy({ $0.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true }),
+              status.chapter.map({ $0.count > 0 && ($0.currentBytes ?? 0) >= 0 && ($0.currentEntries ?? 0) >= 0 }) ?? true,
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
                status.activation.lastRefusalReason, status.activation.lastRefusalDetail]
                 .compactMap({ $0 }).allSatisfy({ $0.utf8.count <= 1_024 }),
@@ -127,6 +141,30 @@ enum HomeChatRouteKey: Equatable, Sendable {
         case .home: true
         case .ordinary(let sessionID): status.sessionId == sessionID
         }
+    }
+}
+
+/// The one source of the Home state and memory lines; the header bar and the
+/// Manage Home sheet must describe the same status identically.
+enum HomeStatusLinePresentation {
+    static func state(_ status: HomeStatusDTO) -> String {
+        switch status.phase {
+        case .ready: "Ready"
+        case .active: "Working"
+        case .paused: "Paused"
+        case .blocked: status.memory.configured ? "Memory blocked" : "Memory setup needed"
+        case .rolloverPending, .missingSession, .unavailable: "Recovery needed"
+        case .disabled: "Disabled"
+        case .undesignated: "Not set up"
+        }
+    }
+
+    static func memory(_ status: HomeStatusDTO, unresolvedCommand: Bool) -> String {
+        if unresolvedCommand { return "Home change unresolved · Check completion" }
+        if status.memory.paused == true { return "Memory paused · New responses are blocked" }
+        if let blocked = status.memory.blocked { return "Memory blocked · \(blocked)" }
+        if !status.memory.configured { return "Choose a memory model before sending" }
+        return status.memory.open ? "Memory available" : "Memory configured"
     }
 }
 
