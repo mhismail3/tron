@@ -223,9 +223,5 @@ final class SettingsTrustCoordinator {
         settingsByTarget[target] = value
     }
 
-    func setHostedInvalidationGenerations(settings: Int? = nil, trust: Int? = nil) {
-        if let settings { settingsInvalidationGeneration = settings }
-        if let trust { trustRevision = trust }
-    }
     #endif
 }

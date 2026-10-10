@@ -871,7 +871,7 @@ The WebSocket hello attempt has one monotonic deadline covering both the hello s
 
 Automatic recovery is owned by each connection lifecycle and continues indefinitely for retryable transport failures while the app is foregrounded on a satisfied network path. Both the primary lifecycle and dashboard pool use `GatewayReconnectSchedule`: the primary lifecycle's nominal delays progress from 2 seconds by ×1.7 to a 15-second cap, each independently jittered within 80–120%; a dashboard pool entry follows the same progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable profile is retried once every five minutes. The pool counts its own failed attempts and only a successful attempt clears the count, so a Mac that dropped after connecting, a handshake that is never answered and a 503 all keep backing off. Foreground activation, a real path change, and explicit Retry cancel a single pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the curve, and an attempt already on the wire consumes that change when it ends rather than waiting the interval the closed route had grown; background retirement and an unsatisfied path pause retry admission, including when the path drops while a socket is active and that socket later retires. Authentication, permission, protocol, and identity failures stop automatic attempts until explicit Retry. A protocol mismatch is classified from the Gateway's own close: the Gateway refuses an unspeakable hello with application close code 4006 and a JSON reason carrying its protocol and minimum, so the stop's message names the build to update (an older app or an older Mac) instead of reading as a retryable transport failure, and the same rule keeps a background pool entry stopped while its own entry, not the selected profile, holds that message for the device detail. A Gateway built before that close answers the same hello with 1008 and no range, which stays a retryable transport failure: a Mac must run a Gateway that sends the typed close before its phone stops retrying it. A failed `session.list` read follows the same capped jitter curve while its exact connection remains current, without needing another catalog invalidation; read failures marked nonretryable stop, while the unavailable notice appears once after the third failure. Revision movement remains bounded to its existing immediate traversal attempts. Retryable failures remain Reconnecting, while Offline denotes stopped recovery. Each handshake bounds its socket open with the monotonic five-second transport-open deadline and its hello exchange with the fifteen-second hello deadline; the maintenance restart watchdog changes a stalled restart to Reconnecting and resumes retry rather than exhausting an allowance. Initial connect and profile switches still claim one admission before cache I/O and retain it through hello; exact lifecycle/connection generations fence stale completion, and canceled cache reads cannot replace the resumed authoritative catalog. Accepted domain mutations keep their receipt/possibly-sent ownership and never re-arm transport recovery. Recovery presentation retains the mounted Chat rows, route, draft, keyboard, and scroll identity, and cannot enable Send while `admitsLiveSessionCommands` is false. Optional provider/settings/device/catalog refreshes run through their existing owners after mounted authority and transport readiness.
 
-Cold-start inbox coverage waits for both the catalog and the one initial inbox request on the scripted socket while holding the inbox response, so asynchronous admission cannot look like a missing read. Dashboard owner tests cover retries past the removed attempt allowance and path pause/resume; socket retirement barriers remain keyed by profile and exact entry generation so a predecessor cannot erase its successor's pending close. Auth completion consumes exact terminal ownership synchronously; one auth-owned worker and one replaceable pending completion perform optional refresh, with canceled/profile-stale publication fenced. The mounted event owner reduces admitted events synchronously into the bounded `SessionSynchronizationCoordinator`; only a claimed synchronization lease enters its single network task, and exact processing-generation fencing prevents retired tasks from clearing successor work. During automatic recovery the last canonical snapshot remains available for rendering, but its old subscription is not a live command grant. A failed bounded recovery transaction stops repeated resync invalidations on that presentation/connection and supplies a persistent, scoped **Retry Conversation** action; a new connection or explicit retry can obtain fresh authority without replaying a prompt. Their manual clock advances only after the original request is sent and the exact request deadline and between-probe timer are registered.
+ Socket retirement barriers remain keyed by profile and exact entry generation so a predecessor cannot erase its successor's pending close. Auth completion consumes exact terminal ownership synchronously; one auth-owned worker and one replaceable pending completion perform optional refresh, with canceled/profile-stale publication fenced. The mounted event owner reduces admitted events synchronously into the bounded `SessionSynchronizationCoordinator`; only a claimed synchronization lease enters its single network task, and exact processing-generation fencing prevents retired tasks from clearing successor work. During automatic recovery the last canonical snapshot remains available for rendering, but its old subscription is not a live command grant. A failed bounded recovery transaction stops repeated resync invalidations on that presentation/connection and supplies a persistent, scoped **Retry Conversation** action; a new connection or explicit retry can obtain fresh authority without replaying a prompt.
 
 ## Efficient focused tests
 
@@ -1148,7 +1148,7 @@ ownership marker, and only this worktree's and lane's runs are removed by
   exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
   fixture while sharing the simulator lane, lease, sweep and process owner.
 
-`ScriptedGatewaySocket` below `GatewayClient`. Pairing generates a local UUID for
+Pairing generates a local UUID for
 connection identity; persisted profiles decode older records with
 `machineGroupID == machineId` and `isEnabled == true`. The dashboard pool admits
 at most one profile per verified physical-machine group and excludes disabled
@@ -1164,87 +1164,34 @@ callers share completion, retired profile loads cannot publish errors or values,
 admits no event/reconnect work.
 to restore the prior lifecycle and proves cancellation after credential commit leaves a separately
 owned connection continuation rather than a stranded transitioning/connecting state.
-an ordered unit-interval source and records `ManualClock` sleeps to prove the nominal
-2/3.4/5.78/9.826/15-second progression, bounded effective delay, foreground acceleration,
+The reconnect schedule has a nominal 2/3.4/5.78/9.826/15-second progression with bounded effective delay, foreground acceleration,
 delay cancellation, single-attempt ownership, foreground reconciliation slot release on every
-exit, and that a selected profile without a credential remains actionable `.unpaired` instead of
+exit, and a selected profile without a credential stays actionable `.unpaired` instead of
 entering a reconnect loop.
-zero-read updates, unknown discovery, shared single-flight traversal, dirty follow-up, autonomous retry of an ordinary failed read on its exact current connection (with the unavailable notice after three failures), silent mixed-revision
+Catalog sync covers zero-read updates for known summaries, unknown discovery, shared single-flight traversal, dirty follow-up, autonomous retry of an ordinary failed read on its exact current connection (with the unavailable notice after three failures), silent mixed-revision
 recovery, page/item/identity bounds, application-error retention on a responsive socket,
 background/foreground convergence, and responsive-socket preservation.
-cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
-when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
-waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
-wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
-the test's own work: a test must not need a fast machine to finish inside it. Hosted views await
-UIKit/SwiftUI callbacks (appearance, transition or animation completion, `TimelineView` ticks)
-thread for seconds, and a stalled `TimelineView`
-coalesces missed ticks, so oracles assert outcomes, never callback latency or every tick. Walk long backoff
-curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
-waits for the replacement attempt its dead epoch starts), and bound display-driven settling in
-The floating
-layout oracle compares the panel and complete composer from their presentation layers at every sampled
-native frame and each keyboard/accessory/draft/restored milestone, so it checks visible geometry on
-one clock rather than comparing a rendered panel with a target composer frame. It does not assume the
-host samples a particular intermediate animation instant. The UI-validation
-programmatic settle and dismissal frames, pixels and stable marker identity; gesture-driven moves remain
-user-owned. The same suite samples catch-up affordance appearance and disappearance; the scroll command
-remains owned by `ChatScrollCoordinator` and is not routed through row motion. The opening progress
-cover uses the same 160 ms smooth/100 ms Reduce Motion opacity transition as the queued-prompt token;
-the existing failed-state fade is unchanged. Failure/retry overlay frame conformance remains a known
+Dashboard state keeps cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
+when a background transport is retired. The opening progress cover uses the same 160 ms smooth/100 ms Reduce Motion opacity transition as the queued-prompt token; the existing failed-state fade is unchanged.  The opening progress
+Failure/retry overlay frame conformance remains a known
 issue: the current hosted opening setup does not emit `session.open`, so it cannot drive those phases.
-Streaming continuity exercises the existing admission/opacity policies with virtual-time schedules (including
-restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
-requires bounded fractional opacity throughout the policy's linear fade, strict progression, and a
-slope bounded by the fade duration. Representative early/middle/late samples around simulated
-restart/wake times use simulation-assigned starts; `virtual-reveal-opacity.json` records those probes.
-They do not observe the view's `revealStarts` and cannot reject a native start-time reset on restart.
-It then mounts the actual view, appends progress on display boundaries without waiting for each
-revision to settle, and records glyph ink in `mounted-reveal-ink.json`. Prefix monotonicity compares
-unchanged reference glyph cores, rejecting layout drift rather than letting added glyphs hide loss.
-The final authoritative source must converge; convergence alone cannot detect timestamp resets.
-Both attachments are retained in the runner's xcresult. The former native largest-jump threshold
-could detect reset-induced bursts on a fast host but also rejected valid rendering when the hosted
-runner missed fade frames. Sampled monotonicity does not guarantee native timestamp preservation
-or temporal smoothness: samples may miss intermediate fades on a loaded host. Policy simulation does
-not prove native bookkeeping. Native timing qualification requires a controlled host or device measurement. Each of the 31 maximum-page
-projection installs has the original ten-second hang bound, with fixture/reference work outside it;
-completed installs never spend a shared wall-time allowance. Test-owned unstructured tasks
-must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
-the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
+Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,
 retry policy, or event admission.
-frame-decoder function when proving one invocation per inbound response/event. Contract
-cases must retain ignored scalar/missing/non-string/future discriminators, strict failure
-for malformed recognized frames, raw unknown-topic payloads, typed large-session
-preparation, and exact epoch rejection. Synchronizer tests must pair a valid unknown
-envelope with malformed-envelope and malformed-known suffixes: only the valid unknown
-sequence may pass pre-publication contiguity. The optional late-callback and suspended-close modes exist only
-to prove that a retired epoch cannot install a hello/frame, emit a disconnect, or retain the client;
-they never alter production transport behavior. Send barriers exercise queued/sending/sent
-cancellation and cancellation-insensitive transports; only the local `GatewayPossiblySentError`
-may activate mutation receipt resolution.
+Mutation receipt resolution is activated only by the local `GatewayPossiblySentError`.
 
-Performance intervals use `SystemPerformanceSignposts`; tests inject
-`RecordingPerformanceSignposts` at the owning boundary. Metadata accepts only a
+Performance intervals use `SystemPerformanceSignposts`.  Metadata accepts only a
 closed result code and nonnegative item/byte counts. Never add identifiers, paths,
 methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway `session.list` materialization, authenticated cursor expiry/scope/client
 binding, per-client/global count and byte limits, disconnect cleanup, one-scan traversal, and summary/catalog
 revision atomicity are owned by
 `runtime-registry.integration.test.ts`.
-frames through visible open, synchronization/resynchronization, uncertain receipt,
-and terminal replay boundaries.
-presentation revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
-gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, final teardown, exact
-list/write/resize/terminate wire contracts, canonical terminate-receipt retirement even when an exit event is lost, phase-aware sheet navigation cancellation/coalescing, and nested replay observation.
 global 16-terminal, 256-chunk, and 1 MiB pending-event bounds, the three-attempt immediate recovery ceiling,
 typed event reduction, and the install/reattach/discard decision for terminal-open responses that resolve on
 the same, a replacement, or no current connection. `TerminalCoordinator` owns all terminal requests,
 receipt-aware commands, attach/replay intervals, compensating detach cleanup, reconciliation, and reconnect
-reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade. The
-same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
-coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
+reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade.
 The onboarding flow retains step/state orchestration while navigation-title, pairing-field, page, card, and info-row
 chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. Onboarding navigation
 uses leading `‹ Back` and trailing `Next ›` labels with matching spacing; the hosted onboarding toolbar capture
@@ -1370,10 +1317,8 @@ synchronously revoke and pop the production route. AppModel performance tests re
 confirmation, and direct share prompts that never inherit staged composer IDs. Run the focused mutation, import, and
 
 live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/exact-next/gap
-cursor). Synchronizer coverage rejects a quarantined route/payload mismatch before baseline
-publication, while the AppModel suites prove snapshots/tokens remain provisional through
-acknowledgement, unmounted or synchronously revoked hints cannot create/advance state, and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
-dashboard selection, dashboard synchronization cannot open an inferred transcript, mounted reconnect restores
+cursor). Session synchronization rejects a quarantined route/payload mismatch before baseline publication, and snapshots/tokens remain provisional through
+acknowledgement, unmounted or synchronously revoked hints cannot create/advance state, and stale routes close their exact provisional token. A mounted route wins over divergent dashboard selection, dashboard synchronization cannot open an inferred transcript, mounted reconnect restores
 the exact route, secondary reads cannot create hidden subscriptions, and create/fork return navigation
 identity without opening it implicitly. Both routes remain bound to the admitting Gateway profile and
 lifecycle. Fork fences the exact source presentation before transport so no new context/tree read can race
@@ -1490,8 +1435,7 @@ require file preview surfaces to remain large-only.
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a
 typed target: global requests omit CWD, while project requests carry their exact project CWD.
-The focused suite deliberately completes global/project settings and global/session provider
-catalogs out of order, then reverses two same-target reads; installed values must remain under
+Provider catalogs for global/project settings and global/session may complete out of order, and two same-target reads may reverse; installed values must remain under
 their request key and the newest same-target request must win. New-session owner coverage binds
 configuration readiness to both workspace and gateway profile, exposes unresolved preparation, and
 single-admits creation until terminal completion. It also proves auth completion retains its catalog
@@ -1523,10 +1467,7 @@ than simulating transport.
 This is not physical-device/weak-network qualification, uncertain trust-receipt recovery proof, or closure of the
 remaining first-party sheet audit. The fixture result gate never ships in production.
 
-Pairing tests keep policy above byte transport.
-feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
-outlive task cancellation, plus an injected commit recorder, so stale-path tests
-never write Keychain. Run the attempt race suite repeatedly when changing its
+Pairing keeps policy above byte transport.
 
 `SessionScenarioBuilder` is test-only and generates deterministic synthetic
 opening tails, on-demand history pages, tool bursts, true prefix-cumulative
@@ -1597,8 +1538,7 @@ both pending and admitted geometry-owned entrances across more than 512 accumula
 suffix work across thirty updates of a 10,000-entry text stream.
 streaming and compatible foreground replacement to retain both the committed revision and every
 committed row's equatable render identity. A fresh store
-rebuilds identical canonical rows deterministically at revision one. The same suite checks that
-foreground entrance suppression remains empty on both retained and cold owners. This is the active/passive resume contract: both
+rebuilds identical canonical rows deterministically at revision one. Foreground entrance suppression remains empty on both retained and cold owners. This is the active/passive resume contract: both
 modes install one complete authoritative commit, live-region replacement never mutates history lineage,
 and relaunch has no local entrance receipt to replay. The
 gate can delay work but cannot manufacture output or disable production projection semantics.
@@ -1704,7 +1644,7 @@ labels and traits. `TronAccessibilityUITests` covers dashboard chrome, server me
 maintenance geometry, typed JSON navigation, and live-to-completed subagent values.
 Its `HOSTED_TEST` fixture renders production surfaces and applies canonical snapshot
 inputs; it does not mirror accessibility labels or enable private accessibility APIs.
-Shared-row sizing, native scroll identity/detent, and toolbar paint stay in unit tests.
+Shared-row sizing, native scroll identity/detent, and toolbar paint were unit-tier coverage; without that tier they rely on the UI journeys that exercise those surfaces and on manual review.
 XCUI does not expose exact spoken hints/header traits; those still require VoiceOver
 qualification. Run these selectors with `xcodebuild test`, scheme `Tron UI Validation`,
 configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` and
@@ -1720,8 +1660,7 @@ Separate held preparation and actual profile/session replacement journeys prove 
 cannot attach to the retained or replacement selection, including deliberately reused blob IDs.
 Image/file foreground-held journeys withhold the predecessor through replacement transport
 READY and successor request admission, then return a synthetic retired payload. Fresh valid
-preparation must rejoin the original sheet without displaying that candidate. The loader owner
-suite additionally gates cancellation cleanup before admission or after successor settlement;
+preparation must rejoin the original sheet without displaying that candidate. The loader owner additionally gates cancellation cleanup before admission or after successor settlement;
 only `HOSTED_TEST` can hold those cleanup hops, with no production timer/retry controls.
 The fixture emits synthetic counters and native geometry/selection indices only, never file
 contents or user credentials. Screenshots and content-free viewport/counter attachments stay
@@ -1729,8 +1668,7 @@ in the retained `.xcresult`; they are not physical-device qualification.
 
 Floating/browser/live/AV retirement is not a readonly-sheet replay mechanism. Remaining
 queued/pending/workspace preview admission, PDF pagination, source replacement during file
-preparation and other sheet owners require their own behavioral qualification; this suite is
-not the ALL-sheet acceptance gate.
+preparation and other sheet owners require their own behavioral qualification; that coverage is not the ALL-sheet acceptance gate.
 
 `TronKnowledgeDetailUITests` drives Entry Detail against the hosted scripted
 Gateway (`-tron-knowledge-detail-fixture`): summary jobs across a double tap,
@@ -1740,7 +1678,7 @@ holds each job until the journey completes or fails it and inserts take text
 through UIKit's text-input path, because simulator inline predictions commit
 extra words.
 
-`TronSmokeUITests.testRuntimeBehaviorThinkingSliderOpensAfterDefaultsConsolidation`
+`TronSmokeUITests.testAgentDefaultsThinkingSliderOpensAfterDefaultsConsolidation`
 launches the test-only Agent Defaults fixture and taps the real moved Thinking control,
 then verifies its slider opens. It guards against losing the configuration-slider host when
 consolidating sheets. Hosted layout tests retain root, account-list, inline-defaults and

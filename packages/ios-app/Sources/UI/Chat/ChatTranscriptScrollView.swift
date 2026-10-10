@@ -871,9 +871,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ChatTranscriptClearance(height: clearance.top)
-                    #if HOSTED_TEST
-                    .background { ChatHostedObstructionProbe() }
-                    #endif
                     .id("transcript-obstruction")
                 tailMarker()
                 if let installed, let physicalRows {

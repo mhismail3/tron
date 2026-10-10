@@ -51,14 +51,6 @@ final class ModelProviderExpansionStore {
         defaults.set(data, forKey: Self.documentKey)
     }
 
-    #if HOSTED_TEST
-    /// Hosted picker tests share the app's store; each starts from no choices.
-    func resetForHostedTest() {
-        choices = [:]
-        defaults.removeObject(forKey: Self.documentKey)
-    }
-    #endif
-
     static func key(profileID: String?, provider: String) -> String {
         "\(profileID ?? "unpaired")|\(provider)"
     }

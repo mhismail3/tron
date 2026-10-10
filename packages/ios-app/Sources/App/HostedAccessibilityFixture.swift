@@ -128,9 +128,8 @@ private final class HostedAccessibilityFixtureState {
             scrollOwner = scroll
             scrollOrigin = scroll.contentOffset
         }
-        // This route samples exact rendered geometry, not command animation.
-        // DashboardChromeTests independently drives and verifies animated return
-        // outside injected touches and accessibility-client focus adjustments.
+        // This route samples exact rendered geometry, not command animation, and
+        // does not drive animated return: the offset is set without animation.
         scroll.setContentOffset(CGPoint(x: scrollOrigin.x, y: scrollOrigin.y + CGFloat(offset)), animated: false)
     }
 
