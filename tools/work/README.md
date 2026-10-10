@@ -53,8 +53,9 @@ progress, and a branch with no commits beyond the base. The privacy guard runs o
 title and summary before anything is pushed or posted. A merge conflict with the base
 is aborted, and the conflicting files are listed for the agent to resolve and commit,
 then `land` runs again. A moved base sends `land` back to merging it, at most three
-times. A refused merge after the base moved is retried the same way. Other refusals
-stop `land` with nothing merged.
+times. A refused merge after the base moved is retried the same way. A head that a
+pull request already merged is refused, so a repeat run cannot open a second one.
+Other refusals stop `land` with nothing merged.
 
 ## `cleanup`
 
