@@ -77,7 +77,7 @@ export type HomeRefusalReason =
  * then runs its retry budget. The variable detail stays on the refusal record that
  * `home.context` reports (`lastRefusalReason`, `lastRefusalDetail`).
  */
-export const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
+const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
   "no-activation": "no Home activation is open for this provider request.",
   "memory-not-configured": "Home memory is not configured for this conversation.",
   "memory-paused": "Home memory is paused.",
@@ -96,7 +96,7 @@ export const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
 };
 
 /** The SDK-visible message of a refusal: the reason and its fixed sentence. */
-export function homeRefusalMessage(reason: HomeRefusalReason): string {
+function homeRefusalMessage(reason: HomeRefusalReason): string {
   return `Home request refused (${reason}): ${HOME_REFUSAL_SENTENCES[reason]}`;
 }
 

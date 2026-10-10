@@ -2637,7 +2637,7 @@ export class GatewayService {
   }
 }
 
-export function validateProviderCatalog(providers: Array<{
+function validateProviderCatalog(providers: Array<{
   id: string;
   name: string;
   usageSupported: boolean;

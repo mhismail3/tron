@@ -6,7 +6,7 @@ import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../util/json.js";
 import { object } from "../util/validation.js";
 
-export const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;
+const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;
 const MODEL_CONFIG_MAX_DEPTH = 64;
 const MODEL_CONFIG_MAX_NODES = 32_768;
 const MODEL_CONFIG_MAX_COLLECTION_MEMBERS = 8_192;

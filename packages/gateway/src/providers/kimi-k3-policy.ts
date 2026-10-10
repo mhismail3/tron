@@ -6,7 +6,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
  * when the model emits fewer tokens. Keep the default agent request useful for
  * coding while leaving headroom for large K3 contexts on ordinary accounts.
  */
-export const KIMI_K3_MAX_COMPLETION_TOKENS = 32_768;
+const KIMI_K3_MAX_COMPLETION_TOKENS = 32_768;
 const installedRuntimes = new WeakSet<ModelRuntime>();
 const KIMI_K3_MAX_CONCURRENCY_RETRY_DELAY_MS = 10_000;
 
@@ -21,7 +21,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** Apply K3's current Chat Completions parameter contract to a provider payload. */
-export function normalizeKimiK3Payload(payload: unknown): unknown {
+function normalizeKimiK3Payload(payload: unknown): unknown {
   const source = record(payload);
   if (!source) return payload;
   const next = { ...source };
@@ -116,7 +116,7 @@ function abortableSleep(delayMs: number, signal: AbortSignal | null | undefined)
 }
 
 /** Prevent terminal Moonshot account limits from being retried by either layer. */
-export function wrapKimiK3Fetch(fetch: FetchFunction): FetchFunction {
+function wrapKimiK3Fetch(fetch: FetchFunction): FetchFunction {
   return async (input, init) => {
     const retryInput = input instanceof Request ? input.clone() : input;
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);

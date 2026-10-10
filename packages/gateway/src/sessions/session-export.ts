@@ -125,7 +125,7 @@ export async function writeSessionProjectionCut(
  * renderer from blocking the Gateway event loop or retaining its temporary
  * strings in the live runtime heap.
  */
-export function validatePiCliPackageRoot(packageRoot: string, nodeModulesRoot: string): string {
+function validatePiCliPackageRoot(packageRoot: string, nodeModulesRoot: string): string {
   const nodeModulesReal = realpathSync(nodeModulesRoot);
   const expected = join(nodeModulesReal, "@earendil-works", "pi-coding-agent");
   const expectedInfo = lstatSync(expected);
@@ -141,7 +141,7 @@ export function validatePiCliPackageRoot(packageRoot: string, nodeModulesRoot: s
   return packageReal;
 }
 
-export function resolvePiCliExecutable(): string {
+function resolvePiCliExecutable(): string {
   const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   const nodeModulesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..", "node_modules");
   let packageRoot = dirname(packageEntry);

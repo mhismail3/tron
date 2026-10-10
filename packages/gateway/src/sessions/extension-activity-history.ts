@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../protocol/types.js";
-/** This module must stay free of runtime imports: extension-activity-history.test.ts
- * loads it in a worker thread under `node --experimental-strip-types`, which does
- * not resolve the `.js` specifiers the rest of the Gateway uses. The bounded page
+/** This module must stay free of runtime imports: it is loaded in a worker thread
+ * under `node --experimental-strip-types`, which does not resolve the `.js`
+ * specifiers the rest of the Gateway uses. The bounded page
  * assembler shared with process history therefore lives here. */
 
 /** Reserved Pi custom-entry type. Custom entries are canonical JSONL facts but
@@ -153,7 +153,7 @@ export function makeExtensionActivityReceipt(activity: ExtensionRunActivity, ses
   };
 }
 
-export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: string): ExtensionActivityReceipt | undefined {
+function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: string): ExtensionActivityReceipt | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
   const state = terminalState(candidate.state);

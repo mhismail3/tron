@@ -20,7 +20,7 @@ import {
 import { stripTerminalControls } from "./terminal-sanitizer.js";
 import { isExtensionForm } from "../semantic-form.js";
 
-export const EXTENSION_PRESENTATION_MAX_SURFACES = 64;
+const EXTENSION_PRESENTATION_MAX_SURFACES = 64;
 // Gateway's complete WebSocket frame is capped at 1 MiB. Keeping presentation
 // below 700 KiB leaves room for session identity, actionable lifecycle state,
 // and a bounded transcript tail in authoritative snapshots.
