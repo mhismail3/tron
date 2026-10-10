@@ -19,7 +19,7 @@ export interface HomeWakeEvent {
   routeGeneration: number;
   createdAt: string;
   state: "pending" | "claimed" | "admitted" | "terminal" | "acknowledged" | "blocked" | "outcome-unknown";
-  /** Undecided until one push covers the event: a wake reply, a waiting notice, or the task-finished notice. */
+  /** Undecided until one push covers the event: its wake turn's terminal push, a waiting notice, or the task-finished notice. */
   push: "pending" | "decided";
   delivery: { sessionId: string; operationId: string; generation: number; routeGeneration: number; messageDigest: string } | null;
   acknowledgedAt: string | null;
@@ -271,10 +271,11 @@ export class WakeInboxOwner {
 
   /** Decides the operation's push, then acknowledges its proven results. The store
    * refuses a push decision once a result is acknowledged, so the order is fixed.
-   * One push per wake: the operation's first finished delivery covers every result it
-   * carried; a wake whose results were all uncertain says Home is waiting instead.
-   * Results a user activation drained were decided when admitted, so only wake
-   * deliveries reach here. A still-admitted result is left for its own proof. */
+   * A replied wake's push is its turn's own terminal push (RuntimeSlot), so only the
+   * decision is recorded here. A wake whose results are all uncertain has no reply
+   * push, so it says Home is waiting. Results a user activation drained were decided
+   * when admitted, so only wake deliveries reach here. A still-admitted result is
+   * left for its own proof. */
   private async finishOperation(route: HomeWakeRoute, operationId: string, provenIds: string[]): Promise<void> {
     const pending: HomeTaskRecord[] = [];
     let replied = false;
@@ -286,9 +287,11 @@ export class WakeInboxOwner {
       if (task.wake.push === "pending" && task.wake.state !== "acknowledged") pending.push(task);
     }
     if (!open && pending.length > 0) {
-      await this.decide(pending.map(task => task.taskId), replied ? "push-wake-reply" : "push-waiting-uncertain");
-      if (replied) await this.notify(route.homeId, `home-wake:${operationId}`, "Tron Home", "Home replied to finished task results. Open Home to review.");
-      else await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home", "Home is waiting for you: finished task results are waiting in Home.");
+      if (replied) await this.decide(pending.map(task => task.taskId), "push-wake-reply");
+      else {
+        await this.decide(pending.map(task => task.taskId), "push-waiting-uncertain");
+        await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home", "Home is waiting for you: finished task results are waiting in Home.");
+      }
     }
     for (const taskId of provenIds) {
       const task = await this.store.read(taskId);

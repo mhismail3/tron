@@ -920,6 +920,7 @@ describe("Home task production dispatch", () => {
     const f = await fixture();
     const model = f.faux.getModel();
     await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const eventsBeforeWake = f.events.length;
     let request = "";
     let instructions = "";
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }), (context) => {
@@ -931,8 +932,12 @@ describe("Home task production dispatch", () => {
     await run.completion;
     const home = await f.registry.acquire(f.home.sessionId);
     await waitForTaskAcknowledgement(f, run.taskId);
-    await waitFor(() => f.notifications.some(input => input.sourceId.startsWith("home-wake:")), "wake reply push");
+    // The wake's one push is its turn's own terminal push: the inbox sends no notice for the reply.
+    await waitFor(() => f.notifications.some(input => input.sessionId === f.home.sessionId), "wake reply push");
     const eventId = (await f.registry.homeOwner().taskResult(run.taskId)).wake!.eventId;
+    // The inbox delivery raises no client error (#730): its context receipt is the inbox's own.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(f.events.slice(eventsBeforeWake).filter(event => event.topic === "session.extensionError")).toEqual([]);
     // The wake delivered the result, and no per-task push went out for it.
     expect(request).toContain("Verified result");
     expect(instructions).toMatch(/settled result wakes Home/);
@@ -940,7 +945,8 @@ describe("Home task production dispatch", () => {
     expect(instructions).toContain("do not assume task success from admission");
     expect(instructions).not.toContain("not yet delivered into Home");
     expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
-    expect(f.notifications.filter(input => input.sourceId.startsWith("home-wake:"))).toHaveLength(1);
+    expect(f.notifications.filter(input => input.sourceId.startsWith("home-wake:"))).toHaveLength(0);
+    expect(f.notifications.filter(input => input.sessionId === f.home.sessionId)).toHaveLength(1);
     const attributed = home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1");
     expect(attributed).toHaveLength(1);
     expect(home.canonicalSessionEntries()).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.context-delivery.v4",
@@ -953,7 +959,7 @@ describe("Home task production dispatch", () => {
     await home.prompt("Again"); await waitFor(() => home.snapshot().configurationBlocker === null, "second Home terminal");
     expect(home.canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
     expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
-    evidence.push({ case: "settled-result-wakes-home", request: request.length, wakePushes: f.notifications.filter(input => input.sourceId.startsWith("home-wake:")).length });
+    evidence.push({ case: "settled-result-wakes-home", request: request.length, homePushes: f.notifications.filter(input => input.sessionId === f.home.sessionId).length });
   }, 20_000);
 
   it("refuses inbox acknowledgement until canonical message and terminal receipt are durably synced", async () => {

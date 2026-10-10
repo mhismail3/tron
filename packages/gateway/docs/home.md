@@ -1107,7 +1107,8 @@ do not drain the inbox.
   between them. The count is derived from the canonical result messages: distinct
   operations that delivered results after the last user message, across chapters, read
   newest first and continuing into an older chapter only while the newer ones hold no
-  user message. Nothing is stored, so the Home and task formats do not change. At the
+  user message. A user activation's drained results precede its own user message, so they
+  never count toward the ceiling (`home-wake.e2e.test.ts`). Nothing is stored, so the Home and task formats do not change. At the
   ceiling no wake runs, results wait for the maintainer, and a waiting notice is sent.
 - **Rollback (#749).** `homeWake` is an additive invocation-receipt source, following
   `subagentWake`. A Gateway built before it skips a receipt whose source it does not know
@@ -1174,9 +1175,10 @@ do not drain the inbox.
   cannot be re-stamped and replayed.
 - **Push (#749).** Each settled result gets at most one push, decided durably before
   its one NotificationService enqueue. A result settled while Home is wake-eligible
-  is decided by its wake: one push when the wake's reply ends, opening Home's chat,
-  whose source is the operation (`home-wake:<operation>`). A wake that delivered only
-  uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
+  is decided by its wake. The wake's reply sends no inbox notice: its turn's own terminal
+  push (the runtime's ordinary agent-finished notice, opening Home's chat) is the one push
+  for the wake. The inbox records that decision as `push-wake-reply`. A wake that delivered
+  only uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
   waiting notice that Home is waiting. A paused, disabled or blocked Home keeps the
   task-finished notice of today, decided when the result settles or when its wake is
   refused. A result a user activation drains is decided without a notice, since the user
@@ -1184,6 +1186,10 @@ do not drain the inbox.
   push is decided before its results are acknowledged. A crash between the durable
   decision and the enqueue may omit a push; the inbox is the guaranteed delivery, and
   recovery never re-decides a decided event.
+- **Stop.** An activation that Stop or abort ended never requests a wake, whether it was a
+  user activation or a wake. The runtime reports the stop with the idle signal, so Stop
+  cannot start a wake (`HomeOwner.noteHomeIdle`). Results still pending after a stopped
+  activation wait for the next user message or the next settled result.
 - **Operating context.** Home is told the settled-result wake, the one-push rule and the
   paused/disabled/blocked fallback (`tron-home-extension.ts`). It reads its learned profile
   and system prompt once per activation at the request seam, so a wake carries the same
