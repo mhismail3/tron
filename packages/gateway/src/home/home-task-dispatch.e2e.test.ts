@@ -1636,7 +1636,11 @@ describe("Home task production dispatch", () => {
     if (scenario === "foreground-process") {
       expect(existsSync(pidPath)).toBe(true);
       const pid = Number(await readFile(pidPath, "utf8"));
-      expect(() => process.kill(pid, 0)).toThrow();
+      // The stop SIGKILLs the shell's process group and joins the shell. The
+      // background child is killed too, but the OS reaps the orphaned zombie
+      // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
+      // the reap within the hang bound instead of sampling once.
+      await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
     expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined", elapsedMs: expect.any(Number) });
