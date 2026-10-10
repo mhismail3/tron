@@ -125,7 +125,9 @@ def build(output, headers=None):
             raise ValueError("addon uses a forbidden Node/V8/libuv ABI")
         if any((ROOT / name).read_bytes() != data for name, data in snapshot.items()):
             raise ValueError("native client source changed during frozen compilation")
-        manifest = {"schema": 1, "inputs": {name: digest(data) for name, data in snapshot.items()}}
+        # `testOnly` stays in the signed metadata so installed apps keep validating;
+        # only production artifacts are built, so it is always false.
+        manifest = {"schema": 1, "testOnly": False, "inputs": {name: digest(data) for name, data in snapshot.items()}}
         # Signing is deliberately left to the existing Mac nested-Mach-O phase;
         # its final runtime fingerprint covers these metadata and signed bytes.
         publish(artifact, output, manifest)
@@ -140,7 +142,8 @@ def verify_inputs(metadata):
         data = source.read(65537)
     if len(data) > 65536:
         raise ValueError("native capture input manifest exceeds bounds")
-    expected = {"schema": 1, "inputs": {name: digest((ROOT / name).read_bytes()) for name in INPUTS}}
+    expected = {"schema": 1, "testOnly": False,
+                "inputs": {name: digest((ROOT / name).read_bytes()) for name in INPUTS}}
     if json.loads(data) != expected:
         raise ValueError("native capture inputs changed; prepare a new signed Mac payload (not a source-only update)")
 
