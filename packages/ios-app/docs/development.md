@@ -1306,7 +1306,9 @@ ownership marker, and only this worktree's and lane's runs are removed by
   `build-identity.json` next to the products only after a successful build, and
   `run` refuses products stamped for another worktree or another source state
   (worktree path, HEAD revision, dirty flag and a fingerprint of the tracked
-  diff plus untracked content), naming both identities. A products directory
+  diff plus untracked content; an untracked nested checkout, such as a SwiftPM
+  dependency under the build root, contributes its own HEAD and its own state),
+  naming both identities. A products directory
   that was replaced by another worktree, or left over from an earlier source
   state, can therefore never be executed silently; exit 74 means the runner
   refused it. Every run's `metadata.json` records the same source identity under

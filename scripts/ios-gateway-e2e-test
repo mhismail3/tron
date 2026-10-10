@@ -450,6 +450,18 @@ stop_gateway() {
   rm -f "$pid_file"
 }
 
+# Ends a process this start spawned when the start then fails. It is this shell's own
+# background child, so its pid is exact. stop_gateway and stop_proxy first prove the
+# command line of the pid, the very proof a failed start did not pass; refusing there
+# would leave the process running with no owner.
+retire_spawned() {
+  local pid="$1" _
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..50}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null || true; fi
+  wait "$pid" 2>/dev/null || true
+}
+
 load_state() {
   [[ -s "$state_file" ]] || die "fixture is not prepared; run '$0 prepare'"
   # Generated exclusively by this script with shell-escaped values.
@@ -533,7 +545,10 @@ EOF
 prepare_fixture() {
   stop_gateway
   install_gateway_if_needed
+  # The fixture stays running on success; a failure after the Gateway spawned stops it, as `run` does.
+  trap finish_e2e_run EXIT
   start_fresh_fixture
+  trap - EXIT
 }
 
 # Start a process this harness keeps past the command: the Gateway fixture and
@@ -611,8 +626,10 @@ PY
     fi
     sleep 0.1
   done
-  [[ -s "$tron_home/gateway/enrollment.json" ]] || die "gateway fixture did not become ready"
-  gateway_running || die "ready Gateway fixture does not match its owned command"
+  [[ -s "$tron_home/gateway/enrollment.json" ]] \
+    || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "gateway fixture did not become ready"; }
+  gateway_running \
+    || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "ready Gateway fixture does not match its owned command"; }
   code="$(python3 - "$tron_home/gateway/enrollment.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:
@@ -641,7 +658,8 @@ PY
     fi
     sleep 0.1
   done
-  [[ -s "$proxy_ready" ]] || { stop_gateway; die "owned fault proxy did not become ready"; }
+  [[ -s "$proxy_ready" ]] \
+    || { retire_spawned "$proxy_pid"; rm -f "$proxy_pid_file"; stop_gateway; die "owned fault proxy did not become ready"; }
   port="$(python3 - "$proxy_ready" "$proxy_pid" <<'PY'
 import json,sys
 with open(sys.argv[1]) as handle: value=json.load(handle)
@@ -649,7 +667,8 @@ assert value['pid']==int(sys.argv[2]) and isinstance(value['port'],int) and 1024
 print(value['port'])
 PY
 )"
-  proxy_running || { stop_gateway; die "proxy command ownership changed"; }
+  proxy_running \
+    || { retire_spawned "$proxy_pid"; rm -f "$proxy_pid_file"; stop_gateway; die "proxy command ownership changed"; }
 
   {
     printf 'TRON_E2E_PORT=%q\n' "$port"

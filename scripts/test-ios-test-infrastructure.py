@@ -3498,6 +3498,17 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         names the real error.
     26. A fault proxy that exits during startup is reported only as a generic
         message, without its process status or the tail of its stderr.
+
+    #706: a fixture Gateway is recognized by its own command line, and a start that
+    fails that proof must not leave the process it spawned running.
+
+    27. The fixture Gateway and fault proxy rewrite their process title to their
+        command line, which the OS keeps within the process's original argv. A
+        checkout at a long path overflows it, `ps` shows a truncated command, and a
+        ready fixture is refused as not owned.
+    28. A start that fails its owned-command proof, or never becomes ready, leaves
+        the Gateway it spawned running: the harness refuses to signal a PID it cannot
+        prove, and the start never retires the child it spawned itself.
     """
 
     def setUp(self) -> None:
@@ -3540,7 +3551,6 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         gateway_source = binary / "fixture-gateway.cjs"
         gateway_source.write_text(f'''const fs = require("node:fs");
 const http = require("node:http");
-process.title = `node ${{process.env.FAKE_E2E_NODE_ENTRY}}`;
 const logs = `${{process.env.TRON_DATA_DIR}}/logs`;
 fs.mkdirSync(logs, {{ recursive: true }});
 fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "gateway.started" }}) + "\\n");
@@ -3573,7 +3583,6 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         proxy_source = binary / "fixture-proxy.cjs"
         proxy_source.write_text(f'''const fs = require("node:fs");
 const http = require("node:http");
-process.title = `node ${{process.env.FAKE_E2E_NODE_ENTRY}}`;
 const controlFailure = "{self.fixture_knob("proxy-control-failure")}";
 const startupFailure = "{self.fixture_knob("proxy-startup-failure")}";
 if (fs.existsSync(startupFailure) && fs.readFileSync(startupFailure, "utf8").trim() === "1") {{
@@ -3606,13 +3615,17 @@ set -euo pipefail
 case "${{1:-}}" in
   */packages/gateway/dist/index.js)
     /usr/bin/env >"{record}/gateway.env"
-    export FAKE_E2E_NODE_ENTRY="$1"
-    exec "{real_node}" "{gateway_source}"
+    echo "$$" >"{record}/gateway.pid"
+    # The command line the process runs as is the owned command the harness checks for
+    # (argv, not a title rewrite, so no path length can truncate it). A case may name
+    # another command line through its knob, to exercise a refused start.
+    argv0="node $1"
+    if [[ -f "{self.fixture_knob("gateway-argv0")}" ]]; then argv0="$(<"{self.fixture_knob("gateway-argv0")}")"; fi
+    exec -a "$argv0" "{real_node}" "{gateway_source}"
     ;;
   */ios-gateway-fault-proxy.mjs)
     /usr/bin/env >"{record}/proxy.env"
-    export FAKE_E2E_NODE_ENTRY="$1"
-    exec "{real_node}" "{proxy_source}"
+    exec -a "node $1" "{real_node}" "{proxy_source}"
     ;;
   */packages/gateway/*|*/ios-gateway-*.mjs|*.js|*.mjs|*.cjs)
     echo "unexpected Node fixture command: $*" >&2
@@ -3709,6 +3722,28 @@ exec "{real_node}" "$@"
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
         shutil.copy2(ROOT / ".node-version", other / ".node-version")
         return other
+
+    def long_worktree(self) -> Path:
+        """A checkout of the harness at a path longer than a fixture process's argv.
+
+        Failure mode 27: the path is the one input that differs between a fixture
+        that starts and one that is refused, so this makes it long on purpose. Only
+        what `prepare` reads is copied: the scripts, the pinned toolchain files and
+        the Gateway's manifests, not the Gateway or its dependencies.
+        """
+        worktree = self.root / ("long-" + "w" * 120) / ("tree-" + "x" * 120)
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
+        shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
+        shutil.copytree(ROOT / ".github/workflows", worktree / ".github/workflows")
+        shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
+        (worktree / "packages/mac-app/scripts").mkdir(parents=True)
+        for name in ("bundle-gateway.sh", "package-dmg.sh", "verify-gateway-payload.sh"):
+            shutil.copy2(ROOT / "packages/mac-app/scripts" / name, worktree / "packages/mac-app/scripts" / name)
+        (worktree / "packages/gateway").mkdir(parents=True)
+        for name in ("package.json", "package-lock.json"):
+            shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
+        return worktree
 
     def reported(self, output: str, label: str) -> Path:
         """The one path `status` reports under `label`."""
@@ -3826,6 +3861,54 @@ exec "{real_node}" "$@"
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("owned fault proxy exited (exit code 42)", result.stderr)
         self.assertIn("fixture proxy startup failure evidence", result.stderr)
+
+    def test_a_gateway_started_from_a_long_worktree_path_is_recognized_as_owned(self) -> None:
+        """Failure mode 27: a ready fixture Gateway at a long path is still this command's."""
+        harness = self.long_worktree() / "scripts/ios-gateway-e2e-test"
+        environment = self.readiness_node_environment(dict(self.environment))
+        try:
+            result = self.e2e("prepare", harness=harness, environment=environment)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            status = self.e2e("status", harness=harness, environment=environment)
+            self.assertIn("Gateway: running", status.stdout)
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_a_start_that_fails_the_owned_command_proof_retires_its_gateway(self) -> None:
+        """Failure mode 28: the Gateway a refused start spawned is not left running.
+
+        The fixture Gateway records its own pid, and the knob makes its command line
+        something other than the owned one, so the start's proof fails on that process.
+        """
+        environment = self.readiness_node_environment(dict(self.environment))
+        self.fixture_knob("gateway-argv0").write_text("not-the-owned-gateway\n")
+        record = Path(environment["TRON_NODE_BIN"]).parent / "record/gateway.pid"
+        try:
+            result = self.e2e("prepare", environment=environment)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("does not match its owned command", result.stderr)
+            pid = int(record.read_text())
+            self.assertFalse(self.process_alive(pid), f"the refused start left Gateway pid {pid} running")
+        finally:
+            # Nothing this case starts may outlive it, whatever the start did.
+            self.e2e("stop", environment=environment)
+            if record.exists():
+                self.kill_if_alive(int(record.read_text()))
+
+    def kill_if_alive(self, pid: int) -> None:
+        if self.process_alive(pid):
+            os.kill(pid, signal.SIGKILL)
+
+    def process_alive(self, pid: int) -> bool:
+        """Whether `pid` is running; a zombie has ended, its parent has not yet reaped it."""
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="], env=self.contained_environment(self.root),
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        ).stdout.strip() not in ("", "Z")
 
     def test_run_ui_builds_the_ui_plan_and_patches_the_ui_target(self) -> None:
         """Failure modes 17 and 18: the UI runner, not the hosted unit runner,
