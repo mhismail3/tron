@@ -238,4 +238,3 @@ test("runBounded settles at the kill deadline when a descendant retains pipes", 
   );
   assert.ok(Date.now() - started < 4_000);
 });
-
