@@ -1,5 +1,8 @@
 import SwiftUI
 import TronMobileCore
+#if HOSTED_TEST
+import UIKit
+#endif
 
 /// Value-driven composer presentation. Draft, route, transport, and canonical
 /// ownership remain outside this view and enter only through bindings/intents.
@@ -92,20 +95,10 @@ struct ChatComposerView: View {
                         if showsCatchUp { catchUpButton }
                     }
                 }
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: showsCatchUp
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: showsCatchUp)
                 // Visibility and glyph changes animate at the shared layout
                 // owner so the input bar participates in the glass morph too.
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: activityKind
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: activityKind)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
@@ -114,19 +107,19 @@ struct ChatComposerView: View {
             // removed child surfaces inside the already-installed space.
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.attachmentArrive(reduceMotion: reduceMotion)
                     : nil,
                 value: pendingAttachments.map(\.id)
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: selectedResource?.id
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: resourcePicker?.kind
             )
@@ -273,6 +266,9 @@ struct ChatComposerView: View {
                     onSend: onSend,
                     onAbort: onAbort
                 )
+                #if HOSTED_TEST
+                .background(ChatComposerTrailingMotionProbe(mode: trailingMode))
+                #endif
                 .transition(
                     reduceMotion
                         ? .opacity
@@ -281,9 +277,7 @@ struct ChatComposerView: View {
             }
         }
         .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .spring(response: 0.32, dampingFraction: 0.82),
+            ChatMotion.composerStructuralResize(reduceMotion: reduceMotion),
             value: trailingMode
         )
         .frame(maxWidth: .infinity, minHeight: 40)
@@ -345,10 +339,51 @@ struct ChatComposerView: View {
                     .combined(with: .scale(scale: 0.82, anchor: .leading))
                     .combined(with: .opacity)
         )
+        #if HOSTED_TEST
+        .background(ChatCatchUpMotionProbe())
+        #endif
         .accessibilityLabel("Catch up")
         .accessibilityHint("Returns to the latest response and follows new messages")
     }
 }
+
+#if HOSTED_TEST
+final class ChatComposerTrailingMotionMarker: UIView {
+    var mode: ComposerTrailingMode?
+}
+
+struct ChatComposerTrailingMotionProbe: UIViewRepresentable {
+    let mode: ComposerTrailingMode
+
+    func makeUIView(context: Context) -> ChatComposerTrailingMotionMarker {
+        let view = ChatComposerTrailingMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.mode = mode
+        return view
+    }
+
+    func updateUIView(_ view: ChatComposerTrailingMotionMarker, context: Context) {
+        view.mode = mode
+    }
+
+    static func dismantleUIView(_ view: ChatComposerTrailingMotionMarker, coordinator: ()) {
+        view.mode = nil
+    }
+}
+
+final class ChatCatchUpMotionMarker: UIView {}
+
+struct ChatCatchUpMotionProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ChatCatchUpMotionMarker {
+        let view = ChatCatchUpMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        return view
+    }
+    func updateUIView(_ view: ChatCatchUpMotionMarker, context: Context) {}
+}
+#endif
 
 struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]
@@ -415,7 +450,7 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         if reduceMotion {
-            withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true)) {
+            withAnimation(ChatMotion.attachmentArrive(reduceMotion: true)) {
                 presentedAttachments = target
             }
             return
@@ -433,7 +468,7 @@ struct ChatPendingAttachmentStrip: View {
             current: presentedAttachments.map(\.id),
             target: target.map(\.id)
         )
-        let animation = ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+        let animation = ChatMotion.attachmentArrive(reduceMotion: false)
         withAnimation(animation) {
             presentedAttachments.removeAll { !targetIDs.contains($0.id) }
             if insertionIDs.isEmpty {

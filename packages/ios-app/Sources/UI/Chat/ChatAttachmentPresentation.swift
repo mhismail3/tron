@@ -141,6 +141,34 @@ struct AttachmentThumbnailSurface: View {
     }
 }
 
+#if HOSTED_TEST
+/// Reads the chip's transformed bounds at hosted display boundaries without
+/// adding production layout or animation state.
+final class ChatPendingAttachmentMotionMarker: UIView {
+    var attachmentID: String?
+}
+
+struct ChatPendingAttachmentMotionProbe: UIViewRepresentable {
+    let attachmentID: String
+
+    func makeUIView(context: Context) -> ChatPendingAttachmentMotionMarker {
+        let view = ChatPendingAttachmentMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.attachmentID = attachmentID
+        return view
+    }
+
+    func updateUIView(_ view: ChatPendingAttachmentMotionMarker, context: Context) {
+        view.attachmentID = attachmentID
+    }
+
+    static func dismantleUIView(_ view: ChatPendingAttachmentMotionMarker, coordinator: ()) {
+        view.attachmentID = nil
+    }
+}
+#endif
+
 struct PendingAttachmentChip: View {
     let attachment: PendingAttachment
     let onRemove: () -> Void
@@ -150,6 +178,9 @@ struct PendingAttachmentChip: View {
     var body: some View {
         previewBase
             .overlay(alignment: .topTrailing) { removeButton }
+            #if HOSTED_TEST
+            .background(ChatPendingAttachmentMotionProbe(attachmentID: attachment.id))
+            #endif
             .tronManagedSheet(
                 isPresented: $showPreview,
                 identity: "chat.pending-attachment-preview"

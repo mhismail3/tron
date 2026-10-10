@@ -1197,6 +1197,14 @@ shutil.copytree(source, clone)
         self.assertEqual(value["test_summary"].get("passedTests"), 3, value)
         self.assertEqual(sorted(value["processes"]), ["build", "test"], value)
 
+    def test_summary_validation_reconciles_expected_failures(self) -> None:
+        result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"expectedFailures":3,"totalTestCount":6}')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"expectedFailures":3,"totalTestCount":7}')
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        result = self.invoke(summary='{"passedTests":0,"failedTests":0,"skippedTests":0,"expectedFailures":1,"totalTestCount":1}')
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+
     def test_summary_validation_requires_real_passing_count(self) -> None:
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
