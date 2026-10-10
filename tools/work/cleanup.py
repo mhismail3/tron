@@ -41,7 +41,7 @@ class Settings:
     primary: Path
     root: Path
     remote: str
-    base: str  # the configured base; each claim lands into its own recorded base (`_claim_base`)
+    base: str  # every claim lands into the configured base
     regenerable: List[str]  # git glob pathspecs
     releases: List[dict]
     started: Path  # the worktree (or checkout) cleanup was started from
@@ -109,21 +109,9 @@ def _issue_state(gh: Gh, number: int) -> str:
     return json.loads(gh.run("issue", "view", str(number), "--json", "state"))["state"]
 
 
-def _claim_base(tree: Worktree, settings: Settings, number: int) -> str:
-    """The base the claim on this worktree lands into: recorded in its claim commit, else the configured one.
-
-    Read from local refs only; a configured base ref that is missing proves nothing later on.
-    """
-    try:
-        found = claims.claim_commit(tree.path, f"{settings.remote}/{settings.base}", tree.head, number)
-    except claims.ClaimError:
-        return settings.base
-    return (found.base if found else None) or settings.base
-
-
-def _claim_commit(tree: Worktree, settings: Settings, number: int, base: str) -> Tuple[Optional[str], Optional[str]]:
+def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Optional[str], Optional[str]]:
     """(the claim commit the head is, why the branch is more than the single claim `start` made)."""
-    base_ref = f"{settings.remote}/{base}"
+    base_ref = f"{settings.remote}/{settings.base}"
     # The base branch moving on is not a change to the branch: a claim commit made
     # against an older remote base tip is still the only commit beyond this ref.
     counted = _git(tree.path, "rev-list", "--count", f"{base_ref}..{tree.head}", check=False)
@@ -132,7 +120,7 @@ def _claim_commit(tree: Worktree, settings: Settings, number: int, base: str) ->
     beyond = counted.stdout.strip() or "0"
     if beyond != "1":
         return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
-    # The same trailers `start` writes, the dashboard reads and `land` checks.
+    # The same trailers `start` writes and the dashboard reads.
     if claims.claim_commit(tree.path, base_ref, tree.head, number) is None:
         return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
     # `start` commits the base tree itself. Work amended or squashed into that
@@ -281,12 +269,11 @@ def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], L
     """(how the head is provably done, why it is not) — a merged pull request, or a spent claim."""
     # `_scope` admits only claim branches, so the issue number is known here.
     number = claims.claimed_issue(tree.branch)
-    base = _claim_base(tree, settings, number)
-    pull, why = _merged_head(gh, tree.branch, tree.head, base)
+    pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
     if pull:
         return Done(f"{pull} merged", False), []
     reasons = [why] if why else []
-    claim_commit, why_not = _claim_commit(tree, settings, number, base)
+    claim_commit, why_not = _claim_commit(tree, settings, number)
     if claim_commit is None:
         reasons.append(why_not)
     else:
@@ -299,24 +286,10 @@ def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], L
     return None, reasons
 
 
-def _stacked_blockers(gh: Gh, tree: Worktree, settings: Settings) -> List[str]:
-    """Removal deletes the remote branch: keep it while an open issue's claim starts from it (failure mode 77)."""
-    try:
-        stacked = claims.stacked_on(settings.primary, settings.remote, settings.base, tree.branch)
-    except claims.ClaimError as error:
-        return [f"cannot prove no open claim starts from it: {error}"]
-    open_issues = [c for c in stacked if _issue_state(gh, claims.claimed_issue(c.branch)) == "OPEN"]
-    if not open_issues:
-        return []
-    return ["open claim(s) start from it: "
-            + ", ".join(f"#{claims.claimed_issue(c.branch)} ({c.branch})" for c in open_issues)]
-
-
 def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
     """(how the worktree is provably done, every reason it must stay)."""
     done, reasons = _done(gh, tree, settings)
-    return done, (reasons + _stacked_blockers(gh, tree, settings) + _local_blockers(tree, settings)
-                  + _process_blockers(tree.path, settings))
+    return done, reasons + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
 
 
 # ------------------------------------------------------------------ removal
@@ -402,8 +375,7 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
             return False, f"release command {failure}"
     # The release commands take time; everything local is proven again right before removing,
     # and so is that no open claim started from the branch meanwhile.
-    reasons = (_local_blockers(tree, settings) + _process_blockers(tree.path, settings)
-               + _stacked_blockers(gh, tree, settings))
+    reasons = _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
     if done.claim_only:
         # A merged pull request cannot unmerge; an issue a claim proved spent can reopen.
         number = claims.claimed_issue(tree.branch)

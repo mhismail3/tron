@@ -96,10 +96,6 @@ class Gh:
         self.cwd = cwd
         self._audit_dir: Optional[Path] = None
 
-    @staticmethod
-    def audit_path(cwd: Path) -> Path:
-        return _audit_directory(cwd) / "github-writes.jsonl"
-
     def _audit_location(self) -> tuple[Path, Path]:
         if self._audit_dir is None:
             self._audit_dir = _audit_directory(self.cwd)
