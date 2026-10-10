@@ -478,7 +478,7 @@ export class GatewayService {
       }
       case "home.taskStatus": {
         rejectUnknownFields(params, ["taskId"], method);
-        return safeJson(await this.requireHome().taskResult(string(params.taskId, "taskId", { max: 160 })));
+        return safeJson(await this.requireHome().taskStatus(string(params.taskId, "taskId", { max: 160 })));
       }
       case "home.redeliverTaskResult":
         return this.mutation(client, method, params, async () => {

@@ -69,6 +69,37 @@ export type HomeRefusalReason =
   | "stream-replayed"
   | "context-mutated";
 
+/**
+ * The text an SDK-visible refusal carries: one fixed sentence per reason. Pi's
+ * transient-error classifier matches substrings of the error text (`500`, `timeout`,
+ * `overloaded`, a retry phrase), so a refusal that embeds a count, an ID, a path or a
+ * memory message can be retried as if the provider failed, and a deterministic refusal
+ * then runs its retry budget. The variable detail stays on the refusal record that
+ * `home.context` reports (`lastRefusalReason`, `lastRefusalDetail`).
+ */
+export const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
+  "no-activation": "no Home activation is open for this provider request.",
+  "memory-not-configured": "Home memory is not configured for this conversation.",
+  "memory-paused": "Home memory is paused.",
+  "memory-blocked": "Home memory is blocked until its source is repaired.",
+  "memory-unavailable": "Home memory is unavailable for this activation.",
+  "memory-boundary-missing": "the Home memory boundary is missing from this conversation.",
+  "memory-wait-cancelled": "the wait for Home memory was cancelled.",
+  "memory-view-failed": "Home memory could not build its view for this activation.",
+  "projection-mismatch": "the conversation changed while this activation was prepared.",
+  "boundary-not-found": "the activation's starting point is no longer in the conversation.",
+  "context-overflow": "this message and its context exceed the model's window.",
+  "stream-nonce": "the activation's view did not carry its nonce exactly once.",
+  "stream-digest": "the outgoing request no longer matches the request prepared for it.",
+  "stream-replayed": "the activation's view was already consumed by an earlier request.",
+  "context-mutated": "the context handlers changed the activation's view.",
+};
+
+/** The SDK-visible message of a refusal: the reason and its fixed sentence. */
+export function homeRefusalMessage(reason: HomeRefusalReason): string {
+  return `Home request refused (${reason}): ${HOME_REFUSAL_SENTENCES[reason]}`;
+}
+
 /** The memory reasons a view source may raise. */
 export type HomeMemoryRefusalReason = Extract<HomeRefusalReason, `memory-${string}`>;
 
@@ -646,7 +677,7 @@ export class HomeRequestPolicy {
     const open = activation ?? this.activation;
     if (open) open.refusal = { reason, detail };
     this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
-    return new HomeRequestPolicyError(reason, `Home request refused (${reason}): ${detail}`);
+    return new HomeRequestPolicyError(reason, homeRefusalMessage(reason));
   }
 }
 

@@ -108,6 +108,7 @@ import {
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner } from "../home/home-owner.js";
+import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
@@ -2991,6 +2992,12 @@ export class RuntimeRegistry {
     return inspection.cwd;
   }
 
+  /** Admits a delegation's model and thinking level against the Gateway's own model
+   * runtime, the one designation validates against. Read-only. */
+  async admitTaskWorkerChoice(choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
+    return admitTaskWorkerChoice(this.options.gatewayModelRuntime, choice);
+  }
+
   async create(cwdInput: string, profile: RuntimeProfile = "ordinary", taskWorker?: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
@@ -4682,6 +4689,19 @@ export class RuntimeRegistry {
     } catch {
       return undefined;
     }
+  }
+
+  /** The model a task worker's transcript recorded last (`model_change`). A live worker
+   * answers from its slot's canonical entries; a settled one from the same evidence cut
+   * recovery reads. Undefined before the worker has recorded a model or has no file. */
+  async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
+    const live = this.slots.get(sessionId);
+    let entries: FileEntry[] = [];
+    if (live) entries = live.canonicalSessionEntries();
+    // A worker that never wrote a conversation has no known file, so nothing was recorded.
+    else if (await this.homeSessionFile(sessionId)) entries = await this.taskEvidenceFileCut(sessionId) ?? [];
+    const change = entries.findLast(entry => entry.type === "model_change");
+    return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
   }
 
   /** Shared live/cold task evidence boundary: never constructs executable

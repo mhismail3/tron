@@ -1207,15 +1207,22 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error),
     );
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
+    const messages = (await item.entries()).filter((entry) => (entry as { type?: string }).type === "message")
+      .map((entry) => (entry as { message?: Record<string, unknown> }).message!);
     const row = {
       providerRequests: item.faux.state.callCount,
       outcome,
       policyRefusals: item.refusals().map((entry) => entry.reason) ?? [],
       lastRefusalDetail: item.refusals().at(-1)?.detail ?? null,
+      canonicalError: messages.findLast((message) => message.stopReason === "error")?.errorMessage ?? null,
     };
     item.record("C12", row);
     expect(row.providerRequests).toBe(0);
-    expect(row.policyRefusals).toContain("context-overflow");
+    // One refusal is zero SDK retries: a deterministic refusal must not run its retry budget.
+    expect(row.policyRefusals).toEqual(["context-overflow"]);
+    // The SDK-visible text is the fixed sentence; the counts stay on the refusal record.
+    expect(row.canonicalError).toBe("Home request refused (context-overflow): this message and its context exceed the model's window.");
+    expect(row.lastRefusalDetail).toContain("120-token window");
   }, 30_000);
 
   it("C13 a runtime reload keeps both wrappers installed", async () => {
