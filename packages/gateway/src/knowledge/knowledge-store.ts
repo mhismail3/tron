@@ -14,7 +14,7 @@ import {
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgePreviewBatchRequest,
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
-  type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
+  type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit, type NoteContent,
   type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest, type SourceFreshness,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
@@ -185,6 +185,16 @@ function mergeSourceAttribution(existing: KnowledgeRecord & { kind: "source" }, 
   return { kind: "source", id: existing.id, createdAt: existing.createdAt, scope: existing.scope, provenance: existing.provenance, relations: existing.relations, ...(existing.temporal ? { temporal: existing.temporal } : {}), content: { ...existing.content, ...(origins.length ? { origins } : {}), ...(annotations.length ? { annotations } : {}) } };
 }
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
+/** A note's labels and retirement are owner state that a native client's typed draft
+ * does not model. An edit that omits them keeps the current revision's, so a confirmation
+ * or edit cannot silently remove a note from the owner's role; an edit that names them
+ * replaces them. */
+function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
+  if (current.kind !== "note") return content;
+  const tags = content.tags ?? current.content.tags;
+  const retired = content.retired ?? current.content.retired;
+  return { ...content, ...(tags ? { tags } : {}), ...(retired ? { retired } : {}) };
+}
 function requestHash(operation: string, request: unknown): string { return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
 function revisionId(): string { return randomUUID(); }
@@ -1780,7 +1790,7 @@ export class KnowledgeStore {
     }, undefined, signal);
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
-  async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
+  async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
     if (!isConnectorProducer(producer)) return;
     if (next.scope !== current.scope && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
@@ -1994,7 +2004,7 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, record, existing?.revisionId);
     });
   }
-  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; if (current.kind === "source" && next.kind === "source") this.assertSourceDecisionAuthority(current, next, next.provenance.actor); return this.putRecord(state, paths, next, expectedRevision); }); }
+  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; const marked = next.kind === "note" ? { ...next, content: carryNoteMarks(current, next.content) } : next; if (current.kind === "source" && next.kind === "source") this.assertSourceDecisionAuthority(current, next, next.provenance.actor); return this.putRecord(state, paths, marked, expectedRevision); }); }
   async setScopeExclusion(commandId: string, scope: { sessionId?: string; branchId?: string; projectId?: string }, excluded: boolean, reason?: string): Promise<{ excluded: boolean; stateRevision: number }> {
     if (!scope.sessionId && !scope.projectId) throw invalid("Scope exclusion requires a session or project"); return this.mutate("knowledge.scope-exclusion", commandId, { scope, excluded, reason }, async state => { const key = scope.sessionId ? (scope.branchId ? `branch:${scope.sessionId}:${scope.branchId}` : `session:${scope.sessionId}`) : `project:${scope.projectId}`; state.scopeExclusions.set(key, { ...scope, excluded, ...(reason === undefined ? {} : { reason }), updatedAt: now() }); return { excluded, stateRevision: state.stateRevision + 1 }; });
   }

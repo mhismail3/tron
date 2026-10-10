@@ -39,9 +39,10 @@ const MAXIMUM_MODEL_ID_BYTES = 300;
 /** The curated Home profile this build writes. A record written against a newer
  * revision is still this build's record to read: only `version` gates admission,
  * because a profile change is not a format change. Revision 2 added the read-only
- * research tools (#724); designation and re-enable both write the current
- * revision, so an older record advances the next time Home is enabled. */
-const HOME_POLICY_REVISION = 2;
+ * research tools (#724) and revision 3 the learned profile tool (#731); designation and
+ * re-enable both write the current revision, so an older record advances the next time
+ * Home is enabled. */
+const HOME_POLICY_REVISION = 3;
 const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
 const HOME_SOFT_ENTRIES = 50_000;
 
@@ -79,6 +80,17 @@ export interface HomeRecord {
  * does not name that session, which is the only window in which a creation-time
  * profile argument applies. */
 export type HomeSessionProfile = "home" | "ordinary" | "unnamed";
+
+/** Knowledge's automatic observation never reads a Tron Home chapter: Home is one
+ * private conversation whose memory is its own (docs/home.md). A chapter of a
+ * disabled Home is no longer that runtime profile, so it is observed like any
+ * ordinary session. The owner is read lazily: `sessions` is constructed after
+ * the Knowledge service that consults this predicate. */
+export function homeChapterObservationExcluded(homeOwner: () => Pick<HomeOwner, "chapterStateFor">): (sessionId: string) => boolean {
+  // Every chapter the record names is Home's history, enabled or disabled: Home's
+  // own memory already holds it, so Knowledge never observes it.
+  return (sessionId) => homeOwner().chapterStateFor(sessionId).homeId !== undefined;
+}
 
 /** The session operations Home needs from the runtime owner. Kept narrow so the
  * Home record's authority is never a second session owner. */

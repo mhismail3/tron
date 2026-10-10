@@ -223,11 +223,12 @@ export const HOME_MODULE_NAMES: readonly string[] = [
 export const TRON_HOME_MODULE: TronModule = {
   name: "tron-home",
   purpose: "Adds Home's operating context, registers Home's memory tools and keeps Home out of prompt-cache warming.",
-  tools: ["zoom", "date", "memory_search", "delegate", "task"],
+  tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"],
   commands: [],
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
     request => host.homeDelegate(host.sessionId(), request),
-    request => host.homeTask(host.sessionId(), request)),
+    request => host.homeTask(host.sessionId(), request),
+    () => host.knowledge),
 };
 
 /** The one research module only a Home runtime loads (#724): read-only web
@@ -256,7 +257,7 @@ export const TRON_HOME_RESEARCH_MODULE: TronModule = {
  * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
  * allowlist semantic. */
 export const HOME_TOOL_NAMES: readonly string[] = [
-  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task",
+  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
   "web_search", "web_fetch", "session_search", "knowledge", "read_file",
 ];
 

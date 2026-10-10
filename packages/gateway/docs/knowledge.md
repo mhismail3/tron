@@ -417,7 +417,9 @@ grant so an older Gateway cannot silently ignore the choice. Existing model,
 limits, selections, and exclusions remain intact when scope changes.
 
 The same eligibility predicate gates inference admission and serialized
-publication. Explicit session/project exclusions always override global scope.
+publication. The Gateway also excludes Tron Home's own chapters through the
+observer's exclusion predicate, `homeChapterObservationExcluded`
+([home.md](home.md#the-learned-profile)). Explicit session/project exclusions always override global scope.
 `setScopeExclusion()` also fences session, branch, or project input before model
 inference, not merely publication. A rejected pending admission cannot start a
 model request. These fences apply even if a late worker generated a new record
@@ -646,7 +648,22 @@ not evidence.
 validity, explicit confirmation, privacy scope, freshness, corrections,
 supersession, and preserved contrary evidence. Personal/research scope remains
 the sharing authority; `privacyScope` is descriptive metadata, not a second
-sharing system. Source assessment uses persisted editable
+sharing system.
+
+Note labels, retirement and revision reasons (#731). A note may carry `tags`: at
+most eight labels, each matching `^[a-z][a-z0-9-]{0,47}$` and unique within the note.
+They are owner metadata, not the source tag vocabulary: the vocabulary does not
+validate them, and an owner alone gives them meaning. Tron Home's learned profile uses
+`home-profile` plus one `kind-<kind>` label ([home.md](home.md#the-learned-profile)).
+`retired: true` marks a note that has left active use; its earlier revisions stay in
+the ledger. An update or correction that omits `tags` or `retired` keeps the current
+revision's values, because native typed drafts do not model them; naming `tags`
+replaces them. `provenance.reason` (at most 2,000 characters) records why a revision
+was written. It is ledger metadata, never evidence. All three fields are optional
+under schema v1, so no schema bump is needed. A Gateway that predates them ignores
+them when it reads a note, but it does not carry them forward when it writes the same
+note, and downgrade is unsupported, so keep the Gateway at this build once a profile
+exists. Source assessment uses persisted editable
 `KnowledgeConfig.currentInterests`; neither assessor accepts an unpersisted
 interest list. The assessed source's evidence and configuration are revalidated
 before its derivative is committed. Capture is durable even when an adapter

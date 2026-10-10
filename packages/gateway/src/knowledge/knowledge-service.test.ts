@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
+import type { NoteContent } from "./knowledge-contract.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -258,6 +259,53 @@ describe("KnowledgeService integration", () => {
     expect(updated.details).toMatchObject({ record: { provenance: { actor: "agent" }, content: { body: "updated", confirmed: false } } });
     const read = await service.tool({ action: "read", id: record.id, revisionId: (updated.details as { record: { revisionId: string } }).record.revisionId });
     expect(read.details).toMatchObject({ record: { provenance: { actor: "agent" }, content: { body: "updated" } } });
+  });
+
+  it("bounds note labels and retirement, and keeps them through an edit or correction that omits them", async () => {
+    // Failure modes: an unbounded or duplicate label is stored (a label is an owner's
+    // role for the note); `retired: false` is stored; an unbounded provenance reason is
+    // stored; an edit or a native correction that omits labels or retirement drops them,
+    // silently removing a Home profile item from its role.
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const draft = (content: Record<string, unknown>, provenance: Record<string, unknown> = {}) => ({
+      kind: "note" as const, scope: "personal" as const, relations: [],
+      provenance: { actor: "agent" as const, source: "home", evidence: [], ...provenance },
+      content: { title: "Labelled", role: "fact" as const, confirmed: false, tags: ["home-profile", "kind-fact"], ...content } as NoteContent,
+    });
+    const refused: Array<[string, Record<string, unknown>, Record<string, unknown> | undefined, RegExp]> = [
+      ["an uppercase label", { tags: ["Home-Profile"] }, undefined, /Invalid note tags/],
+      ["a duplicate label", { tags: ["home-profile", "home-profile"] }, undefined, /Invalid note tags/],
+      ["more than eight labels", { tags: Array.from({ length: 9 }, (_, index) => `label-${index}`) }, undefined, /Invalid note tags/],
+      ["a false retirement", { retired: false }, undefined, /Invalid note retirement/],
+      ["an unbounded provenance reason", {}, { reason: "x".repeat(2_001) }, /provenance reason/],
+    ];
+    for (const [name, content, provenance, message] of refused) {
+      await expect(service.invoke({ operation: "knowledge.note.create", request: { commandId: `label-refused-${name.replace(/\W+/g, "-")}`, record: draft(content, provenance) } }), name).rejects.toThrow(message);
+    }
+
+    const created = await service.invoke({ operation: "knowledge.note.create", request: { commandId: "label-created-0001", record: draft({ retired: true }, { reason: "recorded" }) } }) as { record: { id: string; revisionId: string } };
+    // Retired at creation is a legal state; the labels and reason survive as written.
+    expect(created.record).toMatchObject({ provenance: { reason: "recorded" }, content: { tags: ["home-profile", "kind-fact"], retired: true } });
+
+    const plain = await service.invoke({ operation: "knowledge.note.create", request: { commandId: "label-created-0002", record: draft({}) } }) as { record: { id: string; revisionId: string } };
+    // A native-style update models neither labels nor retirement: they are kept.
+    const edited = await service.invoke({ operation: "knowledge.note.update", request: { commandId: "label-edit-0001", recordId: plain.record.id, expectedRevision: plain.record.revisionId, record: {
+      kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Labelled edit", role: "fact", confirmed: false },
+    } } }) as { record: { revisionId: string; content: { tags?: string[]; retired?: true } } };
+    expect(edited.record.content).toMatchObject({ tags: ["home-profile", "kind-fact"] });
+    expect(edited.record.content.retired).toBeUndefined();
+
+    // An explicit label replaces the kept one; a correction without labels keeps them.
+    const corrected = await service.invoke({ operation: "knowledge.correction", request: { commandId: "label-correct-0001", recordId: plain.record.id, expectedRevision: edited.record.revisionId, replacement: {
+      kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Labelled correction", role: "fact", confirmed: false },
+    }, relation: { type: "corrects", recordId: plain.record.id, revisionId: edited.record.revisionId } } }) as { record: { revisionId: string; content: { tags?: string[] } } };
+    expect(corrected.record.content.tags).toEqual(["home-profile", "kind-fact"]);
+    const relabeled = await service.invoke({ operation: "knowledge.note.update", request: { commandId: "label-relabel-0001", recordId: plain.record.id, expectedRevision: corrected.record.revisionId, record: {
+      kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Labelled relabel", role: "fact", confirmed: false, tags: ["kind-fact"] },
+    } } }) as { record: { content: { tags?: string[] } } };
+    expect(relabeled.record.content.tags).toEqual(["kind-fact"]);
   });
 
   it("reads complete source text and qualifications through bounded continuation pages", async () => {

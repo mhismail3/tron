@@ -60,7 +60,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
       const names = context.availableTools.map(tool => tool.name);
       if (profile === "home") {
         expect(names.sort()).toEqual([
-          "ask_user", "date", "delegate", "display", "knowledge", "memory_search",
+          "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "profile",
           "read_file", "session_search", "task", "web_fetch", "web_search", "zoom",
         ]);
         // The executable allowlist alone can hide tools from a loaded provider;

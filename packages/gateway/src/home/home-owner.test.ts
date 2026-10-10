@@ -370,7 +370,7 @@ describe("Tron Home record", () => {
     expect((await stat(f.workspacePath)).mode & 0o777).toBe(0o700);
     const stored = JSON.parse(await readFile(f.recordPath, "utf8")) as HomeRecord;
     expect(stored).toMatchObject({
-      version: 2, bindingRevision: 1, policyRevision: 2, enabled: true, generation: 1, model: MODEL,
+      version: 2, bindingRevision: 1, policyRevision: 3, enabled: true, generation: 1, model: MODEL,
       chapters: [{ sessionId: designation.sessionId, ordinal: 1, state: "active" }],
     });
     expect(stored.createdAt).toBe(stored.updatedAt);
@@ -422,7 +422,7 @@ describe("Tron Home record", () => {
     await f.owner.designate({ model: MODEL }, defaultModel);
     const stored = JSON.parse(await readFile(f.recordPath, "utf8")) as HomeRecord;
     expect(stored.enabled).toBe(true);
-    expect(stored.policyRevision).toBe(2);
+    expect(stored.policyRevision).toBe(3);
   });
 
   it("designates a fresh session when the recorded session is gone", async () => {
