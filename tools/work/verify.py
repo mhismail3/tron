@@ -98,6 +98,11 @@ def _script_kind(root: Path, relative: str) -> Optional[str]:
     return kind
 
 
+def _code_paths(changed: List[str], prefix: str) -> List[str]:
+    """Changed paths under `prefix` that can affect a build: documentation alone never triggers one."""
+    return [p for p in changed if p.startswith(prefix) and not p.endswith(".md") and "/docs/" not in p]
+
+
 def plan(root: Path, changed: List[str], tests: List[str], merge_base: str) -> List[Check]:
     """The checks the changed paths require, in the order they are reported."""
     existing = [path for path in changed if (root / path).is_file()]
@@ -105,7 +110,7 @@ def plan(root: Path, changed: List[str], tests: List[str], merge_base: str) -> L
         Check("privacy", "scripts/personal-info-guard.sh"),
         Check("whitespace", f"git diff --check {merge_base} HEAD"),
     ]
-    gateway = [p[len(_GATEWAY) + 1:] for p in changed if p.startswith(f"{_GATEWAY}/")]
+    gateway = [p[len(_GATEWAY) + 1:] for p in _code_paths(changed, f"{_GATEWAY}/")]
     if gateway:
         lock_changed = f"{_GATEWAY}/package-lock.json" in changed
         commands = [_install(_GATEWAY, lock_changed, root), "npm run check"]
@@ -122,13 +127,13 @@ def plan(root: Path, changed: List[str], tests: List[str], merge_base: str) -> L
                 commands.append(f"npx vitest run --passWithNoTests --maxWorkers=2 {config}"
                                 + " ".join(shlex.quote(p) for p in test_files))
         checks.append(Check("gateway", f"cd {_GATEWAY} && " + " && ".join(commands)))
-    if any(p.startswith(f"{_RELAY}/") for p in changed):
+    if _code_paths(changed, f"{_RELAY}/"):
         lock_changed = f"{_RELAY}/package-lock.json" in changed
         checks.append(Check("push-relay", f"cd {_RELAY} && {_install(_RELAY, lock_changed, root)} && "
                                           "npm run check && npm run build"))
-    if any(p.startswith(_IOS) for p in changed):
+    if _code_paths(changed, _IOS):
         checks.append(Check("ios", "scripts/tron-ios-test build"))
-    if any(p.startswith(_MAC) for p in changed):
+    if _code_paths(changed, _MAC):
         checks.append(Check("mac", "scripts/tron mac generate && cd packages/mac-app && xcodebuild build "
                                    "-project TronMac.xcodeproj -scheme TronMac -configuration Debug "
                                    "-destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData"))

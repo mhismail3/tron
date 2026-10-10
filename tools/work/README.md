@@ -29,7 +29,8 @@ Reads are plain `gh` reads.
 ## `verify` and `land`
 
 `verify` diffs `HEAD` against the merge base with `<remote>/<base>` and selects checks
-by path:
+by path. A package's check runs only for code paths: markdown and `docs/` changes never
+start a build:
 
 - always: the privacy guard (`scripts/personal-info-guard.sh`) and `git diff --check`;
 - `packages/gateway`: `npm ci` only when the lockfile changed or `node_modules` is
