@@ -282,7 +282,7 @@
           "packages/gateway/src/tron-home-environment-policy.mjs",
           "packages/gateway/test-support/tron-home-environment-preflight.mjs"
         ],
-        "command": "python3 -m unittest discover -s tools/work"
+        "command": "python3 tools/work/run_tests.py"
       },
       {
         "name": "work-related-issues",
@@ -304,6 +304,7 @@
       },
       {
         "name": "gateway",
+        "heavy": true,
         "paths": [
           "packages/gateway/src/**/*.ts",
           "packages/gateway/test-support/**",
@@ -316,6 +317,8 @@
           "packages/gateway/vitest.scale.config.ts",
           "packages/gateway/vitest.corpus.config.ts",
           "packages/gateway/pi-sdk-baseline.json",
+          "packages/gateway/pi-subagents-pin.json",
+          "packages/gateway/artifacts/**",
           "packages/gateway/scripts/**",
           "packages/gateway/test-fixtures/**",
           "packages/gateway/src/**/*.json",
@@ -333,6 +336,7 @@
       },
       {
         "name": "pi-subagents",
+        "heavy": true,
         "paths": [
           "packages/gateway/package.json",
           "packages/gateway/package-lock.json",
@@ -346,6 +350,7 @@
       },
       {
         "name": "gateway-scale",
+        "heavy": true,
         "paths": [
           "packages/gateway/src/knowledge/*.scale.test.ts",
           "packages/gateway/src/knowledge/knowledge-catalog.ts",
@@ -378,6 +383,7 @@
       },
       {
         "name": "ios",
+        "heavy": true,
         "paths": [
           "packages/ios-app/Configuration/**",
           "packages/ios-app/Core/**",
@@ -426,6 +432,7 @@
       },
       {
         "name": "mac",
+        "heavy": true,
         "paths": [
           "packages/mac-app/Configuration/**",
           "packages/mac-app/Sources/**",
@@ -466,6 +473,7 @@
       },
       {
         "name": "mac-bundle-rebuild",
+        "heavy": true,
         "paths": [
           "packages/mac-app/scripts/bundle-gateway.sh",
           "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",

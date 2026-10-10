@@ -533,7 +533,7 @@ struct SessionContextProgressButton: View {
         .accessibilityValue(accessibilityValue)
         .accessibilityHint("Shows context usage, model selection, and session actions")
         .animation(
-            reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8),
+            reduceMotion ? nil : ChatMotion.composerControlSpring,
             value: fraction
         )
     }
@@ -616,8 +616,8 @@ struct ComposerTrailingButtonPressStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.78 : 1)
             .animation(
                 reduceMotion
-                    ? .easeOut(duration: 0.08)
-                    : .spring(response: 0.22, dampingFraction: 0.72),
+                    ? ChatMotion.composerTap
+                    : ChatMotion.composerModeSpring,
                 value: configuration.isPressed
             )
     }
@@ -664,7 +664,7 @@ struct ComposerTrailingButton: View {
                                 )
                         }
                     }
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: isSending)
+                    .animation(ChatMotion.controlArrive(reduceMotion: reduceMotion), value: isSending)
                 }
             }
             .frame(
@@ -676,8 +676,8 @@ struct ComposerTrailingButton: View {
         .buttonStyle(ComposerTrailingButtonPressStyle())
         .disabled(isDisabled && mode == .send)
         .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: mode)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isDisabled)
+        .animation(ChatMotion.composerMode(reduceMotion: reduceMotion), value: mode)
+        .animation(ChatMotion.composerMode(reduceMotion: reduceMotion), value: isDisabled)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .contextMenu {

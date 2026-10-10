@@ -51,13 +51,21 @@ receipt and clears its runtime marker in the origin. Nothing more is written for
 it under the replacement identity. A fork copies the command's `start` row, which
 the replacement projects with its stored lifecycle; the live-command overlay
 applies only to a start receipt the replacement itself wrote, so the inherited row
-is never shown as running while the replacement's handler is still live. Handler code after the call runs unowned in
+is never shown as running while the replacement's handler is still live. Every
+extension-command row a fork inherits (its `start` receipt names the origin) is
+projected as settled in the origin, never as staged: with the origin's terminal
+lifecycle when the fork's history carries that receipt, otherwise `completed`,
+the only outcome the origin records for the forking command whose terminal is
+written after the copy. Such a row carries `settledInOriginSession: true` on its
+semantic metadata. Stored receipts are never rewritten, and a staged inherited
+row would otherwise block live composer commands. Handler code after the call runs unowned in
 the replacement, as Pi's stale-context model implies, so a later failure surfaces
 as an extension error there. A replacement that fails after that boundary still
 records the command `completed`. Receipt and marker writes target the session
 bound when they were requested, and a retry never follows a rebind. The
 command-driven replacement cases in
-`src/transport/session-archive.integration.test.ts` cover all three calls.
+`src/transport/session-archive.integration.test.ts` cover all three calls, and
+the fork-inherited settlement case there covers the projected rows across restart.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
 The v7 projection separates inbound context, agent output/invocations, ambient
@@ -1600,7 +1608,11 @@ require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
-artifact. The deploy helper fingerprints sorted `app/**` and `runtime/**` entries using
+artifact. The delegated provider is the exception: a source update stages the source
+revision's `pi-subagents-pin.json`, its check and install scripts, and exactly the
+artifacts both pin selections name, verifying each against the pin's digest before
+publication, as Mac packaging does. A provider update therefore needs only Rebuild
+from Source, and a payload never claims a revision while carrying an older provider. The deploy helper fingerprints sorted `app/**` and `runtime/**` entries using
 bounded batches of 16 file reads; the batch bound overlaps storage latency
 without issuing one read operation per file at once. Sorted canonical lines
 keep its SHA-256 byte-identical to the Mac payload hash script and launcher;
@@ -3346,14 +3358,16 @@ owners narrow while iterating and use the full configured suite for checkpoints.
 
 `npm test` runs two Vitest passes, in order. The main pass (`vitest.config.ts`) runs
 the parallel suite. The nested pass (`vitest.nested.config.ts`) runs the files that
-spawn nested Vitest or real pi children, or that first-load the managed provider from
-a fresh install root, one file at a time. That config's list is the single owner of
-which files are nested. Under parallel workers those children starve and miss their
-execFile or detached-process bounds, so they cannot share the parallel pass; the
-bounds are hang bounds only, and a passing run never reaches them. A fresh root's
-first managed load transpiles the whole extension graph because jiti's cache is keyed
-by absolute path; production reuses one stable root, so only its first load per
-install pays that cost.
+spawn nested Vitest or real pi children, or that activate the real managed provider
+(including a first load from a fresh install root), one file at a time. That config's
+list is the single owner of which files are nested. Under parallel workers those
+children starve and miss their execFile or detached-process bounds, so they cannot
+share the parallel pass; the bounds are hang bounds only, and a passing run never
+reaches them. For the same reason the nested pass declares its own hang bounds (240 s
+waits under a 300 s test timeout, owned by that config) instead of the main pass's
+12 s under 15 s. A fresh root's first managed load transpiles the whole extension
+graph because jiti's cache is keyed by absolute path; production reuses one stable
+root, so only its first load per install pays that cost.
 Run one of them with `npx vitest run --config vitest.nested.config.ts <file>`.
 
 Tests own every remote boundary through injected fetchers, resolvers and HTTP
@@ -3835,7 +3849,10 @@ during and after an invalid definition. An idle real wake is gated before bindin
 a separate factory-API steering probe compares displayed queued input with ordinary
 maintainer input while retaining hidden wake authority in evidence.
 Execution-specific identities, temporary roots, timestamps and elapsed intervals are
-normalized; launch/child/widget order and authored text remain meaningful. Transport
+normalized; pi-subagents' versioned installation root and bundled `[worker eval]`
+frame positions change on every fork bump and are normalized on both legs (the
+committed OLD baseline is normalized at comparison). Launch/child/widget order and
+authored text remain meaningful. Transport
 revision counters are not presentation values. Finite label/delivery allowances and
 exact OLD/NEW upstream value pairs in `test-support/subagent-parity-approved.json`
 cover only the approved dependency changes (including notification guidance,

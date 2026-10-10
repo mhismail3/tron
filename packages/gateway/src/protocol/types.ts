@@ -288,6 +288,8 @@ export interface ChatSemanticMetadata {
   resourceInvocation?: ResourceInvocation;
   /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
   submittedText?: string;
+  /** Set only on a command row a fork inherited from its origin, whose lifecycle settled there. */
+  settledInOriginSession?: true;
 }
 
 export interface ContextDeliveryMetadata {

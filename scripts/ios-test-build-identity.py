@@ -75,7 +75,9 @@ def source_state(worktree: Path) -> tuple[bool, str]:
 
     Tracked modifications and deletions come from the diff against HEAD; every
     untracked, non-ignored file contributes its path and content, because a new
-    test-only source file changes what a build would produce.
+    test-only source file changes what a build would produce. An untracked nested
+    repository (a SwiftPM checkout under a build root) is listed by Git as one
+    `dir/` entry, so it contributes its own HEAD and its own source state.
     """
     digest = hashlib.sha256()
     diff = git(worktree, "diff", "HEAD", "--binary", "--no-color", "--no-ext-diff", "--no-textconv")
@@ -90,6 +92,12 @@ def source_state(worktree: Path) -> tuple[bool, str]:
     for relative in untracked:
         digest.update(relative)
         digest.update(b"\0")
+        if relative.endswith(b"/"):
+            nested = worktree / os.fsdecode(relative)
+            digest.update(git(nested, "rev-parse", "HEAD"))
+            _, nested_fingerprint = source_state(nested)
+            digest.update(nested_fingerprint.encode())
+            continue
         try:
             with open(worktree / os.fsdecode(relative), "rb") as handle:
                 while chunk := handle.read(CHUNK):

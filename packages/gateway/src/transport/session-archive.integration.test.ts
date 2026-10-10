@@ -376,6 +376,28 @@ const attentionRecord = async (root: string, sessionId: string): Promise<unknown
   return document.sessions[sessionId];
 };
 
+/** Holds every outbound write the Gateway has to this process's sockets until
+ * the returned release runs. The frame is still handed to the socket; only its
+ * completion waits, which is how a loaded host delays a write. The outbound
+ * queue then keeps later frames behind the held one, so a newer snapshot
+ * supersedes an unsent one and the client receives it as a rebaseline. */
+function stallOutboundWrites(server: GatewayServer): () => void {
+  const sockets = server as unknown as { localSockets: { clients: Set<WebSocket> }; pairedSockets: { clients: Set<WebSocket> } };
+  let stalled = true;
+  const held: Array<() => void> = [];
+  for (const socket of [...sockets.localSockets.clients, ...sockets.pairedSockets.clients]) {
+    const send = socket.send.bind(socket);
+    socket.send = ((data: string, complete: (error?: Error) => void) => send(data, (error) => {
+      if (stalled) held.push(() => complete(error));
+      else complete(error);
+    })) as WebSocket["send"];
+  }
+  return () => {
+    stalled = false;
+    for (const complete of held.splice(0)) complete();
+  };
+}
+
 /** Fails every durable archive-record removal from now on, modelling a full or
  * failing disk at the store's exact write boundary. */
 function failArchiveRemovals(registry: RuntimeRegistry): () => void {
@@ -408,6 +430,11 @@ const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
     }
     return [];
   });
+
+/** The Gateway's published row phase. A held subscriber write cannot show the
+ * run yet, so the wait reads the registry to know the run's snapshot is queued. */
+const runningInRegistry = (registry: RuntimeRegistry, sessionId: string): boolean =>
+  (registry as unknown as { latestSummaries: Map<string, { phase?: string }> }).latestSummaries.get(sessionId)?.phase === "running";
 
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
@@ -1854,17 +1881,26 @@ describe("session archive over the real Gateway", () => {
       // active projection the commit rechecks can notice it. Its frames arrive
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
+      // Held socket writes model a loaded host: the run's first running snapshot
+      // queues behind them, and the commit's own republish supersedes it.
+      const releaseSocketWrites = stallOutboundWrites(f.current().server);
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
       await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
-      await waitWithStallState(() => snapshotFrames(client, session.id).some(
-        (frame) => frame.payload?.phase === "running"), "externally started run");
+      await waitWithStallState(() => runningInRegistry(f.current().registry, session.id), "externally started run in the registry");
       releaseWrite();
+      // The restored row's republish is queued behind the held write before
+      // the backstop clears the record, so the release below delivers it.
+      await waitFor(() => f.archiveDiagnostic.mock.calls.some(
+        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
+      releaseSocketWrites();
+      // The running state reaches the client as a rebaseline when its snapshot
+      // was superseded while queued, so the oracle reads delivered authority.
+      await waitWithStallState(() => deliveredAuthorityFrames(client, session.id).some(
+        (frame) => frame.payload?.phase === "running"), "externally started run");
       const response = await archiving;
       expect(response.ok, JSON.stringify(response)).toBe(true);
       expect(response.result).toEqual({ archived: false });
       expect(await listedIds(client, "exclude")).toContain(session.id);
-      await waitFor(() => f.archiveDiagnostic.mock.calls.some(
-        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
       releaseRun();
       await waitFor(async () => (await archivedRecord(f.root, session.id)) === undefined, "record cleared behind the run");
       await waitFor(async () => (await list(client, "exclude")).sessions.some(
@@ -2099,6 +2135,70 @@ describe("command-driven session replacement over the real Gateway", () => {
       "replacement settled snapshot delivered");
     expect((await invocationReceiptsIn(origin.file)).map((receipt) => [receipt.receiptKind, receipt.lifecycle]))
       .toEqual([["start", "staged"], ["terminal", "completed"]]);
+  }, 30_000);
+
+  type InvocationSemantic = { kind?: string; operationId?: string; lifecycle?: string; settledInOriginSession?: boolean };
+  it("projects a fork's inherited command rows from their origin settlement, never staged", async () => {
+    // Failure modes: a command that completed before the fork keeps the copied
+    // `staged` lifecycle, which blocks composer commands in the fork; a command
+    // that failed in the origin projects as completed in the fork; the forking
+    // command projects staged or running; the settlement note is missing; the
+    // projection loses either fact after restart.
+    const f = await fixture({ extensions: [{
+      name: "replace.ts",
+      source: () => `
+        export default function (pi) {
+          pi.registerCommand("finished", { handler: async () => {} });
+          pi.registerCommand("broken", { handler: async () => { throw new Error("broken command"); } });
+          pi.registerCommand("replace", { handler: async (args, ctx) => {
+            await ctx.fork(ctx.sessionManager.getLeafId(), { position: "at" });
+          }});
+        }
+      `,
+    }] });
+    let client = await f.connect();
+    const origin = await f.coldSession("inherited-origin");
+    await openSession(client, origin.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    const runCommand = async (name: string) => {
+      const response = await client.request(`command-${name}`, "session.prompt", {
+        commandId: `${name}-command`, sessionId: origin.id, text: `/${name}`,
+      });
+      expect(response.ok, JSON.stringify(response)).toBe(true);
+      await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, `${name} settled`);
+      return response.result.operationId as string;
+    };
+    const finishedOperation = await runCommand("finished");
+    const brokenOperation = await runCommand("broken");
+    const response = await client.request("command-replace", "session.prompt", {
+      commandId: "replace-command", sessionId: origin.id, text: "/replace",
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    const replaceOperation = response.result.operationId as string;
+    await waitFor(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "fork landed");
+    const replacementId = [...registry.slots.keys()][0]!;
+    await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "forking command settled");
+    await waitFor(() => (deliveredAuthorityFrames(client, replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
+      "replacement settled snapshot delivered");
+    // The command rows of one projected snapshot, in transcript order.
+    const commandRows = (payload: unknown) => (payload as { transcript: Array<{ semantic?: InvocationSemantic }> }).transcript
+      .filter((item) => item.semantic?.kind === "command")
+      .map((item) => [item.semantic!.operationId, item.semantic!.lifecycle, item.semantic!.settledInOriginSession]);
+    const expected = [
+      [finishedOperation, "completed", true],
+      [brokenOperation, "failed", true],
+      [replaceOperation, "completed", true],
+    ];
+    expect(commandRows(deliveredAuthorityFrames(client, replacementId).at(-1)!.payload)).toEqual(expected);
+    // The origin keeps every terminal fact; the fork projects them, never rewrites them.
+    expect((await invocationReceiptsIn(origin.file)).filter((receipt) => receipt.receiptKind === "terminal")
+      .map((receipt) => receipt.lifecycle)).toEqual(["completed", "failed", "completed"]);
+
+    await f.restart();
+    client = await f.connect();
+    const reopened = await client.request("replacement-reopened", "session.open", { sessionId: replacementId });
+    expect(reopened.ok, JSON.stringify(reopened)).toBe(true);
+    expect(commandRows(reopened.result.session)).toEqual(expected);
   }, 30_000);
 
   it("keeps a failure after the switch out of the replacement", async () => {

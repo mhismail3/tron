@@ -1739,9 +1739,7 @@ struct ChatTranscriptPresentationStoreTests {
                 from: pendingPhysical,
                 to: resolvedPhysical
             ) == .notification)
-            #expect(ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
-                reduceMotion: false
-            ) != nil)
+            #expect(ChatMotion.queuedPromptReplace(reduceMotion: false) != nil)
 
             snapshot.phase = .idle
             snapshot.extensionPresentation.semanticState.working.visible = false

@@ -997,7 +997,7 @@ struct AppModelCatalogSyncTests {
             try Self.storePairedProfile(harness.model)
             try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0), summary(id: "other", revision: 0)])
             // An authoritative page is written without waiting for a window.
-            try await waitForCacheSaves(signposts, count: 1)
+            try await waitForPublishedCheckpoint(harness, signposts)
             signposts.reset()
 
             for revision in 1...5 {
@@ -1028,7 +1028,7 @@ struct AppModelCatalogSyncTests {
         try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
             try Self.storePairedProfile(harness.model)
             try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0), summary(id: "other", revision: 0)])
-            try await waitForCacheSaves(signposts, count: 1)
+            try await waitForPublishedCheckpoint(harness, signposts)
             signposts.reset()
 
             await harness.model.handle(summaryEvent(id: "known", revision: 1, phase: .running))
@@ -1057,7 +1057,7 @@ struct AppModelCatalogSyncTests {
         try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
             try Self.storePairedProfile(harness.model)
             try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0)])
-            try await waitForCacheSaves(signposts, count: 1)
+            try await waitForPublishedCheckpoint(harness, signposts)
             signposts.reset()
 
             await harness.model.handle(summaryEvent(id: "known", revision: 1, phase: .running))
@@ -1079,7 +1079,7 @@ struct AppModelCatalogSyncTests {
         try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
             try Self.storePairedProfile(harness.model)
             try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0)])
-            try await waitForCacheSaves(signposts, count: 1)
+            try await waitForPublishedCheckpoint(harness, signposts)
             await harness.model.handle(summaryEvent(id: "known", revision: 1, phase: .running))
             try await clock.waitUntilSleeping(count: 1, duration: SnapshotCachePolicy.summaryCheckpointDelay)
 
@@ -1102,6 +1102,14 @@ struct AppModelCatalogSyncTests {
 
     private func cacheSaveCount(_ signposts: RecordingPerformanceSignposts) -> Int {
         signposts.events().filter { $0 == .begin(.cacheSave) }.count
+    }
+
+    /// The publish's save drains on the main actor after its signpost ends. A
+    /// summary delivered before that resumption finds the drain in flight, which
+    /// writes without arming a trailing window, so the window tests await the drain.
+    private func waitForPublishedCheckpoint(_ harness: Harness, _ signposts: RecordingPerformanceSignposts) async throws {
+        try await waitForCacheSaves(signposts, count: 1)
+        await harness.model.inFlightCacheCheckpoint?.value
     }
 
     /// Cache saves complete on the `SnapshotCache` actor, off the main actor.

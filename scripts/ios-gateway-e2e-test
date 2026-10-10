@@ -450,6 +450,18 @@ stop_gateway() {
   rm -f "$pid_file"
 }
 
+# Ends a process this start spawned when the start then fails. It is this shell's own
+# background child, so its pid is exact. stop_gateway and stop_proxy first prove the
+# command line of the pid, the very proof a failed start did not pass; refusing there
+# would leave the process running with no owner.
+retire_spawned() {
+  local pid="$1" _
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..50}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null || true; fi
+  wait "$pid" 2>/dev/null || true
+}
+
 load_state() {
   [[ -s "$state_file" ]] || die "fixture is not prepared; run '$0 prepare'"
   # Generated exclusively by this script with shell-escaped values.
@@ -533,7 +545,10 @@ EOF
 prepare_fixture() {
   stop_gateway
   install_gateway_if_needed
+  # The fixture stays running on success; a failure after the Gateway spawned stops it, as `run` does.
+  trap finish_e2e_run EXIT
   start_fresh_fixture
+  trap - EXIT
 }
 
 # Start a process this harness keeps past the command: the Gateway fixture and
@@ -611,8 +626,10 @@ PY
     fi
     sleep 0.1
   done
-  [[ -s "$tron_home/gateway/enrollment.json" ]] || die "gateway fixture did not become ready"
-  gateway_running || die "ready Gateway fixture does not match its owned command"
+  [[ -s "$tron_home/gateway/enrollment.json" ]] \
+    || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "gateway fixture did not become ready"; }
+  gateway_running \
+    || { retire_spawned "$spawned_pid"; rm -f "$pid_file"; die "ready Gateway fixture does not match its owned command"; }
   code="$(python3 - "$tron_home/gateway/enrollment.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:
@@ -641,7 +658,8 @@ PY
     fi
     sleep 0.1
   done
-  [[ -s "$proxy_ready" ]] || { stop_gateway; die "owned fault proxy did not become ready"; }
+  [[ -s "$proxy_ready" ]] \
+    || { retire_spawned "$proxy_pid"; rm -f "$proxy_pid_file"; stop_gateway; die "owned fault proxy did not become ready"; }
   port="$(python3 - "$proxy_ready" "$proxy_pid" <<'PY'
 import json,sys
 with open(sys.argv[1]) as handle: value=json.load(handle)
@@ -649,7 +667,8 @@ assert value['pid']==int(sys.argv[2]) and isinstance(value['port'],int) and 1024
 print(value['port'])
 PY
 )"
-  proxy_running || { stop_gateway; die "proxy command ownership changed"; }
+  proxy_running \
+    || { retire_spawned "$proxy_pid"; rm -f "$proxy_pid_file"; stop_gateway; die "proxy command ownership changed"; }
 
   {
     printf 'TRON_E2E_PORT=%q\n' "$port"
@@ -748,6 +767,13 @@ run_one_test_case() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest"
+  # Evidence is kept whatever the case's status: a possibly_sent or pong_timeout
+  # is exactly the case whose Gateway-side and phone-side records must be read
+  # together. Missing evidence is reported, never turned into a case status.
+  capture_journey_evidence "$attempt_dir" \
+    || echo "warning: $test_filter's Gateway or proxy evidence is incomplete (see above)" >&2
+  export_phone_liveness_records "$result_bundle" "$attempt_dir" \
+    || echo "warning: $test_filter attached no phone liveness records to its result bundle" >&2
   if ((status == 0)); then
     # A missing fixture must not turn XCTest's conditional skip into a green
     # cross-layer qualification receipt.
@@ -819,6 +845,39 @@ capture_journey_evidence() {
     failure=1
   fi
   return "$failure"
+}
+
+# The phone's liveness and transport records that the boundary case attaches as
+# `phone-liveness-records` (one JSON line per record, tagged with its client).
+# They are exported from the result bundle and joined into one file: with the
+# fault proxy's per-ping timeline, a reader separates a stalled Gateway (no pong
+# recorded, or a late one) from a stalled phone (the pong was forwarded to the
+# phone but the phone's deadline still fired).
+export_phone_liveness_records() {
+  local result_bundle="$1" attempt_dir="$2" export_dir status=0
+  [[ -d "$result_bundle" ]] || return 1
+  export_dir="$(mktemp -d "$attempt_dir/.attachments.XXXXXX")"
+  if xcrun xcresulttool export attachments --path "$result_bundle" --output-path "$export_dir" >/dev/null 2>&1; then
+    python3 - "$export_dir" "$attempt_dir/phone-liveness-records.jsonl" <<'PY' || status=1
+import json, sys
+from pathlib import Path
+
+export_dir, output = Path(sys.argv[1]), Path(sys.argv[2])
+manifest = json.loads((export_dir / "manifest.json").read_text())
+lines = []
+for test in manifest:
+    for attachment in test.get("attachments", []):
+        if attachment.get("suggestedHumanReadableName", "").startswith("phone-liveness-records"):
+            lines.append((export_dir / attachment["exportedFileName"]).read_text().rstrip("\n"))
+if not lines:
+    raise SystemExit("no phone-liveness-records attachment in the result bundle")
+output.write_text("\n".join(line for line in lines if line) + "\n")
+PY
+  else
+    status=1
+  fi
+  rm -rf "$export_dir"
+  return "$status"
 }
 
 write_journey_report() {

@@ -63,7 +63,9 @@ then waits until that process is gone with no replacement PID. Only then does it
 join native-host retirement. An unavailable response, runtime change, failed
 Gateway exit or failed native drain keeps the wrapper open; there is no forced
 termination, automatic retry or permission bypass. A manual retry for the same
-captured runtime reuses its command ID.
+captured runtime reuses its command ID. A retry after the Gateway has stopped
+resumes at native-host retirement only while the Login Item stays enabled and
+no Gateway process runs.
 
 Quit does not unregister either approved Login Item. The Gateway LaunchAgent is
 `RunAtLoad` with `KeepAlive.SuccessfulExit=false`, so its clean intentional exit

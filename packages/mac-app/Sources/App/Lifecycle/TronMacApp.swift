@@ -268,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             readRuntime: { try await setup.readRuntimeForQuit() },
             processStartIdentity: { pid in await ServerProcessProbe.processStartIdentity(pid: pid) },
             runtimeOwnershipHealthy: setup.runtimeOwnershipHealthy,
+            serviceEnabled: { setup.launchAgentServiceStatus() == .enabled },
             stopGateway: setup.stopGateway,
             retireNativeHost: setup.retireNativeHostForQuit
         )

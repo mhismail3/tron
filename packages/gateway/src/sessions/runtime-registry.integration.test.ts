@@ -3348,11 +3348,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       managers.push(manager);
       const forks = join(directory, basename(manager.getSessionFile()!, ".jsonl"), "forks");
       await mkdir(forks, { recursive: true });
-      for (let child = 0; child < 3; child++) {
-        const fork = SessionManager.forkFrom(manager.getSessionFile()!, cwd, forks);
-        fork.appendMessage(fauxAssistantMessage(`child-${index}-${child}`));
-        children.push(fork);
-      }
+      // One delegated child per parent still gives every parent a forks topology
+      // that each wave appends to; more children multiply the same per-file work.
+      const fork = SessionManager.forkFrom(manager.getSessionFile()!, cwd, forks);
+      fork.appendMessage(fauxAssistantMessage(`child-${index}`));
+      children.push(fork);
     }
     let release!: () => void;
     const barrier = new Promise<void>(resolve => { release = resolve; });

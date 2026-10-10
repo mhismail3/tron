@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -161,6 +162,41 @@ def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[st
     return None, "no pull request from it is merged into " + base + (f" (merged {', '.join(others)})" if others else "")
 
 
+_GLOB_PIECES = {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}
+
+
+def _glob_regex(glob: str) -> str:
+    """The regular expression of a `cleanup.regenerableIgnored` glob, with Git's pathspec-glob meaning.
+
+    Only `*`, `?`, `**/` and `**` are used there: `*` and `?` stay within one path segment,
+    and `**` crosses segments (README.md, `cleanup`).
+    """
+    return "".join(_GLOB_PIECES.get(token, re.escape(token)) for token in re.split(r"(\*\*/|\*\*|\*|\?)", glob))
+
+
+def _regenerable(globs: List[str]) -> re.Pattern:
+    return re.compile("|".join(f"(?:{_glob_regex(glob)})" for glob in globs))
+
+
+def _nested_checkout_problem(checkout: Path) -> Optional[str]:
+    """Why a nested checkout that a regenerable glob matches is still local data, or None when it is re-fetchable.
+
+    Its files are not listed with the parent's ignored files, so they are read here: uncommitted,
+    untracked or ignored content, or a commit that no remote-tracking ref contains, keeps it.
+    """
+    status = _git(checkout, "status", "--porcelain", "--ignored", "--untracked-files=all", check=False)
+    if status.returncode != 0:
+        return f"cannot read its status: {status.stderr.strip() or 'git failed'}"
+    if status.stdout.strip():
+        return "uncommitted, untracked or ignored files"
+    unpushed = _git(checkout, "rev-list", "--count", "--all", "--not", "--remotes", check=False)
+    if unpushed.returncode != 0:
+        return f"cannot compare it with its remotes: {unpushed.stderr.strip() or 'git failed'}"
+    if unpushed.stdout.strip() != "0":
+        return f"{unpushed.stdout.strip()} commits on no remote-tracking branch"
+    return None
+
+
 def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
     """Why removing the worktree now could lose something that is not in its (merged) head."""
     path, reasons = tree.path, []
@@ -174,10 +210,20 @@ def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
     if dirty:
         reasons.append(f"{len(dirty)} uncommitted or untracked: " + _shown([line[3:] for line in dirty]))
     # Every ignored file by name, not --directory: that folds an untracked directory holding only
-    # ignored files into one `dir/` entry, hiding what is in it. Git prunes the regenerable globs.
-    excluded = [f":(exclude,glob){glob}" for glob in settings.regenerable]
-    kept = sorted(p for p in _git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--",
-                                  ".", *excluded).stdout.split("\0") if p)
+    # ignored files into one `dir/` entry, hiding what is in it. The globs are matched here, not by a
+    # pathspec: under --ignored Git does not apply a glob exclude to a directory entry, so a nested
+    # checkout (listed as `dir/`) would never match `**/build/**`.
+    ignored = sorted(p for p in _git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+                     .stdout.split("\0") if p)
+    regenerable = _regenerable(settings.regenerable)
+    kept = []
+    for entry in ignored:
+        if not regenerable.fullmatch(entry.rstrip("/")):
+            kept.append(entry)
+        elif entry.endswith("/"):
+            problem = _nested_checkout_problem(path / entry)
+            if problem:
+                kept.append(f"{entry} ({problem})")
     if kept:
         reasons.append(f"{len(kept)} ignored and not regenerable: " + _shown(kept))
     return reasons

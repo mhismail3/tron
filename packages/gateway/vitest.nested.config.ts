@@ -1,14 +1,15 @@
 import { defineConfig } from "vitest/config";
 
-/** Test files that run nested vitest or real pi children, or first-load the managed
- * provider from a fresh install root (its cold jiti transpile is seconds of CPU).
- * Each child boots its own runtime under execFile or detached-process bounds, and
- * under the parallel pass those children starve and miss their bounds (#655). They
- * run one file at a time in their own pass after the parallel suite; the main
- * config excludes this list. */
+/** Test files that run nested vitest or real pi children, or activate the real
+ * managed pi-subagents install (offline, or a first load from a fresh install root,
+ * whose cold jiti transpile is seconds of CPU). Each boots its own runtime or install
+ * under execFile, detached-process or wait bounds, and under the parallel pass they
+ * starve and miss those bounds (#655, #707). They run one file at a time in their own
+ * pass after the parallel suite; the main config excludes this list. */
 export const nestedTestFiles = [
   "src/home/home-task-managed-provider.e2e.test.ts",
   "src/sessions/managed-attribution.integration.test.ts",
+  "src/sessions/managed-subagents.integration.test.ts",
   "src/sessions/managed-subagents.invalid-entry.test.ts",
   "src/sessions/managed-subagents.rollback.test.ts",
   "src/sessions/managed-subagents.test.ts",
@@ -22,8 +23,13 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     maxWorkers: 1,
-    // Same as vitest.config.ts; the two configs must not drift on the test environment.
-    testTimeout: 15_000,
+    // Every file here waits on real pi/SDK/vitest children, which start in seconds and
+    // run one file at a time on a shared host; their waits and test timeouts are hang
+    // bounds (test-support/wait-for.ts), never speed budgets, so this pass declares
+    // them once: 240 s waits under a 300 s test timeout. A clean run takes ~20 s; the
+    // bounds only turn a genuine hang into a named failure. The main pass keeps 12 s/15 s.
+    testTimeout: 300_000,
+    env: { TRON_TEST_WAIT_HANG_BOUND_MS: "240000" },
     setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },
 });
