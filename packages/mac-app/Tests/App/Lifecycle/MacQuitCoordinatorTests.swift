@@ -47,6 +47,7 @@ struct MacQuitCoordinatorTests {
                 readRuntime: { await fixture.readRuntime() },
                 processStartIdentity: { _ in nil },
                 runtimeOwnershipHealthy: { true },
+                serviceEnabled: { true },
                 stopGateway: { try await fixture.stop(commandID: $0) },
                 retireNativeHost: { try await fixture.retire() },
                 wait: {}
@@ -75,16 +76,57 @@ struct MacQuitCoordinatorTests {
 
     @Test("native retirement failure prevents successful Quit")
     func nativeFailurePropagates() async {
-        let fixture = QuitFixture(readings: [runtime(71, command: "/bundled/tron --host tailscale"), runtime(71, command: "/bundled/tron --host tailscale"), runtime(nil)], nativeFailure: true)
+        let fixture = QuitFixture(readings: [runtime(71, command: "/bundled/tron --host tailscale"), runtime(71, command: "/bundled/tron --host tailscale"), runtime(nil)], nativeFailuresRemaining: 1)
         await #expect(throws: NativeHostError.retirementFailed) { try await coordinator(fixture).quit() }
         #expect(!(await fixture.state().nativeRetired))
     }
 
-    private func coordinator(_ fixture: QuitFixture) -> MacQuitCoordinator {
+    @Test("a retried Quit resumes native retirement when the enabled service has no running Gateway")
+    func stoppedGatewayResumesNativeRetirement() async throws {
+        let fixture = QuitFixture(readings: [nil], ownershipHealthy: false)
+        try await coordinator(fixture, serviceEnabled: true).quit()
+        let state = await fixture.state()
+        #expect(state.stopIDs.isEmpty)
+        #expect(state.nativeRetired)
+    }
+
+    @Test("a Quit whose native retirement failed after the Gateway stopped succeeds on retry")
+    func retryAfterNativeFailureResumesRetirement() async throws {
+        let fixture = QuitFixture(readings: [runtime(71, command: "/bundled/tron --host tailscale"), runtime(71, command: "/bundled/tron --host tailscale"), runtime(nil), runtime(nil)], nativeFailuresRemaining: 1)
+        let coordinator = coordinator(fixture, serviceEnabled: true)
+        await #expect(throws: NativeHostError.retirementFailed) { try await coordinator.quit() }
+        // launchd no longer reports the exact Gateway process as owned by this app.
+        await fixture.setOwnershipHealthy(false)
+        try await coordinator.quit()
+        let state = await fixture.state()
+        #expect(state.stopIDs.count == 1)
+        #expect(state.nativeRetired)
+    }
+
+    @Test("a running Gateway that this app does not own is never stopped or retired")
+    func foreignRunningGatewayIsRefused() async {
+        let fixture = QuitFixture(readings: [runtime(71, command: "/foreign/tron --host tailscale")], ownershipHealthy: false)
+        await #expect(throws: MacQuitCoordinator.Failure.unmanaged) { try await coordinator(fixture, serviceEnabled: true).quit() }
+        let state = await fixture.state()
+        #expect(state.stopIDs.isEmpty)
+        #expect(!state.nativeRetired)
+    }
+
+    @Test("a stopped Gateway whose service is not enabled is refused")
+    func disabledServiceIsRefusedWhenGatewayStopped() async {
+        let fixture = QuitFixture(readings: [nil], ownershipHealthy: false)
+        await #expect(throws: MacQuitCoordinator.Failure.unmanaged) { try await coordinator(fixture, serviceEnabled: false).quit() }
+        let state = await fixture.state()
+        #expect(state.stopIDs.isEmpty)
+        #expect(!state.nativeRetired)
+    }
+
+    private func coordinator(_ fixture: QuitFixture, serviceEnabled: Bool = true) -> MacQuitCoordinator {
         MacQuitCoordinator(
             readRuntime: { await fixture.readRuntime() },
             processStartIdentity: { _ in "pid-start" },
-            runtimeOwnershipHealthy: { true },
+            runtimeOwnershipHealthy: { await fixture.ownershipIsHealthy() },
+            serviceEnabled: { serviceEnabled },
             stopGateway: { try await fixture.stop(commandID: $0) },
             retireNativeHost: { try await fixture.retire() },
             wait: {}
@@ -95,20 +137,35 @@ struct MacQuitCoordinatorTests {
 private actor QuitFixture {
     private var readings: [LaunchAgentRuntimeInfo?]
     private var stopFailuresRemaining: Int
-    private let nativeFailure: Bool
+    private var nativeFailuresRemaining: Int
+    private var ownershipHealthy: Bool
     private var readCount = 0
     private var commands: [String] = []
     private var retired = false
 
-    init(readings: [LaunchAgentRuntimeInfo?], stopFailuresRemaining: Int = 0, nativeFailure: Bool = false) {
+    init(
+        readings: [LaunchAgentRuntimeInfo?],
+        stopFailuresRemaining: Int = 0,
+        nativeFailuresRemaining: Int = 0,
+        ownershipHealthy: Bool = true
+    ) {
         self.readings = readings
         self.stopFailuresRemaining = stopFailuresRemaining
-        self.nativeFailure = nativeFailure
+        self.nativeFailuresRemaining = nativeFailuresRemaining
+        self.ownershipHealthy = ownershipHealthy
     }
 
     func readRuntime() -> LaunchAgentRuntimeInfo? {
         readCount += 1
         return readings.isEmpty ? nil : readings.removeFirst()
+    }
+
+    func ownershipIsHealthy() -> Bool {
+        ownershipHealthy
+    }
+
+    func setOwnershipHealthy(_ healthy: Bool) {
+        ownershipHealthy = healthy
     }
 
     func stop(commandID: String) throws -> GatewayStopClient.Response {
@@ -121,7 +178,10 @@ private actor QuitFixture {
     }
 
     func retire() throws {
-        if nativeFailure { throw NativeHostError.retirementFailed }
+        if nativeFailuresRemaining > 0 {
+            nativeFailuresRemaining -= 1
+            throw NativeHostError.retirementFailed
+        }
         retired = true
     }
 

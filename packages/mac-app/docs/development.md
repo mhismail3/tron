@@ -421,7 +421,9 @@ SMAppService registration remains enabled; its Mach service is started on demand
 by the next authenticated XPC connection. No new approval or desired-state
 record is created. An unapproved or unknown service is never registered to make
 Quit succeed. A `.notFound` native-service status refuses retirement rather
-than being treated as evidence that work is absent.
+than being treated as evidence that work is absent. A retried Quit after the
+Gateway has already stopped resumes at native-host retirement while the service
+stays enabled and launchd reports no running Gateway process.
 
 Prepare a Release app with an explicit derived-data directory inside the
 worktree, so concurrent worktrees never share a build database or hand over each
