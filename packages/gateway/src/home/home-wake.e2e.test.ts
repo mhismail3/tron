@@ -1,0 +1,207 @@
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BlobStore } from "../sessions/blob-store.js";
+import { projectTranscript } from "../sessions/projection.js";
+import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
+import { waitFor } from "../../test-support/wait-for.js";
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await disposeFixtures();
+});
+
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+type Entry = { type: string; id: string; customType?: string; message?: { role: string }; details?: { operationId?: string; eventId?: string } };
+
+const RESULT = "tron.home-task-result.v1";
+/** The push a woken Home sends once per wake reply. */
+const isWakePush = (input: { sourceId: string }) => input.sourceId.startsWith("home-wake:");
+const isWaitingPush = (input: { sourceId: string }) => input.sourceId.startsWith("home-waiting:");
+
+function gate() {
+  let open!: () => void;
+  const wait = new Promise<void>(resolve => { open = resolve; });
+  return { wait, open };
+}
+async function configure(f: Fixture): Promise<void> {
+  const model = f.faux.getModel();
+  await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+}
+async function settledTask(f: Fixture, taskId: string) {
+  return (await f.registry.homeOwner().taskResult(taskId));
+}
+async function waitAcknowledged(f: Fixture, taskId: string): Promise<void> {
+  await waitFor(async () => (await settledTask(f, taskId)).wake?.state === "acknowledged", `wake of ${taskId} acknowledged`);
+}
+function results(entries: readonly Entry[]): Entry[] {
+  return entries.filter(entry => entry.type === "custom_message" && entry.customType === RESULT);
+}
+function userMessages(entries: readonly Entry[]): Entry[] {
+  return entries.filter(entry => entry.type === "message" && entry.message?.role === "user");
+}
+/** Wake operations are the operations whose results are attributed and that have no user message. */
+function operationsWithResults(entries: readonly Entry[]): string[] {
+  return [...new Set(results(entries).map(entry => entry.details?.operationId ?? ""))];
+}
+
+describe("Home wakes on its own task results (#749)", () => {
+  it("wakes an idle Home on a settled result, and Home replies with no user message", async () => {
+    const f = await fixture();
+    await configure(f);
+    f.faux.setResponses([fauxAssistantMessage([reportCall("ra", "Verified result")], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Summary for the maintainer")]);
+    const run = await dispatch(f, "task-wake");
+    await run.completion;
+    await waitAcknowledged(f, "task-wake");
+    const home = await f.registry.acquire(f.home.sessionId);
+    const entries = home.canonicalSessionEntries() as Entry[];
+    // Only the wake ran: no user message exists in this chapter, and the delivered result is the first entry of its turn.
+    expect(userMessages(entries)).toHaveLength(0);
+    expect(results(entries)).toHaveLength(1);
+    expect(entries.some(entry => entry.type === "message" && entry.message?.role === "assistant"
+      && JSON.stringify(entry).includes("Summary for the maintainer"))).toBe(true);
+    // One push for the wake reply, and no per-task push.
+    await waitFor(() => f.notifications.some(isWakePush), "wake reply push");
+    expect(f.notifications.filter(isWakePush)).toHaveLength(1);
+    const eventId = (await settledTask(f, "task-wake")).wake!.eventId;
+    expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
+    // The wake's run is an idle admission like any other: SDK auto-compaction stays disabled for Home (`_checkCompaction`
+    // returns early when compaction is not enabled), so the wake's pre-run check cannot compact.
+    const session = (home as unknown as { runtime: { session: { settingsManager: { getCompactionSettings(model: unknown): { enabled: boolean } }; model: unknown } } }).runtime.session;
+    expect(session.settingsManager.getCompactionSettings(session.model).enabled).toBe(false);
+    // The wake's turn projects to the delivered-context row, then Home's reply: no user row.
+    const rows = projectTranscript((home as unknown as { sessionManager: never }).sessionManager, new BlobStore())
+      .map(item => item.kind === "message" ? `message:${item.role}` : item.kind)
+      .filter(kind => kind !== "modelChange");
+    // The wake's turn starts at its delivered result: no user row before Home's reply.
+    expect(rows.slice(rows.indexOf("customMessage"))).toEqual(["customMessage", "message:assistant"]);
+  }, 30_000);
+
+  it("delivers two results that settle during a user turn in one wake, after that turn", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    f.faux.setResponses([
+      async () => { await hold.wait; return fauxAssistantMessage("user reply"); },
+      fauxAssistantMessage([reportCall("ra", "Result A")], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("rb", "Result B")], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Wake reply for both"),
+    ]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const turn = home.prompt("hello");
+    await waitFor(() => f.faux.state.callCount >= 1, "user turn request");
+    const a = await dispatch(f, "task-a");
+    const b = await dispatch(f, "task-b");
+    await a.completion; await b.completion;
+    await waitFor(async () => (await settledTask(f, "task-a")).lifecycle === "terminal" && (await settledTask(f, "task-b")).lifecycle === "terminal", "both results settled");
+    // Both settled while the user turn runs: nothing wakes Home yet.
+    expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(0);
+    hold.open();
+    await turn;
+    await waitAcknowledged(f, "task-a");
+    await waitAcknowledged(f, "task-b");
+    const entries = home.canonicalSessionEntries() as Entry[];
+    expect(results(entries)).toHaveLength(2);
+    expect(operationsWithResults(entries)).toHaveLength(1);
+    await waitFor(() => f.notifications.some(isWakePush), "wake reply push");
+    expect(f.notifications.filter(isWakePush)).toHaveLength(1);
+  }, 30_000);
+
+  it("does not wake a paused Home, and the task-finished push stays as it is today", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    f.faux.setResponses([async () => { await hold.wait; return fauxAssistantMessage([reportCall("rp", "Paused result")], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f, "task-paused");
+    await f.registry.homeOwner().pauseMemory();
+    hold.open();
+    const task = await run.completion;
+    await waitFor(async () => (await settledTask(f, "task-paused")).wake?.push === "decided", "task-finished push decided");
+    expect(f.faux.state.callCount).toBe(1);
+    expect(results((await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[])).toHaveLength(0);
+    expect(f.notifications.filter(input => input.sourceId === task.wake!.eventId)).toHaveLength(1);
+    expect(f.notifications.filter(isWakePush)).toHaveLength(0);
+  }, 30_000);
+
+  it("does not wake a disabled Home, and the task-finished push stays as it is today", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    f.faux.setResponses([async () => { await hold.wait; return fauxAssistantMessage([reportCall("rd", "Disabled result")], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f, "task-disabled");
+    const disable = f.registry.homeOwner().disable();
+    hold.open();
+    await disable;
+    const task = await run.completion;
+    await waitFor(async () => (await settledTask(f, "task-disabled")).wake?.push === "decided", "task-finished push decided");
+    expect(f.faux.state.callCount).toBe(1);
+    expect(f.notifications.filter(input => input.sourceId === task.wake!.eventId)).toHaveLength(1);
+    expect(f.notifications.filter(isWakePush)).toHaveLength(0);
+  }, 30_000);
+
+  it("refuses the ninth wake: results wait, and the push says Home is waiting", async () => {
+    const f = await fixture();
+    await configure(f);
+    const responses = [];
+    for (let i = 0; i < 9; i++) {
+      responses.push(fauxAssistantMessage([reportCall(`r${i}`, `Result ${i}`)], { stopReason: "toolUse" }));
+      if (i < 8) responses.push(fauxAssistantMessage(`Wake ${i}`));
+    }
+    f.faux.setResponses(responses);
+    for (let i = 0; i < 8; i++) {
+      await (await dispatch(f, `ceiling-${i}`)).completion;
+      await waitAcknowledged(f, `ceiling-${i}`);
+    }
+    await (await dispatch(f, "ceiling-8")).completion;
+    await waitFor(async () => (await settledTask(f, "ceiling-8")).wake?.push === "decided", "waiting push decided");
+    // Eight wakes ran; the ninth result stayed pending and was announced as waiting.
+    expect(f.faux.state.callCount).toBe(9 + 8);
+    expect((await settledTask(f, "ceiling-8")).wake?.state).toBe("pending");
+    expect(f.notifications.filter(isWaitingPush)).toHaveLength(1);
+    expect(f.notifications.filter(isWakePush)).toHaveLength(8);
+  }, 60_000);
+
+  it("wakes exactly once after a restart that finds pending results", async () => {
+    const f = await fixture();
+    await configure(f);
+    // A delegation comes from a Home activation, so Home has a conversation before its result settles.
+    f.faux.setResponses([fauxAssistantMessage("Hello reply")]);
+    await (await f.registry.acquire(f.home.sessionId)).prompt("hello");
+    await waitFor(async () => (await f.registry.acquire(f.home.sessionId)).snapshot().operation === undefined, "hello settled");
+    f.faux.setResponses([fauxAssistantMessage([reportCall("rr", "Restart result")], { stopReason: "toolUse" })]);
+    await f.registry.homeOwner().pauseMemory();
+    await (await dispatch(f, "task-restart")).completion;
+    await waitFor(async () => (await settledTask(f, "task-restart")).wake?.push === "decided", "paused push decided");
+    const beforeRestart = f.faux.state.callCount;
+    await f.registry.homeOwner().resumeMemory();
+    f.faux.setResponses([fauxAssistantMessage("Restart wake reply")]);
+    f.registry = await f.restart();
+    await waitAcknowledged(f, "task-restart");
+    // Exactly one wake request after startup. The result's task-finished notice went out while paused, so
+    // the wake sends no second notice for it.
+    expect(f.faux.state.callCount).toBe(beforeRestart + 1);
+    expect(f.notifications.filter(isWakePush)).toHaveLength(0);
+    const restartEventId = (await settledTask(f, "task-restart")).wake!.eventId;
+    expect(f.notifications.filter(input => input.sourceId === restartEventId)).toHaveLength(1);
+  }, 60_000);
+
+  it("keeps one delivery when a user prompt races a wake", async () => {
+    const f = await fixture();
+    await configure(f);
+    f.faux.setResponses([
+      fauxAssistantMessage([reportCall("rx", "Raced result")], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Reply to the race"),
+      fauxAssistantMessage("Second reply"),
+    ]);
+    const run = await dispatch(f, "task-race");
+    await run.completion;
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.prompt("racing input");
+    await waitAcknowledged(f, "task-race");
+    await waitFor(() => home.snapshot().operation === undefined && home.snapshot().configurationBlocker === null, "race settled");
+    const entries = home.canonicalSessionEntries() as Entry[];
+    expect(results(entries)).toHaveLength(1);
+    expect(userMessages(entries)).toHaveLength(1);
+    expect(operationsWithResults(entries)).toHaveLength(1);
+  }, 30_000);
+});

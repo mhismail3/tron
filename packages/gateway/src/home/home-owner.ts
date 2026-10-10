@@ -1,4 +1,4 @@
-import { isWakeEvidence, WakeInboxOwner, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute } from "./home-wake-inbox.js";
+import { HOME_TASK_RESULT_MESSAGE, HOME_WAKE_CEILING, isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
@@ -126,6 +126,9 @@ export interface HomeSessionPort {
   /** Retire every live Home slot after uncertain publication; next admission
    * rebuilds from the record reloaded by this owner. */
   retireHomeRuntimes(reloaded: boolean): Promise<void>;
+  /** Starts one wake activation for the Home session: admission, the trigger
+   * result, and the run. `delivered` is false when no result could be delivered. */
+  wakeHome(sessionId: string): Promise<{ delivered: boolean }>;
 }
 
 /** What the session runtime reports to Home's memory. Narrow on purpose: the
@@ -194,6 +197,14 @@ export class HomeOwner {
   private unavailable: string | undefined;
   private readonly tasks: HomeTaskDispatcher;
   private readonly inbox: WakeInboxOwner;
+  /** The wake owner's single-flight state: one drain at a time, with one request
+   * remembered while it runs. Nothing else starts a wake. */
+  private wakeRequested = false;
+  private wakeDrain: Promise<void> | undefined;
+  /** Whether the last wake attempt delivered a trigger. Only a delivered wake
+   * asks for another attempt when it ends, so a refused or failed wake cannot
+   * retry itself in a loop. */
+  private lastWakeDelivered = false;
 
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
@@ -213,6 +224,8 @@ export class HomeOwner {
       ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
       result: taskId => this.immutableTaskReport(taskId),
       evidence: scope => this.inboxEvidence(scope),
+      wakeAvailable: homeId => this.wakeAvailable(homeId),
+      wake: () => this.requestWake(),
     });
     this.tasks = new HomeTaskDispatcher(store, authorization, options.taskSessions, options.taskDiagnostic, this.inbox);
   }
@@ -230,7 +243,11 @@ export class HomeOwner {
 
   /** Post-listen startup only (see `RuntimeRegistry.recoverHomeTasks`). Recovery
    * has no executable session lifetime to resurrect. */
-  async recoverTasks(): Promise<void> { await this.tasks.recover(); }
+  async recoverTasks(): Promise<void> {
+    const recovery = await this.tasks.recover();
+    // Recovery settled: pending results from before the restart may now wake Home. A refused recovery delivers nothing.
+    if (recovery.available) this.requestWake();
+  }
 
   private async taskOwner(): Promise<HomeTaskDispatcher> {
     await this.tasks.assertAvailable();
@@ -340,16 +357,141 @@ export class HomeOwner {
     return (await this.tasks.recoveryStatus()).available;
   }
 
-  async admitTaskResults(sessionId: string, operationId: string, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<void> {
+  async admitTaskResults(sessionId: string, operationId: string, delivery: HomeWakeDelivery, append: (message: HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("./home-wake-inbox.js").HomeWakeEnvelope>): Promise<HomeWakeTrigger | undefined> {
     const route = this.wakeRoute(sessionId);
-    if (!route?.enabled || !(await this.inboxAvailable())) return;
+    if (!route?.enabled || !(await this.inboxAvailable())) return undefined;
     await this.inbox.recover(route);
-    await this.inbox.admit(route, operationId, append, envelope);
+    return this.inbox.admit(route, operationId, delivery, append, envelope);
+  }
+
+  /** A wake whose trigger never reached the canonical session goes back to pending. */
+  async releaseWakeTrigger(taskId: string, operationId: string): Promise<void> {
+    await this.inbox.releaseTrigger(taskId, operationId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {
     const route = this.wakeRoute(sessionId);
     if (route && await this.inboxAvailable()) await this.inbox.settle(route, operationId);
+  }
+
+  /** The Home session went idle after a user activation or a delivered wake. Only
+   * these two events can ask for another wake: a refused or failed wake never does. */
+  noteHomeIdle(sessionId: string, by: "user" | "wake"): void {
+    if (!this.wakeRoute(sessionId)?.enabled) return;
+    if (by === "user" || this.lastWakeDelivered) this.requestWake();
+  }
+
+  private requestWake(): void {
+    this.wakeRequested = true;
+    // A drain that fails must not become an unhandled rejection: the attempt is
+    // reported and no further attempt starts until the next event.
+    this.wakeDrain ??= this.drainWakes().catch(() => {
+      this.wakeRequested = false;
+      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "failed" });
+    });
+  }
+
+  /** One drain at a time. An attempt that finds Home busy stops the drain: the
+   * activation that holds Home settles later and asks again. */
+  private async drainWakes(): Promise<void> {
+    try {
+      while (this.wakeRequested) {
+        this.wakeRequested = false;
+        if (await this.wakeOnce() === "busy") return;
+      }
+    } finally {
+      this.wakeDrain = undefined;
+    }
+  }
+
+  /** One wake attempt. Refusals decide each candidate's push once, so nothing
+   * is announced twice: a disabled, paused or blocked Home keeps the task-finished
+   * notice; a ceiling or an undeliverable result says Home is waiting. */
+  private async wakeOnce(): Promise<"busy" | "done"> {
+    const record = this.record;
+    if (this.unavailable || !record || !(await this.inboxAvailable())) return "done";
+    const sessionId = homeSessionId(record);
+    if (!(await this.inbox.pendingTasks(record.homeId)).length) { this.lastWakeDelivered = false; return "done"; }
+    // An attempt runs after recovery, so the task namespace and the session catalog are settled here.
+    // A Home that never wrote its conversation has no session to run.
+    const refusal = !(await this.options.sessions.sessionPresent(sessionId)) ? "unavailable" : await this.homeRefusal(record);
+    if (refusal) {
+      this.lastWakeDelivered = false;
+      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });
+      await this.inbox.pushPending(record.homeId, "task");
+      return "done";
+    }
+    if (await this.consecutiveWakes() >= HOME_WAKE_CEILING) {
+      this.lastWakeDelivered = false;
+      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "ceiling" });
+      await this.inbox.pushPending(record.homeId, "waiting");
+      return "done";
+    }
+    let delivered: boolean;
+    try {
+      ({ delivered } = await this.options.sessions.wakeHome(sessionId));
+    } catch (error) {
+      if (error instanceof GatewayError && error.code === "busy") {
+        this.options.diagnostic?.({ outcome: "wake", decision: "deferred", reason: "busy" });
+        return "busy";
+      }
+      this.lastWakeDelivered = false;
+      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "failed" });
+      await this.inbox.pushPending(record.homeId, "waiting");
+      return "done";
+    }
+    this.lastWakeDelivered = delivered;
+    if (!delivered) {
+      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "nothing-deliverable" });
+      await this.inbox.pushPending(record.homeId, "waiting");
+    } else {
+      this.options.diagnostic?.({ outcome: "wake", decision: "admitted", reason: "delivered" });
+    }
+    return "done";
+  }
+
+  /** Why Home's own state refuses a wake, or undefined. Eligibility reads only this: publish runs
+   * inside task recovery, which must not wait on itself. */
+  private async homeRefusal(record: HomeRecord): Promise<"disabled" | "paused" | "blocked" | undefined> {
+    if (!record.enabled) return "disabled";
+    const memory = await this.memoryStatus();
+    if (!memory.configured || memory.blocked) return "blocked";
+    if (memory.paused) return "paused";
+    return undefined;
+  }
+
+  /** Whether a settled result may wake Home now: the record's own refusals. */
+  private async wakeAvailable(homeId: string): Promise<boolean> {
+    const record = this.record;
+    return record?.homeId === homeId && (await this.homeRefusal(record)) === undefined;
+  }
+
+  /** Consecutive wake activations since the last user message, derived from the
+   * canonical result messages: a wake delivers its results under its own operation
+   * with no user message after them. Chapters are read newest first; the count
+   * continues into an older chapter only while the newer ones hold no user message.
+   * It is never stored, so the Home and task records keep their formats (#749). */
+  private async consecutiveWakes(): Promise<number> {
+    const record = this.record;
+    if (!record) return 0;
+    const operations = new Set<string>();
+    for (const chapter of [...record.chapters].reverse()) {
+      const path = await this.options.sessions.sessionFile(chapter.sessionId);
+      // A chapter whose file was never created holds no entries.
+      if (!path || !(await stat(path).then(() => true, () => false))) continue;
+      let since = new Set<string>();
+      let userSeen = false;
+      await visitCanonicalSessionEntries({ path, sessionId: chapter.sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, visit: entry => {
+        if (entry.type === "message" && (entry.raw.message as { role?: unknown } | undefined)?.role === "user") { since = new Set(); userSeen = true; }
+        else if (entry.type === "custom_message" && entry.raw.customType === HOME_TASK_RESULT_MESSAGE) {
+          const operationId = (entry.raw.details as { operationId?: unknown } | undefined)?.operationId;
+          if (typeof operationId === "string") since.add(operationId);
+        }
+      } });
+      for (const operation of since) operations.add(operation);
+      if (userSeen || operations.size >= HOME_WAKE_CEILING) break;
+    }
+    return operations.size;
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {
