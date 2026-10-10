@@ -10,6 +10,8 @@ const owner = new HomeOwner({
   workspace: new TronWorkspace(tronHome),
   // The crash path only seals a chapter, which never dispatches a task.
   taskSessions: {} as never,
+  // The crash path never reaches a learned-profile read, so no Knowledge owner exists.
+  knowledge: () => undefined,
   sessions: {
     serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
     chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
