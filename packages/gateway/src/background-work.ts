@@ -69,23 +69,11 @@ interface BackgroundBacklogRecord {
   due: number;
 }
 
-export interface BackgroundWorkClock {
-  now?: () => number;
-  immediate?: (callback: () => void) => unknown;
-  timer?: (callback: () => void, delayMs: number) => unknown;
-  cancelImmediate?: (handle: unknown) => void;
-  cancelTimer?: (handle: unknown) => void;
-}
-
-export interface BackgroundWorkStartOptions extends BackgroundWorkClock {
+export interface BackgroundWorkStartOptions {
   /** True while a request is competing for the loop. The scheduler asks this at
    * every tick and starts nothing while it is true, so an interactive request
    * never shares the loop with a background slice. */
   requestsInFlight: () => boolean;
-  /** The loop's p99 delay over the window since the previous sounding. Defaults
-   * to the scheduler's own `monitorEventLoopDelay` histogram, read and reset per
-   * sounding; a test supplies its own. */
-  eventLoopP99Ms?: () => number;
   onSlice?: (record: BackgroundSliceRecord) => void;
   onBacklog?: (record: BackgroundBacklogRecord) => void;
 }
@@ -114,17 +102,16 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
   private running = false;
   /** The one armed wake. A second one would let two ticks run two slices. */
   private pending: { handle: unknown; immediate: boolean } | undefined;
-  private now: () => number = Date.now;
-  private immediate: (callback: () => void) => unknown = (callback) => setImmediate(callback);
-  private timer: (callback: () => void, delayMs: number) => unknown = (callback, delayMs) => {
+  private readonly now: () => number = Date.now;
+  private readonly immediate: (callback: () => void) => unknown = (callback) => setImmediate(callback);
+  private readonly timer: (callback: () => void, delayMs: number) => unknown = (callback, delayMs) => {
     const handle = setTimeout(callback, delayMs);
     handle.unref();
     return handle;
   };
-  private cancelImmediate: (handle: unknown) => void = (handle) => clearImmediate(handle as NodeJS.Immediate);
-  private cancelTimer: (handle: unknown) => void = (handle) => clearTimeout(handle as NodeJS.Timeout);
+  private readonly cancelImmediate: (handle: unknown) => void = (handle) => clearImmediate(handle as NodeJS.Immediate);
+  private readonly cancelTimer: (handle: unknown) => void = (handle) => clearTimeout(handle as NodeJS.Timeout);
   private requestsInFlight: () => boolean = () => false;
-  private readP99: (() => number) | undefined;
   private histogram: IntervalHistogram | undefined;
   private onSlice: ((record: BackgroundSliceRecord) => void) | undefined;
   private onBacklog: ((record: BackgroundBacklogRecord) => void) | undefined;
@@ -172,13 +159,7 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
   start(options: BackgroundWorkStartOptions): void {
     if (this.started) return;
     this.started = true;
-    if (options.now) this.now = options.now;
-    if (options.immediate) this.immediate = options.immediate;
-    if (options.timer) this.timer = options.timer;
-    if (options.cancelImmediate) this.cancelImmediate = options.cancelImmediate;
-    if (options.cancelTimer) this.cancelTimer = options.cancelTimer;
     this.requestsInFlight = options.requestsInFlight;
-    this.readP99 = options.eventLoopP99Ms;
     this.onSlice = options.onSlice;
     this.onBacklog = options.onBacklog;
     for (const registered of this.jobs.values()) registered.nextDueAt = this.now() + registered.job.intervalMs;
@@ -325,7 +306,6 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
   }
 
   private eventLoopP99Ms(): number {
-    if (this.readP99) return this.readP99();
     this.histogram ??= this.beginHistogram();
     const p99 = this.histogram.percentile(99);
     // Read and reset: a percentile over the process's whole life would let one

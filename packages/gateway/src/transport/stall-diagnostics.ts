@@ -185,7 +185,7 @@ const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
  * which is the memory-growth criterion's own resolution. A slower growth has to
  * accumulate across the debug-only minutes between records, so it still reaches
  * disk eventually instead of never. */
-export const RSS_INFO_STEP_SHARE = 0.1;
+const RSS_INFO_STEP_SHARE = 0.1;
 
 /** An event-loop p99 over this bound in one minute misses the exit criterion. */
 export const EVENT_LOOP_P99_WARNING_MS = 100;

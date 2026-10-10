@@ -51,12 +51,7 @@ export class AutomationAdmissionError extends Error {
 }
 
 export interface AutomationSchedulerOptions {
-  now?: () => number;
   hostEpoch: string;
-  setTimer?: (callback: () => void, delay: number) => NodeJS.Timeout;
-  clearTimer?: (timer: NodeJS.Timeout) => void;
-  maximumConcurrent?: number;
-  random?: () => number;
   onDiagnostic?: (message: string, automationId: string, runId?: string) => void;
   onBlocked?: (record: AutomationRecord, run: AutomationRun) => Promise<void> | void;
 }
@@ -93,11 +88,10 @@ function terminalRun(
 }
 
 export class AutomationScheduler {
-  private readonly now: () => number;
-  private readonly setTimer: NonNullable<AutomationSchedulerOptions["setTimer"]>;
-  private readonly clearTimer: NonNullable<AutomationSchedulerOptions["clearTimer"]>;
-  private readonly maximumConcurrent: number;
-  private readonly random: () => number;
+  private readonly now = Date.now;
+  private readonly setTimer = (callback: () => void, delay: number): NodeJS.Timeout => setTimeout(callback, delay);
+  private readonly clearTimer = clearTimeout;
+  private readonly random = Math.random;
   private readonly onDiagnostic: NonNullable<AutomationSchedulerOptions["onDiagnostic"]>;
   private readonly onBlocked: NonNullable<AutomationSchedulerOptions["onBlocked"]>;
   private readonly active = new Map<string, ActiveExecution>();
@@ -116,16 +110,8 @@ export class AutomationScheduler {
     private readonly executor: AutomationExecutor,
     private readonly options: AutomationSchedulerOptions,
   ) {
-    this.now = options.now ?? Date.now;
-    this.setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
-    this.clearTimer = options.clearTimer ?? clearTimeout;
-    this.maximumConcurrent = options.maximumConcurrent ?? MAXIMUM_CONCURRENT_AUTOMATIONS;
-    this.random = options.random ?? Math.random;
     this.onDiagnostic = options.onDiagnostic ?? (() => {});
     this.onBlocked = options.onBlocked ?? (() => {});
-    if (!Number.isSafeInteger(this.maximumConcurrent) || this.maximumConcurrent < 1 || this.maximumConcurrent > 64) {
-      throw new Error("Automation concurrency bound is invalid");
-    }
   }
 
   async recover(): Promise<void> {
@@ -352,7 +338,7 @@ export class AutomationScheduler {
     let dispatched = 0;
     for (const record of candidates) {
       if (!this.admissionOpen
-        || this.active.size + this.dispatchReservations.size >= this.maximumConcurrent
+        || this.active.size + this.dispatchReservations.size >= MAXIMUM_CONCURRENT_AUTOMATIONS
         || dispatched >= MAXIMUM_DISPATCHES_PER_SCAN) break;
       const run = record.currentRun!;
       const runId = run.runId;

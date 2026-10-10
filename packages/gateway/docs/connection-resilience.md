@@ -78,7 +78,6 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   `outcome=excused` in the phone's connection log, so a run that shows no
   `pong_timeout` retirement can still tell an excused probe from a probe that
   never missed its deadline.
-  `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical

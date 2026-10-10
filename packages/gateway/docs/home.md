@@ -1123,7 +1123,7 @@ do not drain the inbox.
 - **Rollback (#749).** `homeWake` is an additive invocation-receipt source, following
   `subagentWake`. A Gateway built before it skips a receipt whose source it does not know
   (the reader returns no receipt for it), so the session still opens. The rolled-back
-  wake's rows become unattributed, not refused. Pinned by `invocation-receipts.test.ts`.
+  wake's rows become unattributed, not refused.
 - **Envelope.** Each activation has one delivery envelope, derived from the frozen
   memory prefix, the incoming text and
   images, the effective model window and the response reserve, bounded by the

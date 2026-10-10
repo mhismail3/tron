@@ -39,8 +39,7 @@ enum DebugGatewayMenuState: Equatable, Sendable {
 }
 
 enum MenuBarItemBuilder {
-    /// Builds the menu sequence for a given snapshot. Tests in
-    /// `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift` pin the ordering.
+    /// Builds the menu sequence for a given snapshot.
     static func build(
         snapshot: ServerStatusSnapshot,
         tronHome: URL,
