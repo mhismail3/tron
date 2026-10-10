@@ -590,6 +590,7 @@ export class RuntimeRegistry {
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
+  private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -790,6 +791,10 @@ export class RuntimeRegistry {
       /** Where Home's request seam reports one record per activation and per
        * refusal. */
       homeRequestDiagnostic?: (record: HomeRequestRecord) => void;
+      /** Transport injection for Home's web research tools, the same seam
+       * capture's fetch exposes; production omits it and uses the pinned
+       * DNS-safe transport. */
+      homeWebTransport?: import("../home/home-research-tools.js").HomeResearchTransport;
     },
   ) {
     this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();
@@ -910,6 +915,14 @@ export class RuntimeRegistry {
   setKnowledgeService(service: KnowledgeService): void {
     if (this.knowledgeService && this.knowledgeService !== service) throw new Error("Knowledge service is already installed");
     this.knowledgeService = service;
+  }
+
+  /** Installs the optional session-search owner for Home's research tools. The
+   * service is constructed over this registry after it exists, so slots read it
+   * late-bound. */
+  setSessionSearchService(service: import("./session-search-service.js").SessionSearchService): void {
+    if (this.sessionSearchService && this.sessionSearchService !== service) throw new Error("Session search service is already installed");
+    this.sessionSearchService = service;
   }
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
@@ -1931,6 +1944,8 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
+      sessionSearch: () => this.sessionSearchService,
+      ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
       homeProfile: (sessionId: string, cwd: string) => this.home.profileFor(sessionId, cwd),
