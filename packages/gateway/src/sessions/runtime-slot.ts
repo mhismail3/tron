@@ -52,7 +52,7 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId } from "../home/home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -7521,7 +7521,8 @@ export class RuntimeSlot {
 
   /** Task-end settlement of this worker's async subagent runs. Every live async run is
    * stopped through the provider's own stop control, then the join waits until no run
-   * is live, bounded by the operation deadline and one disposal grace after it. The
+   * is live, bounded by the operation deadline or the stop-join bound, whichever comes
+   * first, and one disposal grace after it. The
    * fact is appended only when the task launched async runs, so an absent fact proves
    * zero Gateway stops. `stoppedAtEnd` is null unless every stop was accepted and the
    * join completed. */
@@ -7535,7 +7536,11 @@ export class RuntimeSlot {
       if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
       await this.controlSubagentRun(tool, { action: "stop", id: runId });
     }));
-    const joined = await this.joinDetachedWork(deadline);
+    // The join is also bounded once stops are requested: a run whose stop never lands
+    // must not hold the sealed task open for the rest of its 24-hour deadline.
+    const stopJoin = new AbortController();
+    const stopJoinTimer = setTimeout(() => stopJoin.abort(), HOME_TASK_SUBAGENT_STOP_JOIN_MS);
+    const joined = await this.joinDetachedWork(AbortSignal.any([deadline, stopJoin.signal])).finally(() => clearTimeout(stopJoinTimer));
     const stoppedAtEnd = joined && stops.every(stop => stop.status === "fulfilled") ? stops.length : null;
     await this.persistCanonicalCustomEntry(HOME_TASK_SUBAGENTS,
       { receiptId: subagentsReceiptId(operationId), operationId, stoppedAtEnd }, subagentsReceiptId(operationId), this.operationWork.get(operationId));

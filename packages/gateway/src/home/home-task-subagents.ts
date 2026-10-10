@@ -20,6 +20,12 @@ export interface HomeTaskSubagents {
 
 export interface HomeTaskSubagentsEntry { receiptId: string; operationId: string; stoppedAtEnd: number | null }
 
+/** How long task-end settlement waits for the runs it stopped to become terminal. A
+ * stopped runner aborts its request and writes its terminal status within seconds; a
+ * run still live after this bound (a refused stop, an unreadable status) keeps the
+ * detached outcome instead of holding the sealed task open until its 24-hour deadline. */
+export const HOME_TASK_SUBAGENT_STOP_JOIN_MS = 60_000;
+
 export const subagentsReceiptId = (operationId: string) => `subagents:${operationId}`;
 
 /** Provider states that cannot change again. `paused` may still resume, so it is live. */

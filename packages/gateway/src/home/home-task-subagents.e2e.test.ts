@@ -7,6 +7,7 @@ import { OWNED_OPERATION_DEADLINE_MS } from "../sessions/owned-session-dispatch.
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../test-support/home-task-subagent-child.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "./home-task-worker-extension.js";
+import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "./home-task-subagents.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 // Each wait fails with its own label before the 60 s test timeout (the nested pass
@@ -29,16 +30,19 @@ async function childModel(f: Awaited<ReturnType<typeof fixture>>): Promise<Child
   return server;
 }
 
-/** Captures the one 24-hour deadline timer so a test expires it at a chosen point. */
-function captureDeadline(): { expire: () => void; armed: () => boolean } {
+/** Captures the timers armed with exactly `ms` so a test fires the latest at a chosen point. */
+function captureTimer(ms: number): { expire: () => void; armed: () => boolean } {
   const original = globalThis.setTimeout;
   let fire: (() => void) | undefined;
-  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
-    if (ms === OWNED_OPERATION_DEADLINE_MS) fire = callback;
-    return original(callback, ms, ...args);
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, delay: number, ...args: any[]) => {
+    if (delay === ms) fire = callback;
+    return original(callback, delay, ...args);
   }) as typeof setTimeout);
-  return { expire: () => { if (!fire) throw new Error("deadline is not armed"); fire(); }, armed: () => fire !== undefined };
+  return { expire: () => { if (!fire) throw new Error(`no ${ms} ms timer is armed`); fire(); }, armed: () => fire !== undefined };
 }
+
+/** Captures the one 24-hour deadline timer so a test expires it at a chosen point. */
+const captureDeadline = () => captureTimer(OWNED_OPERATION_DEADLINE_MS);
 
 /** Every `subagent` tool result in the worker's canonical session, launches and refusals alike. */
 async function launchResults(registry: { readTaskEvidence(sessionId: string): Promise<unknown[]> }, sessionId: string) {
@@ -228,10 +232,10 @@ describe("Home task subagents", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
-  it("records unknown with detached-work-outlived-task when the provider cannot stop a run", async () => {
+  it("records unknown with detached-work-outlived-task once the stop join is bounded, without waiting for the deadline", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    const deadline = captureDeadline();
+    const stopJoin = captureTimer(HOME_TASK_SUBAGENT_STOP_JOIN_MS);
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       (_context, options) => new Promise((_resolve, reject) => {
@@ -242,8 +246,8 @@ describe("Home task subagents", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     // The Gateway's stop of the run is refused (an injected control failure): the run
-    // stays live, so the join can end only at the task's deadline, and the task is not
-    // allowed to settle as clean. The provider's tool itself is left untouched.
+    // stays live, so the join ends at its own bound, well before the 24-hour deadline,
+    // and the task is not allowed to settle as clean. The provider's tool is untouched.
     let stopRefusals = 0;
     const control = vi.spyOn(slot as any, "controlSubagentRun").mockImplementation(async () => {
       stopRefusals += 1;
@@ -251,7 +255,8 @@ describe("Home task subagents", () => {
     });
     await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
     await waitFor(() => stopRefusals === 1, "stop refused", bound);
-    deadline.expire();
+    await waitFor(() => stopJoin.armed(), "stop join bounded", bound);
+    stopJoin.expire();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "detached-work-outlived-task" });
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.detached-work", reason: "detached-work-outlived-task" }));
