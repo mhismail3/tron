@@ -1553,7 +1553,11 @@ require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
-artifact. The deploy helper fingerprints sorted `app/**` and `runtime/**` entries using
+artifact. The delegated provider is the exception: a source update stages the source
+revision's `pi-subagents-pin.json`, its check and install scripts, and exactly the
+artifacts both pin selections name, verifying each against the pin's digest before
+publication, as Mac packaging does. A provider update therefore needs only Rebuild
+from Source, and a payload never claims a revision while carrying an older provider. The deploy helper fingerprints sorted `app/**` and `runtime/**` entries using
 bounded batches of 16 file reads; the batch bound overlaps storage latency
 without issuing one read operation per file at once. Sorted canonical lines
 keep its SHA-256 byte-identical to the Mac payload hash script and launcher;

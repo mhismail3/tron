@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
-import { chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, chmod, cp, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -837,6 +838,63 @@ test("source rebuild refuses stale packages before compile and records dirty sou
     assert.equal(compilerStarted, true);
     await verifyGatewayBuildInputReceipt(sourceRoot, join(built.root, "app"), built.manifest.sourceRevision, dirtyFingerprint);
     assert.equal(await readFile(store.current, "utf8"), priorSelection);
+  } finally {
+    await makeTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("source builds stage the source revision's pi-subagents pin and exactly its artifacts", async () => {
+  // #718: a source update that kept the base payload's provider ran an older
+  // pi-subagents than the revision it claimed; a provider update needed a Mac app.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-provider-")));
+  try {
+    const { store, sourceRoot, gatewayRoot } = await makeSourceBuildFixture(root);
+    const artifact = (name, bytes, algorithm) => ({ name, bytes, digest: createHash(algorithm).update(bytes).digest("hex") });
+    const current = [artifact("p-2.tgz", "source v2\n", "sha256"), artifact("p-2-lock.json", "lock v2\n", "sha256"), artifact("p-2-closure.tgz", "closure v2\n", "sha512")];
+    const previous = [artifact("p-1.tgz", "source v1\n", "sha256"), artifact("p-1-lock.json", "lock v1\n", "sha256"), artifact("p-1-closure.tgz", "closure v1\n", "sha512")];
+    const pinSelection = ([archive, lock, closure], version) => ({
+      version,
+      sourceArchive: { path: `artifacts/${archive.name}`, sha256: archive.digest },
+      lockfile: { path: `artifacts/${lock.name}`, sha256: lock.digest },
+      closure: { path: `artifacts/${closure.name}`, sha512: closure.digest },
+    });
+    const pin = { ...pinSelection(current, "2"), previous: pinSelection(previous, "1") };
+    await mkdir(join(gatewayRoot, "artifacts"), { recursive: true });
+    for (const { name, bytes } of [...current, ...previous]) await writeFile(join(gatewayRoot, "artifacts", name), bytes);
+    await writeFile(join(gatewayRoot, "pi-subagents-pin.json"), `${JSON.stringify(pin)}\n`);
+    await writeFile(join(gatewayRoot, "scripts", "install-pi-subagents.mjs"), "// source installer v2\n");
+    await execFileAsync("git", ["add", "-A"], { cwd: sourceRoot });
+    await execFileAsync("git", ["-c", "user.email=fixture@example.test", "-c", "user.name=Fixture", "commit", "-q", "-m", "pin v2"], { cwd: sourceRoot });
+    // The active base payload still carries an older pin and an artifact no
+    // selection names any more.
+    const activeApp = join(store.versionsRoot, "active", "app");
+    await makeTreeWritable(join(store.versionsRoot, "active"));
+    await mkdir(join(activeApp, "artifacts"), { recursive: true });
+    await writeFile(join(activeApp, "artifacts", "p-0.tgz"), "stale\n");
+    await writeFile(join(activeApp, "pi-subagents-pin.json"), "{\"version\":\"0\"}\n");
+    const fingerprint = await payloadFingerprint(join(store.versionsRoot, "active"));
+    const manifest = JSON.parse(await readFile(join(store.versionsRoot, "active", "manifest.json"), "utf8"));
+    await writeFile(join(store.versionsRoot, "active", "manifest.json"), `${JSON.stringify({ ...manifest, payloadFingerprint: fingerprint })}\n`);
+    await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
+    const compile = async (tool, args) => {
+      await mkdir(args.at(-1), { recursive: true });
+      await writeFile(join(args.at(-1), "index.js"), `${"p".repeat(1_024)}\n`);
+    };
+    const built = await buildSourcePayload({ paths: store, config: { sourceRoot }, candidateVersion: "provider-v2", runCommand: compile });
+    const app = join(built.root, "app");
+    assert.deepEqual(JSON.parse(await readFile(join(app, "pi-subagents-pin.json"), "utf8")), pin);
+    assert.deepEqual((await readdir(join(app, "artifacts"))).sort(), [...current, ...previous].map(({ name }) => name).sort());
+    for (const { name, bytes } of [...current, ...previous]) assert.equal(await readFile(join(app, "artifacts", name), "utf8"), bytes);
+    assert.equal(await readFile(join(app, "scripts", "install-pi-subagents.mjs"), "utf8"), "// source installer v2\n");
+
+    // Bytes that do not match the pin's digest are refused before publication.
+    await writeFile(join(gatewayRoot, "artifacts", current[2].name), "tampered\n");
+    const before = await readFile(store.current, "utf8");
+    await assert.rejects(buildSourcePayload({ paths: store, config: { sourceRoot }, candidateVersion: "provider-tampered", runCommand: compile }),
+      /pi-subagents artifact digest mismatch/);
+    assert.equal(await readFile(store.current, "utf8"), before);
+    assert.equal(await access(join(store.versionsRoot, "provider-tampered")).then(() => true, () => false), false);
   } finally {
     await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });

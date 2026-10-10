@@ -1305,6 +1305,52 @@ async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
   }
 }
 
+/** Stage the source revision's delegated-provider pin, its scripts and exactly the
+ * artifacts both pin selections name, replacing whatever the base payload carried.
+ * Packaging (`stage-gateway-app.sh`) stages the same set; a source update must not
+ * claim a revision while running an older provider (#718). Artifact bytes are
+ * bound by the pin's own digests, checked here before anything is published. */
+async function stageSourceProvider(sourceRoot, candidateRoot) {
+  const gatewayRoot = join(sourceRoot, "packages", "gateway");
+  const appRoot = join(candidateRoot, "app");
+  const pinBytes = await readFile(join(gatewayRoot, "pi-subagents-pin.json"));
+  const pin = JSON.parse(pinBytes.toString("utf8"));
+  if (!pin || typeof pin !== "object" || Array.isArray(pin)) throw new Error("source pi-subagents pin is malformed");
+  const records = [];
+  for (const selection of [pin, pin.previous]) {
+    if (!selection) continue;
+    for (const [record, algorithm] of [
+      [selection.sourceArchive ?? (selection.path ? { path: selection.path, sha512: selection.sha512 } : undefined), selection.sourceArchive ? "sha256" : "sha512"],
+      [selection.lockfile, "sha256"], [selection.closure, "sha512"],
+    ]) {
+      if (!record) continue;
+      const parts = typeof record.path === "string" ? record.path.split("/") : [];
+      if (parts.length !== 2 || parts[0] !== "artifacts" || !validComponent(parts[1], 255) || typeof record[algorithm] !== "string") {
+        throw new Error("source pi-subagents artifact record must name artifacts/<file> with its digest");
+      }
+      records.push({ relative: record.path, digest: record[algorithm], algorithm });
+    }
+  }
+  await rm(join(appRoot, "artifacts"), { recursive: true, force: true });
+  if (records.length > 0) await mkdir(join(appRoot, "artifacts"), { recursive: true });
+  for (const { relative, digest, algorithm } of records) {
+    const source = join(gatewayRoot, relative);
+    const info = await lstat(source).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`source pi-subagents artifact is missing or unsafe: ${relative}`);
+    const bytes = await readFile(source);
+    if (createHash(algorithm).update(bytes).digest("hex") !== digest) throw new Error(`source pi-subagents artifact digest mismatch: ${relative}`);
+    await writeFile(join(appRoot, relative), bytes);
+  }
+  await writeFile(join(appRoot, "pi-subagents-pin.json"), pinBytes);
+  await mkdir(join(appRoot, "scripts"), { recursive: true });
+  for (const name of ["check-pi-subagents.mjs", "install-pi-subagents.mjs"]) {
+    const source = join(gatewayRoot, "scripts", name);
+    const info = await lstat(source).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`trusted provider script is missing or unsafe: ${source}`);
+    await cp(source, join(appRoot, "scripts", name), { force: true, errorOnExist: false });
+  }
+}
+
 async function verifiedSourceCompilerOutput(root) {
   const info = await lstat(root);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("source compiler output is not a regular directory");
@@ -2566,6 +2612,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         // The updater and helper are part of the trusted source revision, not
         // stale files inherited from whichever payload happened to be active.
         await copyTrustedSourceScripts(config.sourceRoot, temporary);
+        await stageSourceProvider(config.sourceRoot, temporary);
         if (await gitRevision(config.sourceRoot) !== sourceRevision) {
           throw new Error("Gateway source revision changed during rebuild; retry from the current checkout");
         }
