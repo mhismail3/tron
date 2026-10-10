@@ -18,24 +18,10 @@ struct HomeChatHeader: View {
     @Environment(\.hostedHomeHeaderActionProbe) private var hostedActionProbe
     #endif
 
-    private var stateLabel: String {
-        switch status.phase {
-        case .ready: "Ready"
-        case .active: "Working"
-        case .paused: "Paused"
-        case .blocked: status.memory.configured ? "Memory blocked" : "Memory setup needed"
-        case .rolloverPending, .missingSession, .unavailable: "Recovery needed"
-        case .disabled: "Disabled"
-        case .undesignated: "Not set up"
-        }
-    }
+    private var stateLabel: String { HomeStatusLinePresentation.state(status) }
 
     private var memoryLabel: String {
-        if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) { return "Home change unresolved · Check completion" }
-        if status.memory.paused == true { return "Memory paused · New responses are blocked" }
-        if let blocked = status.memory.blocked { return "Memory blocked · \(blocked)" }
-        if !status.memory.configured { return "Choose a memory model before sending" }
-        return status.memory.open ? "Memory available" : "Memory configured"
+        HomeStatusLinePresentation.memory(status, unresolvedCommand: model.homeMutations.ownsUnresolvedCommand(profileID: profileID))
     }
 
     var body: some View {
