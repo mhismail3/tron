@@ -29,6 +29,8 @@ struct ChatComposerView: View {
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     let contextProgress: SessionContextProgressPresentation
+    /// The ring opens Manage Home in a chat that claims the Home status (#748).
+    let contextOpensManageHome: Bool
     let trailingMode: ComposerTrailingMode?
     let isSending: Bool
     let submissionPending: Bool
@@ -254,7 +256,7 @@ struct ChatComposerView: View {
             }
             .frame(minHeight: 40)
 
-            SessionContextProgressButton(presentation: contextProgress, onTap: onShowContext)
+            SessionContextProgressButton(presentation: contextProgress, opensManageHome: contextOpensManageHome, onTap: onShowContext)
 
             if let trailingMode {
                 ComposerTrailingButton(
