@@ -929,6 +929,7 @@ describe("Home task production dispatch", () => {
       route: { sessionId: f.home.sessionId, machineId: "machine-task-test" } });
     const home = await f.registry.acquire(f.home.sessionId);
     expect(JSON.stringify(home.canonicalSessionEntries())).not.toContain("Verified result");
+    const eventsBeforeDelivery = f.events.length;
     let request = "";
     let instructions = "";
     f.faux.setResponses([(context) => { request = JSON.stringify(context); instructions = JSON.stringify(context.messages.filter(message => message.role === "system")); return fauxAssistantMessage("Result consumed"); }]);
@@ -937,6 +938,9 @@ describe("Home task production dispatch", () => {
     await waitForTaskAcknowledgement(f, run.taskId);
     const consumed = await f.registry.homeOwner().taskResult(run.taskId);
     expect(consumed).toMatchObject({ wake: { state: "acknowledged" } });
+    // The inbox owns its messages' context receipts; delivery raises no client error.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(f.events.slice(eventsBeforeDelivery).filter(event => event.topic === "session.extensionError")).toEqual([]);
     expect(request).toContain("Verified result");
     // The actual provider instructions must explain the delivery happening in
     // this activation, rather than telling Home the result is unavailable.
