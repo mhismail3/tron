@@ -282,7 +282,7 @@
           "packages/gateway/src/tron-home-environment-policy.mjs",
           "packages/gateway/test-support/tron-home-environment-preflight.mjs"
         ],
-        "command": "python3 -m unittest discover -s tools/work"
+        "command": "python3 tools/work/run_tests.py"
       },
       {
         "name": "work-related-issues",
