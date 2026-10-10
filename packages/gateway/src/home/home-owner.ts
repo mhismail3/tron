@@ -110,6 +110,9 @@ export interface HomeSessionPort {
   sessionFile(sessionId: string): Promise<string | undefined>;
   /** Whether the session currently holds a live runtime. */
   hasLiveRuntime(sessionId: string): boolean;
+  /** The record's chapter set changed, so the dashboard's Home rule changed: clients
+   * must re-list. Optional because only the runtime owner publishes list changes. */
+  homeChaptersChanged?(): void;
   /** Registry owns session mutation ordering. Seal enters it before taking the
    * Home recordMutex, so admitted attention/archive/delete work settles first. */
   serializeSessionMutation<T>(sessionId: string, commit: () => Promise<T>): Promise<T>;
@@ -656,6 +659,12 @@ export class HomeOwner {
   modelFor(sessionId: string): ModelRef | undefined {
     const record = this.record;
     return record?.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId) ? { ...record.model } : undefined;
+  }
+
+  /** Whether the record names this session as one of Home's chapters, current or
+   * sealed, including a reserved successor whose file does not exist yet. */
+  isHomeChapter(sessionId: string): boolean {
+    return this.record?.chapters.some(chapter => chapter.sessionId === sessionId) ?? false;
   }
 
   /** Only the current active chapter is writable; sealed and in-progress
@@ -1495,6 +1504,7 @@ export class HomeOwner {
   private async writeLocked(record: HomeRecord): Promise<void> {
     this.assertAvailable();
     if (!admitRecord(record)) throw new GatewayError("conflict", "The Home record is invalid or exceeds its chapter bounds");
+    const chaptersBefore = chapterIdentities(this.record);
     try {
       await durablePublishBoundedJson(this.recordPath, record, MAXIMUM_RECORD_BYTES);
     } catch (error) {
@@ -1504,6 +1514,7 @@ export class HomeOwner {
         this.unavailable = "Home ledger publication is being reconciled";
         this.options.sessions.beginHomePublicationReconciliation();
         const reloaded = await this.load(false);
+        this.options.sessions.homeChaptersChanged?.();
         // Do not await this here: writeLocked may be running inside a slot lane,
         // and Registry retirement queues behind that lane. Keep the owner fenced
         // until the retained retirement completes successfully.
@@ -1525,6 +1536,7 @@ export class HomeOwner {
       throw error;
     }
     this.record = record;
+    if (chapterIdentities(record) !== chaptersBefore) this.options.sessions.homeChaptersChanged?.();
   }
 
   private async load(clearAvailability = true): Promise<boolean> {
@@ -1566,6 +1578,10 @@ export class HomeOwner {
 function openableChapter(record: HomeRecord): HomeChapter | undefined {
   const current = record.chapters.at(-1);
   return current?.state === "reserved" || current?.state === "materializing" ? record.chapters.at(-2) : current;
+}
+
+function chapterIdentities(record: HomeRecord | undefined): string {
+  return record?.chapters.map(chapter => chapter.sessionId).join("\n") ?? "";
 }
 
 function homeSessionId(record: HomeRecord): string {

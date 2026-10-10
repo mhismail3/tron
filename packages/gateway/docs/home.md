@@ -68,6 +68,18 @@ on it and no project resource can load from it. The profile's `noExtensions`,
 A physical chapter is one canonical session holding part of Home's history. The
 record's ordered chapter ledger decides which chapter is writable.
 
+### Dashboard list
+
+The record's chapter set is the only identity for Home (not the workspace cwd: only
+the record names a chapter, and a reserved successor has no file yet). The
+`session.list` projection (`scope: "user"`) omits every chapter the record names,
+current or sealed, enabled or disabled, so Home is never a dashboard row. Live
+`session.summary` events for a chapter still reach clients: the status owner refreshes
+Home on them, and a client applies a summary only to a row it already lists. Catalog
+membership is unchanged, so search (`catalog("user")`, `readSearchCut`), `session.open`
+by id, `scope: "all"` and Home's own reads are not filtered. A designation or rollover
+that changes the chapter set publishes a list change, so clients re-list.
+
 ### Limits and rollover
 
 - At a quiescent turn boundary, crossing the **soft** limit (24 MiB canonical bytes

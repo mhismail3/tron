@@ -838,6 +838,12 @@ export class RuntimeRegistry {
           await slot.setModel(model.provider, model.id);
         },
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
+        homeChaptersChanged: () => {
+          // The dashboard's Home rule depends on the record's chapter set, so a
+          // change of that set is a list change for every connected client.
+          this.revision += 1;
+          this.options.sessionListChanged();
+        },
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
         chapterMetrics: async (sessionId) => {
@@ -2399,7 +2405,10 @@ export class RuntimeRegistry {
     const generation = `${materialized.listRevision}:${materialized.factsDigest}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
     if (existing) return existing;
-    const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
+    // The dashboard list never shows a Home chapter. Membership (catalog, search,
+    // open by id) keeps them; only this client-facing projection omits them.
+    const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs)
+      .filter((seed) => scope !== "user" || !this.home.isHomeChapter(seed.id));
     const archivedCount = seeds.reduce((total, seed) => total + (seed.archivedAt === undefined ? 0 : 1), 0);
     const visible = archived === "only"
       ? orderArchivedSessions(seeds.filter((seed) => seed.archivedAt !== undefined))
