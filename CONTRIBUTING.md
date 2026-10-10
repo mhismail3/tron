@@ -24,8 +24,8 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 ## Change requirements
 
-1. Ship implementation, owning documentation, and the tests required by the
-   [testing policy](AGENTS.md#testing-policy) together.
+1. Ship implementation, owning documentation, and the integration or E2E tests
+   that prove it together ([testing policy](AGENTS.md#testing-policy)).
 2. Fix root causes and preserve canonical runtime ownership; do not create a
    second model/session/settings schema unless the mobile protocol requires a
    bounded projection.
@@ -101,8 +101,7 @@ need no parallel scan-root list. Ignored generated output is skipped only when
 untracked; tracked files remain in scope. Only the guard's own needle definitions
 are exempt. Pre-commit `--staged` checks changed index blobs, not later working-tree
 edits. `--stdin` applies the same needles to text about to be published, such as
-the evidence `scripts/tron work verify --post` writes to GitHub, and exits 1 on
-a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
+pull request bodies and issue comments, and exits 1 on a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
 the main checkout or any linked worktree; Git's hooks directory is shared, so one
 install guards every worktree. The hook runs `personal-info-guard.sh --staged`
 and the Gateway build for staged gateway TypeScript. Run
@@ -274,8 +273,8 @@ to implementation-level detail.
 
 ## Commits and releases
 
-Every change reaches `main` as one squash-merged pull request for one issue,
-through `scripts/tron work land` ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
+Every change reaches `main` through `scripts/tron work land`, which verifies the
+merged tree and squash-merges it ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
 ignored. CI does not publish production artifacts. TestFlight/App Store delivery,

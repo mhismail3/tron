@@ -21,7 +21,7 @@ body:
     id: decisions
     attributes:
       label: Decisions
-      description: Settled decisions with their reasons, and open ones (open ones also get the needs-decision label).
+      description: Settled decisions with their reasons, and open ones.
     validations:
       required: false
   - type: textarea

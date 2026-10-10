@@ -8,7 +8,7 @@ export interface InvocationProjection {
   version: 1;
   invocationId: string;
   operationId: string;
-  source: "plain" | "skill" | "prompt" | "extension" | "subagentWake";
+  source: InvocationSource;
   name?: string;
   arguments?: string;
   /** User-authored text for image-bearing prompts; Pi may append resize notes to its canonical message. */
@@ -22,6 +22,8 @@ export interface InvocationProjection {
   updatedAt: string;
 }
 
+/** The Home task result custom message a Home wake is bound to. */
+export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
 /** Canonical, non-context receipt family for Gateway invocation causality. */
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
 const INVOCATION_RECEIPT_WRITER = "gateway";
@@ -33,12 +35,17 @@ const LIFECYCLES = new Set<InvocationLifecycle>([
   "staged", "accepted", "queued", "running", "waitingForInput", "retrying", "settling", "completed", "failed", "interrupted", "outcomeUnknown",
 ]);
 const KINDS = new Set(["start", "transition", "terminal", "binding"] as const);
-const SOURCES = new Set(["plain", "skill", "prompt", "extension", "subagentWake"] as const);
+/** Gateway-authored sources without a user-authored name. An older Gateway that
+ * does not know a source skips its receipt (rollback degrades to unattributed work). */
+export type InvocationSource = "plain" | "skill" | "prompt" | "extension" | "subagentWake" | "homeWake";
+const SOURCES = new Set<InvocationSource>(["plain", "skill", "prompt", "extension", "subagentWake", "homeWake"]);
+/** Sources that carry no name or arguments: a plain prompt or a Gateway-authored wake. */
+const UNNAMED_SOURCES: ReadonlySet<unknown> = new Set<InvocationSource>(["plain", "subagentWake", "homeWake"]);
 const ORIGIN_KINDS = new Set(["user", "subagent", "extension", "process", "gateway", "assistant", "unknown"] as const);
 const ORIGIN_CONFIDENCE = new Set(["boundary", "receipt", "adapter", "unknown"] as const);
 
 type ReceiptKind = "start" | "transition" | "terminal" | "binding";
-type ReceiptSource = "plain" | "skill" | "prompt" | "extension" | "subagentWake";
+type ReceiptSource = InvocationSource;
 
 interface InvocationReceiptCommon {
   receiptId: string;
@@ -176,8 +183,8 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   if (kind === "start" && (r.lifecycle !== "staged"
       || r.canonicalEntryId !== undefined || r.errorCode !== undefined
       || r.retryable !== undefined || r.parentEntryId !== undefined
-      || ((r.source === "plain" || r.source === "subagentWake") && (r.name !== undefined || r.arguments !== undefined))
-      || (r.source !== "plain" && r.source !== "subagentWake" && r.name === undefined))) return undefined;
+      || (UNNAMED_SOURCES.has(r.source) && (r.name !== undefined || r.arguments !== undefined))
+      || (!UNNAMED_SOURCES.has(r.source) && r.name === undefined))) return undefined;
   if (kind === "transition" && (!r.lifecycle || r.lifecycle === "staged"
       || TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (kind === "terminal" && (!TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle) || r.canonicalEntryId !== undefined)) return undefined;
@@ -206,9 +213,11 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
     if (!receipt || (sessionId !== undefined && receipt.sessionId !== sessionId)) continue;
     if (receipt.receiptKind === "binding") {
       const target = entriesById.get(receipt.canonicalEntryId);
-      if (!target || target.type !== "message" || target.message.role !== "user") {
-        throw new Error("invocation receipt target is not a canonical user message");
-      }
+      // A Home wake binds the result message that triggered it, never a user message.
+      const valid = receipt.source === "homeWake"
+        ? target?.type === "custom_message" && target.customType === HOME_TASK_RESULT_MESSAGE
+        : target?.type === "message" && target.message.role === "user";
+      if (!valid) throw new Error("invocation receipt target is not the canonical message its source binds");
       if (receipt.parentEntryId !== undefined && entry.parentId !== receipt.parentEntryId) {
         throw new Error("invocation receipt parent does not match canonical entry");
       }

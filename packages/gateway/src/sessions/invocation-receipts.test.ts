@@ -112,4 +112,44 @@ describe("invocation receipts", () => {
     ] as any[];
     expect(invocationReceipts(entries, "session-1")).toEqual([start]);
   });
+
+  // #749: a Home wake's receipts. The binding targets its delivered result, and only that.
+  describe("Home wake receipts", () => {
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    const wakeStart = makeInvocationReceipt({
+      version: 1, receiptId: "start:inv-w", receiptKind: "start", invocationId: "inv-w", operationId: "op-w",
+      sessionId: "session-1", source: "homeWake", lifecycle: "staged", origin: { kind: "gateway", confidence: "boundary" },
+      sequence: 1, createdAt,
+    });
+    const wakeBinding = (canonicalEntryId: string, source: "homeWake" | "plain" = "homeWake") => makeInvocationReceipt({
+      version: 1, receiptId: "binding:inv-w", receiptKind: "binding", invocationId: "inv-w", operationId: "op-w",
+      sessionId: "session-1", source, canonicalEntryId, sequence: 2, createdAt,
+    });
+    const receiptEntry = (id: string, data: unknown) => ({ id, type: "custom", customType: INVOCATION_RECEIPT_TYPE, data, parentId: null, timestamp: createdAt });
+    const result = { id: "result-1", type: "custom_message", customType: "tron.home-task-result.v1", content: "result", display: true,
+      details: { eventId: "task-result-1", operationId: "op-w" }, parentId: null, timestamp: createdAt };
+    const userMessage = { id: "user-1", type: "message", message: { role: "user", content: "hi", timestamp: 1 }, parentId: null, timestamp: createdAt };
+
+    it("binds a wake to the delivered result message", () => {
+      const values = invocationProjection(invocationReceipts([result, receiptEntry("start", wakeStart), receiptEntry("binding", wakeBinding("result-1"))], "session-1"));
+      expect(values).toEqual([expect.objectContaining({ invocationId: "inv-w", source: "homeWake", canonicalEntryId: "result-1" })]);
+    });
+
+    it("refuses a wake binding that targets a user message", () => {
+      expect(() => invocationReceipts([userMessage, receiptEntry("start", wakeStart), receiptEntry("binding", wakeBinding("user-1"))]))
+        .toThrow("not the canonical message its source binds");
+    });
+
+    it("keeps the user-message rule for every other source", () => {
+      expect(() => invocationReceipts([result, receiptEntry("binding", wakeBinding("result-1", "plain"))]))
+        .toThrow("not the canonical message its source binds");
+    });
+
+    it("an older reader skips a receipt whose source it does not know, without throwing (rollback)", () => {
+      // A Gateway built before `homeWake` parses an unknown source as no receipt.
+      const future = { ...wakeStart, source: "homeWakeFromNewerGateway" };
+      const values = invocationProjection(invocationReceipts([receiptEntry("future", future), receiptEntry("start", start)], "session-1"));
+      expect(values.map(value => value.invocationId)).toEqual(["inv-1"]);
+    });
+  });
 });

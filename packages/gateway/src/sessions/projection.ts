@@ -2216,7 +2216,9 @@ function withInvocationSemantics(
   invocationStates: ReadonlyMap<string, InvocationProjection["lifecycle"]>,
   inheritedCommands: ReadonlyMap<string, InvocationLifecycle>,
 ): TranscriptItem {
-  if (boundInvocation && item.semantic) {
+  // A Home wake's bound target is its delivered result, which already projects as
+  // an attributed context row. Recasting it as a prompt would invent a user row.
+  if (boundInvocation && item.semantic && boundInvocation.source !== "homeWake") {
     return { ...item, semantic: {
       ...item.semantic,
       origin: boundInvocation.origin,

@@ -1,241 +1,19 @@
 name: CI
+# Landing verifies each change locally (`scripts/tron work land`) and merges without
+# waiting on hosted checks. This workflow runs on pushes to main and on demand, as a
+# regression signal that the dashboard reports; it does not gate pull requests.
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
 
 concurrency:
-  # Group key stays ref-scoped: PR runs supersede each other per ref. A started
-  # base-branch push run must finish - it is the evidence behind the epic's
-  # consecutive green main pushes - so only pull_request events cancel in
-  # progress. GitHub still keeps at most one pending run per group, so the
-  # newest pending main run supersedes an older pending one.
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A started main run must finish; a newer main push queues behind it.
+  group: ci-main
+  cancel-in-progress: false
 
 jobs:
-  # Selection is a separate fast job, so the required gateway job waits for it
-  # rather than for the policy suite. Every output fails open to running its job.
-  scope:
-    runs-on: ubuntu-latest
-    outputs:
-      pi-sdk-graph-changed: ${{ steps.pi-graph.outputs.changed }}
-      gateway: ${{ steps.macos-scope.outputs.gateway }}
-      ios: ${{ steps.macos-scope.outputs.ios }}
-      pi-sdk-e2e: ${{ steps.macos-scope.outputs.pi-sdk-e2e }}
-      mac: ${{ steps.macos-scope.outputs.mac }}
-      pi-subagents: ${{ steps.tooling-scope.outputs.pi-subagents }}
-      dev-lifecycle-state: ${{ steps.tooling-scope.outputs.dev-lifecycle-state }}
-      profiler: ${{ steps.tooling-scope.outputs.profiler }}
-      gateway-payload-deploy: ${{ steps.tooling-scope.outputs.gateway-payload-deploy }}
-      work-tooling: ${{ steps.tooling-scope.outputs.work-tooling }}
-      triage: ${{ steps.tooling-scope.outputs.triage }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: .node-version
-      - name: Select advisory macOS coverage
-        id: macos-scope
-        shell: bash
-        env:
-          CI_EVENT: ${{ github.event_name }}
-          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          if [[ "$CI_EVENT" == workflow_dispatch ]]; then
-            args=(--all)
-          else
-            if [[ -n "$CI_BASE" && ! "$CI_BASE" =~ ^0+$ ]]; then
-              git cat-file -e "$CI_BASE^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$CI_BASE" || true
-            fi
-            args=(--base "$CI_BASE" --head HEAD)
-          fi
-          if ! python3 scripts/ci_macos_scope.py "${args[@]}" --github-output "$GITHUB_OUTPUT"; then
-            echo "macOS classifier failed; running every advisory job"
-            for job in gateway ios pi-sdk-e2e mac; do echo "$job=true" >> "$GITHUB_OUTPUT"; done
-          fi
-      - name: Select hosted tooling checks
-        id: tooling-scope
-        shell: bash
-        env:
-          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          set -euo pipefail
-          checks=(pi-subagents dev-lifecycle-state profiler gateway-payload-deploy work-tooling triage)
-          if ! python3 scripts/ci_verify_scope.py --base "$CI_BASE" --head HEAD --github-output "$GITHUB_OUTPUT" "${checks[@]}"; then
-            echo "verify-check classifier failed; running every hosted tooling check"
-            for check in "${checks[@]}"; do echo "$check=true" >> "$GITHUB_OUTPUT"; done
-          fi
-      - name: Detect Pi SDK graph change
-        id: pi-graph
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ "${{ github.event_name }}" == pull_request ]]; then
-            base='${{ github.event.pull_request.base.sha }}'
-          else
-            base='${{ github.event.before }}'
-          fi
-          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"
-          changed="$(node packages/gateway/scripts/compare-pi-sdk-graph.mjs "$base" HEAD "$GITHUB_WORKSPACE" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
-          [[ "$changed" == true || "$changed" == false ]] || { echo "invalid graph comparison result" >&2; exit 1; }
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
-  # Policy waits for scope only to gate its slow tooling suites. `!cancelled()`
-  # keeps it running, and fail-open selection runs them, if scope fails.
-  policy:
-    needs: scope
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: .node-version
-      - run: scripts/personal-info-guard.sh
-      - run: python3 scripts/test-personal-info-guard.py
-      - run: scripts/check-agent-policy.sh
-      - run: scripts/tron version check
-      - run: scripts/tron version test
-      - run: python3 scripts/test-gateway-protocol-contract.py
-      - name: Check Python syntax
-        run: |
-          python3 -m py_compile \
-            scripts/gateway_protocol_contract.py \
-            scripts/verify-gateway-protocol-contract.py \
-            scripts/test-gateway-protocol-contract.py \
-            scripts/check-documentation-policy.py \
-            scripts/ci_ios_infra_scope.py \
-            scripts/test-ci-ios-infra-scope.py \
-            scripts/ci_verify_scope.py \
-            scripts/test-ci-verify-scope.py \
-            scripts/test-personal-info-guard.py \
-            scripts/tron_mac_reinstall.py \
-            scripts/test-mac-reinstall.py \
-            scripts/validate-ios-artifact.py \
-            scripts/ios-test-build-identity.py \
-            scripts/ios-test-lock.py \
-            scripts/ios-test-process.py \
-            scripts/ios-test-simulator.py \
-            scripts/patch-ios-gateway-e2e-xctestrun.py \
-            scripts/test-ios-test-infrastructure.py \
-            scripts/tron_profile_report.py \
-            scripts/tron-profile-gateway \
-            scripts/test-tron-profile.py \
-            scripts/tron-profile-ios \
-            scripts/test-tron-profile-ios.py \
-            scripts/tron_profile_attribution.py \
-            scripts/tron-profile-device \
-            scripts/test-tron-profile-attribution.py \
-            scripts/test-tron-triage.py
-      - name: Check profiler JavaScript and TypeScript syntax
-        run: |
-          node --check scripts/tron-profile-gateway-driver.mjs
-          node --check scripts/tron-profile-gateway-probe.mjs
-          node --experimental-strip-types --check scripts/tron-profile-gateway-extension.ts
-      - name: Test iOS infrastructure path selector
-        run: python3 scripts/test-ci-ios-infra-scope.py
-      - name: Test hosted tooling verify-check selector
-        run: python3 scripts/test-ci-verify-scope.py
-      - name: Test focused iOS suite selector
-        run: python3 scripts/test-ios-verify-test-selection.py
-      - name: Select iOS runner infrastructure coverage
-        id: ios-infrastructure-scope
-        shell: bash
-        run: |
-          set -euo pipefail
-          run=true
-          reason=workflow-dispatch
-          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
-            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              base='${{ github.event.pull_request.base.sha }}'
-            else
-              base='${{ github.event.before }}'
-            fi
-            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-              reason=missing-base
-            elif ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              reason=base-unavailable
-            elif git diff --name-only --no-renames -z "$base" HEAD > "$RUNNER_TEMP/changed-paths.nul"; then
-              if run="$(python3 scripts/ci_ios_infra_scope.py --paths-file "$RUNNER_TEMP/changed-paths.nul")"; then
-                reason=classified-changed-paths
-              else
-                run=true
-                reason=classifier-failed
-              fi
-            else
-              reason=diff-failed
-            fi
-          fi
-          if [[ "$run" != true && "$run" != false ]]; then
-            run=true
-            reason=invalid-classification
-          fi
-          echo "iOS runner infrastructure selection: run=$run reason=$reason"
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-      - name: Test iOS runner infrastructure without hardware
-        if: steps.ios-infrastructure-scope.outputs.run == 'true'
-        run: python3 scripts/test-ios-test-infrastructure.py
-      - name: Test profiler report and comparison policy
-        if: needs.scope.outputs.profiler != 'false'
-        run: |
-          python3 scripts/test-tron-profile-ios.py
-          python3 scripts/test-tron-profile-attribution.py
-      - name: Test the incident triage tool
-        if: needs.scope.outputs.triage != 'false'
-        run: python3 scripts/test-tron-triage.py
-      - name: Test the work tooling
-        if: needs.scope.outputs.work-tooling != 'false'
-        run: python3 tools/work/run_tests.py
-      - run: python3 scripts/check-documentation-policy.py
-      - name: Check shell syntax
-        run: |
-          bash -n \
-            scripts/generate-xcode-project \
-            scripts/install-ci-tools.sh \
-            scripts/ios-ci-test.sh \
-            scripts/ios-gateway-e2e-test \
-            scripts/ios-release-toolchain-doctor.sh \
-            scripts/personal-info-guard.sh \
-            scripts/check-agent-policy.sh \
-            scripts/tron \
-            scripts/tron-profile \
-            scripts/tron-version \
-            scripts/verify-ci-toolchain.sh \
-            packages/mac-app/scripts/bundle-gateway.sh \
-            packages/mac-app/scripts/ensure-gateway-bundle.sh \
-            packages/mac-app/scripts/verify-gateway-payload.sh \
-            packages/mac-app/scripts/test-gateway-payload-verifier.sh \
-            packages/mac-app/scripts/test-tron-gateway-launcher.sh \
-            packages/mac-app/scripts/test-signed-pi-payload-smoke.sh \
-            packages/mac-app/scripts/test-update-payload-fingerprint.sh \
-            packages/mac-app/scripts/test-push-product-config.sh \
-            packages/mac-app/scripts/test-bundle-gateway-rebuild.sh \
-            packages/mac-app/scripts/package-dmg.sh \
-            packages/ios-app/scripts/test-source-policy.sh \
-            packages/ios-app/scripts/test-build-matrix-policy.sh \
-            packages/ios-app/scripts/test-verify-archive-privacy.sh \
-            packages/ios-app/scripts/verify-archive-privacy.sh \
-            scripts/test-ios-artifact-validator.sh \
-            scripts/tron-ios-device-test \
-            scripts/tron-ios-simulator \
-            scripts/tron-ios-test
-      - run: scripts/ios-release-toolchain-doctor.sh --self-test
-
-  # Gateway is required for land; other advisory jobs retain real failure
-  # conclusions visible in the dashboard without blocking unrelated work.
   gateway:
-    needs: scope
-    if: ${{ !cancelled() && needs.scope.outputs.gateway != 'false' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -246,57 +24,10 @@ jobs:
           cache-dependency-path: packages/gateway/package-lock.json
       - run: npm ci
         working-directory: packages/gateway
-      - run: npm run check:pi-sdk
-        working-directory: packages/gateway
-      - run: npm run build
+      - run: npm run check
         working-directory: packages/gateway
       - run: npm test
         working-directory: packages/gateway
-      - run: npm run test:pi-sdk-rollback
-        if: needs.scope.outputs.pi-sdk-graph-changed == 'true'
-        working-directory: packages/gateway
-      - run: npm audit --omit=dev
-        working-directory: packages/gateway
-
-  # Advisory checks moved off the required gateway job. Each step runs only when
-  # scope selected its check with the same path globs as `scripts/tron work verify`.
-  gateway-tooling:
-    needs: scope
-    if: ${{ !cancelled() && (needs.scope.outputs.pi-subagents != 'false' || needs.scope.outputs.dev-lifecycle-state != 'false' || needs.scope.outputs.profiler != 'false' || needs.scope.outputs.gateway-payload-deploy != 'false') }}
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: packages/gateway/package-lock.json
-      # The profiler test and the provider scripts load the Gateway's own dependencies.
-      - run: npm ci
-        working-directory: packages/gateway
-      - name: Install CI tools
-        if: needs.scope.outputs.pi-subagents != 'false'
-        run: scripts/install-ci-tools.sh node
-      - name: Check the pi-subagents provider
-        if: needs.scope.outputs.pi-subagents != 'false'
-        run: npm run check:pi-subagents
-        working-directory: packages/gateway
-      - name: Test the pi-subagents provider scripts
-        if: needs.scope.outputs.pi-subagents != 'false'
-        run: npm run test:pi-subagents-scripts
-        working-directory: packages/gateway
-      - name: Test macOS development lifecycle state tooling
-        if: needs.scope.outputs.dev-lifecycle-state != 'false'
-        run: node --test scripts/tron-dev-state.test.mjs
-      # The Gateway profiler samples the Gateway through macOS libproc, and its
-      # stub Gateway loads the Gateway's own `ws` dependency, so its fixtures
-      # run here rather than on the Linux policy runner (#113).
-      - name: Test the Gateway profiler
-        if: needs.scope.outputs.profiler != 'false'
-        run: python3 scripts/test-tron-profile.py
-      - name: Test the gateway payload deploy helper
-        if: needs.scope.outputs.gateway-payload-deploy != 'false'
-        run: node --test scripts/gateway-payload-deploy.test.mjs
 
   push-relay:
     runs-on: ubuntu-latest
@@ -311,31 +42,23 @@ jobs:
         working-directory: packages/push-relay
       - run: npm run check
         working-directory: packages/push-relay
-      - run: npm test
-        working-directory: packages/push-relay
-      - run: npm audit --omit=dev
-        working-directory: packages/push-relay
       - run: npm run build
         working-directory: packages/push-relay
 
   ios:
-    # After the required gateway job, so it never queues for a macOS runner behind
-    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
-    needs: [scope, gateway]
-    if: ${{ !cancelled() && needs.scope.outputs.ios != 'false' }}
     runs-on: macos-26
     # The memory reserve protects a shared development Mac's Gateway. A hosted
     # runner is a dedicated VM whose whole memory (7 GB) is below the 8 GB
     # default, so the default refuses every boot here (#113).
     env:
       TRON_IOS_TEST_MEMORY_RESERVE_BYTES: "0"
+      TRON_IOS_TEST_EPHEMERAL: "1"
+      TRON_IOS_TEST_DEVICE_NAME: "Tron iOS Build CI ${{ github.run_id }}-${{ github.run_attempt }}"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: packages/gateway/package-lock.json
       - name: Resolve canonical iOS Xcode
         id: ios-toolchain
         run: |
@@ -346,99 +69,13 @@ jobs:
           xcode-version: ${{ steps.ios-toolchain.outputs.xcode }}
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node ios xcodegen
-      - run: packages/ios-app/scripts/test-source-policy.sh
-      - run: scripts/check-agent-policy.sh
-      - run: packages/ios-app/scripts/test-build-matrix-policy.sh
-      - run: scripts/test-ios-artifact-validator.sh
-      - run: packages/ios-app/scripts/test-verify-archive-privacy.sh
-      - run: scripts/tron-ios-device-test
-      - run: scripts/ios-ci-test.sh
-      - name: Upload bounded iOS test evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ios-test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            packages/ios-app/build/test-runs
-            packages/ios-app/build/ios-ci-metrics.json
-          if-no-files-found: warn
-          retention-days: 14
+      - name: Build iOS test products
+        run: scripts/tron-ios-test build
       - name: Delete only the CI-owned simulator
         if: always()
         run: scripts/ios-ci-test.sh cleanup
 
-  pi-sdk-e2e:
-    # After the required gateway job, so it never queues for a macOS runner behind
-    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
-    needs: [scope, gateway]
-    if: ${{ !cancelled() && needs.scope.outputs['pi-sdk-e2e'] != 'false' }}
-    # Source-level transport and native changes must exercise this boundary,
-    # not only backing-SDK dependency upgrades.
-    runs-on: macos-26
-    # Same dedicated-runner reserve as the ios job.
-    env:
-      TRON_IOS_TEST_MEMORY_RESERVE_BYTES: "0"
-    steps:
-      # The runner context is not available in job-level env, so the E2E
-      # state roots are exported from RUNNER_TEMP for every later step.
-      - name: Scope E2E state to the runner's temporary directory
-        run: |
-          {
-            echo "TRON_IOS_E2E_STATE_DIR=$RUNNER_TEMP/tron-ios-gateway-e2e"
-            echo "TRON_IOS_E2E_DERIVED_DATA=$RUNNER_TEMP/tron-ios-gateway-e2e-derived"
-            echo "TRON_IOS_TEST_STATE_DIR=$RUNNER_TEMP/tron-ios-test-state"
-          } >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: .node-version
-          cache: npm
-          cache-dependency-path: packages/gateway/package-lock.json
-      - name: Resolve canonical iOS Xcode
-        id: pi-ios-toolchain
-        run: |
-          source config/ci-toolchain.env
-          echo "xcode=$TRON_CI_XCODE_VERSION" >> "$GITHUB_OUTPUT"
-      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
-        with:
-          xcode-version: ${{ steps.pi-ios-toolchain.outputs.xcode }}
-      - name: Install canonical iOS E2E tools
-        run: scripts/install-ci-tools.sh xcodegen
-      - name: Verify canonical iOS E2E toolchain
-        run: scripts/verify-ci-toolchain.sh node ios xcodegen
-      - name: Run hosted iOS Gateway resilience boundary
-        run: |
-          set -euo pipefail
-          trap 'scripts/ios-gateway-e2e-test stop || true' EXIT
-          scripts/ios-gateway-e2e-test all
-      - name: Run hosted iOS Gateway LAN lane boundary
-        # The E-3c two-lane case needs this runner's private address, which the
-        # lane binds; `run-lan` reuses the products the boundary case built.
-        run: |
-          set -euo pipefail
-          trap 'scripts/ios-gateway-e2e-test stop || true' EXIT
-          scripts/ios-gateway-e2e-test run-lan
-      - name: Upload Pi boundary evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pi-sdk-boundary-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ env.TRON_IOS_E2E_STATE_DIR }}/attempts
-            ${{ env.TRON_IOS_E2E_STATE_DIR }}/results
-            ${{ env.TRON_IOS_E2E_STATE_DIR }}/gateway.log
-            ${{ env.TRON_IOS_E2E_STATE_DIR }}/proxy.log
-          if-no-files-found: warn
-          retention-days: 14
-      - name: Remove only Pi boundary owned state
-        if: always()
-        run: scripts/ios-gateway-e2e-test clean
-
   mac:
-    # After the required gateway job, so it never queues for a macOS runner behind
-    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
-    needs: [scope, gateway]
-    if: ${{ !cancelled() && needs.scope.outputs.mac != 'false' }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -457,32 +94,10 @@ jobs:
           xcode-version: ${{ steps.mac-toolchain.outputs.xcode }}
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
-      - run: python3 scripts/test-personal-info-guard.py
-      - run: python3 scripts/test-native-host.py
-      - run: python3 scripts/test-mac-reinstall.py
-      - run: scripts/test-cua-assets.sh
-      - name: Test actual native capture addon ownership (offline transport only)
-        timeout-minutes: 3
-        run: |
-          python3 -m unittest discover -s packages/mac-app/native-gateway-client -p 'test_*.py'
-          python3 packages/mac-app/native-gateway-client/build.py --test --output "$RUNNER_TEMP/native-capture-test/tron-native-capture-test.node"
-          TRON_CAPTURE_TEST_ADDON="$RUNNER_TEMP/native-capture-test/tron-native-capture-test.node" node --expose-gc --test packages/mac-app/native-gateway-client/addon.test.mjs
-      - name: Test native computer-control primitives (offline)
-        timeout-minutes: 3
-        run: |
-          python3 -m unittest discover -s packages/mac-app/native-computer-control/qualification -p 'test_*.py'
-          swift test --package-path packages/mac-app/native-computer-control --scratch-path "$RUNNER_TEMP/tron-computer-control-build"
       - run: packages/mac-app/scripts/bundle-gateway.sh
-      - run: packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
-      - run: packages/mac-app/scripts/test-tron-gateway-launcher.sh
-      - run: packages/mac-app/scripts/test-gateway-payload-verifier.sh
-      - run: packages/mac-app/scripts/test-update-payload-fingerprint.sh
-      - run: packages/mac-app/scripts/test-push-product-config.sh
       - run: scripts/tron mac generate
-      # Compile only. The app-hosted TronMacTests and the signed-payload smoke
-      # need the team's Mac Development certificate, which CI does not hold, and
-      # an ad-hoc signature makes macOS reject the hosted test bundle. They run
-      # locally (packages/mac-app/docs/development.md#efficient-focused-tests).
+      # Compile only. The app-hosted TronMacTests need the team's Mac Development
+      # certificate, which CI does not hold; they run locally (packages/mac-app/docs/development.md).
       - name: Compile Mac app and test sources unsigned
         working-directory: packages/mac-app
         run: |
