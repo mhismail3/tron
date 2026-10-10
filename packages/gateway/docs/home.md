@@ -698,7 +698,7 @@ admission. A task ID never replays an accepted prompt.
   guarantee for operation-owned work.
 - The first-party task extension refuses subagent executions (even `async:false`,
   which the pinned configuration can force async), revival, mutating management and
-  the schedule tool. Only read-only management from the verified `0.76.1-tron.5`
+  the schedule tool. Only read-only management from the verified `0.76.1-tron.6`
   provider is admitted: `guide`, `children.list`, `status`, `list`, `get`, `models`,
   and supervisor `status`, `pending`, `list`. The blocking `bg_wait` is allowed and
   is aborted and joined with the operation; `nonBlocking: true` is refused, since
