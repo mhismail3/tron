@@ -803,6 +803,19 @@ intent before any worker effect, authorizes the exact snapshot, creates an ordin
 worker through `OwnedSessionDispatch`, and binds its exact operation before prompt
 admission. A task ID never replays an accepted prompt.
 
+**Worker model and thinking.** `delegate` takes optional `model` (`{ provider, id }`) and
+`thinking` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`). Both are admitted
+against the Gateway's model runtime before the task record, namespace initialization or
+worker exists. The model must be registered, usable (its provider has credentials) and not
+virtual. The thinking level must be one that model supports; the SDK would otherwise clamp
+it silently. A `thinking` without a `model` is refused. A refusal is `invalid_request`, its
+`details.reason` is `unregistered-model`, `virtual-model`, `unavailable-model`,
+`unsupported-thinking`, `thinking-requires-model` or `invalid-model`, and its message names at
+most twenty valid models, the fixed and usable ones. An accepted choice is applied through the
+worker slot's `setModel` and `setThinking` after `createWorker` and before the first prompt,
+so the worker's canonical JSONL records it. An omitted model keeps the worker session's
+default. The choice is never persisted with the task record.
+
 - A task worker has normal project tools and resources plus `report`, and cannot
   replace its owned session. Its canonical `tron-home-task` marker binds the task,
   Home identity and generation, session and operation. Cold
@@ -936,8 +949,12 @@ work. One per-process result is shared by every task surface.
   (needs-input or unknown) and `pendingGrant`. Null spend is unavailable, not zero;
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
-- **`home.taskStatus`** returns the record, the exact active operation, spend and the
-  immutable result. Viewing never changes control. Home's
+- **`home.taskStatus`** returns the record, the exact active operation, spend, the
+  immutable result and `workerModel`: the worker session's current `{ provider, id }`, read
+  from its canonical `model_change` entries. A running worker answers from its live slot; a
+  settled one reads its conversation file, through the same evidence cut as recovery. It is
+  `null` before the worker records a model or when it has no conversation file. It is a read
+  projection and is never persisted with the record. Viewing never changes control. Home's
   `task` tool exposes `status`, `steer` and `stop`, only for tasks bound to the
   enabled Home's identity and generation; it can never reconfirm, revoke or decide.
   Status follows Home across disable and re-enable but never transfers control.
@@ -1091,7 +1108,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
 | `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result. |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result, worker model. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
@@ -1312,6 +1329,7 @@ without a retained artifact.
 | `src/episodic/home-source.scale.test.ts` | streamed source bound (`heap.json`); 2,000 messages at production caps (`heap-production.json`); 20 messages of 2 MiB at production caps (`heap-over-cap.json`) | `test-results/home-memory/{heap,heap-production,heap-over-cap}.json` | `npx vitest run --config vitest.scale.config.ts src/episodic/home-source.scale.test.ts` (`-t production` for `heap-production.json`) |
 | `src/home/home-owner.test.ts` | strict admission; unknown-version, malformed-topology, corrupt, empty and permissive records preserved and refused; unavailable workspace, including through a symlink | none | `npx vitest run src/home/home-owner.test.ts` |
 | `src/home/home-session-recovery.test.ts` | reserved-chapter scan: absence proven only after a complete scan; duplicate IDs; path mismatch; uninspectable entries; enumeration errors | none | `npx vitest run src/home/home-session-recovery.test.ts` |
+| `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |

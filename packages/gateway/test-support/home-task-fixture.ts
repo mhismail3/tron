@@ -39,6 +39,9 @@ export async function disposeFixtures(): Promise<void> {
 // identity, so this version string never changes what the gate decides.
 const UNMANAGED_PROVIDER_VERSION = "0.76.1-tron.4";
 
+export const TASK_REASONING_MODEL_ID = "tron-task-reasoning";
+export const TASK_VIRTUAL_MODEL_ID = "tron-task-router";
+
 export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
@@ -52,8 +55,19 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   vi.stubEnv("TMPDIR", temporary);
   // Pacing 0 streams by microtask. A timer per chunk waits at least 1 ms in Node, so a
   // 64 KB tool call alone took about 5 s here.
-  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 0, ...(contextWindow ? { models: [{ id: "bounded", contextWindow, maxTokens: 1024 }] } : {}) });
+  // The second model is a reasoning model, so a delegation can choose a thinking level
+  // it supports (`off` through `high`; the faux definition has no xhigh or max mapping).
+  const faux = fauxProvider({ provider: "tron-task-faux", tokensPerSecond: 0, models: [
+    contextWindow ? { id: "bounded", contextWindow, maxTokens: 1024 } : { id: "faux-1", name: "Faux Model" },
+    { id: TASK_REASONING_MODEL_ID, reasoning: true },
+  ] });
   const model = faux.getModel();
+  // The Gateway-wide runtime that admits Home's delegate choices (production passes it
+  // as `gatewayModelRuntime`). It also holds a virtual router, which must be refused.
+  const gateway = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  gateway.registerNativeProvider(faux.provider);
+  gateway.registerVirtualModel({ provider: model.provider, id: TASK_VIRTUAL_MODEL_ID, name: "Fixture router",
+    route: () => ({ model: gateway.getModel(model.provider, model.id)!, thinkingLevel: "off" }) });
   const settings: Record<string, unknown> = { sessionDir: join(root, "sessions"), defaultProvider: model.provider, defaultModel: model.id };
   if (contextWindow) settings.compaction = { enabled: false, reserveTokens: 1024, keepRecentTokens: 0 };
   if (codemode) {
@@ -94,6 +108,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
   const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+    gatewayModelRuntime: gateway,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
@@ -129,7 +144,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
-  return { root, registry, faux, cwd, tronHome, home, signals, notifications, events, agentDir, trust, restartToReadiness,
+  return { root, registry, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
       await cold.recoverHomeTasks();

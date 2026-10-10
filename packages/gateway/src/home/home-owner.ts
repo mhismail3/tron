@@ -265,7 +265,7 @@ export class HomeOwner {
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task control is unavailable");
     const task = await this.tasks.store.read(request.taskId);
     if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
-    if (request.action === "status") return this.taskResult(request.taskId);
+    if (request.action === "status") return this.taskStatus(request.taskId);
     if (request.action === "report") {
       if (!Number.isSafeInteger(request.offset) || request.offset < 0 || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 4096) throw new GatewayError("invalid_request", "Invalid report page");
       const { text } = await this.immutableTaskReport(request.taskId);
@@ -315,6 +315,11 @@ export class HomeOwner {
 
   async taskResult(taskId: string) {
     return (await this.taskOwner()).result(taskId);
+  }
+
+  /** The task record plus the worker's model, as the status RPC and Home's status tool show it. */
+  async taskStatus(taskId: string) {
+    return (await this.taskOwner()).status(taskId);
   }
 
   private wakeRoute(sessionId?: string): HomeWakeRoute | undefined {

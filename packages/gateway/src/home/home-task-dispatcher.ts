@@ -12,6 +12,7 @@ import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecor
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
+import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
@@ -24,7 +25,10 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
-export interface HomeTaskDispatchRequest { taskId: string; intent: string; target: string }
+export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string }
+/** The durable record plus the worker's model from its own transcript. The model is
+ * projected per read, never persisted with the task. */
+export type HomeTaskStatus = HomeTaskRecord & { workerModel: { provider: string; id: string } | null };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -132,9 +136,12 @@ export class HomeTaskDispatcher {
 
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
-    if (Object.keys(input).sort().join(",") !== "intent,target,taskId"
+    const keys = Object.keys(input);
+    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking"].includes(key))
       || typeof input.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(input.taskId)
       || typeof input.intent !== "string" || !input.intent.trim() || Buffer.byteLength(input.intent) > 65536) throw new GatewayError("invalid_request", "Invalid task intent");
+    // Refused before any task record, namespace initialization or worker exists.
+    const choice = await this.sessions.admitTaskWorkerChoice(input);
     const epoch = await this.setup.run(async () => {
       const created = await this.store.initialize();
       const current = await this.store.restoreEpoch();
@@ -168,6 +175,10 @@ export class HomeTaskDispatcher {
       // Trust is rechecked by the neutral creation/admission boundary too.
       lease = await dispatch.createWorker(task.target, reports);
       const { slot } = lease;
+      // The slot's own configuration owners record the choice in the worker's transcript
+      // before its first prompt. An omitted model keeps the session's default.
+      if (choice.model) await slot.setModel(choice.model.provider, choice.model.id);
+      if (choice.thinking !== undefined) await slot.setThinking(choice.thinking);
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
@@ -318,6 +329,12 @@ export class HomeTaskDispatcher {
     const task = await this.store.read(control.taskId);
     if (!task || task.lifecycle !== "active" || !task.sessionId || task.operationId !== control.operationId) throw new GatewayError("conflict", "Stale or terminal task operation");
     return task;
+  }
+
+  async status(taskId: string): Promise<HomeTaskStatus> {
+    const task = await this.result(taskId);
+    const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
+    return { ...task, workerModel };
   }
 
   async result(taskId: string): Promise<HomeTaskRecord> {
