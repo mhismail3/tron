@@ -240,7 +240,7 @@ xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData \
-  -only-testing:TronMacTests/<Suite>
+  -only-testing:TronMacIntegrationTests/<Suite>
 ```
 
 Run full gateway/native suites at cross-module checkpoints or after focused

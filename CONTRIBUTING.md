@@ -252,7 +252,7 @@ scripts/tron mac generate
 The TronMac build and test commands are in the
 [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
 CI only compiles the Mac app and test sources, unsigned. Run the app-hosted
-`TronMacTests` locally, because they need the team's signing certificate.
+`TronMacIntegrationTests` locally, because they need the team's signing certificate.
 
 The Release app packages only `Tron Agent.app` under the stable
 `com.tron.server` label. Developer tooling reuses that installed signed launcher
