@@ -195,7 +195,7 @@ jobs:
         run: python3 scripts/test-tron-triage.py
       - name: Test the work tooling
         if: needs.scope.outputs.work-tooling != 'false'
-        run: python3 -m unittest discover -s tools/work
+        run: python3 tools/work/run_tests.py
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |
