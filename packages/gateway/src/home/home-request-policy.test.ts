@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { HOME_NONCE_MARKER, markHomeMemoryCache } from "./home-request-policy.js";
+import { isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { HOME_NONCE_MARKER, HOME_REFUSAL_SENTENCES, homeRefusalMessage, markHomeMemoryCache, type HomeRefusalReason } from "./home-request-policy.js";
 
 // One failure mode the wire E2E (pi-ai's own Anthropic builder) cannot reach:
 // a provider that composes its own request, as CortexKit does, prepends its
@@ -53,6 +55,18 @@ describe("markHomeMemoryCache", () => {
       expect(found).not.toContain(`.messages[0].content[${offset + 4}]`);
       expect(found).toContain(".messages[1].content[0]");
       expect(found.length).toBeLessThanOrEqual(4);
+    }
+  });
+});
+
+// A refusal is deterministic, so the SDK must never retry one. Pi's retry classifier
+// matches substrings of the assistant error text, so every reason's SDK-visible text
+// must fail that classifier (a count such as `4500` matches `500`).
+describe("Home refusal text", () => {
+  it("is never classified as a transient provider error, for every refusal reason", () => {
+    for (const reason of Object.keys(HOME_REFUSAL_SENTENCES) as HomeRefusalReason[]) {
+      const message = { role: "assistant", stopReason: "error", errorMessage: homeRefusalMessage(reason) } as unknown as AssistantMessage;
+      expect(isRetryableAssistantError(message), reason).toBe(false);
     }
   });
 });

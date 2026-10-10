@@ -365,6 +365,15 @@ restart, or cache expiry.
   the view text. After a rebalance the whole view is one block, written once.
 - The previous request's line count and digest are recorded only after every refusal
   check, so a refused activation sends nothing.
+- **Refusal text.** A refusal's chat error is one fixed sentence per reason
+  (`HOME_REFUSAL_SENTENCES`, `home-request-policy.ts`), with no counts, IDs or memory text.
+  The SDK retries an assistant error that its transient classifier matches, and the
+  classifier matches substrings such as `500`, so a deterministic refusal that embedded
+  `effective 4500 tokens` ran its retry budget. The variable detail stays on the refusal
+  record, which `home.context` reports as `lastRefusalReason` and `lastRefusalDetail`; the
+  chat error does not carry it. `home-request-policy.test.ts` proves every reason's text is
+  never retryable, and C12 of `home-request-seam.integration.test.ts` proves an overflow
+  refusal produces one refusal and no retry.
 - **Cache marks.** OpenAI and DeepSeek reuse the prefix themselves. For
   `anthropic-messages`, the `before_provider_request` handler marks the first block
   and
@@ -1290,7 +1299,7 @@ without a retained artifact.
 | test file | failure modes proven | artifact | regenerate |
 | --- | --- | --- | --- |
 | `src/sessions/home-activation.e2e.test.ts` | chapter admission and rollover; receipt replay; joined submissions; signal privacy; real SDK byte stop; cyclic cold evidence; memory browser contract; reserved and cold profile orderings; pause receipts; inline-photo mirror; terminal child cases | `test-results/home-activation/report.json`; `test-results/terminal-chat-home/attachments-{rollover,failed-sync,handled-input}.json` (`-t 'owns exact Home attachments'`) | `npx vitest run src/sessions/home-activation.e2e.test.ts` |
-| `src/sessions/home-request-seam.integration.test.ts` | seam identity, path and byte refusal; five rebuilds and five reloads per manager | `test-results/home-activation/seam-report.json` | `npx vitest run src/sessions/home-request-seam.integration.test.ts` |
+| `src/sessions/home-request-seam.integration.test.ts` | seam identity, path and byte refusal; an overflow refusal is one refusal with no SDK retry and a fixed chat sentence (C12); five rebuilds and five reloads per manager | `test-results/home-activation/seam-report.json` | `npx vitest run src/sessions/home-request-seam.integration.test.ts` |
 | `src/sessions/home-cache-layout.e2e.test.ts` | cache layout across the frozen view; post-terminal quiescence; refused-activation readiness | `test-results/home-cache-layout/report.json` | `npx vitest run src/sessions/home-cache-layout.e2e.test.ts` |
 | `src/sessions/home-managed-provider.integration.test.ts` | Home delegate-only versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
@@ -1309,7 +1318,7 @@ without a retained artifact.
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |
 | `src/home/home-receipt-crash.e2e.test.ts` | SIGKILL after binding, during SDK effects before completion, and after completion before response: pending fences and exact replay | `test-results/home-receipt-crash/report.json` | `npx vitest run src/home/home-receipt-crash.e2e.test.ts` |
 | `src/sessions/runtime-registry.integration.test.ts` (`-t deadline`) | 24-hour owned-operation deadline: endless no-effect and successful-read turns; a blocked provider request; joined stop | `test-results/owned-session-deadline/report.json` | `npx vitest run src/sessions/runtime-registry.integration.test.ts -t deadline` |
-| `src/home/home-request-policy.test.ts`, `home-memory-tools.test.ts`, `home-memory.test.ts`, `home-task-spend.test.ts` | cache marks on the view's first block and last line; typed unavailable tool results; serialized opens and coded ingest failure; usage deduplication and contradictory-usage refusal | none | `npx vitest run src/home/home-request-policy.test.ts src/home/home-memory-tools.test.ts src/home/home-memory.test.ts src/home/home-task-spend.test.ts` |
+| `src/home/home-request-policy.test.ts`, `home-memory-tools.test.ts`, `home-memory.test.ts`, `home-task-spend.test.ts` | cache marks on the view's first block and last line; every refusal reason's chat text is never classified as a transient provider error; typed unavailable tool results; serialized opens and coded ingest failure; usage deduplication and contradictory-usage refusal | none | `npx vitest run src/home/home-request-policy.test.ts src/home/home-memory-tools.test.ts src/home/home-memory.test.ts src/home/home-task-spend.test.ts` |
 
 Two limits apply:
 
