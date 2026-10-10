@@ -462,6 +462,11 @@ describe("Tron Home learned profile", () => {
     const observed = infer.mock.calls[0]![0].sourceText;
     expect(observed).toContain("ORDINARY-SENTENCE");
     expect(observed).not.toContain("HOME-ONLY-SENTENCE");
+    // A disabled Home's chapters remain Home history and stay excluded.
+    const homeSessionId = (await f.registry.homeOwner().status()).sessionId!;
+    await f.registry.homeOwner().disable();
+    expect(homeChapterObservationExcluded(() => f.registry.homeOwner())(homeSessionId)).toBe(true);
+    expect(homeChapterObservationExcluded(() => f.registry.homeOwner())(ordinary.id)).toBe(false);
     recordCase("home-chapter-not-observed", { observedInferences: infer.mock.calls.length });
   }, 120_000);
 

@@ -653,8 +653,8 @@ mutation.
   that composes the brief from the prompt.
 - **Observation.** Knowledge's automatic observation never reads a Home chapter. The
   Gateway passes `homeChapterObservationExcluded` as the observer's exclusion
-  predicate. A forked ordinary session is observed normally. A chapter of a disabled
-  Home is no longer Home's runtime profile and is observed like any ordinary session.
+  predicate. It excludes every chapter the Home record names, whether Home is enabled
+  or disabled. A forked ordinary session is observed normally.
 - **Costs and limits.** Each activation reads every personal note page by page to
   find the profile, so the read grows with the personal note count. A single personal
   note over Knowledge's 750 KB page budget makes the read fail, and the section then

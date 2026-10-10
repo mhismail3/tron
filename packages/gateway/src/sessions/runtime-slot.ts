@@ -1,4 +1,8 @@
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
+import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
+/** Delivery headroom counts the learned profile at its bound: the activation's section is
+ * read inside Home's prompt hook, after this estimate, and never exceeds it. */
+const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
@@ -8026,7 +8030,7 @@ export class RuntimeSlot {
                 safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
                   owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
             }, async () => {
-              const headroom = await this.homeRequestPolicy!.deliveryHeadroom(session, { role: "user", content: [{ type: "text", text }, ...(images ?? [])], timestamp: Date.now() }, `${session.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}`, ownership?.signal);
+              const headroom = await this.homeRequestPolicy!.deliveryHeadroom(session, { role: "user", content: [{ type: "text", text }, ...(images ?? [])], timestamp: Date.now() }, `${session.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}\n\n${HOME_PROFILE_HEADROOM_TEXT}`, ownership?.signal);
               let chapterBytes = 0;
               if (this.sessionFile) {
                 try { chapterBytes = statSync(this.sessionFile).size; }
