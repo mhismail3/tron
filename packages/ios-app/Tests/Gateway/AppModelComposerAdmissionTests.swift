@@ -25,6 +25,22 @@ struct AppModelComposerAdmissionTests {
         }
     }
 
+    @Test("a fork-inherited command row settled in its origin does not block live composer admission")
+    func inheritedCommandReceiptAdmission() async throws {
+        try await withHarness(supportsSkills: true) { model, _, target, scope in
+            var snapshot = try #require(model.authoritativeSnapshot(for: target.sessionID))
+            snapshot.transcript = try JSONDecoder.gateway.decode([TranscriptItem].self, from: Data("""
+            [{"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:test","title":"Test","confidence":"receipt"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"completed","settledInOriginSession":true,"resourceInvocation":{"source":"extension","name":"test","arguments":""}}}]
+            """.utf8))
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            model.replaceHostedAuthoritativeSnapshot(snapshot)
+            #expect(snapshot.transcript.first?.semantic?.settledInOriginSession == true)
+            #expect(model.admitsLiveSessionCommands(target))
+            #expect(model.composerDrafts.text(for: scope) == "keep this draft")
+        }
+    }
+
     @Test("unsupported skills are rejected before draft and submission mutation", arguments: [false, true])
     func unsupportedSkillRetainsDraft(explicitInvocation: Bool) async throws {
         try await withHarness(supportsSkills: false) { model, socket, target, scope in

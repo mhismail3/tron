@@ -1,5 +1,8 @@
 import SwiftUI
 import TronMobileCore
+#if HOSTED_TEST
+import UIKit
+#endif
 
 /// Value-driven composer presentation. Draft, route, transport, and canonical
 /// ownership remain outside this view and enter only through bindings/intents.
@@ -92,20 +95,10 @@ struct ChatComposerView: View {
                         if showsCatchUp { catchUpButton }
                     }
                 }
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: showsCatchUp
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: showsCatchUp)
                 // Visibility and glyph changes animate at the shared layout
                 // owner so the input bar participates in the glass morph too.
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: activityKind
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: activityKind)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
@@ -114,19 +107,19 @@ struct ChatComposerView: View {
             // removed child surfaces inside the already-installed space.
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.attachmentArrive(reduceMotion: reduceMotion)
                     : nil,
                 value: pendingAttachments.map(\.id)
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: selectedResource?.id
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: resourcePicker?.kind
             )
@@ -144,13 +137,9 @@ struct ChatComposerView: View {
             locallyExpiredRecentExpiry = expiryText
         }
         .background(alignment: .bottom) {
-            ChatBottomActivityBlur(
-                isActive: showsAmbientWorkingBlur,
-                keyboardVisible: keyboardVisible
-            )
-            .offset(y: ChatBottomActivityBlurLayout.translation(keyboardVisible: keyboardVisible))
-            .ignoresSafeArea(edges: .bottom)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: keyboardVisible)
+            ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+                .offset(y: ChatBottomActivityBlurLayout.translation)
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 
@@ -239,9 +228,7 @@ struct ChatComposerView: View {
             attachmentButton
             ZStack(alignment: .leading) {
                 if text.isEmpty && !isFocused {
-                    Text("Type here")
-                        .font(TronTypography.input)
-                        .foregroundStyle(Color.tronEmerald)
+                    ComposerPlaceholder()
                         .opacity(isTranscriptReady ? 1 : 0.38)
                         .padding(.leading, 2)
                         .padding(.vertical, 10)
@@ -279,6 +266,9 @@ struct ChatComposerView: View {
                     onSend: onSend,
                     onAbort: onAbort
                 )
+                #if HOSTED_TEST
+                .background(ChatComposerTrailingMotionProbe(mode: trailingMode))
+                #endif
                 .transition(
                     reduceMotion
                         ? .opacity
@@ -287,9 +277,7 @@ struct ChatComposerView: View {
             }
         }
         .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .spring(response: 0.32, dampingFraction: 0.82),
+            ChatMotion.composerStructuralResize(reduceMotion: reduceMotion),
             value: trailingMode
         )
         .frame(maxWidth: .infinity, minHeight: 40)
@@ -351,10 +339,51 @@ struct ChatComposerView: View {
                     .combined(with: .scale(scale: 0.82, anchor: .leading))
                     .combined(with: .opacity)
         )
+        #if HOSTED_TEST
+        .background(ChatCatchUpMotionProbe())
+        #endif
         .accessibilityLabel("Catch up")
         .accessibilityHint("Returns to the latest response and follows new messages")
     }
 }
+
+#if HOSTED_TEST
+final class ChatComposerTrailingMotionMarker: UIView {
+    var mode: ComposerTrailingMode?
+}
+
+struct ChatComposerTrailingMotionProbe: UIViewRepresentable {
+    let mode: ComposerTrailingMode
+
+    func makeUIView(context: Context) -> ChatComposerTrailingMotionMarker {
+        let view = ChatComposerTrailingMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.mode = mode
+        return view
+    }
+
+    func updateUIView(_ view: ChatComposerTrailingMotionMarker, context: Context) {
+        view.mode = mode
+    }
+
+    static func dismantleUIView(_ view: ChatComposerTrailingMotionMarker, coordinator: ()) {
+        view.mode = nil
+    }
+}
+
+final class ChatCatchUpMotionMarker: UIView {}
+
+struct ChatCatchUpMotionProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ChatCatchUpMotionMarker {
+        let view = ChatCatchUpMotionMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        return view
+    }
+    func updateUIView(_ view: ChatCatchUpMotionMarker, context: Context) {}
+}
+#endif
 
 struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]
@@ -421,7 +450,7 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         if reduceMotion {
-            withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true)) {
+            withAnimation(ChatMotion.attachmentArrive(reduceMotion: true)) {
                 presentedAttachments = target
             }
             return
@@ -439,7 +468,7 @@ struct ChatPendingAttachmentStrip: View {
             current: presentedAttachments.map(\.id),
             target: target.map(\.id)
         )
-        let animation = ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+        let animation = ChatMotion.attachmentArrive(reduceMotion: false)
         withAnimation(animation) {
             presentedAttachments.removeAll { !targetIDs.contains($0.id) }
             if insertionIDs.isEmpty {
@@ -474,5 +503,44 @@ struct ChatPendingAttachmentStrip: View {
             withAnimation(animation) { presentedAttachments = target }
             reconciliationTask = nil
         }
+    }
+}
+
+/// The empty, unfocused composer's prompt. It exists only while visible, so
+/// its state is recreated each time it reappears (after a send or clearing the
+/// draft): each appearance picks one random line and keeps it until hidden.
+private struct ComposerPlaceholder: View {
+    @State private var line = ComposerPlaceholder.lines.randomElement() ?? "Ask anything"
+
+    /// Keep lines short enough for one line beside the composer's buttons.
+    static let lines = [
+        "Ask anything",
+        "Ask me anything",
+        "Go on, ask",
+        "Spill it",
+        "What are we breaking today?",
+        "Say the magic words",
+        "Ask away, I don't bite",
+        "What's the plan, boss?",
+        "Got a wild idea?",
+        "Make me useful",
+        "Hit me",
+        "Let's ship something",
+        "Any bugs to squash?",
+        "No question too weird",
+        "Okay, what now?",
+        "Type something brilliant",
+        "I was promised tasks",
+        "Ready when you are",
+        "Your wish, my command",
+        "Ask before you overthink",
+    ]
+
+    var body: some View {
+        Text(line)
+            .font(TronTypography.input)
+            // Typed text is full emerald; the prompt reads as a dimmer hint.
+            .foregroundStyle(Color.tronEmerald.opacity(0.55))
+            .lineLimit(1)
     }
 }

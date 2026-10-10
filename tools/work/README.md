@@ -206,7 +206,7 @@ merges and silently drop the work.
 
 ### Base failure modes
 
-`test_claim.py`, `test_land.py`, `test_cleanup.py` and `test_verify.py` check these against real
+`test_claim.py`, `test_land*.py`, `test_cleanup.py` and `test_verify.py` check these against real
 repositories, local bare remotes and the fake `gh`. Each module builds its repository
 history once and every test copies it (`repo_template.py`), so setup costs no per-test Git
 processes while each test keeps its own repositories. The land fixtures disable
@@ -322,6 +322,15 @@ configurations and Node test scripts.
    with a positive integer; `--jobs 1` runs sequentially. The bound does not
    replace the native tools' live-memory admission or leases: exit 73 remains
    a refusal, never an automatic retry, and lease waits count in check time.
+   A check marked `"heavy": true` in `.github/work.json` also takes one of
+   `verify.heavySlots` host-wide slots (default `max(1, CPUs // 8)`), held as
+   flock'd files in the git common directory, so every worktree and session on
+   the host shares them. A check waiting for a slot prints
+   `waiting for a heavy slot`, its wait counts in its wall time, and independent
+   checks keep running. Heavy checks receive `VERIFY_CPU_SHARE` (CPUs divided by
+   the slot count); it can only lower the Gateway's Vitest width (at most 4). Slots are released
+   when a check's process group is retired. Heavy flags and the slot count are
+   execution choices, so they do not change the configuration hash.
    Checks sharing an optional `exclusiveGroup` name in `.github/work.json`
    never overlap within one invocation. Optional nonempty `exclusivePaths`
    restricts membership to diffs matching those globs (and requires a group).
@@ -438,7 +447,8 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 
 - **Gateway** is one check whose globs cover every build and test input:
   sources, dependencies, TypeScript and Vitest configuration, scripts, fixtures,
-  protocol fixtures and the pinned Node version. A lockfile change merged from
+  protocol fixtures, the pinned Node version, and the pi-subagents pin and
+  artifacts that its managed-subagents suites load. A lockfile change merged from
   the base branch therefore reruns it. It runs `npm ci`, the Pi SDK cohort check
   and the build, then `vitest related` when every changed Gateway path is
   existing source or test support. That related selection runs twice, once per
@@ -523,6 +533,14 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   CI-workflow, unknown and empty path sets run the infrastructure suite. If the
   base commit cannot be resolved or path classification fails, the workflow
   runs it. This does not change CI's hosted iOS unit suite.
+- **Work tooling** (`work-tooling`, and CI's "Test the work tooling" step) runs
+  `tools/work/run_tests.py`: one `python3 -m unittest` process per `test*.py`
+  module, `min(4, CPUs)` at a time (`WORK_TEST_JOBS` overrides). It prints each
+  module's result in name order, shows the full output of a failing module, and
+  exits non-zero if any module failed. The check is not `heavy`: its modules
+  spawn Python and Git processes, not a native build or simulator, so they hold
+  no `verify.heavySlots` slot. `test_run_tests.py` covers the failure report and
+  interrupt retirement.
 - **The related-issue check** (`.agents/skills/tron-work/related-issues.js`)
   has its own `work-related-issues` check, a Node test that runs the script as
   codemode does against a Jev stand-in enforcing Jev's request bounds.
@@ -642,7 +660,7 @@ unrelated Gateway source does not.
     changed/missing/symlink snapshots. Public evidence repositories and upload
     errors leave no media comment or success status. The fake-gh boundary is not
     live GitHub upload proof. Repeat with
-    `python3 -m unittest discover -s tools/work`; retain its output alongside the
+    `python3 tools/work/run_tests.py`; retain its output alongside the
     verify receipt/logs for the tested commit.
 
 ## `dashboard`
@@ -1216,7 +1234,7 @@ resumed by a session that claims it.
 
 ### Failure modes
 
-`test_land.py` checks these against real temporary repositories, local bare
+The `test_land*.py` modules check these against real temporary repositories, local bare
 remotes and a fake `gh` (`WORK_GH`) that keeps pull request, check, issue and
 Project state and records every call. The live E2E covers GitHub itself.
 
@@ -1310,7 +1328,7 @@ Project state and records every call. The live E2E covers GitHub itself.
     irreducible part and then the check, and the handoff comment carries both;
     a resumed land compares that whole section with the merged body, so a
     resume cannot quietly drop or change the irreducible part.
-79. **A malformed bug summary is published or merged.** `test_land.py` runs
+79. **A malformed bug summary is published or merged.** `test_land_pull_body.py` runs
     the real `cli.py land` process against its isolated Git/fake-GitHub fixture.
     It refuses missing or empty sections (including headings/content hidden in
     comments, a sibling heading with no section body, empty fenced blocks,
@@ -1383,7 +1401,12 @@ A worktree is provably done when all of these hold:
   rebase, cherry-pick, revert or bisect in progress;
 - every ignored file matches a `cleanup.regenerableIgnored` glob. These are
   Git `glob` pathspecs: `*` stays within one path segment and `**` crosses
-  segments. Any other ignored file keeps the worktree and is named;
+  segments. Any other ignored file keeps the worktree and is named. A nested
+  Git checkout, which Git lists as one `dir/` entry, matches by its own path,
+  and is regenerable only while it is clean and re-fetchable: no uncommitted,
+  untracked or ignored file, and no commit that no remote-tracking branch
+  contains (SwiftPM's checkouts under DerivedData are). Otherwise it keeps the
+  worktree and is named with its reason;
 - no process has its working directory inside the worktree (`lsof`), other
   than `cleanup` and its ancestors when the worktree is the one `cleanup` was
   started from. When `lsof` fails, nothing counts as proven.
@@ -1452,7 +1475,8 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     worktree.
 54. **Local data is lost with the worktree.** Modified, staged or untracked
     files, a non-regenerable ignored file, an operation in progress, or a lock
-    keeps it. Ignored files that match the regenerable globs do not.
+    keeps it. Ignored files that match the regenerable globs do not, and a
+    nested checkout that matches them keeps it while it is not clean (88-90).
 55. **A live process loses its working directory.** Another process with its
     working directory inside keeps the worktree, and so does an `lsof` that
     fails. The caller's own shell does not block its own cleanup, but an
@@ -1501,3 +1525,18 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
     no pull request the claim commit is the whole proof, so the remote claim
     branch keeps its lease on exactly that commit, as for a merged worktree, and
     a dry run of the same proof changes nothing.
+88. **A clean nested checkout keeps a merged worktree.** SwiftPM's checkouts
+    under a build root's `SourcePackages` are Git repositories nested in an
+    ignored directory. `test_cleanup.py` removes a merged worktree holding a
+    clean, remote-backed one. Git lists it as one `dir/` entry, so the regenerable
+    globs match its path in the cleanup code; a pathspec does not apply to it.
+89. **A nested checkout's local data is removed with it.** A nested checkout in
+    a regenerable build root with a modified or untracked file, or an ignored
+    file of its own, keeps the worktree and is named with its reason.
+90. **Commits only a local ref holds are removed with a nested checkout.** A
+    nested checkout whose commit no remote-tracking ref contains, on any local
+    branch and not only its HEAD, keeps the worktree.
+91. **A nested checkout outside the regenerable globs is removed.** A clean,
+    remote-backed nested checkout that no regenerable glob matches keeps the
+    worktree, and so does one under a directory whose name only resembles
+    `build` (`packages/build-tools/`).

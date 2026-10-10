@@ -63,12 +63,14 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   ten-second wakeup grid the energy plan fixed, and any inbound frame that
   reaches the app after a ping was sent is proof of liveness for that ping:
   messages, pongs and any other data all answer it. A probe's pong returns on
-  the downlink, behind whatever data the Gateway has already queued for the
+  the downlink, behind the bytes the Gateway has already written toward the
   phone, so a pong can miss its eight-second deadline on a link that is carrying
-  data. Such a probe retires the epoch only when nothing arrived after it was
-  sent, and the next grid tick re-arms the wait. Only a fully delivered frame
-  counts as that proof, so a frame whose last byte arrives later than that
-  deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
+  data. The Gateway writes a pong ahead of frames still waiting in its outbound
+  queue (`server-pong-backlog.integration.test.ts`), so that wait is bounded by
+  bytes in flight, not by the backlog. Such a probe retires the epoch only when
+  nothing arrived after it was sent, and the next grid tick re-arms the wait.
+  Only a fully delivered frame counts as that proof, so a frame whose last byte
+  arrives later than that deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
   proof at all and the epoch is still retired as `pong_timeout`. Dead-link
   detection stays within 18 seconds of the last inbound frame: no grid tick is
   later than 10 seconds after it and the deadline is 8 seconds after the tick.

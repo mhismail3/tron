@@ -36,7 +36,9 @@ category remain explicit text so color is never the only signal.
 Every compact command/context/tool/notification pill is payload-free: it shows the trusted
 producer when available, the command or semantic category, and lifecycle/status only.
 Arguments, notification bodies, context text, objectives, and arbitrary values live in the
-tappable detail sheet and may wrap there without expanding transcript rows.
+tappable detail sheet and may wrap there without expanding transcript rows. A command row a fork
+inherited from its origin shows the origin's settled lifecycle, with a "Settled in: Original session"
+metadata row in that sheet (`settledInOriginSession`).
 
 `custom_message` is model context regardless of whether it triggers a turn or is
 producer-visible. Producer-hidden messages remain hidden in ordinary chat.

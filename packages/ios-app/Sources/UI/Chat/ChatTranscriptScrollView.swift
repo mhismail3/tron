@@ -517,9 +517,7 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 promptReplacementProgress = 0
             }
             withAnimation(
-                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
-                    reduceMotion: reduceMotion
-                ),
+                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion),
                 completionCriteria: .logicallyComplete
             ) {
                 promptReplacementProgress = 1
