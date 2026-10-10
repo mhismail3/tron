@@ -30,10 +30,13 @@ describe("Home task managed provider", () => {
     const receipts = rows.filter(row => row.type === "custom" && row.customType === "tron.chat-invocation.v1"
       && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
     expect(receipts).toHaveLength(1);
-    expect(receipts[0].data).toMatchObject({ sessionId: run.sessionId, operationId: run.operationId,
-      lifecycle: ending === "report" ? "interrupted" : "completed" });
+    // A sealed report ends the run at its turn boundary: no aborted reply, no error.
+    expect(receipts[0].data).toMatchObject({ sessionId: run.sessionId, operationId: run.operationId, lifecycle: "completed" });
+    expect(receipts[0].data.errorCode).toBeUndefined();
+    expect(rows.some(row => row.type === "message" && row.message?.role === "assistant" && row.message.stopReason === "aborted")).toBe(false);
     expect(result.terminalEvidence?.outcome).toBe(ending === "report" ? "final" : "unknown");
     expect(f.notifications).toHaveLength(1);
-    expect(f.notifications[0]).toMatchObject({ kind: "agent_finished", title: "Tron Home task", sessionId: result.homeId });
+    // The push names Home's openable chapter, which a tap can open.
+    expect(f.notifications[0]).toMatchObject({ kind: "agent_finished", title: "Tron Home task", sessionId: f.home.sessionId });
   }, 20_000);
 });

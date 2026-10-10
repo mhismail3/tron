@@ -81,6 +81,8 @@ export class HomeTaskReportOwner {
   }
 
   get controlsActive(): boolean { return this.admission !== undefined; }
+  /** The report is sealed: the run ends at its turn boundary and runs no more tools. */
+  get reportSealed(): boolean { return this.sealed !== undefined; }
   get acceptsSteering(): boolean { return !!this.admission && !this.sealed && !this.stopping; }
   /** Settlement releases execution callbacks with the lease, even when exact
    * Stop failed. Immutable evidence remains, but no late report can rewrite it. */
@@ -112,15 +114,16 @@ export class HomeTaskReportOwner {
     });
   }
 
+  /** Sealing ends the task without a stop: the runtime ends the run at this
+   * turn's boundary (`reportSealed`), so no further model request starts and the
+   * worker session shows no aborted reply. */
   tool(sessionId: () => string, operationId: () => string | undefined,
-    append: (report: HomeTaskReport) => Promise<string>, stop: () => void): ToolDefinition {
+    append: (report: HomeTaskReport) => Promise<string>): ToolDefinition {
     return { name: "report", label: "Report", description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards.",
       parameters: PARAMETERS, executionMode: "sequential",
       execute: async (_id, request) => {
         const entryId = await this.accept(sessionId(), operationId(), request, append);
-        // Never await abort inside the tool being joined by that abort.
-        stop();
-        return { content: [{ type: "text", text: "Task report sealed." }], details: { entryId } };
+        return { content: [{ type: "text", text: "Task report sealed." }], details: { entryId }, terminate: true };
       },
     };
   }

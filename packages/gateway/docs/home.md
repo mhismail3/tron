@@ -103,7 +103,8 @@ operation. The crossing entry and abort-settlement writes stay canonical; no tur
 tool dispatch, steering or follow-up is admitted while the stop settles. The receipt
 terminalizes as interrupted with `chapter-limit`, and the next admission rolls over.
 
-Gateway-owned stop owners (chapter limit, task report, task Stop, deadline) record
+Gateway-owned stop owners (chapter limit, task Stop, deadline, and a task report
+that must retire queued steering) record
 their reason on the live invocation before cancellation yields; a user Stop records
 only its intent. Every terminal observer reads that reason at the common receipt
 boundary, so a successful crossing is `chapter-limit`, never `user-abort`, whichever
@@ -683,7 +684,12 @@ admission. A task ID never replays an accepted prompt.
   Home identity and generation, session and operation. Cold
   construction checks the marker before loading executable resources. Missing or
   contradictory tasks are never recreated.
-- Task Stop (report, control or deadline) is terminal, unlike ordinary chat Stop,
+- A sealed `report` ends the task at that turn's boundary (Pi's `finishTurn`
+  `end`): no further model request starts, a later tool call in the same batch is
+  refused, and the run settles `completed` with no aborted reply. Only when
+  steering is still queued does the report take the task's exact stop, so that
+  input is retired rather than stranded.
+- Task Stop (control or deadline) is terminal, unlike ordinary chat Stop,
   which continues with queued steering. Accepted but unconsumed steers are removed
   with `task-stopped-before-delivery` receipts and never replayed. A steering
   preflight in progress is fenced by the sealed or stopping report owner and
@@ -929,9 +935,10 @@ continuations do not drain the inbox.
   stable identity. There is no retry or
   re-decision after restart, even past NotificationService's 24-hour dedupe. Push
   failure or quota refusal cannot reopen a
-  task or delay acknowledgement. The fixed-content hint routes to logical `home`,
-  qualified by machine ID, never to the old
-  worker or a sealed chapter.
+  task or delay acknowledgement. The fixed-content hint names Home's openable
+  chapter at push time (the chapter `home.status` reports as `openSessionId`),
+  qualified by machine ID, never the worker. NotificationService admits only a
+  route naming the notification's own session.
 
 `home.task.inbox` reports only a hashed event ID, state and coded reason;
 [observability.md](observability.md) owns its

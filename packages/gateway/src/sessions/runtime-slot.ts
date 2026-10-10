@@ -14,7 +14,7 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTurnDecision } from "@earendil-works/pi-agent-core";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
@@ -1848,6 +1848,7 @@ export class RuntimeSlot {
               providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
                 taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
+              reportSealed: () => this.taskWorker!.reportSealed,
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
@@ -1942,7 +1943,7 @@ export class RuntimeSlot {
                 && candidate.customType === HOME_TASK_REPORT && (candidate.data as { receiptId?: string }).receiptId === report.receiptId);
               if (!entry) throw new GatewayError("conflict", "Canonical task report is missing");
               return entry.id;
-            }, () => this.taskWorker!.requestStop(() => this.abort("agent", this.taskWorker!.identity.operationId, "task-report")))] : []),
+            })] : []),
         ] } : {}),
       });
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
@@ -1977,6 +1978,22 @@ export class RuntimeSlot {
           created.session,
           created.session.agent.prepareRequest,
         );
+      }
+      if (this.taskWorker) {
+        // A sealed report ends the task at its turn boundary, after the SDK's own
+        // boundary handling, so no further model request starts. Steering queued
+        // before the seal would be stranded by a quiet end, so it takes the task's
+        // exact stop, which retires queued input as not delivered.
+        const taskWorker = this.taskWorker;
+        const finishTurn = created.session.agent.finishTurn;
+        created.session.agent.finishTurn = async (turn, signal): Promise<AgentTurnDecision | undefined> => {
+          const decision = await finishTurn?.(turn, signal);
+          if (!taskWorker.reportSealed) return decision ?? undefined;
+          if (this.queuedMessages.length > 0) {
+            taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, "task-report"));
+          }
+          return { action: "end" };
+        };
       }
       this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
@@ -3233,10 +3250,14 @@ export class RuntimeSlot {
     const invocation = this.invocationForOperation(operationId);
     const sourceId = entry?.id ?? (invocation ? `terminal:${invocation.invocationId}` : operationId);
     const reason = assistant?.role === "assistant" ? assistant.stopReason : undefined;
+    // A task operation whose report is sealed ended at the report's tool boundary
+    // by design: that is its completion, not an unknown outcome.
+    const reportCompleted = reason === "toolUse" && this.taskWorker?.reportSealed === true
+      && this.taskWorker.identity.operationId === operationId;
     const outcome: AgentTerminalOutcome = this.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
       : reason === "error" ? "failed"
       : reason === "length" ? "limited"
-      : reason === "stop" ? "completed"
+      : reason === "stop" || reportCompleted ? "completed"
       : "unknown";
     // Observation belongs to the terminal boundary, before receipt I/O can
     // suspend and a phone can open/close the chat or a successor can start.

@@ -29,7 +29,7 @@ async function fixture() {
   await store.put(task, null);
   const { WakeInboxOwner } = await import("./home-wake-inbox.js");
   const pushes: unknown[] = []; const entries: any[] = [];
-  const options = { notify: async (input: unknown) => { pushes.push(input); return "queued"; },
+  const options = { notify: async (input: unknown) => { pushes.push(input); return "queued"; }, pushSession: () => "chapter-one",
     result: async () => ({ task: await store.read("task"), text: "immutable evidence" }),
     evidence: async () => entries };
   const owner = new WakeInboxOwner(store, options);
