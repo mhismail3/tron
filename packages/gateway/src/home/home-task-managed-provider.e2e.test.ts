@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("Home task managed provider", () => {
-  it.each(["report", "natural"] as const)("loads the managed provider into ordinary task workers but refuses execution (%s)", async ending => {
+  it.each(["report", "natural"] as const)("loads the managed provider into task workers and admits a launch the provider then rejects (%s)", async ending => {
     const f = await fixture(undefined, false, undefined, true);
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { action: "guide" }, { id: "managed-guide" })], { stopReason: "toolUse" }),
@@ -24,9 +24,10 @@ describe("Home task managed provider", () => {
     const rows = (await f.registry.readTaskEvidence(run.sessionId)) as any[];
     const tools = rows.filter(row => row.type === "message" && row.message?.role === "toolResult").map(row => row.message);
     expect(tools).toContainEqual(expect.objectContaining({ toolCallId: "managed-guide", isError: false }));
+    // The launch reaches the provider, which rejects the unknown agent itself: the task gate admits launches.
     expect(tools).toContainEqual(expect.objectContaining({ toolCallId: "managed-execution", isError: true,
-      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("Home tasks can't launch subagents yet") })]) }));
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.producer-refused", reason: "subagent-execution" }));
+      content: expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("missing-task-test-agent") })]) }));
+    expect(f.signals.filter(signal => signal.event === "home.task.producer-refused")).toEqual([]);
     const receipts = rows.filter(row => row.type === "custom" && row.customType === "tron.chat-invocation.v1"
       && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
     expect(receipts).toHaveLength(1);

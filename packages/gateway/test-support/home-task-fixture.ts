@@ -10,7 +10,7 @@ import { NotificationGrantStore } from "../src/notifications/grant-store.js";
 import type { PushRelayClient } from "../src/notifications/relay-client.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
-import { delegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
+import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
 
 // Registered runtime roots of the current test file. Each file's afterEach calls
 // disposeFixtures(), so a fixture is retired with the file that created it.
@@ -98,6 +98,8 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   if (managed) {
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
     vi.stubEnv("PI_SUBAGENTS_TEMP_ROOT", delegatedArtifactRoot(tronHome));
+    // Gateway startup creates the admitted root owner-only (gateway-main.ts); run artifacts under it are read only then.
+    await ensureDelegatedArtifactRoot(delegatedArtifactRoot(tronHome));
   }
   const managedSubagents = managed ? ManagedSubagents.activateForStartup(tronHome) : undefined;
   // Fixture runtimes never idle-evict; an omitted idle lifetime would make the cutoff NaN.
@@ -108,9 +110,13 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
   const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+    // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.
+    ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
     modelRuntimeFactory: async () => {
-      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      // Managed fixtures read the agent directory's models.json, as production does, so a
+      // scripted child model is registered for the worker's own subagent launches.
+      const runtime = await ModelRuntime.create({ modelsPath: managed ? join(agentDir, "models.json") : null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
     },
     broadcast: (_sessionId: string, topic: string, payload: unknown) => { events.push({ topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

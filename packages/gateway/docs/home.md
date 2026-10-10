@@ -835,23 +835,88 @@ default. The choice is never persisted with the task record.
   caller that opts in owns it; ordinary sessions and Automations do not. Expiry
   cancels the exact operation and waits for its terminal completion before reporting
   a joined stop. Task dispatch applies the seam before asynchronous prompt
-  preflight. No user-configurable limit exists.
+  preflight, and the same ceiling bounds the subagent join ([Subagent runs](#subagent-runs)).
+  No user-configurable limit exists.
 - Task workers load the same Tron-managed subagent provider as ordinary chats; Home
-  does not. In v1, task workers cannot run subagents, which keeps the 24-hour
-  guarantee for operation-owned work.
-- The first-party task extension refuses subagent executions (even `async:false`,
-  which the pinned configuration can force async), revival, mutating management and
-  the schedule tool. Only read-only management from the verified `0.76.1-tron.6`
-  provider is admitted: `guide`, `children.list`, `status`, `list`, `get`, `models`,
-  and supervisor `status`, `pending`, `list`. The blocking `bg_wait` is allowed and
-  is aborted and joined with the operation; `nonBlocking: true` is refused, since
-  its durable subscription can wake the session after report. Unknown versions or
-  owners refuse all subagent, supervisor and `bg_wait` calls. A later pin requires a
-  new explicit review before this gate changes. Nested codemode calls cross the same
-  gate.
+  does not. A worker may launch subagents, foreground or async. Every run its session
+  starts is owned by the task operation ([Subagent runs](#subagent-runs)).
+- The first-party task extension admits `subagent` launches, even `async:false`, which
+  the pinned configuration can force async, and the read-only management of the
+  verified `0.76.1-tron.6` provider: `guide`, `children.list`, `status`, `list`, `get`,
+  `models`, and supervisor `status`, `pending`, `list`. It admits `stop` and `interrupt`
+  only for a run this session's canonical history launched, addressed by `id` or
+  `runId` and never by `dir`. It refuses every other mutating management action
+  (steer, resume, create, worktree, schedule and the rest), revival, the schedule tool,
+  any launch that attaches a mission (`mission` other than `false`, or `missionId`,
+  since a mission outlives its run), and `bg_wait` with `nonBlocking: true`, whose
+  durable subscription can wake the session after report. The blocking `bg_wait` is
+  aborted and joined with the operation. Unknown versions or owners refuse all
+  subagent, supervisor and `bg_wait` calls. A later pin requires a new explicit review
+  before this gate changes. Nested codemode calls cross the same gate.
 - Trusted extensions are not a sandbox. If detached-work tracking still sees
-  task-session work after foreground settlement, the outcome is `unknown` with
+  task-session work after the subagent join, the outcome is `unknown` with
   `detached-work-outlived-task`, never a clean-termination claim.
+
+### Subagent runs
+
+A task owns every subagent run its worker session starts. The worker session is created
+for one task and never reused, so its runs end with the task. Ownership is canonical:
+a launch is a `subagent` call without an `action` that the gate admitted, and an async
+run is identified by the `asyncDir` in its launch result. Runs are never tracked by a
+slot-wide map that outlives the session.
+
+Per run, the states are:
+
+- **launching → running**: the admitted call returns the run's identity. A foreground
+  run is live inside that call; an async run is live from its published `asyncDir`.
+- **running → terminal**: the provider reports `complete`, `failed`, `partial`,
+  `stopped` or `rejected`, or a paused run has its process-terminal proof. A foreground
+  run ends when the operation abort reaches its tool signal.
+- **stop requested → stopped**: settlement calls the provider's own `stop` for each live
+  async run through the installed controller. An accepted stop is counted, and the run
+  becomes terminal once the provider writes `stopped`.
+- **unjoinable**: the run is still live at the bound, or its stop was refused and it stayed
+  live. The task is `unknown` with `detached-work-outlived-task`. A run is never reported
+  as stopped unless it was joined.
+
+A workflow can complete while the children it launched in their own runners keep running.
+Such a child is live work of its run, under the same liveness rule as a live run: it keeps
+the session running, blocks drain and eviction, and keeps the task join waiting. Its state
+is read from its own `status.json`. Settlement stops a completed workflow's live child by
+its run id, because the workflow itself can no longer be stopped. A live workflow is stopped
+as itself, and the provider's workflow stop reaches its children.
+
+Settlement runs in this order: operation terminal; report stop joined; the Gateway stops
+and joins the live async runs and live workflow children; the worker's settlement fact is
+appended; the evidence cut; the outcome. The join waits until no run is live. Its bound
+is one minute after the stops are requested, or the task's 24-hour deadline (which stays
+armed through settlement) if that comes first; after the bound, the join waits one
+disposal grace (5 s) more. A stopped runner settles within seconds, so a run still live
+then (a refused stop, an unreadable status) keeps the detached outcome rather than
+holding the sealed task open. The settlement fact is the worker's canonical custom entry
+`tron-home-task-subagents` with `{ receiptId: "subagents:<operationId>", operationId,
+stoppedAtEnd }`. It is written only when the task launched async runs, so its absence
+proves zero Gateway stops. Its value is `null` unless every stop was accepted and every
+run was joined.
+
+The counts are projections read from canonical evidence and are never persisted with the
+task record:
+
+- `started` counts the subagent launches the task admitted. A call the gate blocked never
+  counts. A provider that rejects an admitted launch before creating a run still counts,
+  because its result carries no run identity to tell the two apart.
+- `stoppedAtEnd` counts the async runs and workflow children the Gateway stopped at
+  settlement. Foreground runs end with the operation abort and are not Gateway stops.
+
+`home.taskStatus` returns `subagents: { started, stoppedAtEnd }`. `stoppedAtEnd` is
+`null` while async work is unsettled or its stops cannot be proven. Without async runs,
+it is `0`. Every Home result header states both counts. Settlement emits
+`home.task.subagents`.
+
+Provider completion notices reach a task worker as context of its operation. No turn
+starts after settlement: the provider suppresses idle wakes, and no Gateway guard is
+added. The no-turn checks in `home-task-subagents.e2e.test.ts` cover that property.
+
 
 **The `report` tool** takes `resultId`, a claimed `outcome` (`progress`,
 `needs-input`, `final`), `text` (at most 64 KiB UTF-8) and `evidence` (at most 64
@@ -868,8 +933,9 @@ latest-assistant pointer.
 **Outcomes.** A final reply without a report is `unknown`. A provider length stop or
 a joined deadline without a report is `limited`. The last assistant entry is
 evidence only. A failed exact stop is `unknown` (`deadline-stop-failed`,
-`task-stop-failed`, `report-stop-failed`). Admission alone never establishes
-success.
+`task-stop-failed`, `report-stop-failed`). A subagent run still live after the join is
+`unknown` (`detached-work-outlived-task`), whatever the report says. Admission alone
+never establishes success.
 
 **Spend.** Canonical usage is deduplicated by entry identity over the operation's
 history and persisted before live status and settlement. Contradictory duplicates,
@@ -897,7 +963,13 @@ bounded or hashed references after durable publication.
 
 Startup retires abandoned `pending` and `active` records before task admission
 opens. It does not construct a worker, resume an operation, recreate callbacks or
-replay a prompt or tool. Pending identities, including authorization consumed before
+replay a prompt or tool. It stops no subagent run, since it has no runtime to stop one
+through. Each async run of the abandoned task is checked against its own `status.json`
+under the admitted artifact root: `complete`, `failed`, `partial`, `stopped` or `rejected`
+has ended; any other state, or an unreadable status, is live. Each runner-backed workflow
+child of that run is checked the same way under its own run directory. A live run or child
+makes the outcome `unknown` with `detached-work-outlived-task`, even with a valid report. A
+malformed settlement fact refuses the evidence rather than being guessed. Pending identities, including authorization consumed before
 worker binding, become `unknown`. Scopes and unspent grants stay byte-identical, and
 restart never initializes, enables, renews, revokes or re-stamps authority.
 
@@ -950,7 +1022,7 @@ work. One per-process result is shared by every task surface.
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
 - **`home.taskStatus`** returns the record, the exact active operation, spend, the
-  immutable result and `workerModel`: the worker session's current `{ provider, id }`, read
+  immutable result, `workerModel` and `subagents` (see [Subagent runs](#subagent-runs)): the worker session's current `{ provider, id }`, read
   from its canonical `model_change` entries. A running worker answers from its live slot; a
   settled one reads its conversation file, through the same evidence cut as recovery. It is
   `null` before the worker records a model or when it has no conversation file. It is a read
@@ -1332,6 +1404,8 @@ without a retained artifact.
 | `src/home/home-session-recovery.test.ts` | reserved-chapter scan: absence proven only after a complete scan; duplicate IDs; path mismatch; uninspectable entries; enumeration errors | none | `npx vitest run src/home/home-session-recovery.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
+| `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
+| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows stopped on report and on Stop, and a child that outlives its completed workflow stopped by run id; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |

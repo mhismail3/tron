@@ -235,8 +235,11 @@ it("attributes real workflow completion and supervisor delivery to their managed
     expect.soft(count(tree)).toBe(64);
     facts.boundedChildren = covered?.children;
     facts.boundedTree = tree;
-    await writeFile(join(parityDir, "status.json"), JSON.stringify({ ...running, state: "completed", endedAt: status.endedAt,
-      lifecycleProjection: { ...running.lifecycleProjection, root: { ...running.lifecycleProjection.root, state: "complete", endedAt: status.endedAt } } }));
+    // A completed workflow's children are terminal: the provider's real terminal steps
+    // and header children replace the running fixture rows, so no child stays live.
+    await writeFile(join(parityDir, "status.json"), JSON.stringify({ ...running, state: "completed", endedAt: status.endedAt, steps: status.steps,
+      lifecycleProjection: { ...running.lifecycleProjection, root: { ...running.lifecycleProjection.root, state: "complete", endedAt: status.endedAt,
+        children: status.lifecycleProjection.root.children } } }));
     await slot.discoverExtensionArtifact(parityDir);
     facts.receipts = entries.filter(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4");
     const decodedDeliveries = contextDeliveryMetadataByEntry(entries);

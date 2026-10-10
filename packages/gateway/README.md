@@ -1089,7 +1089,9 @@ record, RPC shapes, chapters, runtime profile, memory, task delegation and termi
   Sealed chapters stay readable and refuse mutation.
 - **Tasks.** Home is delegate-only for project work. `delegate` admits finite work once, in a trusted project,
   through the neutral owned-session boundary. Workers keep normal project capabilities plus the explicit `report`
-  tool. v1 refuses subagent execution and revival, scheduled work and durable `bg_wait` wake subscriptions.
+  tool. Workers may launch subagents; the task stops and joins every async run it started before it settles, so
+  the 24-hour deadline covers subagent work. v1 refuses revival, mutating management of runs the task did not
+  start, mission launches, scheduled work and durable `bg_wait` wake subscriptions.
   Reports seal exact canonical evidence, never the latest assistant reply; a missing report is `limited` or
   `unknown`. A fixed internal 24-hour deadline cancels and joins operation-owned work. Usage is reported as tokens only,
   and unknown tracked detached work yields `unknown`, never a clean-stop claim.
@@ -3825,6 +3827,10 @@ they observe missing directories' creation and later child-only writes without a
 root event.
 Edges retire only when the root removes them or its observation retires. Child
 watcher errors stay local and never stop the independent root watcher.
+A workflow can complete while its runner-backed children keep running. The root observation
+then stays open, and the live child counts as live work of its run in the one liveness rule
+shared by the dashboard, drain, eviction, and Home task settlement. A terminal root's lifecycle
+never moves; only its child rows update until every child is terminal.
 An explicitly empty recent-tools list with no total represents zero tools before the
 first tool event. The header supplies ownership, not the compact widget's labels,
 ordering or eight-child limit.

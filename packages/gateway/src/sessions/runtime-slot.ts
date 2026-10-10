@@ -52,6 +52,7 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -175,6 +176,19 @@ type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE
 // Disposable exact child subscriptions travel with the admitted read, never
 // with canonical activity data or a separate slot-wide child registry.
 const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
+
+/** Workflow keys of a status's runner-backed children (`async` edges). Each has its
+ * own run directory and status, the authority for its state; an edge without `async`
+ * has none and ends with its workflow. */
+function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlySet<string> {
+  const keys = new Set<string>();
+  const steps = Array.isArray(status.steps) ? status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN) : [];
+  for (const step of steps) {
+    const edge = step as Record<string, unknown> | null;
+    if (edge?.async === true && typeof edge.workflowKey === "string") keys.add(edge.workflowKey);
+  }
+  return keys;
+}
 
 function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
   Object.defineProperty(value, EMBEDDED_LIFECYCLE_ARTIFACT, { configurable: false, enumerable: false, value: true, writable: false });
@@ -768,6 +782,9 @@ export class RuntimeSlot {
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
+  /** Task-end joins waiting for a detached run's state to change. Each join owns its
+   * entry and removes it when it stops waiting. */
+  private readonly detachedWorkWaiters = new Set<() => void>();
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
    * facts; producer timestamps are display evidence only. */
   private readonly extensionActivitySequences = new Map<string, number>();
@@ -782,6 +799,9 @@ export class RuntimeSlot {
     /** Gateway-observed instant of this run's paused process-terminal proof;
      * absent while the run owns live processes or is not paused. */
     pausedProcessQuiescentAt?: string;
+    /** Workflow keys of the children this run launched in their own runners (see
+     * `detachedWorkflowChildKeys`). Only these may keep the run live as children. */
+    detachedChildKeys?: ReadonlySet<string>;
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
@@ -1511,12 +1531,36 @@ export class RuntimeSlot {
   }
 
   /** One liveness rule for detached extension work, shared by dashboard
-   * accounting and administrative drain. */
+   * accounting, administrative drain and task settlement. An async run is live
+   * while it is, and also while a workflow child it launched is: a workflow can
+   * complete while its detached children keep running. */
   private extensionActivityOwnsLiveWork(activity: ExtensionRunActivity): boolean {
+    return this.extensionActivityOwnsOwnLiveWork(activity) || this.liveWorkflowChildren(activity).length > 0;
+  }
+
+  private extensionActivityOwnsOwnLiveWork(activity: ExtensionRunActivity): boolean {
     const state = activity.lifecycle?.state;
     if (state === "queued" || state === "running") return true;
     if (state !== "paused") return false;
     return this.pausedProcessSettlementAt(activity) === undefined;
+  }
+
+  /** Live runner-backed workflow children of a run, in the states of the run itself.
+   * A child's state is its lifecycle when projected, else its coarse status. Their
+   * paused-process proof is not projected, so a paused child stays live. */
+  private liveWorkflowChildren(activity: ExtensionRunActivity): ExtensionRunChild[] {
+    const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
+    if (!detached?.size) return [];
+    return activity.children.filter(child => {
+      const state = child.lifecycle ?? child.status;
+      return detached.has(child.producerId ?? child.id) && (state === "queued" || state === "running" || state === "paused");
+    });
+  }
+
+  /** A run stays observed while it is running or a runner-backed child is live, so the
+   * child's own status change still reaches the projection and the join. */
+  private extensionActivityWatchRequired(activity: ExtensionRunActivity): boolean {
+    return activity.status === "running" || this.liveWorkflowChildren(activity).length > 0;
   }
 
   /** The Gateway-admitted settlement instant of one paused activity, recorded
@@ -1877,6 +1921,7 @@ export class RuntimeSlot {
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
                 taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
               reportSealed: () => this.taskWorker!.reportSealed,
+              ownsSubagentRun: runId => this.ownsSubagentRun(runId),
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
@@ -2898,6 +2943,7 @@ export class RuntimeSlot {
       this.liveActivityRevision += 1;
       this.extensionActivityAsOf = new Date().toISOString();
       this.syncSubagentProcesses(activity);
+      this.notifyDetachedWork();
     }
     return visibility;
   }
@@ -5166,6 +5212,9 @@ export class RuntimeSlot {
         // watcher nor its other authoritative edges are retired by that error.
         watcher.on("error", () => tracked.onChange("change", "status.json"));
         tracked.children.set(directory, watcher);
+        // The root read that named this child ran before it was subscribed, so a
+        // terminal write in between would be lost. Re-read once after subscribing.
+        tracked.onChange("change", "status.json");
       } catch {
         // Optional observation cannot refuse otherwise valid root evidence.
       }
@@ -5728,6 +5777,7 @@ export class RuntimeSlot {
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership?.terminal),
         ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
+        detachedChildKeys: detachedWorkflowChildKeys(raw),
       });
       if (!ownershipAccepted) {
         this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
@@ -5741,15 +5791,12 @@ export class RuntimeSlot {
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
       this.upsertExtensionActivity(activity);
-      if (activity.status === "running" && ownershipAccepted) {
-        this.startExtensionActivityWatcher(toolCallId, realAsyncDir);
-      } else {
-        if (activity.status !== "running") {
-          void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
-          claimedReceipt = undefined;
-        }
-        this.stopExtensionActivityWatcher(toolCallId);
+      if (activity.status !== "running") {
+        void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
+        claimedReceipt = undefined;
       }
+      if (this.extensionActivityWatchRequired(activity)) this.startExtensionActivityWatcher(toolCallId, realAsyncDir);
+      else this.stopExtensionActivityWatcher(toolCallId);
       this.trimExtensionActivities();
       this.publishExtensionActivity(activity);
       return "accepted";
@@ -5811,7 +5858,7 @@ export class RuntimeSlot {
 
   private bindExtensionRunOwnership(
     runId: string,
-    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string },
+    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string; detachedChildKeys?: ReadonlySet<string> },
   ): boolean {
     const existing = this.extensionRunOwnership.get(runId);
     if (existing && existing.toolCallId !== binding.toolCallId) {
@@ -5819,6 +5866,7 @@ export class RuntimeSlot {
       if (!existing.toolCallId.startsWith("subagent:") || binding.toolCallId.startsWith("subagent:")) return false;
     }
     const asyncDir = existing?.asyncDir ?? binding.asyncDir;
+    const detachedChildKeys = binding.detachedChildKeys ?? existing?.detachedChildKeys;
     this.extensionRunOwnership.set(runId, {
       toolCallId: binding.toolCallId,
       ...(asyncDir ? { asyncDir } : {}),
@@ -5828,6 +5876,7 @@ export class RuntimeSlot {
       ...(binding.pausedProcessQuiescentAt
         ? { pausedProcessQuiescentAt: binding.pausedProcessQuiescentAt }
         : {}),
+      ...(detachedChildKeys ? { detachedChildKeys } : {}),
     });
     return true;
   }
@@ -6047,12 +6096,15 @@ export class RuntimeSlot {
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       const terminalStates = ["completed", "failed", "stopped", "rejected"];
       if (ownership.terminal && artifactState === "running" && !superseded) return;
-      if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running") {
-        const requestedTerminal = artifactState === "failed" ? "failed" : "completed";
-        if (requestedTerminal !== previous.lifecycle?.state) return;
-      }
+      // A latched terminal state is final: a re-read of a kept-open run may restate
+      // it (its workflow children still report), never move it to another state.
+      if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running"
+        && normalized.lifecycleState !== previous.lifecycle?.state) return;
+      // A kept-open run restates its latched terminal lifecycle; only its children move.
+      const latchedState = previous.lifecycle?.state !== undefined && terminalStates.includes(previous.lifecycle.state)
+        ? previous.lifecycle.state : undefined;
       const artifactValue = ownership.terminal
-        ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous.status === "failed" ? "failed" : "completed" })
+        ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: latchedState ?? (previous.status === "failed" ? "failed" : "completed") })
         : superseded
           ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "stopped", supersededByRunId: recoveryClaim!.replacementRunId })
           : raw;
@@ -6102,6 +6154,7 @@ export class RuntimeSlot {
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership.terminal),
         ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
+        detachedChildKeys: detachedWorkflowChildKeys(raw),
       });
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
@@ -6119,11 +6172,11 @@ export class RuntimeSlot {
         }
       }
       if (activity.status !== "running") {
-        this.stopExtensionActivityWatcher(toolCallId);
         claimedReceiptOwner = undefined;
         claimedReceiptActivityId = undefined;
         void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
       }
+      if (!this.extensionActivityWatchRequired(activity)) this.stopExtensionActivityWatcher(toolCallId);
     } catch (error) {
       if (claimedReceiptActivityId) this.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
       // The next filesystem event or normal snapshot retries; warning is bounded.
@@ -6500,6 +6553,7 @@ export class RuntimeSlot {
       extensionActivityAsOf: this.extensionActivityAsOf,
     }));
     this.publishProcessesForToolCall(activity.toolCallId);
+    this.notifyDetachedWork();
     // Detached lifecycle updates do not rebuild the full transcript snapshot,
     // but they are authoritative live catalog activity and must reorder rows.
     this.publishSummary();
@@ -7443,23 +7497,117 @@ export class RuntimeSlot {
     }
 
     if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
-    const toolCallId = `tron-stop-${randomUUID()}`;
+    await this.controlSubagentRun(tool, { action: "stop", id: route.runId, childId: route.childId });
+  }
+
+  /** The provider's own control for one run, through the exact installed controller.
+   * A rejection is an error: the caller must not assume the run was stopped. */
+  private async controlSubagentRun(tool: ToolDefinition, input: Record<string, unknown>): Promise<void> {
+    const toolCallId = `tron-control-${randomUUID()}`;
     const signal = new AbortController().signal;
-    const result = await tool.execute(
-      toolCallId,
-      { action: "stop", id: route.runId, childId: route.childId },
-      signal,
-      undefined,
-      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal),
-    );
+    const result = await tool.execute(toolCallId, input, signal, undefined,
+      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal));
     if ((result as typeof result & { isError?: boolean }).isError === true) {
       const message = result.content.find(content => content.type === "text")?.text;
-      throw new GatewayError(
-        "conflict",
-        message?.slice(0, 512) || "The subagent controller rejected the stop request",
-        true,
-      );
+      throw new GatewayError("conflict", message?.slice(0, 512) || "The subagent controller rejected the request", true);
     }
+  }
+
+  /** Whether this session's canonical history launched the run. Task controls use it
+   * to refuse a stop or interrupt of any run the task did not start. */
+  ownsSubagentRun(runId: string): boolean {
+    return this.canonicalExtensionRunFacts().has(runId);
+  }
+
+  /** Task-end settlement of this worker's async subagent runs. Every live async run is
+   * stopped through the provider's own stop control, then the join waits until no run
+   * is live, bounded by the operation deadline or the stop-join bound, whichever comes
+   * first, and one disposal grace after it. The
+   * fact is appended only when the task launched async runs, so an absent fact proves
+   * zero Gateway stops. `stoppedAtEnd` is null unless every stop was accepted and the
+   * join completed. */
+  async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null }> {
+    if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
+    const launched = homeTaskSubagentLaunches(this.canonicalSessionEntries());
+    const targets = await this.asyncStopTargets();
+    if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0 };
+    const tool = this.trustedSubagentController();
+    const stops = await Promise.allSettled(targets.map(async runId => {
+      if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
+      await this.controlSubagentRun(tool, { action: "stop", id: runId });
+    }));
+    // The join is also bounded once stops are requested: a run whose stop never lands
+    // must not hold the sealed task open for the rest of its 24-hour deadline.
+    const stopJoin = new AbortController();
+    const stopJoinTimer = setTimeout(() => stopJoin.abort(), HOME_TASK_SUBAGENT_STOP_JOIN_MS);
+    const joined = await this.joinDetachedWork(AbortSignal.any([deadline, stopJoin.signal])).finally(() => clearTimeout(stopJoinTimer));
+    const stoppedAtEnd = joined && stops.every(stop => stop.status === "fulfilled") ? stops.length : null;
+    await this.persistCanonicalCustomEntry(HOME_TASK_SUBAGENTS,
+      { receiptId: subagentsReceiptId(operationId), operationId, stoppedAtEnd }, subagentsReceiptId(operationId), this.operationWork.get(operationId));
+    return { stoppedAtEnd };
+  }
+
+  /** The run ids settlement stops through the provider. A live run is stopped as itself,
+   * and a workflow's stop reaches its children. A run that completed while runner-backed
+   * children stay live cannot be stopped by its own state, so each live child is named by
+   * its run id from the run's status. */
+  private async asyncStopTargets(): Promise<string[]> {
+    const targets: string[] = [];
+    for (const activity of this.extensionActivities.values()) {
+      const runId = activity.runId;
+      const asyncDir = runId === undefined ? undefined : this.extensionRunOwnership.get(runId)?.asyncDir;
+      if (runId === undefined || asyncDir === undefined || !this.extensionActivityOwnsLiveWork(activity)) continue;
+      if (this.extensionActivityOwnsOwnLiveWork(activity)) { targets.push(runId); continue; }
+      targets.push(...await this.liveWorkflowChildRunIds(asyncDir, this.liveWorkflowChildren(activity)));
+    }
+    return targets;
+  }
+
+  /** Run ids of the named live workflow children, read from the run's own status. A status
+   * that cannot be read names no child: the join then waits for the bound and the task keeps
+   * the detached outcome, never a clean one. */
+  private async liveWorkflowChildRunIds(asyncDir: string, children: readonly ExtensionRunChild[]): Promise<string[]> {
+    const status = await this.readExtensionStatusArtifact(asyncDir, false).catch(() => undefined);
+    if (!Array.isArray(status?.steps)) return [];
+    const live = new Set(children.map(child => child.producerId ?? child.id));
+    return status.steps.flatMap((step: unknown): string[] => {
+      const edge = step as Record<string, unknown> | null;
+      return edge?.async === true && typeof edge.runId === "string" && typeof edge.workflowKey === "string" && live.has(edge.workflowKey)
+        ? [edge.runId] : [];
+    });
+  }
+
+  /** Waits until no detached run is live. The wait is bounded by the operation's
+   * deadline, then by one disposal grace after it fires. A run still live then is
+   * not joined, and the caller keeps the detached outcome. */
+  private async joinDetachedWork(deadline: AbortSignal): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let resolveBound!: (value: "bound") => void;
+    const bound = new Promise<"bound">(resolve => { resolveBound = resolve; });
+    const start = (): void => { timer = setTimeout(() => resolveBound("bound"), DEFAULT_RUNTIME_DISPOSAL_GRACE_MS); };
+    if (deadline.aborted) start();
+    else deadline.addEventListener("abort", start, { once: true });
+    try {
+      while (this.hasDetachedDashboardWork()) {
+        let wake!: () => void;
+        const changed = new Promise<"changed">(resolve => { wake = () => resolve("changed"); });
+        this.detachedWorkWaiters.add(wake);
+        const outcome = await Promise.race([changed, bound]);
+        this.detachedWorkWaiters.delete(wake);
+        if (outcome === "bound") break;
+      }
+    } finally {
+      deadline.removeEventListener("abort", start);
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    return !this.hasDetachedDashboardWork();
+  }
+
+  /** Every extension-activity publication may end a join's wait. */
+  private notifyDetachedWork(): void {
+    const waiters = [...this.detachedWorkWaiters];
+    this.detachedWorkWaiters.clear();
+    for (const wake of waiters) wake();
   }
 
   publishSnapshot(): void {

@@ -109,6 +109,7 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { HomeOwner } from "../home/home-owner.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
+import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
@@ -4695,13 +4696,29 @@ export class RuntimeRegistry {
    * answers from its slot's canonical entries; a settled one from the same evidence cut
    * recovery reads. Undefined before the worker has recorded a model or has no file. */
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
-    const live = this.slots.get(sessionId);
-    let entries: FileEntry[] = [];
-    if (live) entries = live.canonicalSessionEntries();
-    // A worker that never wrote a conversation has no known file, so nothing was recorded.
-    else if (await this.homeSessionFile(sessionId)) entries = await this.taskEvidenceFileCut(sessionId) ?? [];
-    const change = entries.findLast(entry => entry.type === "model_change");
+    const change = (await this.taskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
+  }
+
+  /** The worker's subagent facts for one operation, read like its model. */
+  async taskWorkerSubagents(sessionId: string, operationId: string): Promise<HomeTaskSubagents> {
+    return homeTaskSubagentsProjection(await this.taskWorkerEntries(sessionId), operationId);
+  }
+
+  /** Cold reconciliation proves a task's async runs ended from their status files.
+   * Without the admitted artifact root nothing is provable, so the runs are live. */
+  taskSubagentRunsSettled(asyncDirs: readonly string[]): Promise<boolean> {
+    const root = this.options.delegatedArtifactRoot;
+    return root === undefined ? Promise.resolve(asyncDirs.length === 0) : homeTaskSubagentRunsSettled(asyncDirs, root);
+  }
+
+  /** The live session's branch, or the settled conversation's evidence cut. A worker
+   * that never wrote a conversation has no known file, so nothing was recorded. */
+  private async taskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
+    const live = this.slots.get(sessionId);
+    if (live) return live.canonicalSessionEntries();
+    if (await this.homeSessionFile(sessionId)) return await this.taskEvidenceFileCut(sessionId) ?? [];
+    return [];
   }
 
   /** Shared live/cold task evidence boundary: never constructs executable
