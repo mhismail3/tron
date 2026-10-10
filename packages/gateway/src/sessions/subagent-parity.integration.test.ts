@@ -448,7 +448,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     await writeFile(path, JSON.stringify(report, null, 2) + "\n");
     if (cleanupError) throw cleanupError;
   }
-}, 60_000);
+});
 
 // pi-subagents' installation root embeds its version and its bundled worker-eval
 // frames embed line/column positions. Both change on any fork bump and carry no

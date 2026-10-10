@@ -377,7 +377,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       }
       notifications.dispose();
     }
-  }, 60_000);
+  });
 
   it("waits through retries and announces only the exhausted final error", async () => {
     const resumed = barrier();

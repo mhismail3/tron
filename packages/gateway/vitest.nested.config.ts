@@ -20,11 +20,12 @@ export default defineConfig({
     fileParallelism: false,
     maxWorkers: 1,
     // Every file here waits on real pi/SDK/vitest children, which start in seconds and
-    // run one file at a time; their waits are hang bounds (test-support/wait-for.ts),
-    // so this pass declares its own: 45 s waits under a 60 s test timeout, which most
-    // of these files already set per test. The main pass keeps 12 s under 15 s.
-    testTimeout: 60_000,
-    env: { TRON_TEST_WAIT_HANG_BOUND_MS: "45000" },
+    // run one file at a time on a shared host; their waits and test timeouts are hang
+    // bounds (test-support/wait-for.ts), never speed budgets, so this pass declares
+    // them once: 240 s waits under a 300 s test timeout. A clean run takes ~20 s; the
+    // bounds only turn a genuine hang into a named failure. The main pass keeps 12 s/15 s.
+    testTimeout: 300_000,
+    env: { TRON_TEST_WAIT_HANG_BOUND_MS: "240000" },
     setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },
 });

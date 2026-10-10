@@ -80,7 +80,7 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
   expect(() => foreign.admit(loaded.extensions)).toThrow(/different verified root/);
 // Cold real-extension loading measured 22s alongside rollback, even with the
 // install shared. Bound only this real I/O case at roughly 3x that duration.
-}, 60_000);
+});
 
 it("loads one peer-free install through two host SDK payload paths with exact host export identity", () => {
   expect(existsSync(join(root, "node_modules", "@earendil-works", "pi-coding-agent"))).toBe(false);
@@ -123,7 +123,7 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
   }
 // Two separate SDK module lifetimes measured 23s under parallel verification;
 // sharing provider bytes cannot remove their cold real-loader work.
-}, 60_000);
+});
 
 it("refuses package writes through the loader view without dropping canonical declarations", async () => {
   const agentDir = join(home, "agent");
@@ -156,7 +156,7 @@ it("refuses an unknown loaded extension registering the reserved subagent tool",
     extensionsOverride: base => attributeExtensions(base, undefined, { managedSubagents: provider }),
   });
   await expect(loader.reload()).rejects.toThrow(/subagent tool is reserved/);
-}, 60_000);
+});
 
 it("refuses a tampered installed byte for both admission and discovery", async () => {
   // Only this destructive case owns a copy; admission cases share immutable bytes.
