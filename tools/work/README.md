@@ -14,7 +14,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | --- | --- |
 | `start <issue>` | Claims an open, unclaimed, non-epic issue: pushes a claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates the worktree `../tron-worktrees/<issue>-<slug>` on `<type>/<issue>-<slug>`. A session resumes its own claim. |
 | `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
-| `land --summary-file <md> [--title T] [--tests CMD]... [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. Prints `merged: <commit>`. |
+| `land --summary-file <md> [--title T] [--tests CMD]... [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. Prints `merged: <commit>`. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale work, orphans and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
