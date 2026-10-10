@@ -84,8 +84,8 @@ def validate(app):
     if len(data) > 65536:
         raise ValueError('Native client artifact outside size bounds')
     metadata = json.loads(data)
-    if (not isinstance(metadata, dict) or set(metadata) != {'schema', 'testOnly', 'inputs'}
-            or metadata.get('schema') != 1 or metadata.get('testOnly') is not False
+    if (not isinstance(metadata, dict) or set(metadata) != {'schema', 'inputs'}
+            or metadata.get('schema') != 1
             or not isinstance(metadata.get('inputs'), dict) or not 1 <= len(metadata['inputs']) <= 32
             or not all(isinstance(k, str) and 0 < len(k) <= 256 and isinstance(v, str)
                        and re.fullmatch('[a-f0-9]{64}', v) for k, v in metadata['inputs'].items())):

@@ -2,7 +2,6 @@
 """Compile only: one universal C Node-API8 client; no signing, loading or launch.
 
 The four C headers are authenticated independently of the staged Node binaries.
-Only the --test artifact substitutes the NSXPC edge and exports fault controls.
 """
 import argparse
 import hashlib
@@ -77,8 +76,8 @@ def publish(artifact, output, manifest):
         os.close(parent)
 
 
-def build(output, headers=None, test=False):
-    name = "tron-native-capture-test.node" if test else "tron-native-capture.node"
+def build(output, headers=None):
+    name = "tron-native-capture.node"
     output = Path(os.path.abspath(output))
     if output.name != name:
         raise ValueError(f"output must be a fresh {name}")
@@ -114,7 +113,6 @@ def build(output, headers=None, test=False):
             "-arch", "arm64", "-arch", "x86_64", "-mmacosx-version-min=15.0",
             "-Wall", "-Wextra", "-Werror", "-O2", "-fvisibility=hidden",
             "-bundle", "-undefined", "dynamic_lookup", "-framework", "Foundation", "-framework", "Security",
-            *(["-DTRON_CAPTURE_TEST=1"] if test else []),
             str(frozen / OWNER / "addon.mm"), str(frozen / OWNER / "transport.mm"), "-o", str(artifact),
         ]
         print(" ".join(command), flush=True)
@@ -127,7 +125,7 @@ def build(output, headers=None, test=False):
             raise ValueError("addon uses a forbidden Node/V8/libuv ABI")
         if any((ROOT / name).read_bytes() != data for name, data in snapshot.items()):
             raise ValueError("native client source changed during frozen compilation")
-        manifest = {"schema": 1, "testOnly": test, "inputs": {name: digest(data) for name, data in snapshot.items()}}
+        manifest = {"schema": 1, "inputs": {name: digest(data) for name, data in snapshot.items()}}
         # Signing is deliberately left to the existing Mac nested-Mach-O phase;
         # its final runtime fingerprint covers these metadata and signed bytes.
         publish(artifact, output, manifest)
@@ -142,8 +140,7 @@ def verify_inputs(metadata):
         data = source.read(65537)
     if len(data) > 65536:
         raise ValueError("native capture input manifest exceeds bounds")
-    expected = {"schema": 1, "testOnly": False,
-                "inputs": {name: digest((ROOT / name).read_bytes()) for name in INPUTS}}
+    expected = {"schema": 1, "inputs": {name: digest((ROOT / name).read_bytes()) for name in INPUTS}}
     if json.loads(data) != expected:
         raise ValueError("native capture inputs changed; prepare a new signed Mac payload (not a source-only update)")
 
@@ -154,11 +151,10 @@ if __name__ == "__main__":
     operation.add_argument("--output", type=Path)
     operation.add_argument("--verify-inputs", type=Path, help="check production metadata against the exact source inputs")
     parser.add_argument("--headers", type=Path, help="build-only local headers, still checked against exact pins")
-    parser.add_argument("--test", action="store_true", help="offline transport artifact; NEVER stage or sign as production")
     args = parser.parse_args()
     if args.verify_inputs:
-        if args.test or args.headers:
+        if args.headers:
             parser.error("verification accepts only --verify-inputs")
         verify_inputs(args.verify_inputs)
     else:
-        build(args.output, args.headers, args.test)
+        build(args.output, args.headers)
